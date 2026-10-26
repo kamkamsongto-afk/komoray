@@ -34,7 +34,12 @@
 	"observability": {
 		"enabled": true
 	},
-	"upload_source_maps": true
+	"upload_source_maps": true,
+	// Not secret. The R2 access keys are secrets: .dev.vars locally, Worker Settings → Variables and Secrets in production.
+	"vars": {
+		"R2_ACCOUNT_ID": "be3b27d119ef421e4b13632b0976cfa3",
+		"R2_BUCKET": "komoray-uploads"
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
