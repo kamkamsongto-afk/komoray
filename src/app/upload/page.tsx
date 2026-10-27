@@ -1,10 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Status = "idle" | "uploading" | "done" | "error";
 type Cut = { start: number; end: number };
 type Analysis = { editKey: string; duration: number; cuts: Cut[]; words: { text: string }[] };
+type RenderState = {
+	status: "none" | "processing" | "done" | "failed";
+	videoUrl?: string;
+	downloadUrl?: string;
+	error?: string;
+};
+
+const POLL_MS = 5000;
 
 // fetch() can't report upload progress yet, so we use XMLHttpRequest for the PUT to R2.
 function putWithProgress(url: string, file: File, onProgress: (percent: number) => void) {
@@ -33,6 +41,18 @@ export default function UploadPage() {
 	const [analyzing, setAnalyzing] = useState(false);
 	const [analysis, setAnalysis] = useState<Analysis | null>(null);
 	const [analysisError, setAnalysisError] = useState("");
+	const [render, setRender] = useState<RenderState>({ status: "none" });
+
+	// While Modal is working, ask the server every few seconds whether the video is ready.
+	useEffect(() => {
+		if (!key || render.status !== "processing") return;
+		const timer = setInterval(async () => {
+			const res = await fetch(`/api/render?key=${encodeURIComponent(key)}`);
+			const data = (await res.json()) as RenderState;
+			if (data.status !== "processing") setRender(data);
+		}, POLL_MS);
+		return () => clearInterval(timer);
+	}, [key, render.status]);
 
 	async function handleFile(file: File) {
 		setStatus("uploading");
@@ -41,6 +61,7 @@ export default function UploadPage() {
 		setKey(null);
 		setAnalysis(null);
 		setAnalysisError("");
+		setRender({ status: "none" });
 
 		try {
 			// 1) Ask our server for a short-lived upload link.
@@ -69,6 +90,7 @@ export default function UploadPage() {
 		setAnalyzing(true);
 		setAnalysis(null);
 		setAnalysisError("");
+		setRender({ status: "none" });
 		try {
 			const res = await fetch("/api/analyze", {
 				method: "POST",
@@ -82,6 +104,22 @@ export default function UploadPage() {
 			setAnalysisError(err instanceof Error ? err.message : "Analysis failed");
 		} finally {
 			setAnalyzing(false);
+		}
+	}
+
+	async function makeVideo() {
+		if (!key) return;
+		setRender({ status: "processing" });
+		try {
+			const res = await fetch("/api/render", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ key }),
+			});
+			const data = (await res.json()) as { error?: string };
+			if (!res.ok) throw new Error(data.error ?? "Could not start the render");
+		} catch (err) {
+			setRender({ status: "failed", error: err instanceof Error ? err.message : "Could not start the render" });
 		}
 	}
 
@@ -162,6 +200,42 @@ export default function UploadPage() {
 								{analysis.cuts.length === 0 && <li>No silences longer than 0.4s 🎉</li>}
 							</ul>
 							<p className="break-all text-foreground/60">Saved cut list: {analysis.editKey}</p>
+						</div>
+					)}
+
+					{analysis && (
+						<div className="flex flex-col gap-3 border-t border-foreground/10 pt-4">
+							<button
+								onClick={makeVideo}
+								disabled={render.status === "processing"}
+								className="self-start rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+							>
+								{render.status === "done" || render.status === "failed" ? "Make video again" : "Make video"}
+							</button>
+
+							{render.status === "processing" && (
+								<div className="flex flex-col gap-2">
+									<div className="h-3 w-full animate-pulse rounded-full bg-blue-600/60" />
+									<p className="text-sm text-foreground/70">
+										🎬 Making your video… usually 1–3 minutes. Keep this page open.
+									</p>
+								</div>
+							)}
+
+							{render.status === "failed" && <p className="text-sm text-red-500">❌ {render.error}</p>}
+
+							{render.status === "done" && render.videoUrl && (
+								<div className="flex flex-col gap-3">
+									<p className="text-sm">✅ Your video is ready!</p>
+									<video src={render.videoUrl} controls playsInline className="max-h-[70vh] w-full rounded-lg bg-black" />
+									<a
+										href={render.downloadUrl}
+										className="self-start rounded-lg border border-foreground/20 px-4 py-2 font-medium hover:bg-foreground/5"
+									>
+										⬇️ Download video
+									</a>
+								</div>
+							)}
 						</div>
 					)}
 				</div>

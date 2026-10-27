@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { putObject, signedUrl } from "@/lib/r2";
+import { putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { findSilences, MIN_SILENCE, PADDING } from "@/lib/silences";
 import { transcribe } from "@/lib/transcribe";
 
@@ -8,7 +8,7 @@ export async function POST(request: Request) {
 	const { key, language } = (await request.json()) as { key?: string; language?: string };
 
 	// Only files our upload page created: uploads/<id>/<name>
-	if (!key || !/^uploads\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+$/.test(key)) {
+	if (!key || !VIDEO_KEY.test(key)) {
 		return Response.json({ error: "Unknown video" }, { status: 400 });
 	}
 
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
 			cuts,
 			words: transcript.words,
 		};
-		const editKey = key.replace(/[^/]+$/, "edit.json");
+		const editKey = siblingKey(key, "edit.json");
 		await putObject(editKey, JSON.stringify(edit, null, 2), "application/json");
 
 		return Response.json({ editKey, ...edit });

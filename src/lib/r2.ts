@@ -22,10 +22,18 @@ function r2() {
 }
 
 // A link that lets whoever holds it do one thing (PUT or GET) to one file, for a limited time.
-export async function signedUrl(key: string, method: "PUT" | "GET", seconds: number, contentType?: string) {
+// downloadName makes browsers save the file under that name instead of playing it.
+export async function signedUrl(
+	key: string,
+	method: "PUT" | "GET",
+	seconds: number,
+	contentType?: string,
+	downloadName?: string,
+) {
 	const { client, objectUrl } = r2();
 	const url = objectUrl(key);
 	url.searchParams.set("X-Amz-Expires", String(seconds));
+	if (downloadName) url.searchParams.set("response-content-disposition", `attachment; filename="${downloadName}"`);
 	const headers = contentType ? { "Content-Type": contentType } : undefined;
 	const signed = await client.sign(new Request(url, { method, headers }), { aws: { signQuery: true } });
 	return signed.url;
@@ -44,3 +52,27 @@ export async function putObject(key: string, body: string, contentType: string) 
 	const res = await fetch(signed.url, { method: "PUT", headers: signed.headers, body: bytes });
 	if (!res.ok) throw new Error(`R2 write failed (${res.status})`);
 }
+
+export async function getJson<T>(key: string): Promise<T | null> {
+	const { client, objectUrl } = r2();
+	const res = await client.fetch(objectUrl(key));
+	if (res.status === 404) return null;
+	if (!res.ok) throw new Error(`R2 read failed (${res.status})`);
+	return (await res.json()) as T;
+}
+
+export async function exists(key: string) {
+	const { client, objectUrl } = r2();
+	const res = await client.fetch(objectUrl(key), { method: "HEAD" });
+	return res.ok;
+}
+
+export async function deleteObject(key: string) {
+	const { client, objectUrl } = r2();
+	const res = await client.fetch(objectUrl(key), { method: "DELETE" });
+	if (!res.ok && res.status !== 404) throw new Error(`R2 delete failed (${res.status})`);
+}
+
+// uploads/<id>/<name> → the job folder's other files live next to the video.
+export const VIDEO_KEY = /^uploads\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+$/;
+export const siblingKey = (videoKey: string, name: string) => videoKey.replace(/[^/]+$/, name);
