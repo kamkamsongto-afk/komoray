@@ -13,6 +13,10 @@ type RenderState = {
 };
 
 const POLL_MS = 5000;
+const ANALYZE_POLL_MS = 3000;
+const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
 
 // Pop up a desktop notification (if the user allowed it) and flag the browser tab,
@@ -133,9 +137,22 @@ export default function UploadPage() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ key, language }),
 			});
-			const data = (await res.json()) as Analysis & { error?: string };
-			if (!res.ok) throw new Error(data.error ?? "Analysis failed");
-			setAnalysis(data);
+			const started = (await res.json()) as { error?: string };
+			if (!res.ok) throw new Error(started.error ?? "Analysis failed");
+
+			// Long videos take Deepgram a few minutes, so keep asking until the cut list is saved.
+			const giveUpAt = Date.now() + ANALYZE_GIVE_UP_MS;
+			while (Date.now() < giveUpAt) {
+				await wait(ANALYZE_POLL_MS);
+				const poll = await fetch(`/api/analyze?key=${encodeURIComponent(key)}`);
+				const data = (await poll.json()) as Analysis & { status?: string; error?: string };
+				if (data.status === "done") {
+					setAnalysis(data);
+					return;
+				}
+				if (data.status === "failed") throw new Error(data.error ?? "Analysis failed");
+			}
+			throw new Error("This is taking too long. Please try again.");
 		} catch (err) {
 			setAnalysisError(err instanceof Error ? err.message : "Analysis failed");
 		} finally {
@@ -237,6 +254,12 @@ export default function UploadPage() {
 							{analyzing ? "Listening…" : "Find silences"}
 						</button>
 					</div>
+
+					{analyzing && (
+						<p className="text-sm text-foreground/70">
+							👂 Listening to your video… longer videos can take a few minutes.
+						</p>
+					)}
 
 					{analysisError && <p className="text-sm text-red-500">❌ {analysisError}</p>}
 
