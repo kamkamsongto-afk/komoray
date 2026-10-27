@@ -1,6 +1,6 @@
 # Komoray: บันทึกความคืบหน้า
 
-อัปเดตล่าสุด: **27 ต.ค. 2026** (ปิดงานของวันที่ 26 ต.ค.)
+อัปเดตล่าสุด: **28 ต.ค. 2026** (เก็บงานของวันที่ 27 ต.ค.)
 แผน 67 วัน: [Google Sheet](https://docs.google.com/spreadsheets/d/177tM1wyvNRYY82ykldY7aoKK9YSHDi8JJ1SKtCfR5v4/edit) (1 แถว = 1 วันในปฏิทิน, คอลัมน์ K = สถานะ)
 
 ---
@@ -45,6 +45,7 @@
 | `src/lib/r2.ts` | ทำลิงก์ชั่วคราว + เขียนไฟล์ลง R2 |
 | `src/lib/transcribe.ts` | **ไฟล์เดียวที่รู้จัก Deepgram** (เปลี่ยนเจ้าแก้ไฟล์นี้ไฟล์เดียว) |
 | `src/lib/silences.ts` | กติกาช่วงเงียบ: ช่องว่าง > 0.4 วิ, เว้นระยะรอบคำ 0.1 วิ |
+| `modal_app/render.py` | งานตัดคลิปบน Modal (FFmpeg) · deploy: `python -m modal deploy modal_app/render.py` · ทดสอบ: `python -m modal run modal_app/render.py --job job.json` · endpoint: `https://kamkamsongto--komoray-render-start.us-east.modal.run` |
 
 `edit.json` = `{ source, duration, rules, cuts: [{start, end, reason}], words: [{text, start, end}] }`
 
@@ -60,6 +61,12 @@
 - อัปเดต Google Sheet: วันที่ 1–3 เสร็จ, เลื่อน MVP 2 วัน, soft launch เป็น 30 ต.ค.
 - เปิดบัญชี X @KomorayStudio: โลโก้, banner, bio, หมวด Software Company
 - สร้าง `PROGRESS.md` (ไฟล์นี้) และ `CLAUDE.md` (กฎประจำโปรเจกต์ + กิจวัตรปิดงาน)
+
+**27 ต.ค. (วันที่ 7 ในชีต: งานตัดคลิป)**
+- สมัคร Modal (Starter, เครดิตฟรี $1/เดือนเพราะยังไม่ผูกบัตร · ผูกบัตรแล้วได้ $30) · ติดตั้ง Python 3.12 + modal 1.6
+- `modal_app/render.py` deploy แล้วเป็นแอป `komoray-render`: ตัดตาม edit.json → 1080×1920 → ซับ Kanit Medium (ขนาด 100, ขอบดำ 10, สูง 31% จากล่าง) → ลายน้ำ komoray.com → ส่ง `final.mp4` กลับ R2
+- Modal ไม่ถือกุญแจ R2: รับแค่ลิงก์ชั่วคราว · endpoint `start` ต้องมี `RENDER_TOKEN` (เก็บใน Modal secret `komoray-render`, Worker secret, `.dev.vars`)
+- ทดสอบกับคลิปไทยของโค้ช: 2:07 → 1:50 นาที ผ่าน · ซับไทยรวมได้ 7 พยางค์ต่อบรรทัด · แก้ `ํา` → `ำ` ในซับแล้ว
 
 ---
 
@@ -81,12 +88,10 @@
 
 ## ⏭️ ขั้นต่อไป
 
-**ก่อนเริ่มงานวันอังคาร 27 ต.ค.:** สมัคร **Modal** (modal.com) ใช้รัน FFmpeg
 
 | วัน | งาน (ตามชีต) | เสร็จเมื่อ |
 |---|---|---|
-| **อ. 27/10** | Modal + FFmpeg: ตัดตาม `edit.json` + ซับอังกฤษ 2–4 คำ + ลายน้ำ → export 1080×1920 → เก็บกลับ R2 | ได้คลิปที่ตัดแล้วมีซับ |
-| พ. 28/10 | หน้าสถานะงาน + ปุ่มดาวน์โหลด + อีเมลแจ้ง (Resend) | ได้อีเมลพร้อมลิงก์ดาวน์โหลดจริง |
+| **พ. 28/10** | หน้าสถานะงาน + ปุ่มดาวน์โหลด + อีเมลแจ้ง (Resend) | ได้อีเมลพร้อมลิงก์ดาวน์โหลดจริง |
 | พฤ. 29/10 | ทดสอบ 10 คลิป แก้ทุกจุดที่พัง + เปลี่ยนกุญแจ R2 + กฎลบคลิปอัตโนมัติ | 10 คลิปผ่าน |
 | **ศ. 30/10** | **Soft launch** ให้ beta 10–20 คน + แบบฟอร์ม feedback | มีคนนอกใช้จริง ≥ 5 คน |
 | ส. 31/10 | Google login (Supabase) · ต้องสมัคร Supabase ก่อน | |
