@@ -54,6 +54,18 @@ export default function UploadPage() {
 	const [analysis, setAnalysis] = useState<Analysis | null>(null);
 	const [analysisError, setAnalysisError] = useState("");
 	const [render, setRender] = useState<RenderState>({ status: "none" });
+	const [dragging, setDragging] = useState(false);
+
+	// A file dropped outside the drop zone would make the browser open it and leave the page.
+	useEffect(() => {
+		const stop = (e: DragEvent) => e.preventDefault();
+		window.addEventListener("dragover", stop);
+		window.addEventListener("drop", stop);
+		return () => {
+			window.removeEventListener("dragover", stop);
+			window.removeEventListener("drop", stop);
+		};
+	}, []);
 
 	// While Modal is working, ask the server every few seconds whether the video is ready.
 	useEffect(() => {
@@ -150,20 +162,37 @@ export default function UploadPage() {
 	}
 
 	const silentSeconds = analysis ? analysis.cuts.reduce((sum, c) => sum + (c.end - c.start), 0) : 0;
+	const busy = status === "uploading" || analyzing;
 
 	return (
 		<main className="font-sans mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-6 p-8">
 			<h1 className="text-3xl font-bold tracking-tight">Upload a video</h1>
 			<p className="text-foreground/70">MP4 or MOV, up to 500 MB.</p>
 
-			<label className="flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-foreground/20 p-10 text-center hover:border-foreground/40">
-				<span className="text-lg font-medium">Choose a video</span>
-				<span className="text-sm text-foreground/60">Click here to pick a file</span>
+			<label
+				onDragOver={(e) => {
+					e.preventDefault();
+					if (!busy) setDragging(true);
+				}}
+				onDragLeave={() => setDragging(false)}
+				onDrop={(e) => {
+					e.preventDefault();
+					setDragging(false);
+					const file = e.dataTransfer.files[0];
+					if (file && !busy) handleFile(file);
+				}}
+				className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed p-10 text-center transition-colors ${
+					dragging ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:border-foreground/40"
+				}`}
+			>
+				{/* pointer-events-none: hovering the text must not count as leaving the drop zone */}
+				<span className="pointer-events-none text-lg font-medium">{dragging ? "Release to upload ⬇️" : "Drop your video here 🎬"}</span>
+				<span className="pointer-events-none text-sm text-foreground/60">or click to choose a file</span>
 				<input
 					type="file"
 					accept="video/mp4,video/quicktime"
 					className="hidden"
-					disabled={status === "uploading" || analyzing}
+					disabled={busy}
 					onChange={(e) => {
 						const file = e.target.files?.[0];
 						if (file) handleFile(file);
