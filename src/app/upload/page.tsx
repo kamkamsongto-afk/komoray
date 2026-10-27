@@ -13,6 +13,18 @@ type RenderState = {
 };
 
 const POLL_MS = 5000;
+const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
+
+// Pop up a desktop notification (if the user allowed it) and flag the browser tab,
+// so people can work in another tab while the video renders.
+function announce(state: RenderState) {
+	const text = state.status === "done" ? "✅ Your video is ready!" : "❌ Your video could not be made";
+	if (document.hidden) document.title = `${state.status === "done" ? "✅ Ready" : "❌ Failed"} · Komoray`;
+	if ("Notification" in window && Notification.permission === "granted") {
+		const note = new Notification("Komoray", { body: text, icon: "/favicon.svg" });
+		note.onclick = () => window.focus();
+	}
+}
 
 // fetch() can't report upload progress yet, so we use XMLHttpRequest for the PUT to R2.
 function putWithProgress(url: string, file: File, onProgress: (percent: number) => void) {
@@ -49,10 +61,22 @@ export default function UploadPage() {
 		const timer = setInterval(async () => {
 			const res = await fetch(`/api/render?key=${encodeURIComponent(key)}`);
 			const data = (await res.json()) as RenderState;
-			if (data.status !== "processing") setRender(data);
+			if (data.status === "done" || data.status === "failed") {
+				setRender(data);
+				announce(data);
+			}
 		}, POLL_MS);
 		return () => clearInterval(timer);
 	}, [key, render.status]);
+
+	// Put the normal tab title back when the user returns to this tab.
+	useEffect(() => {
+		const restore = () => {
+			if (!document.hidden) document.title = PAGE_TITLE;
+		};
+		document.addEventListener("visibilitychange", restore);
+		return () => document.removeEventListener("visibilitychange", restore);
+	}, []);
 
 	async function handleFile(file: File) {
 		setStatus("uploading");
@@ -109,6 +133,8 @@ export default function UploadPage() {
 
 	async function makeVideo() {
 		if (!key) return;
+		// Browsers only allow this question right after a click, so ask here.
+		if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
 		setRender({ status: "processing" });
 		try {
 			const res = await fetch("/api/render", {
@@ -217,7 +243,7 @@ export default function UploadPage() {
 								<div className="flex flex-col gap-2">
 									<div className="h-3 w-full animate-pulse rounded-full bg-blue-600/60" />
 									<p className="text-sm text-foreground/70">
-										🎬 Making your video… usually 1–3 minutes. Keep this page open.
+										🎬 Making your video… usually 1–3 minutes. Feel free to switch tabs, we&apos;ll notify you.
 									</p>
 								</div>
 							)}
