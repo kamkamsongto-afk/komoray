@@ -1,7 +1,14 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { verifyCallback } from "@/lib/callback";
 import { putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
-import { findSilences, MIN_SILENCE, PADDING } from "@/lib/silences";
+import {
+	findSilences,
+	MIN_SILENCE,
+	PADDING,
+	trimStretchedWords,
+	WORD_BASE_SECONDS,
+	WORD_SECONDS_PER_LETTER,
+} from "@/lib/silences";
 import { readTranscript } from "@/lib/transcribe";
 
 // Deepgram POSTs the transcript here when it is done. We turn it into edit.json.
@@ -16,12 +23,19 @@ export async function POST(request: Request) {
 
 	try {
 		const transcript = readTranscript(await request.json());
+		// Trimmed words feed both the cuts and the subtitle timing in edit.json.
+		const words = trimStretchedWords(transcript.words);
 		const edit = {
 			source: key,
 			duration: transcript.duration,
-			rules: { minSilence: MIN_SILENCE, padding: PADDING },
-			cuts: findSilences(transcript),
-			words: transcript.words,
+			rules: {
+				minSilence: MIN_SILENCE,
+				padding: PADDING,
+				wordBaseSeconds: WORD_BASE_SECONDS,
+				wordSecondsPerLetter: WORD_SECONDS_PER_LETTER,
+			},
+			cuts: findSilences({ duration: transcript.duration, words }),
+			words,
 		};
 		await putObject(siblingKey(key, "edit.json"), JSON.stringify(edit, null, 2), "application/json");
 	} catch (err) {

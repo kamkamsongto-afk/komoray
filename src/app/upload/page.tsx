@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Status = "idle" | "uploading" | "done" | "error";
 type Cut = { start: number; end: number };
@@ -19,14 +19,50 @@ const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
 
-// Pop up a desktop notification (if the user allowed it) and flag the browser tab,
-// so people can work in another tab while the video renders.
-function announce(state: RenderState) {
+const NOTIFY_PREF = "komoray.desktopNotify"; // remembers the checkbox in this browser
+
+// Two soft rising tones, made in the browser so there is no sound file to load.
+function ding(audio: AudioContext | null) {
+	if (!audio) return;
+	[880, 1320].forEach((freq, i) => {
+		const osc = audio.createOscillator();
+		const gain = audio.createGain();
+		const at = audio.currentTime + i * 0.18;
+		osc.frequency.value = freq;
+		gain.gain.setValueAtTime(0.0001, at);
+		gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
+		gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
+		osc.connect(gain).connect(audio.destination);
+		osc.start(at);
+		osc.stop(at + 0.4);
+	});
+}
+
+// Let people work in another tab while the video renders: play a sound, flag the browser tab,
+// and pop up a desktop notification only if they ticked the box.
+function announce(state: RenderState, audio: AudioContext | null, desktop: boolean) {
 	const text = state.status === "done" ? "✅ Your video is ready!" : "❌ Your video could not be made";
+	ding(audio);
 	if (document.hidden) document.title = `${state.status === "done" ? "✅ Ready" : "❌ Failed"} · Komoray`;
-	if ("Notification" in window && Notification.permission === "granted") {
+	if (desktop && "Notification" in window && Notification.permission === "granted") {
 		const note = new Notification("Komoray", { body: text, icon: "/favicon.svg" });
 		note.onclick = () => window.focus();
+	}
+}
+
+function readNotifyPref() {
+	try {
+		return localStorage.getItem(NOTIFY_PREF) === "1";
+	} catch {
+		return false;
+	}
+}
+
+function saveNotifyPref(on: boolean) {
+	try {
+		localStorage.setItem(NOTIFY_PREF, on ? "1" : "0");
+	} catch {
+		// private window etc. — the checkbox just won't be remembered
 	}
 }
 
@@ -59,6 +95,28 @@ export default function UploadPage() {
 	const [analysisError, setAnalysisError] = useState("");
 	const [render, setRender] = useState<RenderState>({ status: "none" });
 	const [dragging, setDragging] = useState(false);
+	const [desktopNotify, setDesktopNotify] = useState(false);
+	const [notifyBlocked, setNotifyBlocked] = useState(false);
+	// Browsers only allow sound after a click, so the Make video click creates this.
+	const audioRef = useRef<AudioContext | null>(null);
+
+	useEffect(() => {
+		const granted = "Notification" in window && Notification.permission === "granted";
+		setDesktopNotify(granted && readNotifyPref());
+	}, []);
+
+	async function toggleDesktopNotify(on: boolean) {
+		setNotifyBlocked(false);
+		if (on && "Notification" in window) {
+			const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+			if (permission !== "granted") {
+				setNotifyBlocked(true);
+				on = false;
+			}
+		}
+		setDesktopNotify(on);
+		saveNotifyPref(on);
+	}
 
 	// A file dropped outside the drop zone would make the browser open it and leave the page.
 	useEffect(() => {
@@ -79,11 +137,11 @@ export default function UploadPage() {
 			const data = (await res.json()) as RenderState;
 			if (data.status === "done" || data.status === "failed") {
 				setRender(data);
-				announce(data);
+				announce(data, audioRef.current, desktopNotify);
 			}
 		}, POLL_MS);
 		return () => clearInterval(timer);
-	}, [key, render.status]);
+	}, [key, render.status, desktopNotify]);
 
 	// Put the normal tab title back when the user returns to this tab.
 	useEffect(() => {
@@ -162,8 +220,8 @@ export default function UploadPage() {
 
 	async function makeVideo() {
 		if (!key) return;
-		// Browsers only allow this question right after a click, so ask here.
-		if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
+		if (!audioRef.current && "AudioContext" in window) audioRef.current = new AudioContext();
+		void audioRef.current?.resume();
 		setRender({ status: "processing" });
 		try {
 			const res = await fetch("/api/render", {
@@ -291,11 +349,26 @@ export default function UploadPage() {
 								{render.status === "done" || render.status === "failed" ? "Make video again" : "Make video"}
 							</button>
 
+							<label className="flex items-center gap-2 text-sm text-foreground/70">
+								<input
+									type="checkbox"
+									checked={desktopNotify}
+									onChange={(e) => void toggleDesktopNotify(e.target.checked)}
+								/>
+								🔔 Also notify me on my desktop
+							</label>
+							{notifyBlocked && (
+								<p className="text-sm text-foreground/60">
+									Your browser is blocking notifications. Click the icon left of the address bar → Notifications →
+									Allow, then tick the box again.
+								</p>
+							)}
+
 							{render.status === "processing" && (
 								<div className="flex flex-col gap-2">
 									<div className="h-3 w-full animate-pulse rounded-full bg-blue-600/60" />
 									<p className="text-sm text-foreground/70">
-										🎬 Making your video… usually 1–3 minutes. Feel free to switch tabs, we&apos;ll notify you.
+										🎬 Making your video… usually 1–3 minutes. Feel free to switch tabs, you&apos;ll hear a ding when it&apos;s ready.
 									</p>
 								</div>
 							)}

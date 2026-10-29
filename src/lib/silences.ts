@@ -1,4 +1,4 @@
-import type { Transcript } from "./transcribe";
+import type { Transcript, Word } from "./transcribe";
 
 export type Cut = { start: number; end: number; reason: "silence" };
 
@@ -7,7 +7,21 @@ export const MIN_SILENCE = 0.4;
 // Leave a little breathing room around each word so cuts never clip a syllable.
 export const PADDING = 0.1;
 
+// Speech-to-text often stretches the last word of a phrase over the pause after it
+// ("strong" reported as 1.04s). A word gets at most BASE + PER_LETTER × letters seconds;
+// anything past that is treated as silence. Tuned on a real clip: "strong" 1.04s → 0.50s.
+export const WORD_BASE_SECONDS = 0.2;
+export const WORD_SECONDS_PER_LETTER = 0.05;
+
 const round = (n: number) => Math.round(n * 1000) / 1000;
+
+export function trimStretchedWords(words: Word[]): Word[] {
+	return words.map((w) => {
+		const letters = w.text.replace(/[^\p{L}\p{N}]/gu, "").length || 1;
+		const maxEnd = w.start + WORD_BASE_SECONDS + WORD_SECONDS_PER_LETTER * letters;
+		return w.end > maxEnd ? { ...w, end: round(maxEnd) } : w;
+	});
+}
 
 export function findSilences({ duration, words }: Transcript): Cut[] {
 	if (words.length === 0) return [];
