@@ -15,7 +15,8 @@ type DeepgramResponse = {
 // Long videos take Deepgram minutes, longer than a request may stay open, so we don't wait:
 // Deepgram answers right away and later POSTs the result to callbackUrl.
 export async function startTranscription(mediaUrl: string, apiKey: string, language: string, callbackUrl: string) {
-	const params = new URLSearchParams({ model: "nova-3", smart_format: "true", language, callback: callbackUrl });
+	// mip_opt_out: Deepgram must not keep or train on creators' audio (promised in our Privacy Policy).
+	const params = new URLSearchParams({ model: "nova-3", smart_format: "true", language, callback: callbackUrl, mip_opt_out: "true" });
 	const res = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
 		method: "POST",
 		headers: { Authorization: `Token ${apiKey}`, "Content-Type": "application/json" },
