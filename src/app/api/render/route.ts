@@ -43,7 +43,9 @@ export async function POST(request: Request) {
 	});
 	const data = (await res.json().catch(() => ({}))) as { callId?: string; error?: string };
 	if (!res.ok || !data.callId) {
-		return Response.json({ error: data.error ?? "Could not start the render" }, { status: 502 });
+		const error = data.error ?? `Could not start the render (${res.status})`;
+		await putObject(errorKey, JSON.stringify({ error, at: new Date().toISOString() }), "application/json");
+		return Response.json({ error }, { status: 502 });
 	}
 	return Response.json({ status: "processing" });
 }

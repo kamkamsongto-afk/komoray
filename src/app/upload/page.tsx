@@ -81,6 +81,16 @@ function putWithProgress(url: string, file: File, onProgress: (percent: number) 
 	});
 }
 
+// Tell the admin page about errors only the browser sees. Never blocks or breaks the page.
+function reportError(stage: string, error: string, details: { key?: string | null; filename?: string; size?: number } = {}) {
+	void fetch("/api/report", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ stage, error, ...details }),
+		keepalive: true,
+	}).catch(() => {});
+}
+
 const fmt = (s: number) => s.toFixed(2);
 
 export default function UploadPage() {
@@ -178,8 +188,10 @@ export default function UploadPage() {
 			setMessage(data.key);
 			setKey(data.key);
 		} catch (err) {
+			const error = err instanceof Error ? err.message : "Something went wrong";
 			setStatus("error");
-			setMessage(err instanceof Error ? err.message : "Something went wrong");
+			setMessage(error);
+			reportError("upload", error, { filename: file.name, size: file.size });
 		}
 	}
 
@@ -212,7 +224,9 @@ export default function UploadPage() {
 			}
 			throw new Error("This is taking too long. Please try again.");
 		} catch (err) {
-			setAnalysisError(err instanceof Error ? err.message : "Analysis failed");
+			const error = err instanceof Error ? err.message : "Analysis failed";
+			setAnalysisError(error);
+			reportError("find silences", error, { key });
 		} finally {
 			setAnalyzing(false);
 		}
@@ -232,7 +246,9 @@ export default function UploadPage() {
 			const data = (await res.json()) as { error?: string };
 			if (!res.ok) throw new Error(data.error ?? "Could not start the render");
 		} catch (err) {
-			setRender({ status: "failed", error: err instanceof Error ? err.message : "Could not start the render" });
+			const error = err instanceof Error ? err.message : "Could not start the render";
+			setRender({ status: "failed", error });
+			reportError("make video", error, { key });
 		}
 	}
 

@@ -73,6 +73,30 @@ export async function deleteObject(key: string) {
 	if (!res.ok && res.status !== 404) throw new Error(`R2 delete failed (${res.status})`);
 }
 
+export type ObjectInfo = { key: string; size: number; lastModified: string };
+
+// Every file under a prefix (R2 returns at most 1000 per page, so follow the pages).
+export async function listObjects(prefix: string) {
+	const { client, objectUrl } = r2();
+	const items: ObjectInfo[] = [];
+	let token: string | null = null;
+	do {
+		const url = objectUrl("");
+		url.searchParams.set("list-type", "2");
+		url.searchParams.set("prefix", prefix);
+		if (token) url.searchParams.set("continuation-token", token);
+		const res = await client.fetch(url);
+		if (!res.ok) throw new Error(`R2 list failed (${res.status})`);
+		const xml = await res.text();
+		const tag = (block: string, name: string) => block.match(new RegExp(`<${name}>([^<]*)</${name}>`))?.[1] ?? "";
+		for (const [, block] of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+			items.push({ key: tag(block, "Key"), size: Number(tag(block, "Size")), lastModified: tag(block, "LastModified") });
+		}
+		token = tag(xml, "IsTruncated") === "true" ? tag(xml, "NextContinuationToken") : null;
+	} while (token);
+	return items;
+}
+
 // uploads/<id>/<name> → the job folder's other files live next to the video.
 export const VIDEO_KEY = /^uploads\/[0-9a-f-]{36}\/[a-zA-Z0-9._-]+$/;
 export const siblingKey = (videoKey: string, name: string) => videoKey.replace(/[^/]+$/, name);

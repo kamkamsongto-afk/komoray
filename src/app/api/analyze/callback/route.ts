@@ -40,7 +40,7 @@ export async function POST(request: Request) {
 		await putObject(siblingKey(key, "edit.json"), JSON.stringify(edit, null, 2), "application/json");
 	} catch (err) {
 		const error = err instanceof Error ? err.message : "Analysis failed";
-		await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error }), "application/json");
+		await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error, at: new Date().toISOString() }), "application/json");
 	}
 	// Always 200 so Deepgram doesn't keep retrying a result we already handled.
 	return Response.json({ ok: true });

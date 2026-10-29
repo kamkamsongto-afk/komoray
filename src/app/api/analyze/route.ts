@@ -26,7 +26,10 @@ export async function POST(request: Request) {
 		await startTranscription(await signedUrl(key, "GET", LINK_SECONDS), env.DEEPGRAM_API_KEY, language || "en", callbackUrl);
 		return Response.json({ status: "processing" });
 	} catch (err) {
-		return Response.json({ error: err instanceof Error ? err.message : "Analysis failed" }, { status: 502 });
+		const error = err instanceof Error ? err.message : "Analysis failed";
+		// Saved so the admin page shows it too, not just the user's screen.
+		await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error, at: new Date().toISOString() }), "application/json").catch(() => {});
+		return Response.json({ error }, { status: 502 });
 	}
 }
 
