@@ -3,7 +3,7 @@ import { LegalPage } from "@/components/LegalPage";
 
 export const metadata: Metadata = { title: "Privacy Policy · Komoray" };
 
-const CONTACT = "kamkamsongto@gmail.com";
+const CONTACT = "hello@komoray.com";
 
 export default function PrivacyPage() {
 	return (

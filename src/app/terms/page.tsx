@@ -4,7 +4,7 @@ import { LegalPage } from "@/components/LegalPage";
 
 export const metadata: Metadata = { title: "Terms of Service · Komoray" };
 
-const CONTACT = "kamkamsongto@gmail.com";
+const CONTACT = "hello@komoray.com";
 
 export default function TermsPage() {
 	return (

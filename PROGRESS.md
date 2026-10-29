@@ -1,6 +1,6 @@
 # Komoray: บันทึกความคืบหน้า
 
-อัปเดตล่าสุด: **28 ต.ค. 2026** (ปิดงานของวันที่ 28 ต.ค.)
+อัปเดตล่าสุด: **30 ต.ค. 2026** (ปิดงานของวันที่ 29 ต.ค. ทำต่อจนเลยเที่ยงคืน)
 แผน 67 วัน: [Google Sheet](https://docs.google.com/spreadsheets/d/177tM1wyvNRYY82ykldY7aoKK9YSHDi8JJ1SKtCfR5v4/edit) (1 แถว = 1 วันในปฏิทิน, คอลัมน์ K = สถานะ)
 
 ---
@@ -28,17 +28,26 @@
   - Build: `npx opennextjs-cloudflare build` · Deploy: `npx opennextjs-cloudflare deploy` · Preview: `npx opennextjs-cloudflare upload`
 - **Cloudflare R2**: ตู้ `komoray-uploads` (CORS อนุญาต localhost:3000, komoray.com, www, workers.dev)
 - **Deepgram** (model `nova-3`) ถอดเสียงพร้อมเวลารายคำ รองรับ `en` และ `th`
-- **DNS** อยู่ที่ Cloudflare (โดเมนซื้อที่ Namecheap) · ห้ามลบ MX/TXT (ระบบส่งต่ออีเมลของ Namecheap)
+- **Modal** ตัดคลิปด้วย FFmpeg (แอป `komoray-render`)
+- **Supabase** (โปรเจกต์ `komoray`, region Americas, Free) สำหรับ login · เปิด Google provider แล้ว · URL `https://icjjeinussbapihdjiym.supabase.co`
+- **Google Cloud** โปรเจกต์ `komoray` → Google Auth Platform: แอป Komoray (External, ยัง **Testing**), OAuth client `Komoray web` (redirect ไป Supabase callback)
+- **DNS** อยู่ที่ Cloudflare (โดเมนซื้อที่ Namecheap)
+- **อีเมล** `hello@komoray.com` → Cloudflare Email Routing ส่งต่อเข้า kamkamsongto@gmail.com (30 ต.ค.) · ลบ MX/TXT eforward ของ Namecheap แล้ว · Gmail มี filter "Never send to Spam" สำหรับ komoray.com
 
 ### กุญแจและความลับ
 - ในเครื่อง: ไฟล์ `.dev.vars` (อยู่ใน `.gitignore` ไม่ขึ้น GitHub)
-- บนเว็บจริง: Worker secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DEEPGRAM_API_KEY` (ตั้งด้วย `npx wrangler secret`, wrangler login แล้ว)
+- ใน `.dev.vars` มี: R2, Deepgram, `RENDER_TOKEN`, `ADMIN_PASSWORD`, `SUPABASE_DB_PASSWORD`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- บนเว็บจริง: Worker secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DEEPGRAM_API_KEY`, `RENDER_TOKEN`, `ADMIN_PASSWORD` (ตั้งด้วย `npx wrangler secret`, wrangler login แล้ว)
+- กุญแจ R2 ปัจจุบัน = token `komoray-upload-v2` (เปลี่ยน 29 ต.ค., ลบดอกเก่าแล้ว)
 - ค่าที่ไม่ลับ (`R2_ACCOUNT_ID`, `R2_BUCKET`) อยู่ใน `wrangler.jsonc` → `vars`
 
 ### แผนที่ไฟล์
 | ไฟล์ | หน้าที่ |
 |---|---|
-| `src/app/page.tsx` | หน้าแรก Coming soon |
+| `src/app/page.tsx` | หน้าแรก Coming soon + ลิงก์ Privacy · Terms |
+| `src/app/privacy/page.tsx`, `src/app/terms/page.tsx` | นโยบายความเป็นส่วนตัว / ข้อตกลง (ติดต่อ hello@komoray.com) · ใช้ `src/components/LegalPage.tsx` |
+| `src/app/admin/page.tsx` + `src/app/api/admin/jobs/route.ts` | หน้า admin: ทุกคลิป + สถานะ (done/working/failed/stuck) + error · ใช้รหัส `ADMIN_PASSWORD` (ชั่วคราว จนกว่าจะมี login) |
+| `src/app/api/report/route.ts` | หน้าเว็บส่ง error ฝั่งเบราว์เซอร์มาเก็บที่ `logs/` ใน R2 (ลบเองหลัง 90 วัน) |
 | `src/app/upload/page.tsx` | หน้าอัปโหลด: ลากวางไฟล์ + แถบความคืบหน้า → Find silences → Make video → ดู/ดาวน์โหลด + แจ้งเตือนบนจอ (ยังไม่ลิงก์จากหน้าแรก) |
 | `src/app/api/upload-url/route.ts` | ออกลิงก์อัปโหลดชั่วคราว 10 นาที (mp4/mov ≤ 500 MB) |
 | `src/app/api/analyze/route.ts` | POST: ส่งงานให้ Deepgram แบบ callback (ไม่รอ) · GET: ถามสถานะ (`analyze.json` → `edit.json` / `analyze-error.json`) |
@@ -47,7 +56,7 @@
 | `src/lib/r2.ts` | ทำลิงก์ชั่วคราว + อ่าน/เขียน/ลบไฟล์ใน R2 + `VIDEO_KEY`, `siblingKey` |
 | `src/lib/callback.ts` | ลายเซ็นลับของลิงก์ callback |
 | `src/lib/transcribe.ts` | **ไฟล์เดียวที่รู้จัก Deepgram** (เปลี่ยนเจ้าแก้ไฟล์นี้ไฟล์เดียว) |
-| `src/lib/silences.ts` | กติกาช่วงเงียบ: ช่องว่าง > 0.4 วิ, เว้นระยะรอบคำ 0.1 วิ |
+| `src/lib/silences.ts` | กติกาช่วงเงียบ: ช่องว่าง > 0.4 วิ, เว้นระยะรอบคำ 0.1 วิ · `trimStretchedWords`: คำยาวได้ไม่เกิน 0.2 + 0.05×ตัวอักษร วิ (Deepgram ชอบลากหางคำท้ายประโยค) |
 | `modal_app/render.py` | งานตัดคลิปบน Modal (FFmpeg) · deploy: `python -m modal deploy modal_app/render.py` · ทดสอบ: `python -m modal run modal_app/render.py --job job.json` · endpoint: `https://kamkamsongto--komoray-render-start.us-east.modal.run` |
 
 `edit.json` = `{ source, duration, rules, cuts: [{start, end, reason}], words: [{text, start, end}] }`
@@ -78,19 +87,32 @@
 - แก้ **error 524** (Deepgram ทำงานเกิน 100 วิกับคลิปยาว): เปลี่ยนเป็นแบบ callback + หน้าเว็บถามสถานะทุก 3 วิ
 - ทดสอบบนเว็บจริงกับคลิปไทย 7 นาที (482 MB): Find silences 137 วิ (35 จุด รวม 84 วิ) → Make video 95 วิ → ไฟล์ 112 MB ดาวน์โหลดได้ ✅
 
+**29 ต.ค. (วันที่ 9 ในชีต: ทดสอบ 10 คลิป) + ล่วงหน้างานวันที่ 10–11**
+- R2 ลบไฟล์ `uploads/` อัตโนมัติหลัง 14 วัน (`beta-expire-14d`) และ `logs/` หลัง 90 วัน (`logs-expire-90d`)
+- โค้ชอัดคลิปทดสอบ 9 คลิป ทดสอบไปแล้ว Eng01, Eng02, Long01 (5 นาที) ผ่าน · ยังไม่มีคลิปแนวนอน / .mov จาก iPhone
+- สูตรตัดใหม่ตัดหางเสียงที่ Deepgram ลากยาว (Eng01: 36.0 → 31.2 วิ) · รอโค้ชฟังว่ามีคำไหนโดนตัดหางไหม
+- แจ้งเตือน: เสียง ding ทุกครั้ง + ป๊อปอัปบนเดสก์ท็อปเฉพาะคนติ๊ก "Also notify me on my desktop" (จำไว้ในเบราว์เซอร์)
+- **เปลี่ยนกุญแจ R2** เป็น `komoray-upload-v2` และลบดอกเก่าแล้ว (ลิงก์ที่เซ็นด้วยดอกเก่าใช้ไม่ได้แล้ว)
+- **หน้า admin** komoray.com/admin + บันทึก error ทั้งฝั่งเซิร์ฟเวอร์และเบราว์เซอร์ (งาน soft launch ข้อ 3–4 ของวันที่ 10)
+- **หน้า Privacy / Terms** + ขอ Deepgram ไม่ให้เอาเสียงไปเทรน (`mip_opt_out=true`)
+- **เตรียม Login (วันที่ 11):** สมัคร Supabase, สร้าง Google OAuth client, เปิด Google provider ใน Supabase (ทดสอบแล้ว Supabase ส่งต่อไป Google ถูกต้อง)
+- **อีเมลทางการ** hello@komoray.com รับเมลได้แล้ว
+
 ---
 
 ## ⚠️ ติดอยู่ / เรื่องที่ต้องรู้
 
 | เรื่อง | รายละเอียด | ต้องทำเมื่อไหร่ |
 |---|---|---|
-| 🔐 กุญแจ R2 เคยหลุดในภาพหน้าจอ | โค้ชเลือกยังไม่เปลี่ยน (ความเสี่ยงต่ำ มีแค่คลิปทดสอบ) | **ก่อน soft launch 30 ต.ค.** |
+| 🔑 Google login ยังเป็นโหมด Testing | ล็อกอินได้เฉพาะ test users (ใส่ kamkamsongto@gmail.com แล้วหรือยัง ต้องถามโค้ช) · Publish ต้องกรอกหน้า Branding (home/privacy/terms, authorized domains `komoray.com` + `icjjeinussbapihdjiym.supabase.co`) · **ห้ามอัปโหลดโลโก้** (จะต้องรอ Google ตรวจหลายวัน) | ก่อนเปิดให้ beta ล็อกอิน |
+| 🔒 หน้า admin ใช้รหัสผ่าน | ชั่วคราว · หลังมี login ให้เปิดได้เฉพาะ kamkamsongto@gmail.com แล้วเลิกใช้ `ADMIN_PASSWORD` | ตอนทำ login |
+| 💸 Deepgram opt out อาจแพงขึ้น | ยังไม่รู้ตัวเลขจริง · เช็กใน Deepgram Console → Usage หลังมีคลิปใหม่ | ครั้งถัดไปที่ทดสอบ |
 | 🌐 หน้า `/upload` เปิดให้ทุกคนใช้ได้ | ยังไม่มี login (มาวันที่ 31 ต.ค.) · **ไม่ใส่ปุ่มจากหน้าแรก** ส่งลิงก์ให้เฉพาะคน beta (ตัดสินใจ 29 ต.ค.) · R2 ลบไฟล์ใน `uploads/` อัตโนมัติหลัง 14 วันแล้ว (กฎ `beta-expire-14d`) | ใส่ปุ่มหลังมี login |
 | 🇹🇭 ข้อความภาษาไทยจาก Deepgram ตัวอักษรแตก | เช่น `สํา` แทน `สำ` (เวลาของคำยังใช้ได้) | แก้พร้อมหน้า Script view (1 พ.ย.) |
 | 🇹🇭 คลิปไทยเจอช่วงเงียบน้อย | มีช่วง 28.99–43.49 วิ (14.5 วิ) ในคลิปโค้ช รอโค้ชฟังว่าเงียบจริงไหม | รอคำตอบจากโค้ช |
 | 🧹 ESLint พังมากับเทมเพลต | error "Converting circular structure to JSON" ไม่กระทบเว็บ | ทำเมื่อว่าง |
 | 🖼️ Banner บน X | ใช้ภาพคนที่ AI สร้าง + ตัวเลขยอดไลก์ อาจทำให้เข้าใจผิดว่าเป็นลูกค้าจริง | แนะนำลบตัวเลข / เปลี่ยนเป็นภาพจริงภายหลัง |
-| 📣 งานตลาดยังไม่เริ่ม | 0 โพสต์ · ยังไม่มีรายชื่อครีเอเตอร์ · ยังไม่ได้ DM · ยังไม่มีหน้า waitlist | **ด่วน: ต้องมี beta 10–20 คนภายใน 30 ต.ค.** |
+| 📣 งานตลาด / launch / ติดต่อ creator | โค้ชสั่ง**ข้ามไปก่อน** (29 ต.ค.) · 0 โพสต์ · ยังไม่มี beta · soft launch จึงยังไม่เกิด | รอโค้ชตัดสินใจวันใหม่ |
 | 💻 บทเรียน | เวลาทดสอบด้วย `next dev` เบื้องหลัง ต้องปิด process ให้หมด ไม่งั้น `npm run dev` ของโค้ชจะเปิดไม่ได้ | ทุกครั้งที่ทดสอบ |
 | 🏠 Find silences บน localhost | Deepgram ส่งผล callback มาที่เครื่องในบ้านไม่ได้ จะค้างที่ Listening · ทดสอบบน komoray.com หรือจำลอง callback ด้วยลายเซ็น HMAC | ทุกครั้งที่ทดสอบในเครื่อง |
 | 📦 ขนาดไฟล์ 500 MB | คลิป 4K ของมืออาชีพเกินแน่นอน · โค้ชเลือก**ยังไม่ขยาย**ตอนนี้ · ของจริงควรจำกัดตามความยาวคลิป/แพ็กเกจ + อัปโหลดแบบแบ่งชิ้น (multipart) | หลังมี login |
@@ -100,11 +122,12 @@
 ## ⏭️ ขั้นต่อไป
 
 
-| วัน | งาน (ตามชีต) | เสร็จเมื่อ |
-|---|---|---|
-| **พฤ. 29/10** | ทดสอบ 10 คลิป (ยาว/สั้น, ไทย/อังกฤษ, mov จาก iPhone) แก้ทุกจุดที่พัง + เปลี่ยนกุญแจ R2 + กฎลบคลิปอัตโนมัติ + ลิงก์ไปหน้า /upload | 10 คลิปผ่าน |
-| **ศ. 30/10** | **Soft launch** ให้ beta 10–20 คน + แบบฟอร์ม feedback | มีคนนอกใช้จริง ≥ 5 คน |
-| ส. 31/10 | Google login (Supabase) · ต้องสมัคร Supabase ก่อน | |
+**งานถัดไป (เรียงตามลำดับ):**
+1. **อีเมลส่งออก:** ตั้ง Gmail "Send mail as" hello@komoray.com (ต้องเปิด 2-Step + App password) + เพิ่ม SPF ของ Google · เปลี่ยนอีเมลในหน้า Google **Branding** เป็น hello@komoray.com
+2. **Google Branding → Publish app** (หน้า privacy/terms ขึ้นเว็บแล้ว)
+3. **โค้ดปุ่ม Sign in with Google** + ผูกคลิปกับ user + หน้า My Projects + ทดสอบ 2 บัญชีมองไม่เห็นงานกัน (วันที่ 11 ในชีต) · หน้า admin เปลี่ยนเป็นเช็กอีเมลแทนรหัส
+4. ทดสอบคลิปที่เหลือ 6 คลิป + คลิปแนวนอน + .mov จาก iPhone (โค้ช)
+5. งานที่ข้ามไว้: soft launch / แบบฟอร์ม feedback / ชวน beta (รอโค้ชบอกว่าจะกลับมาทำเมื่อไหร่)
 
 **งานตลาด (วันละ ~30 นาที, เร่งด่วน):**
 1. โพสต์แรก build in public บน X (โค้ชเล่าเป็นภาษาไทย Claude เกลาเป็นอังกฤษ)
@@ -126,6 +149,9 @@
 - ไม่ใส่ตัวเลขอย่าง "10x faster" จนกว่าจะวัดจริงกับ beta
 - **Deepgram ใช้แบบ callback** (28 ต.ค.) เพราะคลิปยาวเกิน 100 วิของการรอแบบปกติ (error 524)
 - **คลิปเสร็จแจ้งเตือนบนจออย่างเดียว ไม่ส่งอีเมล** (28 ต.ค.)
-- **การเก็บไฟล์** (29 ต.ค.): beta ลบทุกอย่างหลัง 14 วัน · หลังมี login: เก็บ edit.json ตลอดไป, คลิปเก็บตามแพ็กเกจ (ร่าง: Free 7 / Pro 30 / Business 90 วัน), เตือนก่อนหมดอายุ, ทำงานต่อได้ทุกเครื่องผ่านบัญชี (แบบ Gling)
+- **การเก็บไฟล์** (แก้ 30 ต.ค.): beta ลบทุกอย่างหลัง 14 วัน · ระยะยาว: **เก็บตลอด จำกัดพื้นที่ตามแพ็กเกจ ผู้ใช้ลบเอง** (แทนแผนเดิม Free 7 / Pro 30 / Business 90 วัน) · บัญชีที่ไม่ใช้เกิน 12 เดือนเตือนก่อน 30 วันแล้วลบ · edit.json เก็บตลอด · ต้องแก้หน้า privacy + อีเมลแจ้งผู้ใช้เมื่อเปลี่ยน
+- **ไม่ขายข้อมูล ไม่เอาคลิปไปเทรน AI** (30 ต.ค.) · Deepgram ใช้ `mip_opt_out=true` · ร่าง privacy/terms ใช้ได้ช่วง beta แต่ก่อน public launch ให้นักกฎหมายดู (ลูกค้าอเมริกา + PDPA ไทย)
+- **อีเมล** (30 ต.ค.): เริ่มฟรีด้วย Cloudflare Email Routing + Gmail Send mail as · ย้ายไป Google Workspace เมื่อมีลูกค้าจ่ายเงินหรือมีทีม
+- **สูตรตัดหางคำ** (29 ต.ค.): แก้ที่สูตรของเรา ไม่ได้แก้ที่ Deepgram · ค่า 0.2 + 0.05×ตัวอักษร
 - ไอเดียช่วงเงียบที่ตั้งใจเว้น (29 ต.ค.): ระดับความกระชับ Tight/Natural/Relaxed + ย่อช่วงเงียบแทนตัดทิ้ง + กดคืนจุดตัดใน Script view
 - ก่อน Public launch: เพิ่มเจ้าถอดเสียงสำรองที่สลับอัตโนมัติถ้า Deepgram ล่ม (ยังไม่ยืนยันกับโค้ช) กันอีเมลขยะ · อีเมล (Resend) ใช้เฉพาะเรื่องสำคัญ: ฟีเจอร์ใหม่, ชวนอัปเกรด, waitlist, ต้อนรับ
