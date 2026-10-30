@@ -1,4 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { ownsVideo } from "@/lib/supabase/server";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
 // One render job lives in the video's folder:
@@ -9,15 +10,16 @@ const LINK_SECONDS = 3600;
 
 type RenderEnv = { RENDER_URL: string; RENDER_TOKEN: string };
 
-function readKey(key: string | null) {
-	return key && VIDEO_KEY.test(key) ? key : null;
+// A valid video key that belongs to the signed-in user, or null.
+async function readKey(key: string | null) {
+	return key && VIDEO_KEY.test(key) && (await ownsVideo(key)) ? key : null;
 }
 
 // Start making the final video.
 export async function POST(request: Request) {
 	const { key: rawKey } = (await request.json()) as { key?: string };
-	const key = readKey(rawKey ?? null);
-	if (!key) return Response.json({ error: "Unknown video" }, { status: 400 });
+	const key = await readKey(rawKey ?? null);
+	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 
 	const edit = await getJson<object>(siblingKey(key, "edit.json"));
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
@@ -52,8 +54,8 @@ export async function POST(request: Request) {
 
 // Where is the job at? The page asks this every few seconds.
 export async function GET(request: Request) {
-	const key = readKey(new URL(request.url).searchParams.get("key"));
-	if (!key) return Response.json({ error: "Unknown video" }, { status: 400 });
+	const key = await readKey(new URL(request.url).searchParams.get("key"));
+	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 
 	const finalKey = siblingKey(key, "final.mp4");
 	if (await exists(finalKey)) {

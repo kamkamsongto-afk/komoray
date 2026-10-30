@@ -1,4 +1,5 @@
 import { putObject } from "@/lib/r2";
+import { currentUser } from "@/lib/supabase/server";
 
 // The upload page sends errors that only the browser sees (e.g. an upload dropping halfway),
 // so they show up on the admin page next to the server-side ones.
@@ -7,7 +8,9 @@ const clip = (value: unknown, max: number) => String(value ?? "").slice(0, max);
 export async function POST(request: Request) {
 	const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 	const at = new Date().toISOString();
+	const { user } = await currentUser().catch(() => ({ user: null }));
 	const report = {
+		email: user?.email ?? "",
 		at,
 		stage: clip(body.stage, 40),
 		error: clip(body.error, 500),

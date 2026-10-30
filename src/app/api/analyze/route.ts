@@ -1,4 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { startTranscription } from "@/lib/transcribe";
@@ -14,7 +15,7 @@ type AnalyzeEnv = { DEEPGRAM_API_KEY: string; RENDER_TOKEN: string };
 // Start finding the silences. Returns right away; the page then polls GET below.
 export async function POST(request: Request) {
 	const { key, language } = (await request.json()) as { key?: string; language?: string };
-	if (!key || !VIDEO_KEY.test(key)) return Response.json({ error: "Unknown video" }, { status: 400 });
+	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
 	const env = getCloudflareContext().env as unknown as AnalyzeEnv;
 	try {
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
 // Where is it at? Returns the cut list once the callback has saved it.
 export async function GET(request: Request) {
 	const key = new URL(request.url).searchParams.get("key");
-	if (!key || !VIDEO_KEY.test(key)) return Response.json({ error: "Unknown video" }, { status: 400 });
+	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
 	const editKey = siblingKey(key, "edit.json");
 	const edit = await getJson<object>(editKey);

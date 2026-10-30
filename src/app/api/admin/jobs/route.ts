@@ -1,8 +1,8 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getJson, listObjects, signedUrl, type ObjectInfo } from "@/lib/r2";
+import { currentUser, isAdmin } from "@/lib/supabase/server";
 
 // Everything the admin page shows: every video folder with how far it got and why it broke,
-// plus the errors browsers reported. Only works with the admin password.
+// plus the errors browsers reported. Only for the admin's Google account.
 const SHOW_JOBS = 100;
 const SHOW_REPORTS = 100;
 const STUCK_MS = 30 * 60 * 1000; // a step still "working" after 30 minutes has silently died
@@ -10,20 +10,6 @@ const LINK_SECONDS = 3600;
 const JOB_FILES = ["analyze.json", "edit.json", "analyze-error.json", "render.json", "final.mp4", "render-error.json"];
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
-
-async function sha256(text: string) {
-	const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-	return new Uint8Array(hash);
-}
-
-// Hashing both sides first makes the compare take the same time whatever was typed.
-async function passwordOk(given: string, expected: string) {
-	if (!expected) return false;
-	const [a, b] = await Promise.all([sha256(given), sha256(expected)]);
-	let diff = 0;
-	for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-	return diff === 0;
-}
 
 async function step(files: Map<string, ObjectInfo>, started: string, done: string, failed: string): Promise<Step> {
 	const fail = files.get(failed);
@@ -39,12 +25,10 @@ async function step(files: Map<string, ObjectInfo>, started: string, done: strin
 	return { status: stuck ? "stuck" : "working", at: start.lastModified };
 }
 
-export async function GET(request: Request) {
-	const env = getCloudflareContext().env as unknown as { ADMIN_PASSWORD?: string };
-	const given = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-	if (!(await passwordOk(given, env.ADMIN_PASSWORD ?? ""))) {
-		return Response.json({ error: "Wrong password" }, { status: 401 });
-	}
+export async function GET() {
+	const { user } = await currentUser();
+	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
+	if (!isAdmin(user.email)) return Response.json({ error: "This page is for the Komoray team only" }, { status: 403 });
 
 	const [uploads, logs] = await Promise.all([listObjects("uploads/"), listObjects("logs/")]);
 

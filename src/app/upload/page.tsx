@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AccountBar, SignInCard, useUser } from "@/components/Account";
 
 type Status = "idle" | "uploading" | "done" | "error";
 type Cut = { start: number; end: number };
@@ -94,6 +95,7 @@ function reportError(stage: string, error: string, details: { key?: string | nul
 const fmt = (s: number) => s.toFixed(2);
 
 export default function UploadPage() {
+	const user = useUser();
 	const [status, setStatus] = useState<Status>("idle");
 	const [progress, setProgress] = useState(0);
 	const [message, setMessage] = useState("");
@@ -127,6 +129,31 @@ export default function UploadPage() {
 		setDesktopNotify(on);
 		saveNotifyPref(on);
 	}
+
+	// Opened from My projects (/upload?key=…): pick up where that video left off.
+	useEffect(() => {
+		const saved = new URLSearchParams(window.location.search).get("key");
+		if (!user || !saved) return;
+		void (async () => {
+			const res = await fetch(`/api/analyze?key=${encodeURIComponent(saved)}`);
+			const data = (await res.json()) as Analysis & { status?: string; error?: string };
+			if (!res.ok) {
+				setStatus("error");
+				setMessage("This project was not found. Videos are deleted after 14 days during the beta.");
+				return;
+			}
+			setKey(saved);
+			setStatus("done");
+			setMessage(saved.split("/").pop() ?? saved);
+			if (data.status === "done") setAnalysis(data);
+			if (data.status === "failed") setAnalysisError(data.error ?? "Analysis failed");
+			if (data.status === "processing") void findSilences(saved, false);
+
+			const rendered = (await (await fetch(`/api/render?key=${encodeURIComponent(saved)}`)).json()) as RenderState;
+			if (rendered.status !== "none") setRender(rendered);
+		})();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [user]);
 
 	// A file dropped outside the drop zone would make the browser open it and leave the page.
 	useEffect(() => {
@@ -185,8 +212,10 @@ export default function UploadPage() {
 			await putWithProgress(data.uploadUrl, file, setProgress);
 
 			setStatus("done");
-			setMessage(data.key);
+			setMessage(file.name);
 			setKey(data.key);
+			// Put the project in the address bar so a refresh (or a bookmark) comes back to it.
+			window.history.replaceState(null, "", `/upload?key=${encodeURIComponent(data.key)}`);
 		} catch (err) {
 			const error = err instanceof Error ? err.message : "Something went wrong";
 			setStatus("error");
@@ -195,26 +224,29 @@ export default function UploadPage() {
 		}
 	}
 
-	async function findSilences() {
-		if (!key) return;
+	// start=false: it is already running (e.g. reopened from My projects), just wait for the result.
+	async function findSilences(videoKey = key, start = true) {
+		if (!videoKey) return;
 		setAnalyzing(true);
 		setAnalysis(null);
 		setAnalysisError("");
-		setRender({ status: "none" });
+		if (start) setRender({ status: "none" });
 		try {
-			const res = await fetch("/api/analyze", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ key, language }),
-			});
-			const started = (await res.json()) as { error?: string };
-			if (!res.ok) throw new Error(started.error ?? "Analysis failed");
+			if (start) {
+				const res = await fetch("/api/analyze", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ key: videoKey, language }),
+				});
+				const started = (await res.json()) as { error?: string };
+				if (!res.ok) throw new Error(started.error ?? "Analysis failed");
+			}
 
 			// Long videos take Deepgram a few minutes, so keep asking until the cut list is saved.
 			const giveUpAt = Date.now() + ANALYZE_GIVE_UP_MS;
 			while (Date.now() < giveUpAt) {
 				await wait(ANALYZE_POLL_MS);
-				const poll = await fetch(`/api/analyze?key=${encodeURIComponent(key)}`);
+				const poll = await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`);
 				const data = (await poll.json()) as Analysis & { status?: string; error?: string };
 				if (data.status === "done") {
 					setAnalysis(data);
@@ -226,7 +258,7 @@ export default function UploadPage() {
 		} catch (err) {
 			const error = err instanceof Error ? err.message : "Analysis failed";
 			setAnalysisError(error);
-			reportError("find silences", error, { key });
+			reportError("find silences", error, { key: videoKey });
 		} finally {
 			setAnalyzing(false);
 		}
@@ -255,8 +287,18 @@ export default function UploadPage() {
 	const silentSeconds = analysis ? analysis.cuts.reduce((sum, c) => sum + (c.end - c.start), 0) : 0;
 	const busy = status === "uploading" || analyzing;
 
+	if (user === undefined) return <main className="min-h-screen" />;
+	if (user === null) {
+		return (
+			<main className="font-sans mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 p-4">
+				<SignInCard title="Sign in to upload a video" />
+			</main>
+		);
+	}
+
 	return (
-		<main className="font-sans mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-6 p-8">
+		<main className="font-sans mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-6 p-4 sm:p-8">
+			<AccountBar user={user} />
 			<h1 className="text-3xl font-bold tracking-tight">Upload a video</h1>
 			<p className="text-foreground/70">MP4 or MOV, up to 500 MB.</p>
 
@@ -321,7 +363,7 @@ export default function UploadPage() {
 							<option value="th">ไทย</option>
 						</select>
 						<button
-							onClick={findSilences}
+							onClick={() => void findSilences()}
 							disabled={analyzing}
 							className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 						>
@@ -351,7 +393,6 @@ export default function UploadPage() {
 								))}
 								{analysis.cuts.length === 0 && <li>No silences longer than 0.4s 🎉</li>}
 							</ul>
-							<p className="break-all text-foreground/60">Saved cut list: {analysis.editKey}</p>
 						</div>
 					)}
 

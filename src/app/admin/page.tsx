@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SignInCard, useUser } from "@/components/Account";
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
 type Job = {
@@ -13,9 +14,7 @@ type Job = {
 	render: Step;
 	finalUrl: string | null;
 };
-type Report = { at: string; stage: string; error: string; key?: string; filename?: string; size?: number; browser?: string };
-
-const PASSWORD_KEY = "komoray.adminPassword"; // remembered in this browser only
+type Report = { at: string; email?: string; stage: string; error: string; key?: string; filename?: string; size?: number; browser?: string };
 
 const BADGE: Record<Step["status"], string> = {
 	"not started": "bg-foreground/10 text-foreground/60",
@@ -39,25 +38,22 @@ function StepBadge({ label, step }: { label: string; step: Step }) {
 }
 
 export default function AdminPage() {
-	const [password, setPassword] = useState("");
+	const user = useUser();
 	const [jobs, setJobs] = useState<Job[] | null>(null);
 	const [reports, setReports] = useState<Report[]>([]);
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [onlyProblems, setOnlyProblems] = useState(false);
 
-	async function load(pw: string) {
+	async function load() {
 		setLoading(true);
 		setError("");
 		try {
-			const res = await fetch("/api/admin/jobs", { headers: { Authorization: `Bearer ${pw}` } });
+			const res = await fetch("/api/admin/jobs");
 			const data = (await res.json()) as { jobs?: Job[]; reports?: Report[]; error?: string };
 			if (!res.ok || !data.jobs) throw new Error(data.error ?? "Could not load");
 			setJobs(data.jobs);
 			setReports(data.reports ?? []);
-			try {
-				localStorage.setItem(PASSWORD_KEY, pw);
-			} catch {}
 		} catch (err) {
 			setJobs(null);
 			setError(err instanceof Error ? err.message : "Could not load");
@@ -67,43 +63,23 @@ export default function AdminPage() {
 	}
 
 	useEffect(() => {
-		let saved = "";
-		try {
-			saved = localStorage.getItem(PASSWORD_KEY) ?? "";
-		} catch {}
-		if (saved) {
-			setPassword(saved);
-			void load(saved);
-		}
-	}, []);
+		if (user) void load();
+	}, [user]);
 
 	const problem = (j: Job) => [j.analyze.status, j.render.status].some((s) => s === "failed" || s === "stuck");
 	const shown = jobs?.filter((j) => !onlyProblems || problem(j)) ?? [];
 	const problemCount = jobs?.filter(problem).length ?? 0;
 
+	if (user === undefined) return <main className="min-h-screen" />;
 	if (!jobs) {
 		return (
-			<main className="font-sans mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 p-4">
+			<main className="font-sans mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-4">
 				<h1 className="text-2xl font-bold">Komoray admin</h1>
-				<form
-					onSubmit={(e) => {
-						e.preventDefault();
-						void load(password);
-					}}
-					className="flex flex-col gap-3"
-				>
-					<input
-						type="password"
-						value={password}
-						onChange={(e) => setPassword(e.target.value)}
-						placeholder="Admin password"
-						className="rounded-lg border border-foreground/20 bg-transparent px-3 py-2"
-					/>
-					<button disabled={loading || !password} className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white disabled:opacity-50">
-						{loading ? "Loading…" : "Open"}
-					</button>
-					{error && <p className="text-sm text-red-600">❌ {error}</p>}
-				</form>
+				{user === null ? (
+					<SignInCard title="Sign in as admin" />
+				) : (
+					<p className="text-sm text-foreground/70">{loading ? "Loading…" : error && `❌ ${error}`}</p>
+				)}
 			</main>
 		);
 	}
@@ -117,7 +93,7 @@ export default function AdminPage() {
 						<input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} />
 						Only problems
 					</label>
-					<button onClick={() => load(password)} disabled={loading} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm disabled:opacity-50">
+					<button onClick={() => load()} disabled={loading} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm disabled:opacity-50">
 						{loading ? "Loading…" : "Refresh"}
 					</button>
 				</div>
@@ -164,7 +140,10 @@ export default function AdminPage() {
 				{reports.map((r, i) => (
 					<div key={i} className="flex flex-col gap-1 rounded-xl border border-foreground/15 p-4 text-sm">
 						<div className="flex flex-wrap justify-between gap-2">
-							<span className="font-medium">{r.stage}</span>
+							<span className="font-medium">
+								{r.stage}
+								{r.email && <span className="font-normal text-foreground/60"> · {r.email}</span>}
+							</span>
 							<span className="text-xs text-foreground/60">{when(r.at)}</span>
 						</div>
 						<span className="break-words text-red-600">{r.error}</span>
