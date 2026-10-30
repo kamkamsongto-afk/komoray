@@ -2,6 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts } from "@/lib/edit";
+import { keepSegments, subtitleLines } from "@/lib/timeline";
+import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -112,14 +114,16 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 	const [selected, setSelected] = useState<number[]>([]);
 	const items = useMemo(() => layout(words, cuts), [words, cuts]);
 	const gone = useMemo(() => new Set(deleted), [deleted]);
-	// Preview with cuts: playback jumps over silences and deleted words, like the final video.
-	const [previewCuts, setPreviewCuts] = useState(true);
-	const skips = useMemo(
-		() => (previewCuts ? allCuts({ duration, words, cuts: cuts.map((c) => ({ ...c, reason: "silence" as const })), deleted }) : []),
-		[previewCuts, duration, words, cuts, deleted],
+	// Preview = the final video (cuts, 9:16, subtitles), built live in the browser. Original = the raw upload.
+	const [mode, setMode] = useState<"preview" | "original">("preview");
+	const playerRef = useRef<PreviewHandle>(null);
+	const segments = useMemo(
+		() => keepSegments(duration, allCuts({ duration, words, cuts: cuts.map((c) => ({ ...c, reason: "silence" as const })), deleted })),
+		[duration, words, cuts, deleted],
 	);
-	// Clicking a ✂️ marker plays that one silence instead of jumping over it.
-	const listenRef = useRef<{ start: number; end: number } | null>(null);
+	const lines = useMemo(() => subtitleLines(words, segments), [words, segments]);
+	// Where we are in the source video, so switching between Preview and Original keeps the spot.
+	const timeRef = useRef(0);
 
 	// Which words the user has highlighted with the mouse (or a long press on a phone).
 	useEffect(() => {
@@ -163,25 +167,37 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 	const anyKept = selected.some((i) => !gone.has(i));
 	const anyGone = selected.some((i) => gone.has(i));
 
-	// While playing, follow the video every frame (timeupdate alone is too jumpy for word highlights).
+	// Original: follow the video every frame (timeupdate alone is too jumpy for word highlights).
 	useEffect(() => {
-		if (!playing) return;
+		if (mode !== "original" || !playing) return;
 		let frame = 0;
 		const tick = () => {
 			const video = videoRef.current;
 			if (video) {
-				const t = video.currentTime;
-				const listen = listenRef.current;
-				if (listen && (t < listen.start - 0.2 || t > listen.end + 0.2)) listenRef.current = null;
-				const skip = listenRef.current ? null : skips.find((c) => t >= c.start && t < c.end - 0.05);
-				if (skip) video.currentTime = Math.min(skip.end, video.duration || skip.end);
+				timeRef.current = video.currentTime;
 				setCurrent(wordAt(words, video.currentTime));
 			}
 			frame = requestAnimationFrame(tick);
 		};
 		frame = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(frame);
-	}, [playing, words, skips]);
+	}, [mode, playing, words]);
+
+	// Preview: the player reports where it is in the source every frame.
+	const onPreviewTime = useCallback(
+		(t: number) => {
+			timeRef.current = t;
+			setCurrent(wordAt(words, t));
+		},
+		[words],
+	);
+
+	// After switching, start the other player where the last one was.
+	useEffect(() => {
+		setPlaying(false);
+		if (mode === "preview") playerRef.current?.seek(timeRef.current);
+		else if (videoRef.current) videoRef.current.currentTime = timeRef.current;
+	}, [mode]);
 
 	// Keep the highlighted word visible inside the transcript box (without scrolling the whole page).
 	useEffect(() => {
@@ -194,37 +210,74 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 		if (top < box.scrollTop || top > box.scrollTop + box.clientHeight - 40) box.scrollTo({ top: top - box.clientHeight / 3, behavior: "smooth" });
 	}, [current, playing, items]);
 
-	function seek(seconds: number) {
+	// Jump to a moment of the source. Silences and deleted words only exist in the Original,
+	// so clicking those switches over; everything else plays in the Preview.
+	function seek(seconds: number, original = false) {
 		// A click that ends a drag-to-select should select, not jump.
 		if (!window.getSelection()?.isCollapsed) return;
+		timeRef.current = seconds;
+		setCurrent(wordAt(words, seconds));
+		if (original && mode === "preview") {
+			setMode("original");
+			requestAnimationFrame(() => void videoRef.current?.play());
+			return;
+		}
+		if (mode === "preview") {
+			playerRef.current?.seek(seconds);
+			playerRef.current?.play();
+			return;
+		}
 		const video = videoRef.current;
 		if (!video) return;
 		video.currentTime = seconds;
-		setCurrent(wordAt(words, seconds));
 		void video.play();
 	}
 
 	return (
 		<div className="flex flex-col gap-3">
-			<video
-				ref={videoRef}
-				src={videoUrl}
-				controls
-				playsInline
-				preload="metadata"
-				onPlay={() => setPlaying(true)}
-				onPause={() => setPlaying(false)}
-				onEnded={() => setPlaying(false)}
-				onSeeked={(e) => setCurrent(wordAt(words, e.currentTarget.currentTime))}
-				className="max-h-[50vh] w-full rounded-lg bg-black"
-			/>
+			<div className="flex self-center rounded-lg border border-foreground/20 p-0.5 text-sm">
+				{(["preview", "original"] as const).map((m) => (
+					<button
+						key={m}
+						onClick={() => setMode(m)}
+						className={`rounded-md px-3 py-1 ${mode === m ? "bg-foreground text-background" : "text-foreground/70 hover:text-foreground"}`}
+					>
+						{m === "preview" ? "Preview (final video)" : "Original"}
+					</button>
+				))}
+			</div>
+			{mode === "preview" ? (
+				<PreviewPlayer
+					ref={playerRef}
+					src={videoUrl}
+					segments={segments}
+					lines={lines}
+					onTime={onPreviewTime}
+					onPlayingChange={setPlaying}
+				/>
+			) : (
+				<video
+					ref={videoRef}
+					src={videoUrl}
+					controls
+					playsInline
+					preload="metadata"
+					onPlay={() => setPlaying(true)}
+					onPause={() => setPlaying(false)}
+					onEnded={() => setPlaying(false)}
+					onSeeked={(e) => {
+						timeRef.current = e.currentTarget.currentTime;
+						setCurrent(wordAt(words, e.currentTarget.currentTime));
+					}}
+					className="max-h-[50vh] w-full rounded-lg bg-black"
+				/>
+			)}
 			<p className="text-xs text-foreground/60">
+				{mode === "preview"
+					? "This is how your video will look. Changes show up right away, no need to make the video first."
+					: "The video as you uploaded it."}{" "}
 				Click a word to jump there. Drag across words to delete them. Click ✂️ to hear a silence that will be cut.
 			</p>
-			<label className="flex items-center gap-2 text-sm text-foreground/70">
-				<input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />
-				✂️ Preview with cuts (skip silences and deleted words while playing)
-			</label>
 			<div className="flex min-h-9 flex-wrap items-center gap-2">
 				{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
 				{anyKept && (
@@ -261,10 +314,7 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 						return (
 							<button
 								key={i}
-								onClick={() => {
-									listenRef.current = { start: item.at, end: item.end };
-									seek(item.at);
-								}}
+								onClick={() => seek(item.at, true)}
 								title="Silence that will be cut"
 								className="mx-1 rounded bg-red-500/15 px-1.5 align-middle text-xs leading-5 text-red-600 hover:bg-red-500/25"
 							>
@@ -278,7 +328,7 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 							<span
 								data-word={item.index}
 								data-last={item.last}
-								onClick={() => seek(words[item.index].start)}
+								onClick={() => seek(words[item.index].start, gone.has(item.index))}
 								className={`cursor-pointer rounded transition-colors ${
 									gone.has(item.index)
 										? "text-red-600/60 line-through decoration-2"
