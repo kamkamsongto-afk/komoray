@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { wordCuts } from "@/lib/edit";
+import { allCuts } from "@/lib/edit";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -15,7 +15,7 @@ const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
 type Item =
 	| { kind: "word"; index: number; last: number; text: string; space: boolean }
-	| { kind: "silence"; seconds: number; at: number }
+	| { kind: "silence"; seconds: number; at: number; end: number }
 	| { kind: "break" };
 
 // Deepgram splits Thai into pieces ("พ" "ัด" "ล" "ม"). Glue the pieces back into real words using the
@@ -53,7 +53,9 @@ function layout(words: Word[], cuts: Cut[]): Item[] {
 	const starts = thaiClip ? thaiWordStarts(words) : null;
 	const silenceBetween = (from: number, to: number) => {
 		const inside = cuts.filter((c) => c.start >= from - 0.01 && c.end <= to + 0.01);
-		return inside.length ? { seconds: inside.reduce((sum, c) => sum + c.end - c.start, 0), at: inside[0].start } : null;
+		return inside.length
+			? { seconds: inside.reduce((sum, c) => sum + c.end - c.start, 0), at: inside[0].start, end: inside[inside.length - 1].end }
+			: null;
 	};
 
 	words.forEach((w, i) => {
@@ -110,8 +112,14 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 	const [selected, setSelected] = useState<number[]>([]);
 	const items = useMemo(() => layout(words, cuts), [words, cuts]);
 	const gone = useMemo(() => new Set(deleted), [deleted]);
-	// Where playback jumps over deleted words, so the preview sounds like the final video.
-	const skips = useMemo(() => wordCuts(words, deleted, duration), [words, deleted, duration]);
+	// Preview with cuts: playback jumps over silences and deleted words, like the final video.
+	const [previewCuts, setPreviewCuts] = useState(true);
+	const skips = useMemo(
+		() => (previewCuts ? allCuts({ duration, words, cuts: cuts.map((c) => ({ ...c, reason: "silence" as const })), deleted }) : []),
+		[previewCuts, duration, words, cuts, deleted],
+	);
+	// Clicking a ✂️ marker plays that one silence instead of jumping over it.
+	const listenRef = useRef<{ start: number; end: number } | null>(null);
 
 	// Which words the user has highlighted with the mouse (or a long press on a phone).
 	useEffect(() => {
@@ -162,7 +170,10 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 		const tick = () => {
 			const video = videoRef.current;
 			if (video) {
-				const skip = skips.find((c) => video.currentTime >= c.start && video.currentTime < c.end - 0.05);
+				const t = video.currentTime;
+				const listen = listenRef.current;
+				if (listen && (t < listen.start - 0.2 || t > listen.end + 0.2)) listenRef.current = null;
+				const skip = listenRef.current ? null : skips.find((c) => t >= c.start && t < c.end - 0.05);
 				if (skip) video.currentTime = Math.min(skip.end, video.duration || skip.end);
 				setCurrent(wordAt(words, video.currentTime));
 			}
@@ -208,8 +219,12 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 				className="max-h-[50vh] w-full rounded-lg bg-black"
 			/>
 			<p className="text-xs text-foreground/60">
-				Click a word to jump there. Drag across words to delete them. ✂️ marks a silence that will be cut.
+				Click a word to jump there. Drag across words to delete them. Click ✂️ to hear a silence that will be cut.
 			</p>
+			<label className="flex items-center gap-2 text-sm text-foreground/70">
+				<input type="checkbox" checked={previewCuts} onChange={(e) => setPreviewCuts(e.target.checked)} />
+				✂️ Preview with cuts (skip silences and deleted words while playing)
+			</label>
 			<div className="flex min-h-9 flex-wrap items-center gap-2">
 				{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
 				{anyKept && (
@@ -246,7 +261,10 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 						return (
 							<button
 								key={i}
-								onClick={() => seek(item.at)}
+								onClick={() => {
+									listenRef.current = { start: item.at, end: item.end };
+									seek(item.at);
+								}}
 								title="Silence that will be cut"
 								className="mx-1 rounded bg-red-500/15 px-1.5 align-middle text-xs leading-5 text-red-600 hover:bg-red-500/25"
 							>
