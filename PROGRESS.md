@@ -29,26 +29,34 @@
 - **Cloudflare R2**: ตู้ `komoray-uploads` (CORS อนุญาต localhost:3000, komoray.com, www, workers.dev)
 - **Deepgram** (model `nova-3`) ถอดเสียงพร้อมเวลารายคำ รองรับ `en` และ `th`
 - **Modal** ตัดคลิปด้วย FFmpeg (แอป `komoray-render`)
-- **Supabase** (โปรเจกต์ `komoray`, region Americas, Free) สำหรับ login · เปิด Google provider แล้ว · URL `https://icjjeinussbapihdjiym.supabase.co`
-- **Google Cloud** โปรเจกต์ `komoray` → Google Auth Platform: แอป Komoray (External, ยัง **Testing**), OAuth client `Komoray web` (redirect ไป Supabase callback)
+- **Supabase** (โปรเจกต์ `komoray`, Free, ฐานข้อมูลอยู่ us-west-2) สำหรับ login · Google provider เปิดแล้ว · URL `https://icjjeinussbapihdjiym.supabase.co`
+  - ตาราง `projects` (1 แถว = 1 คลิป, `id` = โฟลเดอร์ใน R2) + Row Level Security: เห็น/เพิ่ม/ลบได้เฉพาะของตัวเอง · SQL อยู่ที่ `supabase/migrations/`
+  - รันคำสั่ง SQL จากเครื่อง: ต่อผ่าน `aws-1-us-west-2.pooler.supabase.com:5432` user `postgres.icjjeinussbapihdjiym` + `SUPABASE_DB_PASSWORD`
+  - URL Configuration: Site URL `https://komoray.com` · Redirect URLs komoray.com/**, www.komoray.com/**, localhost:3000/**
+- **Google Cloud** โปรเจกต์ `komoray` → Google Auth Platform: แอป Komoray (External, **Published** 30 ต.ค., ไม่มีโลโก้), OAuth client `Komoray web` (redirect ไป Supabase callback)
 - **DNS** อยู่ที่ Cloudflare (โดเมนซื้อที่ Namecheap)
-- **อีเมล** `hello@komoray.com` → Cloudflare Email Routing ส่งต่อเข้า kamkamsongto@gmail.com (30 ต.ค.) · ลบ MX/TXT eforward ของ Namecheap แล้ว · Gmail มี filter "Never send to Spam" สำหรับ komoray.com
+- **อีเมล** `hello@komoray.com` → Cloudflare Email Routing ส่งต่อเข้า kamkamsongto@gmail.com (30 ต.ค.) · ส่งออกผ่าน Gmail "Send mail as" (App password `Komoray mail`) · DNS: SPF `include:_spf.mx.cloudflare.net include:_spf.google.com`, DMARC `_dmarc` p=none · Gmail filter "Never send to Spam" สำหรับ komoray.com · ⚠️ เมลที่ส่งออกยังตกสแปม (ไม่มี DKIM ของ komoray.com) → จะย้ายไป Google Workspace
 
 ### กุญแจและความลับ
 - ในเครื่อง: ไฟล์ `.dev.vars` (อยู่ใน `.gitignore` ไม่ขึ้น GitHub)
-- ใน `.dev.vars` มี: R2, Deepgram, `RENDER_TOKEN`, `ADMIN_PASSWORD`, `SUPABASE_DB_PASSWORD`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- บนเว็บจริง: Worker secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DEEPGRAM_API_KEY`, `RENDER_TOKEN`, `ADMIN_PASSWORD` (ตั้งด้วย `npx wrangler secret`, wrangler login แล้ว)
+- ใน `.dev.vars` มี: R2, Deepgram, `RENDER_TOKEN`, `SUPABASE_DB_PASSWORD`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- บนเว็บจริง: Worker secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DEEPGRAM_API_KEY`, `RENDER_TOKEN` (ตั้งด้วย `npx wrangler secret`, wrangler login แล้ว)
 - กุญแจ R2 ปัจจุบัน = token `komoray-upload-v2` (เปลี่ยน 29 ต.ค., ลบดอกเก่าแล้ว)
-- ค่าที่ไม่ลับ (`R2_ACCOUNT_ID`, `R2_BUCKET`) อยู่ใน `wrangler.jsonc` → `vars`
+- ค่าที่ไม่ลับ (`R2_ACCOUNT_ID`, `R2_BUCKET`, `RENDER_URL`) อยู่ใน `wrangler.jsonc` → `vars` · Supabase URL + publishable key (สาธารณะ) อยู่ในโค้ด `src/lib/supabase/config.ts` เพื่อไม่ต้องตั้งค่าตอน build
 
 ### แผนที่ไฟล์
 | ไฟล์ | หน้าที่ |
 |---|---|
 | `src/app/page.tsx` | หน้าแรก Coming soon + ลิงก์ Privacy · Terms |
+| `src/app/upload/page.tsx` | ต้องล็อกอินก่อน · อัปโหลด → Find silences → Script view → Make video · จำงานไว้ใน URL `?key=` |
 | `src/app/privacy/page.tsx`, `src/app/terms/page.tsx` | นโยบายความเป็นส่วนตัว / ข้อตกลง (ติดต่อ hello@komoray.com) · ใช้ `src/components/LegalPage.tsx` |
-| `src/app/admin/page.tsx` + `src/app/api/admin/jobs/route.ts` | หน้า admin: ทุกคลิป + สถานะ (done/working/failed/stuck) + error · ใช้รหัส `ADMIN_PASSWORD` (ชั่วคราว จนกว่าจะมี login) |
+| `src/app/admin/page.tsx` + `src/app/api/admin/jobs/route.ts` | หน้า admin: ทุกคลิป + สถานะ (done/working/failed/stuck) + error · เข้าได้เฉพาะล็อกอินด้วย `ADMIN_EMAIL` (kamkamsongto@gmail.com) |
+| `src/app/projects/page.tsx` | My projects: คลิปของตัวเอง เรียงใหม่→เก่า + อีกกี่วันถูกลบ · กดแล้วไป `/upload?key=…` ทำต่อ |
+| `src/app/auth/callback/route.ts` | Google ส่งกลับมาที่นี่หลังล็อกอิน → แลกเป็น session cookie |
+| `src/components/Account.tsx` | `useUser`, ปุ่ม Sign in with Google, แถบบน (New video · My projects · Sign out) |
+| `src/components/ScriptView.tsx` | Script view: คำพูดเป็นย่อหน้า + ✂️ ช่วงเงียบที่จะตัด · คลิกคำ → วิดีโอกระโดด · ไฮไลต์คำที่กำลังพูด · แก้ `ํา`→`ำ` |
+| `src/lib/supabase/` | `config.ts` (URL, key, ADMIN_EMAIL) · `browser.ts` · `server.ts` (`currentUser`, `ownsVideo`, `isAdmin`) |
 | `src/app/api/report/route.ts` | หน้าเว็บส่ง error ฝั่งเบราว์เซอร์มาเก็บที่ `logs/` ใน R2 (ลบเองหลัง 90 วัน) |
-| `src/app/upload/page.tsx` | หน้าอัปโหลด: ลากวางไฟล์ + แถบความคืบหน้า → Find silences → Make video → ดู/ดาวน์โหลด + แจ้งเตือนบนจอ (ยังไม่ลิงก์จากหน้าแรก) |
 | `src/app/api/upload-url/route.ts` | ออกลิงก์อัปโหลดชั่วคราว 10 นาที (mp4/mov ≤ 500 MB) |
 | `src/app/api/analyze/route.ts` | POST: ส่งงานให้ Deepgram แบบ callback (ไม่รอ) · GET: ถามสถานะ (`analyze.json` → `edit.json` / `analyze-error.json`) |
 | `src/app/api/analyze/callback/route.ts` | Deepgram ส่งผลมาที่นี่ (ตรวจลายเซ็น HMAC ด้วย `RENDER_TOKEN`) → หาช่วงเงียบ → บันทึก `edit.json` |
@@ -98,17 +106,25 @@
 - **เตรียม Login (วันที่ 11):** สมัคร Supabase, สร้าง Google OAuth client, เปิด Google provider ใน Supabase (ทดสอบแล้ว Supabase ส่งต่อไป Google ถูกต้อง)
 - **อีเมลทางการ** hello@komoray.com รับเมลได้แล้ว
 
+**30 ต.ค. (วันที่ 10–12 ในชีต)**
+- Google **Publish app** แล้ว (กรอก Branding: home/privacy/terms, authorized domains)
+- **ส่งเมลในชื่อ hello@komoray.com** จาก Gmail ได้ + SPF เพิ่ม Google + DMARC · แต่เมลยังตกกล่องขยะ (ไม่มี DKIM ของโดเมนเรา)
+- **Login ด้วย Google ขึ้นเว็บจริงแล้ว** (วันที่ 11): `/upload` ต้องล็อกอิน · ทุกคลิปผูกกับเจ้าของ · คนอื่นเปิด/สั่งงานคลิปของเราไม่ได้ (ทดสอบด้วยบัญชีทดสอบ 2 บัญชี + โค้ชทดสอบบนเว็บจริงผ่านครบ)
+- หน้า **My projects** · หน้า admin เปลี่ยนจากรหัสผ่านเป็นเช็กอีเมล (ลบ `ADMIN_PASSWORD` แล้ว) · error report บอกอีเมลคนที่เจอ
+- **Script view** (วันที่ 12, ยังไม่ขึ้นเว็บจริง รอโค้ชลอง): ทดสอบกับ Eng01 และคลิปไทย 5 นาที (1,396 คำ)
+
 ---
 
 ## ⚠️ ติดอยู่ / เรื่องที่ต้องรู้
 
 | เรื่อง | รายละเอียด | ต้องทำเมื่อไหร่ |
 |---|---|---|
-| 🔑 Google login ยังเป็นโหมด Testing | ล็อกอินได้เฉพาะ test users (ใส่ kamkamsongto@gmail.com แล้วหรือยัง ต้องถามโค้ช) · Publish ต้องกรอกหน้า Branding (home/privacy/terms, authorized domains `komoray.com` + `icjjeinussbapihdjiym.supabase.co`) · **ห้ามอัปโหลดโลโก้** (จะต้องรอ Google ตรวจหลายวัน) | ก่อนเปิดให้ beta ล็อกอิน |
-| 🔒 หน้า admin ใช้รหัสผ่าน | ชั่วคราว · หลังมี login ให้เปิดได้เฉพาะ kamkamsongto@gmail.com แล้วเลิกใช้ `ADMIN_PASSWORD` | ตอนทำ login |
+| 🖼️ Google consent screen | **ห้ามอัปโหลดโลโก้** ในหน้า Branding (ต้องรอ Google ตรวจหลายวัน) · หน้าเลือกบัญชีจะโชว์ `icjjeinussbapihdjiym.supabase.co` (แก้ได้ด้วย Supabase custom domain แบบเสียเงิน) | ภายหลัง |
+| 📧 เมล hello@ ที่ส่งออกตกสแปม | แบบฟรีเซ็น DKIM เป็น gmail.com · แก้จริง = Google Workspace (~$7/เดือน) | **ก่อนส่งเมลชวน beta** |
+| 🇹🇭 Deepgram ภาษาไทย | ตกตัวอักษรบางตัว (เช่น "จุดเด่คือ") และแยกคำอังกฤษเป็นชิ้น ("P r ice") · Script view ต่อคำอังกฤษให้แล้ว แต่ตัวที่ตกต้องรอฟีเจอร์แก้ข้อความ | ทำพร้อมฟีเจอร์แก้คำ |
+| 🗂️ คลิปก่อนมี login | 10 คลิปทดสอบไม่มีเจ้าของในตาราง projects → เปิดจาก /upload ไม่ได้ ดูได้ใน admin · หมดอายุเองตามกฎ 14 วัน | ไม่ต้องทำอะไร |
 | 💸 Deepgram opt out อาจแพงขึ้น | ยังไม่รู้ตัวเลขจริง · เช็กใน Deepgram Console → Usage หลังมีคลิปใหม่ | ครั้งถัดไปที่ทดสอบ |
 | 🌐 หน้า `/upload` เปิดให้ทุกคนใช้ได้ | ยังไม่มี login (มาวันที่ 31 ต.ค.) · **ไม่ใส่ปุ่มจากหน้าแรก** ส่งลิงก์ให้เฉพาะคน beta (ตัดสินใจ 29 ต.ค.) · R2 ลบไฟล์ใน `uploads/` อัตโนมัติหลัง 14 วันแล้ว (กฎ `beta-expire-14d`) | ใส่ปุ่มหลังมี login |
-| 🇹🇭 ข้อความภาษาไทยจาก Deepgram ตัวอักษรแตก | เช่น `สํา` แทน `สำ` (เวลาของคำยังใช้ได้) | แก้พร้อมหน้า Script view (1 พ.ย.) |
 | 🇹🇭 คลิปไทยเจอช่วงเงียบน้อย | มีช่วง 28.99–43.49 วิ (14.5 วิ) ในคลิปโค้ช รอโค้ชฟังว่าเงียบจริงไหม | รอคำตอบจากโค้ช |
 | 🧹 ESLint พังมากับเทมเพลต | error "Converting circular structure to JSON" ไม่กระทบเว็บ | ทำเมื่อว่าง |
 | 🖼️ Banner บน X | ใช้ภาพคนที่ AI สร้าง + ตัวเลขยอดไลก์ อาจทำให้เข้าใจผิดว่าเป็นลูกค้าจริง | แนะนำลบตัวเลข / เปลี่ยนเป็นภาพจริงภายหลัง |
@@ -123,9 +139,9 @@
 
 
 **งานถัดไป (เรียงตามลำดับ):**
-1. **อีเมลส่งออก:** ตั้ง Gmail "Send mail as" hello@komoray.com (ต้องเปิด 2-Step + App password) + เพิ่ม SPF ของ Google · เปลี่ยนอีเมลในหน้า Google **Branding** เป็น hello@komoray.com
-2. **Google Branding → Publish app** (หน้า privacy/terms ขึ้นเว็บแล้ว)
-3. **โค้ดปุ่ม Sign in with Google** + ผูกคลิปกับ user + หน้า My Projects + ทดสอบ 2 บัญชีมองไม่เห็นงานกัน (วันที่ 11 ในชีต) · หน้า admin เปลี่ยนเป็นเช็กอีเมลแทนรหัส
+1. **โค้ชลอง Script view** ในเครื่อง → commit + push
+2. **Google Workspace** (~45 นาทีต่อเนื่อง): สมัคร Business Starter (บัญชีหลัก เช่น yoshi@komoray.com, hello@/support@ เป็น alias ฟรี) → ยืนยันโดเมน (TXT) → เปลี่ยน MX เป็นของ Google + ปิด Cloudflare Email Routing → เปิด DKIM (`google._domainkey`) → SPF เหลือ `include:_spf.google.com` → ลบ "Send mail as" ใน Gmail ส่วนตัว + ลบ App password `Komoray mail` → ทดสอบส่งหาภรรยา
+3. วันที่ 14 ในชีต: ลบคำในสคริปต์แล้วคลิปตัดตาม + กดคืนคำได้ (ต่อจาก Script view)
 4. ทดสอบคลิปที่เหลือ 6 คลิป + คลิปแนวนอน + .mov จาก iPhone (โค้ช)
 5. งานที่ข้ามไว้: soft launch / แบบฟอร์ม feedback / ชวน beta (รอโค้ชบอกว่าจะกลับมาทำเมื่อไหร่)
 

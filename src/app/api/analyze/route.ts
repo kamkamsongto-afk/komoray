@@ -17,6 +17,11 @@ export async function POST(request: Request) {
 	const { key, language } = (await request.json()) as { key?: string; language?: string };
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
+	// Deepgram can't reach a computer at home to deliver the result, so say so plainly.
+	if (["localhost", "127.0.0.1"].includes(new URL(request.url).hostname)) {
+		return Response.json({ error: "Find silences only works on komoray.com, not on localhost." }, { status: 400 });
+	}
+
 	const env = getCloudflareContext().env as unknown as AnalyzeEnv;
 	try {
 		await Promise.all([deleteObject(siblingKey(key, "edit.json")), deleteObject(siblingKey(key, "analyze-error.json"))]);
@@ -41,7 +46,8 @@ export async function GET(request: Request) {
 
 	const editKey = siblingKey(key, "edit.json");
 	const edit = await getJson<object>(editKey);
-	if (edit) return Response.json({ status: "done", editKey, ...edit });
+	// videoUrl: the original video, so the Script view can play it next to the transcript.
+	if (edit) return Response.json({ status: "done", editKey, ...edit, videoUrl: await signedUrl(key, "GET", LINK_SECONDS) });
 
 	const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));
 	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Analysis failed" });

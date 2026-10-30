@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
+import { ScriptView } from "@/components/ScriptView";
 
 type Status = "idle" | "uploading" | "done" | "error";
 type Cut = { start: number; end: number };
-type Analysis = { editKey: string; duration: number; cuts: Cut[]; words: { text: string }[] };
+type Analysis = { editKey: string; duration: number; cuts: Cut[]; words: { text: string; start: number; end: number }[]; videoUrl: string };
 type RenderState = {
 	status: "none" | "processing" | "done" | "failed";
 	videoUrl?: string;
@@ -385,14 +386,8 @@ export default function UploadPage() {
 								🗣️ {analysis.words.length} words · ⏱️ {fmt(analysis.duration)}s long · ✂️ {analysis.cuts.length} silences
 								= {fmt(silentSeconds)}s to cut
 							</p>
-							<ul className="max-h-64 overflow-y-auto rounded-lg bg-foreground/5 p-3 font-mono">
-								{analysis.cuts.map((c, i) => (
-									<li key={i}>
-										{fmt(c.start)}s → {fmt(c.end)}s ({fmt(c.end - c.start)}s)
-									</li>
-								))}
-								{analysis.cuts.length === 0 && <li>No silences longer than 0.4s 🎉</li>}
-							</ul>
+							{analysis.cuts.length === 0 && <p>No silences longer than 0.4s 🎉</p>}
+							<ScriptView videoUrl={analysis.videoUrl} words={analysis.words} cuts={analysis.cuts} />
 						</div>
 					)}
 
