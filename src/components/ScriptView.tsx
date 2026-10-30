@@ -13,16 +13,43 @@ const script = (text: string) => (isThai(text) ? "thai" : /^\d/.test(text) ? "nu
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
 type Item =
-	| { kind: "word"; index: number; text: string; space: boolean }
+	| { kind: "word"; index: number; last: number; text: string; space: boolean }
 	| { kind: "silence"; seconds: number; at: number }
 	| { kind: "break" };
+
+// Deepgram splits Thai into pieces ("พ" "ัด" "ล" "ม"). Glue the pieces back into real words using the
+// browser's Thai word splitter, keeping each piece whole. Returns the first piece index of each word.
+function thaiWordStarts(words: Word[]): Set<number> {
+	const starts = new Set<number>();
+	const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.Segmenter("th", { granularity: "word" }) : null;
+	let i = 0;
+	while (i < words.length) {
+		// A run of Thai pieces with no real pause between them.
+		let j = i + 1;
+		while (j < words.length && isThai(words[i].text) && isThai(words[j].text) && words[j].start - words[j - 1].end < 0.3) j++;
+		starts.add(i);
+		if (segmenter && j - i > 1) {
+			const offsets: number[] = [];
+			let text = "";
+			for (let k = i; k < j; k++) {
+				offsets.push(text.length);
+				text += fixThai(words[k].text);
+			}
+			const bounds = new Set([...segmenter.segment(text)].map((s) => s.index));
+			for (let k = i + 1; k < j; k++) if (bounds.has(offsets[k - i])) starts.add(k);
+		} else for (let k = i + 1; k < j; k++) starts.add(k);
+		i = j;
+	}
+	return starts;
+}
 
 // Turn the word list into what we draw: words, "silence cut here" markers, and paragraph breaks.
 function layout(words: Word[], cuts: Cut[]): Item[] {
 	const items: Item[] = [];
-	// In Thai clips Deepgram splits English words into pieces ("P r ice"), so only put spaces
-	// where Thai, numbers and English meet. English clips get a space between every word.
+	// Thai clips only get spaces where Thai, numbers and English meet (Deepgram also splits English
+	// into pieces there: "P r ice"). English clips get a space between every word.
 	const thaiClip = words.filter((w) => isThai(w.text)).length > words.length / 2;
+	const starts = thaiClip ? thaiWordStarts(words) : null;
 	const silenceBetween = (from: number, to: number) => {
 		const inside = cuts.filter((c) => c.start >= from - 0.01 && c.end <= to + 0.01);
 		return inside.length ? { seconds: inside.reduce((sum, c) => sum + c.end - c.start, 0), at: inside[0].start } : null;
@@ -31,10 +58,17 @@ function layout(words: Word[], cuts: Cut[]): Item[] {
 	words.forEach((w, i) => {
 		const prev = words[i - 1];
 		const silence = silenceBetween(prev ? prev.end : 0, w.start);
+		const last = items[items.length - 1];
+		// Glue this piece onto the word before it (same Thai word, nothing in between).
+		if (starts && !starts.has(i) && !silence && last?.kind === "word") {
+			last.text += fixThai(w.text);
+			last.last = i;
+			return;
+		}
 		if (prev && w.start - prev.end >= PARAGRAPH_GAP) items.push({ kind: "break" });
 		if (silence) items.push({ kind: "silence", ...silence });
 		const space = Boolean(prev) && (thaiClip ? script(prev.text) !== script(w.text) : true);
-		items.push({ kind: "word", index: i, text: fixThai(w.text), space });
+		items.push({ kind: "word", index: i, last: i, text: fixThai(w.text), space });
 	});
 
 	const last = words[words.length - 1];
@@ -82,11 +116,12 @@ export function ScriptView({ videoUrl, words, cuts }: { videoUrl: string; words:
 	useEffect(() => {
 		if (!playing || current < 0) return;
 		const box = boxRef.current;
-		const el = box?.querySelector<HTMLElement>(`[data-word="${current}"]`);
+		const word = items.find((it) => it.kind === "word" && it.index <= current && current <= it.last);
+		const el = word?.kind === "word" ? box?.querySelector<HTMLElement>(`[data-word="${word.index}"]`) : null;
 		if (!box || !el) return;
 		const top = el.offsetTop; // the box is position:relative, so this is measured from its top
 		if (top < box.scrollTop || top > box.scrollTop + box.clientHeight - 40) box.scrollTo({ top: top - box.clientHeight / 3, behavior: "smooth" });
-	}, [current, playing]);
+	}, [current, playing, items]);
 
 	function seek(seconds: number) {
 		const video = videoRef.current;
@@ -132,8 +167,8 @@ export function ScriptView({ videoUrl, words, cuts }: { videoUrl: string; words:
 							<span
 								data-word={item.index}
 								onClick={() => seek(words[item.index].start)}
-								className={`cursor-pointer rounded px-0.5 transition-colors ${
-									item.index === current ? "bg-blue-600 text-white" : "hover:bg-foreground/10"
+								className={`cursor-pointer rounded transition-colors ${
+									item.index <= current && current <= item.last ? "bg-blue-600 text-white" : "hover:bg-foreground/10"
 								}`}
 							>
 								{item.text}
