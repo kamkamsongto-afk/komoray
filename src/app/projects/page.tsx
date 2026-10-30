@@ -62,7 +62,8 @@ export default function ProjectsPage() {
 				{live.map((p) => (
 					<li key={p.id}>
 						<Link
-							href={`/upload?key=${encodeURIComponent(p.video_key)}`}
+							// The editor sends videos without a script yet back to the upload page.
+							href={`/edit?key=${encodeURIComponent(p.video_key)}`}
 							className="flex flex-col gap-1 rounded-xl border border-foreground/15 p-4 hover:border-foreground/40"
 						>
 							<span className="font-medium break-all">{p.filename}</span>

@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts } from "@/lib/edit";
+import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines } from "@/lib/timeline";
 import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
 
@@ -104,9 +105,12 @@ type Props = {
 	cuts: Cut[];
 	deleted: number[];
 	onChange: (deleted: number[]) => void;
+	subtitle: SubtitleStyle;
+	onSubtitleChange: (style: SubtitleStyle) => void;
 };
 
-export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange }: Props) {
+// The editor: script on the left, the video on the right (stacked on phones, video first).
+export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange, subtitle, onSubtitleChange }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [current, setCurrent] = useState(-1);
@@ -233,115 +237,150 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange 
 		void video.play();
 	}
 
+	const styleSlider = (label: string, key: "size" | "outline") => (
+		<label className="flex items-center gap-3 text-sm text-foreground/70">
+			<span className="w-24 shrink-0">{label}</span>
+			<input
+				type="range"
+				min={LIMITS[key].min}
+				max={LIMITS[key].max}
+				step={LIMITS[key].step}
+				value={subtitle[key]}
+				onChange={(e) => onSubtitleChange({ ...subtitle, [key]: Number(e.target.value) })}
+				className="flex-1"
+			/>
+			<span className="w-8 text-right tabular-nums">{subtitle[key]}</span>
+		</label>
+	);
+
 	return (
-		<div className="flex flex-col gap-3">
-			<div className="flex self-center rounded-lg border border-foreground/20 p-0.5 text-sm">
-				{(["preview", "original"] as const).map((m) => (
-					<button
-						key={m}
-						onClick={() => setMode(m)}
-						className={`rounded-md px-3 py-1 ${mode === m ? "bg-foreground text-background" : "text-foreground/70 hover:text-foreground"}`}
-					>
-						{m === "preview" ? "Preview (final video)" : "Original"}
-					</button>
-				))}
-			</div>
-			{mode === "preview" ? (
-				<PreviewPlayer
-					ref={playerRef}
-					src={videoUrl}
-					segments={segments}
-					lines={lines}
-					onTime={onPreviewTime}
-					onPlayingChange={setPlaying}
-				/>
-			) : (
-				<video
-					ref={videoRef}
-					src={videoUrl}
-					controls
-					playsInline
-					preload="metadata"
-					onPlay={() => setPlaying(true)}
-					onPause={() => setPlaying(false)}
-					onEnded={() => setPlaying(false)}
-					onSeeked={(e) => {
-						timeRef.current = e.currentTarget.currentTime;
-						setCurrent(wordAt(words, e.currentTarget.currentTime));
-					}}
-					className="max-h-[50vh] w-full rounded-lg bg-black"
-				/>
-			)}
-			<p className="text-xs text-foreground/60">
-				{mode === "preview"
-					? "This is how your video will look. Changes show up right away, no need to make the video first."
-					: "The video as you uploaded it."}{" "}
-				Click a word to jump there. Drag across words to delete them. Click ✂️ to hear a silence that will be cut.
-			</p>
-			<div className="flex min-h-9 flex-wrap items-center gap-2">
-				{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
-				{anyKept && (
-					<button
-						onMouseDown={(e) => e.preventDefault()}
-						onClick={() => apply(true)}
-						className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
-					>
-						🗑️ Delete
-					</button>
+		<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,440px)] lg:items-start">
+			{/* Right on big screens (sticky while the script scrolls), on top on phones. */}
+			<div className="flex flex-col gap-3 lg:sticky lg:top-4 lg:order-2">
+				<div className="flex self-center rounded-lg border border-foreground/20 p-0.5 text-sm">
+					{(["preview", "original"] as const).map((m) => (
+						<button
+							key={m}
+							onClick={() => setMode(m)}
+							className={`rounded-md px-3 py-1 ${mode === m ? "bg-foreground text-background" : "text-foreground/70 hover:text-foreground"}`}
+						>
+							{m === "preview" ? "Preview (final video)" : "Original"}
+						</button>
+					))}
+				</div>
+				{mode === "preview" ? (
+					<PreviewPlayer
+						ref={playerRef}
+						src={videoUrl}
+						segments={segments}
+						lines={lines}
+						subtitle={subtitle}
+						onSubtitleChange={onSubtitleChange}
+						onTime={onPreviewTime}
+						onPlayingChange={setPlaying}
+					/>
+				) : (
+					<video
+						ref={videoRef}
+						src={videoUrl}
+						controls
+						playsInline
+						preload="metadata"
+						onPlay={() => setPlaying(true)}
+						onPause={() => setPlaying(false)}
+						onEnded={() => setPlaying(false)}
+						onSeeked={(e) => {
+							timeRef.current = e.currentTarget.currentTime;
+							setCurrent(wordAt(words, e.currentTarget.currentTime));
+						}}
+						className="max-h-[65vh] w-full rounded-lg bg-black"
+					/>
 				)}
-				{anyGone && (
-					<button
-						onMouseDown={(e) => e.preventDefault()}
-						onClick={() => apply(false)}
-						className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
-					>
-						↩️ Restore
-					</button>
-				)}
-				{!selected.length && deleted.length > 0 && (
-					<button
-						onClick={() => onChange([])}
-						className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
-					>
-						↩️ Restore all deleted words
-					</button>
+				{mode === "preview" && (
+					<div className="flex flex-col gap-2 rounded-lg border border-foreground/15 p-3">
+						<p className="text-sm font-medium">Subtitles</p>
+						{styleSlider("Text size", "size")}
+						{styleSlider("Black outline", "outline")}
+						<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>
+					</div>
 				)}
 			</div>
-			<div ref={boxRef} className="relative max-h-80 overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8">
-				{items.map((item, i) => {
-					if (item.kind === "break") return <span key={i} className="block h-3" />;
-					if (item.kind === "silence") {
+
+			<div className="flex min-w-0 flex-col gap-3 lg:order-1">
+				<p className="text-xs text-foreground/60">
+					{mode === "preview"
+						? "The video shows how your final video will look. Changes show up right away, no need to make the video first."
+						: "The video as you uploaded it."}{" "}
+					Click a word to jump there. Drag across words to delete them. Click ✂️ to hear a silence that will be cut.
+				</p>
+				<div className="flex min-h-9 flex-wrap items-center gap-2">
+					{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
+					{anyKept && (
+						<button
+							onMouseDown={(e) => e.preventDefault()}
+							onClick={() => apply(true)}
+							className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
+						>
+							🗑️ Delete
+						</button>
+					)}
+					{anyGone && (
+						<button
+							onMouseDown={(e) => e.preventDefault()}
+							onClick={() => apply(false)}
+							className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
+						>
+							↩️ Restore
+						</button>
+					)}
+					{!selected.length && deleted.length > 0 && (
+						<button
+							onClick={() => onChange([])}
+							className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+						>
+							↩️ Restore all deleted words
+						</button>
+					)}
+				</div>
+				<div
+					ref={boxRef}
+					className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-12rem)] lg:text-lg lg:leading-9"
+				>
+					{items.map((item, i) => {
+						if (item.kind === "break") return <span key={i} className="block h-3" />;
+						if (item.kind === "silence") {
+							return (
+								<button
+									key={i}
+									onClick={() => seek(item.at, true)}
+									title="Silence that will be cut"
+									className="mx-1 rounded bg-red-500/15 px-1.5 align-middle text-xs leading-5 text-red-600 hover:bg-red-500/25"
+								>
+									✂️ {item.seconds.toFixed(1)}s
+								</button>
+							);
+						}
 						return (
-							<button
-								key={i}
-								onClick={() => seek(item.at, true)}
-								title="Silence that will be cut"
-								className="mx-1 rounded bg-red-500/15 px-1.5 align-middle text-xs leading-5 text-red-600 hover:bg-red-500/25"
-							>
-								✂️ {item.seconds.toFixed(1)}s
-							</button>
+							<Fragment key={i}>
+								{item.space && " "}
+								<span
+									data-word={item.index}
+									data-last={item.last}
+									onClick={() => seek(words[item.index].start, gone.has(item.index))}
+									className={`cursor-pointer rounded transition-colors ${
+										gone.has(item.index)
+											? "text-red-600/60 line-through decoration-2"
+											: item.index <= current && current <= item.last
+												? "bg-blue-600 text-white"
+												: "hover:bg-foreground/10"
+									}`}
+								>
+									{item.text}
+								</span>
+							</Fragment>
 						);
-					}
-					return (
-						<Fragment key={i}>
-							{item.space && " "}
-							<span
-								data-word={item.index}
-								data-last={item.last}
-								onClick={() => seek(words[item.index].start, gone.has(item.index))}
-								className={`cursor-pointer rounded transition-colors ${
-									gone.has(item.index)
-										? "text-red-600/60 line-through decoration-2"
-										: item.index <= current && current <= item.last
-											? "bg-blue-600 text-white"
-											: "hover:bg-foreground/10"
-								}`}
-							>
-								{item.text}
-							</span>
-						</Fragment>
-					);
-				})}
+					})}
+				</div>
 			</div>
 		</div>
 	);

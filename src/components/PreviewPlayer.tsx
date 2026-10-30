@@ -2,11 +2,12 @@
 
 import { Kanit } from "next/font/google";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { FPS, HEIGHT, type Line, type Segment, WIDTH } from "@/lib/timeline";
 
-// Same look as the final video (DEFAULT_STYLE in modal_app/render.py).
+// Same look as the final video (Kanit Medium, side margins 80px in modal_app/render.py).
 const kanit = Kanit({ weight: "500", subsets: ["thai", "latin"] });
-const SUBTITLE = { size: 100, outline: 10, position: 0.31, sideMargin: 80 };
+const SIDE_MARGIN = 80;
 
 export type PreviewHandle = { seek: (sourceSeconds: number) => void; play: () => void };
 
@@ -14,6 +15,8 @@ type Props = {
 	src: string;
 	segments: Segment[];
 	lines: Line[];
+	subtitle: SubtitleStyle;
+	onSubtitleChange: (style: SubtitleStyle) => void; // dragged up or down on the video
 	onTime: (sourceSeconds: number) => void; // where we are in the original video, every frame
 	onPlayingChange: (playing: boolean) => void;
 };
@@ -27,7 +30,7 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 // Two <video> elements take turns: while one plays a piece, the other waits at the start of the
 // next piece, so every cut is an instant swap instead of a seek (which would stutter).
 export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPlayer(
-	{ src, segments, lines, onTime, onPlayingChange },
+	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange },
 	ref,
 ) {
 	const pieces = useMemo<Piece[]>(
@@ -47,6 +50,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	const [playing, setPlaying] = useState(false);
 	const [outTime, setOutTime] = useState(0);
 	const [scale, setScale] = useState(0.3);
+	const dragRef = useRef<{ y: number; position: number } | null>(null);
 
 	const shown = () => (activeRef.current === 0 ? videoA : videoB).current;
 	const waiting = () => (activeRef.current === 0 ? videoB : videoA).current;
@@ -152,7 +156,8 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	}
 
 	return (
-		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: "calc(60vh * 9 / 16)" }}>
+		// As wide as fits, but never taller than ~70% of the screen.
+		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: "calc(70vh * 9 / 16)" }}>
 			<div
 				ref={boxRef}
 				onClick={toggle}
@@ -178,26 +183,49 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 					className="pointer-events-none absolute top-0 left-0"
 					style={{ width: WIDTH, height: HEIGHT, transform: `scale(${scale})`, transformOrigin: "top left" }}
 				>
-					{line && (
+					{(line || !playing) && (
+						// Drag the subtitle up or down to move it. While paused with nothing being said,
+						// a faded sample shows where subtitles will sit.
 						<div
+							onClick={(e) => e.stopPropagation()}
+							onPointerDown={(e) => {
+								e.stopPropagation();
+								e.currentTarget.setPointerCapture(e.pointerId);
+								dragRef.current = { y: e.clientY, position: subtitle.position };
+							}}
+							onPointerMove={(e) => {
+								const drag = dragRef.current;
+								const box = boxRef.current;
+								if (!drag || !box) return;
+								const { min, max } = LIMITS.position;
+								const position = drag.position - (e.clientY - drag.y) / box.clientHeight;
+								onSubtitleChange({ ...subtitle, position: Math.round(Math.min(max, Math.max(min, position)) * 1000) / 1000 });
+							}}
+							onPointerUp={() => (dragRef.current = null)}
+							title="Drag to move the subtitles"
 							style={{
 								position: "absolute",
-								left: SUBTITLE.sideMargin,
-								right: SUBTITLE.sideMargin,
-								bottom: HEIGHT * SUBTITLE.position,
+								left: SIDE_MARGIN,
+								right: SIDE_MARGIN,
+								bottom: HEIGHT * subtitle.position,
 								textAlign: "center",
 								fontFamily: kanit.style.fontFamily,
 								fontWeight: 500,
-								fontSize: SUBTITLE.size,
+								fontSize: subtitle.size,
 								lineHeight: 1.25,
 								color: "white",
 								// The stroke is drawn half inside the letters; paint-order puts it behind them.
-								WebkitTextStroke: `${SUBTITLE.outline * 2}px black`,
+								WebkitTextStroke: subtitle.outline ? `${subtitle.outline * 2}px black` : undefined,
 								paintOrder: "stroke fill",
 								textShadow: "2px 2px 0 rgba(0,0,0,0.4)",
+								opacity: line ? 1 : 0.5,
+								cursor: "ns-resize",
+								pointerEvents: "auto",
+								touchAction: "none",
+								userSelect: "none",
 							}}
 						>
-							{line.text}
+							{line ? line.text : "Your subtitles"}
 						</div>
 					)}
 					<div

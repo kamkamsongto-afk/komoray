@@ -1,80 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
-import { ScriptView } from "@/components/ScriptView";
-import { cutSeconds, wordCuts } from "@/lib/edit";
+import { reportError } from "@/lib/report";
 
 type Status = "idle" | "uploading" | "done" | "error";
-type Cut = { start: number; end: number };
-type Analysis = {
-	editKey: string;
-	duration: number;
-	cuts: Cut[];
-	words: { text: string; start: number; end: number }[];
-	deleted?: number[];
-	videoUrl: string;
-};
-type RenderState = {
-	status: "none" | "processing" | "done" | "failed";
-	videoUrl?: string;
-	downloadUrl?: string;
-	error?: string;
-};
 
-const POLL_MS = 5000;
 const ANALYZE_POLL_MS = 3000;
 const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
-
-const NOTIFY_PREF = "komoray.desktopNotify"; // remembers the checkbox in this browser
-
-// Two soft rising tones, made in the browser so there is no sound file to load.
-function ding(audio: AudioContext | null) {
-	if (!audio) return;
-	[880, 1320].forEach((freq, i) => {
-		const osc = audio.createOscillator();
-		const gain = audio.createGain();
-		const at = audio.currentTime + i * 0.18;
-		osc.frequency.value = freq;
-		gain.gain.setValueAtTime(0.0001, at);
-		gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
-		gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
-		osc.connect(gain).connect(audio.destination);
-		osc.start(at);
-		osc.stop(at + 0.4);
-	});
-}
-
-// Let people work in another tab while the video renders: play a sound, flag the browser tab,
-// and pop up a desktop notification only if they ticked the box.
-function announce(state: RenderState, audio: AudioContext | null, desktop: boolean) {
-	const text = state.status === "done" ? "✅ Your video is ready!" : "❌ Your video could not be made";
-	ding(audio);
-	if (document.hidden) document.title = `${state.status === "done" ? "✅ Ready" : "❌ Failed"} · Komoray`;
-	if (desktop && "Notification" in window && Notification.permission === "granted") {
-		const note = new Notification("Komoray", { body: text, icon: "/favicon.svg" });
-		note.onclick = () => window.focus();
-	}
-}
-
-function readNotifyPref() {
-	try {
-		return localStorage.getItem(NOTIFY_PREF) === "1";
-	} catch {
-		return false;
-	}
-}
-
-function saveNotifyPref(on: boolean) {
-	try {
-		localStorage.setItem(NOTIFY_PREF, on ? "1" : "0");
-	} catch {
-		// private window etc. — the checkbox just won't be remembered
-	}
-}
 
 // fetch() can't report upload progress yet, so we use XMLHttpRequest for the PUT to R2.
 function putWithProgress(url: string, file: File, onProgress: (percent: number) => void) {
@@ -91,18 +26,6 @@ function putWithProgress(url: string, file: File, onProgress: (percent: number) 
 	});
 }
 
-// Tell the admin page about errors only the browser sees. Never blocks or breaks the page.
-function reportError(stage: string, error: string, details: { key?: string | null; filename?: string; size?: number } = {}) {
-	void fetch("/api/report", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ stage, error, ...details }),
-		keepalive: true,
-	}).catch(() => {});
-}
-
-const fmt = (s: number) => s.toFixed(2);
-
 export default function UploadPage() {
 	const user = useUser();
 	const [status, setStatus] = useState<Status>("idle");
@@ -112,35 +35,8 @@ export default function UploadPage() {
 
 	const [language, setLanguage] = useState("en");
 	const [analyzing, setAnalyzing] = useState(false);
-	const [analysis, setAnalysis] = useState<Analysis | null>(null);
 	const [analysisError, setAnalysisError] = useState("");
-	const [render, setRender] = useState<RenderState>({ status: "none" });
 	const [dragging, setDragging] = useState(false);
-	const [desktopNotify, setDesktopNotify] = useState(false);
-	const [notifyBlocked, setNotifyBlocked] = useState(false);
-	const [saveError, setSaveError] = useState("");
-	// The latest save of deleted words; Make video waits for it so the render never uses an old list.
-	const savingRef = useRef<Promise<boolean>>(Promise.resolve(true));
-	// Browsers only allow sound after a click, so the Make video click creates this.
-	const audioRef = useRef<AudioContext | null>(null);
-
-	useEffect(() => {
-		const granted = "Notification" in window && Notification.permission === "granted";
-		setDesktopNotify(granted && readNotifyPref());
-	}, []);
-
-	async function toggleDesktopNotify(on: boolean) {
-		setNotifyBlocked(false);
-		if (on && "Notification" in window) {
-			const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
-			if (permission !== "granted") {
-				setNotifyBlocked(true);
-				on = false;
-			}
-		}
-		setDesktopNotify(on);
-		saveNotifyPref(on);
-	}
 
 	// Opened from My projects (/upload?key=…): pick up where that video left off.
 	useEffect(() => {
@@ -148,21 +44,18 @@ export default function UploadPage() {
 		if (!user || !saved) return;
 		void (async () => {
 			const res = await fetch(`/api/analyze?key=${encodeURIComponent(saved)}`);
-			const data = (await res.json()) as Analysis & { status?: string; error?: string };
+			const data = (await res.json()) as { status?: string; error?: string };
 			if (!res.ok) {
 				setStatus("error");
 				setMessage("This project was not found. Videos are deleted after 14 days during the beta.");
 				return;
 			}
+			if (data.status === "done") return openEditor(saved);
 			setKey(saved);
 			setStatus("done");
 			setMessage(saved.split("/").pop() ?? saved);
-			if (data.status === "done") setAnalysis(data);
 			if (data.status === "failed") setAnalysisError(data.error ?? "Analysis failed");
 			if (data.status === "processing") void findSilences(saved, false);
-
-			const rendered = (await (await fetch(`/api/render?key=${encodeURIComponent(saved)}`)).json()) as RenderState;
-			if (rendered.status !== "none") setRender(rendered);
 		})();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [user]);
@@ -178,37 +71,17 @@ export default function UploadPage() {
 		};
 	}, []);
 
-	// While Modal is working, ask the server every few seconds whether the video is ready.
-	useEffect(() => {
-		if (!key || render.status !== "processing") return;
-		const timer = setInterval(async () => {
-			const res = await fetch(`/api/render?key=${encodeURIComponent(key)}`);
-			const data = (await res.json()) as RenderState;
-			if (data.status === "done" || data.status === "failed") {
-				setRender(data);
-				announce(data, audioRef.current, desktopNotify);
-			}
-		}, POLL_MS);
-		return () => clearInterval(timer);
-	}, [key, render.status, desktopNotify]);
-
-	// Put the normal tab title back when the user returns to this tab.
-	useEffect(() => {
-		const restore = () => {
-			if (!document.hidden) document.title = PAGE_TITLE;
-		};
-		document.addEventListener("visibilitychange", restore);
-		return () => document.removeEventListener("visibilitychange", restore);
-	}, []);
+	// The script is ready: on to the full-screen editor.
+	function openEditor(videoKey: string) {
+		window.location.assign(`/edit?key=${encodeURIComponent(videoKey)}`);
+	}
 
 	async function handleFile(file: File) {
 		setStatus("uploading");
 		setProgress(0);
 		setMessage(file.name);
 		setKey(null);
-		setAnalysis(null);
 		setAnalysisError("");
-		setRender({ status: "none" });
 
 		try {
 			// 1) Ask our server for a short-lived upload link.
@@ -240,9 +113,7 @@ export default function UploadPage() {
 	async function findSilences(videoKey = key, start = true) {
 		if (!videoKey) return;
 		setAnalyzing(true);
-		setAnalysis(null);
 		setAnalysisError("");
-		if (start) setRender({ status: "none" });
 		try {
 			if (start) {
 				const res = await fetch("/api/analyze", {
@@ -259,11 +130,8 @@ export default function UploadPage() {
 			while (Date.now() < giveUpAt) {
 				await wait(ANALYZE_POLL_MS);
 				const poll = await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`);
-				const data = (await poll.json()) as Analysis & { status?: string; error?: string };
-				if (data.status === "done") {
-					setAnalysis(data);
-					return;
-				}
+				const data = (await poll.json()) as { status?: string; error?: string };
+				if (data.status === "done") return openEditor(videoKey);
 				if (data.status === "failed") throw new Error(data.error ?? "Analysis failed");
 			}
 			throw new Error("This is taking too long. Please try again.");
@@ -276,56 +144,6 @@ export default function UploadPage() {
 		}
 	}
 
-	// Words deleted or restored in the Script view: show it right away, save in the background.
-	function changeDeleted(deleted: number[]) {
-		if (!key) return;
-		setAnalysis((a) => (a ? { ...a, deleted } : a));
-		setSaveError("");
-		const previous = savingRef.current;
-		savingRef.current = (async () => {
-			await previous; // keep saves in order
-			try {
-				const res = await fetch("/api/edit", {
-					method: "PUT",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ key, deleted }),
-				});
-				const data = (await res.json()) as { error?: string };
-				if (!res.ok) throw new Error(data.error ?? "Could not save");
-				return true;
-			} catch (err) {
-				const error = err instanceof Error ? err.message : "Could not save";
-				setSaveError(`Your last change was not saved (${error}). Please try again.`);
-				reportError("save deleted words", error, { key });
-				return false;
-			}
-		})();
-	}
-
-	async function makeVideo() {
-		if (!key) return;
-		if (!(await savingRef.current)) return;
-		if (!audioRef.current && "AudioContext" in window) audioRef.current = new AudioContext();
-		void audioRef.current?.resume();
-		setRender({ status: "processing" });
-		try {
-			const res = await fetch("/api/render", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ key }),
-			});
-			const data = (await res.json()) as { error?: string };
-			if (!res.ok) throw new Error(data.error ?? "Could not start the render");
-		} catch (err) {
-			const error = err instanceof Error ? err.message : "Could not start the render";
-			setRender({ status: "failed", error });
-			reportError("make video", error, { key });
-		}
-	}
-
-	const silentSeconds = analysis ? analysis.cuts.reduce((sum, c) => sum + (c.end - c.start), 0) : 0;
-	const deleted = analysis?.deleted ?? [];
-	const totalCut = analysis ? cutSeconds([...analysis.cuts, ...wordCuts(analysis.words, deleted, analysis.duration)]) : 0;
 	const busy = status === "uploading" || analyzing;
 
 	if (user === undefined) return <main className="min-h-screen" />;
@@ -414,87 +232,12 @@ export default function UploadPage() {
 
 					{analyzing && (
 						<p className="text-sm text-foreground/70">
-							👂 Listening to your video… longer videos can take a few minutes.
+							👂 Listening to your video… longer videos can take a few minutes. The editor opens by itself when it&apos;s done.
 						</p>
 					)}
 
 					{analysisError && <p className="text-sm text-red-500">❌ {analysisError}</p>}
 
-					{analysis && (
-						<div className="flex flex-col gap-3 text-sm">
-							<p>
-								🗣️ {analysis.words.length} words · ⏱️ {fmt(analysis.duration)}s long · ✂️ {analysis.cuts.length} silences
-								= {fmt(silentSeconds)}s to cut
-								{deleted.length > 0 && (
-									<>
-										{" "}
-										· 🗑️ {deleted.length} words deleted · final video ≈ {fmt(analysis.duration - totalCut)}s
-									</>
-								)}
-							</p>
-							{analysis.cuts.length === 0 && <p>No silences longer than 0.4s 🎉</p>}
-							<ScriptView
-								videoUrl={analysis.videoUrl}
-								duration={analysis.duration}
-								words={analysis.words}
-								cuts={analysis.cuts}
-								deleted={deleted}
-								onChange={changeDeleted}
-							/>
-							{saveError && <p className="text-sm text-red-500">❌ {saveError}</p>}
-						</div>
-					)}
-
-					{analysis && (
-						<div className="flex flex-col gap-3 border-t border-foreground/10 pt-4">
-							<button
-								onClick={makeVideo}
-								disabled={render.status === "processing"}
-								className="self-start rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-							>
-								{render.status === "done" || render.status === "failed" ? "Make video again" : "Make video"}
-							</button>
-
-							<label className="flex items-center gap-2 text-sm text-foreground/70">
-								<input
-									type="checkbox"
-									checked={desktopNotify}
-									onChange={(e) => void toggleDesktopNotify(e.target.checked)}
-								/>
-								🔔 Also notify me on my desktop
-							</label>
-							{notifyBlocked && (
-								<p className="text-sm text-foreground/60">
-									Your browser is blocking notifications. Click the icon left of the address bar → Notifications →
-									Allow, then tick the box again.
-								</p>
-							)}
-
-							{render.status === "processing" && (
-								<div className="flex flex-col gap-2">
-									<div className="h-3 w-full animate-pulse rounded-full bg-blue-600/60" />
-									<p className="text-sm text-foreground/70">
-										🎬 Making your video… usually 1–3 minutes. Feel free to switch tabs, you&apos;ll hear a ding when it&apos;s ready.
-									</p>
-								</div>
-							)}
-
-							{render.status === "failed" && <p className="text-sm text-red-500">❌ {render.error}</p>}
-
-							{render.status === "done" && render.videoUrl && (
-								<div className="flex flex-col gap-3">
-									<p className="text-sm">✅ Your video is ready!</p>
-									<video src={render.videoUrl} controls playsInline className="max-h-[70vh] w-full rounded-lg bg-black" />
-									<a
-										href={render.downloadUrl}
-										className="self-start rounded-lg border border-foreground/20 px-4 py-2 font-medium hover:bg-foreground/5"
-									>
-										⬇️ Download video
-									</a>
-								</div>
-							)}
-						</div>
-					)}
 				</div>
 			)}
 		</main>

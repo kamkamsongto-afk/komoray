@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ownsVideo } from "@/lib/supabase/server";
 import { allCuts, type EditCut } from "@/lib/edit";
+import { readStyle } from "@/lib/subtitle-style";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
 // One render job lives in the video's folder:
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
 	const key = await readKey(rawKey ?? null);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 
-	const edit = await getJson<{ duration: number; cuts: EditCut[]; words: { start: number; end: number }[]; deleted?: number[] }>(
+	const edit = await getJson<{ duration: number; cuts: EditCut[]; words: { start: number; end: number }[]; deleted?: number[]; style?: unknown }>(
 		siblingKey(key, "edit.json"),
 	);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
@@ -41,6 +42,8 @@ export async function POST(request: Request) {
 			token: env.RENDER_TOKEN,
 			// Modal just removes every cut, so hand it the deleted words as cuts too.
 			edit: { ...edit, cuts: allCuts(edit) },
+			// Subtitle size / outline / position from the editor; Modal fills in the rest (font).
+			style: readStyle(edit.style),
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.
 			videoUrl: await signedUrl(key, "GET", LINK_SECONDS),
 			outputUrl: await signedUrl(finalKey, "PUT", LINK_SECONDS, "video/mp4"),
