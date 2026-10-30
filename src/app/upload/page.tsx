@@ -3,10 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
+import { cutSeconds, wordCuts } from "@/lib/edit";
 
 type Status = "idle" | "uploading" | "done" | "error";
 type Cut = { start: number; end: number };
-type Analysis = { editKey: string; duration: number; cuts: Cut[]; words: { text: string; start: number; end: number }[]; videoUrl: string };
+type Analysis = {
+	editKey: string;
+	duration: number;
+	cuts: Cut[];
+	words: { text: string; start: number; end: number }[];
+	deleted?: number[];
+	videoUrl: string;
+};
 type RenderState = {
 	status: "none" | "processing" | "done" | "failed";
 	videoUrl?: string;
@@ -110,6 +118,9 @@ export default function UploadPage() {
 	const [dragging, setDragging] = useState(false);
 	const [desktopNotify, setDesktopNotify] = useState(false);
 	const [notifyBlocked, setNotifyBlocked] = useState(false);
+	const [saveError, setSaveError] = useState("");
+	// The latest save of deleted words; Make video waits for it so the render never uses an old list.
+	const savingRef = useRef<Promise<boolean>>(Promise.resolve(true));
 	// Browsers only allow sound after a click, so the Make video click creates this.
 	const audioRef = useRef<AudioContext | null>(null);
 
@@ -265,8 +276,35 @@ export default function UploadPage() {
 		}
 	}
 
+	// Words deleted or restored in the Script view: show it right away, save in the background.
+	function changeDeleted(deleted: number[]) {
+		if (!key) return;
+		setAnalysis((a) => (a ? { ...a, deleted } : a));
+		setSaveError("");
+		const previous = savingRef.current;
+		savingRef.current = (async () => {
+			await previous; // keep saves in order
+			try {
+				const res = await fetch("/api/edit", {
+					method: "PUT",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ key, deleted }),
+				});
+				const data = (await res.json()) as { error?: string };
+				if (!res.ok) throw new Error(data.error ?? "Could not save");
+				return true;
+			} catch (err) {
+				const error = err instanceof Error ? err.message : "Could not save";
+				setSaveError(`Your last change was not saved (${error}). Please try again.`);
+				reportError("save deleted words", error, { key });
+				return false;
+			}
+		})();
+	}
+
 	async function makeVideo() {
 		if (!key) return;
+		if (!(await savingRef.current)) return;
 		if (!audioRef.current && "AudioContext" in window) audioRef.current = new AudioContext();
 		void audioRef.current?.resume();
 		setRender({ status: "processing" });
@@ -286,6 +324,8 @@ export default function UploadPage() {
 	}
 
 	const silentSeconds = analysis ? analysis.cuts.reduce((sum, c) => sum + (c.end - c.start), 0) : 0;
+	const deleted = analysis?.deleted ?? [];
+	const totalCut = analysis ? cutSeconds([...analysis.cuts, ...wordCuts(analysis.words, deleted, analysis.duration)]) : 0;
 	const busy = status === "uploading" || analyzing;
 
 	if (user === undefined) return <main className="min-h-screen" />;
@@ -385,9 +425,23 @@ export default function UploadPage() {
 							<p>
 								🗣️ {analysis.words.length} words · ⏱️ {fmt(analysis.duration)}s long · ✂️ {analysis.cuts.length} silences
 								= {fmt(silentSeconds)}s to cut
+								{deleted.length > 0 && (
+									<>
+										{" "}
+										· 🗑️ {deleted.length} words deleted · final video ≈ {fmt(analysis.duration - totalCut)}s
+									</>
+								)}
 							</p>
 							{analysis.cuts.length === 0 && <p>No silences longer than 0.4s 🎉</p>}
-							<ScriptView videoUrl={analysis.videoUrl} words={analysis.words} cuts={analysis.cuts} />
+							<ScriptView
+								videoUrl={analysis.videoUrl}
+								duration={analysis.duration}
+								words={analysis.words}
+								cuts={analysis.cuts}
+								deleted={deleted}
+								onChange={changeDeleted}
+							/>
+							{saveError && <p className="text-sm text-red-500">❌ {saveError}</p>}
 						</div>
 					)}
 

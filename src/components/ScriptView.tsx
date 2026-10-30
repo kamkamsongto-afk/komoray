@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { wordCuts } from "@/lib/edit";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -92,12 +93,67 @@ function wordAt(words: Word[], t: number) {
 	return found;
 }
 
-export function ScriptView({ videoUrl, words, cuts }: { videoUrl: string; words: Word[]; cuts: Cut[] }) {
+type Props = {
+	videoUrl: string;
+	duration: number;
+	words: Word[];
+	cuts: Cut[];
+	deleted: number[];
+	onChange: (deleted: number[]) => void;
+};
+
+export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [current, setCurrent] = useState(-1);
 	const [playing, setPlaying] = useState(false);
+	const [selected, setSelected] = useState<number[]>([]);
 	const items = useMemo(() => layout(words, cuts), [words, cuts]);
+	const gone = useMemo(() => new Set(deleted), [deleted]);
+	// Where playback jumps over deleted words, so the preview sounds like the final video.
+	const skips = useMemo(() => wordCuts(words, deleted, duration), [words, deleted, duration]);
+
+	// Which words the user has highlighted with the mouse (or a long press on a phone).
+	useEffect(() => {
+		const update = () => {
+			const box = boxRef.current;
+			const sel = window.getSelection();
+			if (!box || !sel || sel.isCollapsed || !sel.anchorNode || !box.contains(sel.anchorNode)) return setSelected([]);
+			const picked: number[] = [];
+			box.querySelectorAll<HTMLElement>("[data-word]").forEach((el) => {
+				if (!sel.containsNode(el, true)) return;
+				for (let i = Number(el.dataset.word); i <= Number(el.dataset.last); i++) picked.push(i);
+			});
+			setSelected(picked);
+		};
+		document.addEventListener("selectionchange", update);
+		return () => document.removeEventListener("selectionchange", update);
+	}, []);
+
+	const apply = useCallback(
+		(remove: boolean) => {
+			const next = new Set(deleted);
+			selected.forEach((i) => (remove ? next.add(i) : next.delete(i)));
+			onChange([...next].sort((a, b) => a - b));
+			window.getSelection()?.removeAllRanges();
+		},
+		[deleted, selected, onChange],
+	);
+
+	// Delete / Backspace removes the highlighted words, like in a text editor.
+	useEffect(() => {
+		if (!selected.length) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key !== "Delete" && e.key !== "Backspace") return;
+			e.preventDefault();
+			apply(true);
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [selected, apply]);
+
+	const anyKept = selected.some((i) => !gone.has(i));
+	const anyGone = selected.some((i) => gone.has(i));
 
 	// While playing, follow the video every frame (timeupdate alone is too jumpy for word highlights).
 	useEffect(() => {
@@ -105,12 +161,16 @@ export function ScriptView({ videoUrl, words, cuts }: { videoUrl: string; words:
 		let frame = 0;
 		const tick = () => {
 			const video = videoRef.current;
-			if (video) setCurrent(wordAt(words, video.currentTime));
+			if (video) {
+				const skip = skips.find((c) => video.currentTime >= c.start && video.currentTime < c.end - 0.05);
+				if (skip) video.currentTime = Math.min(skip.end, video.duration || skip.end);
+				setCurrent(wordAt(words, video.currentTime));
+			}
 			frame = requestAnimationFrame(tick);
 		};
 		frame = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(frame);
-	}, [playing, words]);
+	}, [playing, words, skips]);
 
 	// Keep the highlighted word visible inside the transcript box (without scrolling the whole page).
 	useEffect(() => {
@@ -124,6 +184,8 @@ export function ScriptView({ videoUrl, words, cuts }: { videoUrl: string; words:
 	}, [current, playing, items]);
 
 	function seek(seconds: number) {
+		// A click that ends a drag-to-select should select, not jump.
+		if (!window.getSelection()?.isCollapsed) return;
 		const video = videoRef.current;
 		if (!video) return;
 		video.currentTime = seconds;
@@ -145,7 +207,38 @@ export function ScriptView({ videoUrl, words, cuts }: { videoUrl: string; words:
 				onSeeked={(e) => setCurrent(wordAt(words, e.currentTarget.currentTime))}
 				className="max-h-[50vh] w-full rounded-lg bg-black"
 			/>
-			<p className="text-xs text-foreground/60">Click any word to jump there. ✂️ marks a silence that will be cut.</p>
+			<p className="text-xs text-foreground/60">
+				Click a word to jump there. Drag across words to delete them. ✂️ marks a silence that will be cut.
+			</p>
+			<div className="flex min-h-9 flex-wrap items-center gap-2">
+				{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
+				{anyKept && (
+					<button
+						onMouseDown={(e) => e.preventDefault()}
+						onClick={() => apply(true)}
+						className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
+					>
+						🗑️ Delete
+					</button>
+				)}
+				{anyGone && (
+					<button
+						onMouseDown={(e) => e.preventDefault()}
+						onClick={() => apply(false)}
+						className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
+					>
+						↩️ Restore
+					</button>
+				)}
+				{!selected.length && deleted.length > 0 && (
+					<button
+						onClick={() => onChange([])}
+						className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+					>
+						↩️ Restore all deleted words
+					</button>
+				)}
+			</div>
 			<div ref={boxRef} className="relative max-h-80 overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8">
 				{items.map((item, i) => {
 					if (item.kind === "break") return <span key={i} className="block h-3" />;
@@ -166,9 +259,14 @@ export function ScriptView({ videoUrl, words, cuts }: { videoUrl: string; words:
 							{item.space && " "}
 							<span
 								data-word={item.index}
+								data-last={item.last}
 								onClick={() => seek(words[item.index].start)}
 								className={`cursor-pointer rounded transition-colors ${
-									item.index <= current && current <= item.last ? "bg-blue-600 text-white" : "hover:bg-foreground/10"
+									gone.has(item.index)
+										? "text-red-600/60 line-through decoration-2"
+										: item.index <= current && current <= item.last
+											? "bg-blue-600 text-white"
+											: "hover:bg-foreground/10"
 								}`}
 							>
 								{item.text}
