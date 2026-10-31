@@ -6,6 +6,7 @@ import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
+import { type Pace, PACES } from "@/lib/silences";
 import { allCuts, cutSeconds, type Fix, fixedWords, type WordFix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -21,6 +22,7 @@ type Analysis = {
 	dictionaryApplied?: boolean; // the personal dictionary already ran on this video once
 	style?: unknown;
 	banners?: Banner[];
+	pace?: Pace;
 	videoUrl: string; // the small preview copy once it exists, else the original
 	studio?: StudioMedia | null; // the preview copy and its sound, for the editor's own player
 	proxy?: "done" | "processing" | "failed" | "none";
@@ -270,6 +272,27 @@ export default function EditPage() {
 		[save],
 	);
 
+	// Tighter or looser: the server finds the silences again in the words it has (a second or so).
+	const [paceBusy, setPaceBusy] = useState(false);
+	async function changePace(pace: Pace) {
+		if (!key) return;
+		setPaceBusy(true);
+		setSaveError("");
+		try {
+			await savingRef.current;
+			const res = await fetch("/api/edit", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, pace }) });
+			const data = (await res.json()) as { cuts?: Cut[]; error?: string };
+			if (!res.ok || !data.cuts) throw new Error(data.error ?? "Could not change the pace");
+			setAnalysis((a) => (a ? { ...a, pace, cuts: data.cuts! } : a));
+		} catch (err) {
+			const error = err instanceof Error ? err.message : "Could not change the pace";
+			setSaveError(`${error}. Please try again.`);
+			reportError("pace", error, { key });
+		} finally {
+			setPaceBusy(false);
+		}
+	}
+
 	async function toggleDesktopNotify(on: boolean) {
 		setNotifyBlocked(false);
 		if (on && "Notification" in window) {
@@ -367,6 +390,22 @@ export default function EditPage() {
 						{deleted.length > 0 && ` · 🗑️ ${deleted.length} words deleted`}
 						{fixes.length > 0 && ` · ✏️ ${fixes.length} fixed`}
 					</p>
+					<label className="flex items-center gap-2 text-xs text-foreground/60" title="How short a pause has to be to stay in the video">
+						Pace
+						<select
+							value={analysis.pace ?? "natural"}
+							onChange={(e) => void changePace(e.target.value as Pace)}
+							disabled={paceBusy}
+							className="rounded-md border border-foreground/20 bg-background px-1.5 py-0.5 text-foreground disabled:opacity-50"
+						>
+							{(Object.keys(PACES) as Pace[]).map((p) => (
+								<option key={p} value={p}>
+									{PACES[p].name} (cuts pauses over {PACES[p].minSilence}s)
+								</option>
+							))}
+						</select>
+						{paceBusy && <span>Finding silences…</span>}
+					</label>
 				</div>
 				<div className="flex flex-col items-end gap-1">
 					<button

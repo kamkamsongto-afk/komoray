@@ -23,8 +23,19 @@ export function trimStretchedWords(words: Word[]): Word[] {
 	});
 }
 
-export function findSilences({ duration, words }: Transcript): Cut[] {
+// How tight the edit is: the shortest pause that gets cut and the room left around words.
+// "natural" is MIN_SILENCE / PADDING above. Picked in the editor, saved in edit.json as "pace".
+export type Pace = "tight" | "natural" | "relaxed";
+export const PACES: Record<Pace, { name: string; minSilence: number; padding: number }> = {
+	tight: { name: "Tight", minSilence: 0.25, padding: 0.05 },
+	natural: { name: "Natural", minSilence: MIN_SILENCE, padding: PADDING },
+	relaxed: { name: "Relaxed", minSilence: 0.7, padding: 0.15 },
+};
+export const readPace = (value: unknown): Pace | null => (value === "tight" || value === "natural" || value === "relaxed" ? value : null);
+
+export function findSilences({ duration, words }: Transcript, pace: Pace = "natural"): Cut[] {
 	if (words.length === 0) return [];
+	const { minSilence, padding } = PACES[pace];
 
 	// Treat the start and end of the clip as "words" so leading/trailing silence is caught too.
 	const edges = [{ end: 0 }, ...words, { start: duration }] as { start?: number; end?: number }[];
@@ -33,11 +44,11 @@ export function findSilences({ duration, words }: Transcript): Cut[] {
 	for (let i = 0; i < edges.length - 1; i++) {
 		const gapStart = edges[i].end!;
 		const gapEnd = edges[i + 1].start!;
-		if (gapEnd - gapStart <= MIN_SILENCE) continue;
+		if (gapEnd - gapStart <= minSilence) continue;
 
 		// No padding at the very start/end of the clip: there is no word there to protect.
-		const start = i === 0 ? 0 : gapStart + PADDING;
-		const end = i === edges.length - 2 ? duration : gapEnd - PADDING;
+		const start = i === 0 ? 0 : gapStart + padding;
+		const end = i === edges.length - 2 ? duration : gapEnd - padding;
 		if (end > start) cuts.push({ start: round(start), end: round(end), reason: "silence" });
 	}
 	return cuts;
