@@ -2,6 +2,7 @@
 
 import { Kanit } from "next/font/google";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { createDebugLog, type DebugLog, videoState } from "@/lib/debug-log";
 import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { FPS, HEIGHT, type Line, type Segment, WIDTH } from "@/lib/timeline";
 
@@ -25,6 +26,8 @@ type Props = {
 type Piece = { start: number; end: number; out: number };
 
 const LEAD = 0.5;
+const SAMPLE_MS = 250; // debug mode: how often both videos' state is written down
+const MEDIA_EVENTS = ["play", "playing", "pause", "waiting", "stalled", "seeking", "seeked", "canplay", "canplaythrough", "suspend", "emptied", "ended", "error", "loadeddata"];
 
 // Every browser on iPhone/iPad is Safari underneath; their names say CriOS, FxiOS, EdgiOS, not Chrome.
 const isSafari = () => /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Android/.test(navigator.userAgent);
@@ -62,9 +65,17 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	const [outTime, setOutTime] = useState(0);
 	const [scale, setScale] = useState(0.3);
 	const dragRef = useRef<{ y: number; position: number } | null>(null);
+	const debugRef = useRef<DebugLog | null>(null);
+	const framesRef = useRef([0, 0]); // debug: frames each video put on screen since the last sample
+	const [debugCount, setDebugCount] = useState<number | null>(null);
 
 	const shown = () => (activeRef.current === 0 ? videoA : videoB).current;
 	const waiting = () => (activeRef.current === 0 ? videoB : videoA).current;
+	const dbg = (what: string, detail?: Record<string, unknown>) => debugRef.current?.log(what, detail);
+	const both = () => ({ piece: pieceRef.current, active: activeRef.current, a: videoState(videoA.current), b: videoState(videoB.current) });
+	// play() can be refused (e.g. iPhone/iPad rules on sound); write down why instead of hiding it.
+	const start = (video: HTMLVideoElement, why: string) =>
+		video.play().catch((err: Error) => dbg("playRefused", { v: video === videoA.current ? 0 : 1, why, name: err.name, message: err.message }));
 
 	// The subtitle layer is drawn at full 1080x1920 and shrunk to fit, so sizes match the final video.
 	useEffect(() => {
@@ -83,6 +94,39 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		setLead(leadRef.current);
 	}, []);
 
+	// Debug mode (?debug=1): write down everything both videos do.
+	useEffect(() => {
+		const debug = createDebugLog({ file: src.includes("/proxy.mp4") ? "proxy" : "original", pieces: pieces.length, lead: leadRef.current });
+		if (!debug.on) return;
+		debugRef.current = debug;
+		const off: (() => void)[] = [];
+		[videoA.current, videoB.current].forEach((video, v) => {
+			if (!video) return;
+			for (const type of MEDIA_EVENTS) {
+				const on = () => debug.log(`v${v}:${type}`, { shown: activeRef.current === v, ...videoState(video) });
+				video.addEventListener(type, on);
+				off.push(() => video.removeEventListener(type, on));
+			}
+			if ("requestVideoFrameCallback" in video) {
+				let id = 0;
+				const count = () => {
+					framesRef.current[v]++;
+					id = video.requestVideoFrameCallback(count);
+				};
+				id = video.requestVideoFrameCallback(count);
+				off.push(() => video.cancelVideoFrameCallback(id));
+			}
+		});
+		const shownCount = setInterval(() => setDebugCount(debug.count()), 1000);
+		return () => {
+			off.forEach((f) => f());
+			clearInterval(shownCount);
+			debug.close();
+			debugRef.current = null;
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
 	// Stop the waiting <video> and park it `lead` seconds before the piece after `index`.
 	const prepareNext = useCallback(
 		(index: number) => {
@@ -92,7 +136,10 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 			if (!video.paused) video.pause();
 			video.playbackRate = 1;
 			const at = next ? Math.max(0, next.start - leadRef.current) : 0;
-			if (next && Math.abs(video.currentTime - at) > 0.02) video.currentTime = at;
+			if (next && Math.abs(video.currentTime - at) > 0.02) {
+				dbg("park", { piece: index + 1, to: Math.round(at * 1000) / 1000 });
+				video.currentTime = at;
+			}
 		},
 		[pieces],
 	);
@@ -106,6 +153,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 			if (i === -1) i = pieces.length - 1;
 			pieceRef.current = i;
 			const at = Math.max(t, pieces[i].start); // a moment that was cut lands on the next kept frame
+			dbg("seek", { piece: i, to: Math.round(at * 1000) / 1000 });
 			video.currentTime = at;
 			setOutTime(pieces[i].out + at - pieces[i].start);
 			onTime(at);
@@ -119,17 +167,21 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		if (!video || !last) return;
 		// Finished? Start again from the top.
 		if (pieceRef.current === pieces.length - 1 && video.currentTime >= last.end - 0.05) seek(pieces[0].start);
-		void video.play();
+		dbg("userPlay", both());
+		void start(video, "userPlay");
 		// iPhone/iPad only let a video be unmuted later if it was played from a tap, so tap the waiting one too.
 		const other = waiting();
 		if (other?.paused) {
-			other.play().catch(() => {});
+			void start(other, "unlock");
 			other.pause();
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pieces, last, seek]);
 
 	// Both videos, since the waiting one may already be running ahead of a cut.
 	const pause = useCallback(() => {
+		dbg("userPause", both());
+		debugRef.current?.send("userPause");
 		cutRef.current = false;
 		shown()?.pause();
 		prepareNext(pieceRef.current);
@@ -154,15 +206,24 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	useEffect(() => {
 		if (!playing) return;
 		let frame = 0;
+		let sampled = 0;
 		const tick = () => {
 			const video = shown();
 			const other = waiting();
 			const piece = pieces[pieceRef.current];
 			const next = pieces[pieceRef.current + 1];
+			if (debugRef.current && performance.now() - sampled >= SAMPLE_MS) {
+				sampled = performance.now();
+				dbg("sample", { ...both(), frames: [...framesRef.current], holding: cutRef.current });
+				framesRef.current = [0, 0];
+			}
 			if (video && piece) {
 				const left = piece.end - video.currentTime; // seconds of this piece still to show
 				if (next && other) {
-					if (left <= leadRef.current + 0.02 && other.paused) other.play().catch(() => {});
+					if (left <= leadRef.current + 0.02 && other.paused) {
+						dbg("preroll", { left: Math.round(left * 1000) / 1000, ...both() });
+						void start(other, "preroll");
+					}
 					if (!other.paused) {
 						// Where it should be so it reaches the next piece exactly when this one ends.
 						// Only change speed when clearly off: every change makes Chrome rebuild its audio and drop frames.
@@ -174,10 +235,13 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 				if (left <= 0.02 && !video.paused) {
 					// Hold the last frame on screen (not black) until the other video arrives.
 					cutRef.current = !!next;
+					dbg(next ? "hold" : "end", both());
 					video.pause();
+					if (!next) debugRef.current?.send("end");
 				}
 				// Not while it is still finding its spot: it would show an old frame for a moment.
 				if (next && other && !other.paused && !other.seeking && other.currentTime >= next.start - 0.01) {
+					dbg("swap", { to: pieceRef.current + 1, ...both() });
 					other.playbackRate = 1;
 					other.muted = false;
 					video.muted = true;
@@ -197,6 +261,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		};
 		frame = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(frame);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [playing, pieces, prepareNext, onTime]);
 
 	const line = lines.find((l) => outTime * FPS >= l.from && outTime * FPS < l.to);
@@ -296,6 +361,11 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 						komoray.com
 					</div>
 				</div>
+				{debugCount !== null && (
+					<span className="pointer-events-none absolute top-2 left-2 z-[2] rounded bg-red-600 px-2 py-0.5 text-xs text-white">
+						Recording · {debugCount}
+					</span>
+				)}
 				{!playing && (
 					<span className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center text-5xl text-white/90 drop-shadow">▶</span>
 				)}

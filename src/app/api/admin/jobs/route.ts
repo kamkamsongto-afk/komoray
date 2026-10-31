@@ -7,7 +7,17 @@ const SHOW_JOBS = 100;
 const SHOW_REPORTS = 100;
 const STUCK_MS = 30 * 60 * 1000; // a step still "working" after 30 minutes has silently died
 const LINK_SECONDS = 3600;
-const JOB_FILES = ["analyze.json", "edit.json", "analyze-error.json", "render.json", "final.mp4", "render-error.json"];
+const JOB_FILES = [
+	"analyze.json",
+	"edit.json",
+	"analyze-error.json",
+	"render.json",
+	"final.mp4",
+	"render-error.json",
+	"proxy.json",
+	"proxy.mp4",
+	"proxy-error.json",
+];
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
 
