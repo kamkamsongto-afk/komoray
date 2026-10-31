@@ -26,6 +26,9 @@ type Piece = { start: number; end: number; out: number };
 
 const LEAD = 0.5;
 
+// Every browser on iPhone/iPad is Safari underneath; their names say CriOS, FxiOS, EdgiOS, not Chrome.
+const isSafari = () => /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Android/.test(navigator.userAgent);
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 // The final video, played live: the kept pieces back to back, cropped to 9:16, with subtitles.
@@ -33,6 +36,7 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 // piece, so every cut is a swap instead of a seek (which would stutter). The waiting one starts
 // LEAD seconds early, muted and underneath, and is nudged faster or slower to hit the cut on time:
 // Safari takes a moment to start a video, which showed as a freeze and a black flash at each cut.
+// Only on Safari: Chrome starts instantly, and decoding two videos at once made it drop frames.
 export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPlayer(
 	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange },
 	ref,
@@ -52,6 +56,8 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	const activeRef = useRef(0);
 	const pieceRef = useRef(0); // which piece is playing
 	const cutRef = useRef(false); // shown video stopped at a cut, the other one not there yet
+	const [lead, setLead] = useState(0); // seconds the waiting video starts early (Safari only)
+	const leadRef = useRef(0);
 	const [playing, setPlaying] = useState(false);
 	const [outTime, setOutTime] = useState(0);
 	const [scale, setScale] = useState(0.3);
@@ -73,9 +79,11 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	useEffect(() => {
 		if (videoA.current) videoA.current.muted = false;
 		if (videoB.current) videoB.current.muted = true;
+		leadRef.current = isSafari() ? LEAD : 0;
+		setLead(leadRef.current);
 	}, []);
 
-	// Stop the waiting <video> and park it LEAD seconds before the piece after `index`.
+	// Stop the waiting <video> and park it `lead` seconds before the piece after `index`.
 	const prepareNext = useCallback(
 		(index: number) => {
 			const video = waiting();
@@ -83,7 +91,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 			if (!video) return;
 			if (!video.paused) video.pause();
 			video.playbackRate = 1;
-			const at = next ? Math.max(0, next.start - LEAD) : 0;
+			const at = next ? Math.max(0, next.start - leadRef.current) : 0;
 			if (next && Math.abs(video.currentTime - at) > 0.02) video.currentTime = at;
 		},
 		[pieces],
@@ -112,6 +120,12 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		// Finished? Start again from the top.
 		if (pieceRef.current === pieces.length - 1 && video.currentTime >= last.end - 0.05) seek(pieces[0].start);
 		void video.play();
+		// iPhone/iPad only let a video be unmuted later if it was played from a tap, so tap the waiting one too.
+		const other = waiting();
+		if (other?.paused) {
+			other.play().catch(() => {});
+			other.pause();
+		}
 	}, [pieces, last, seek]);
 
 	// Both videos, since the waiting one may already be running ahead of a cut.
@@ -148,11 +162,13 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 			if (video && piece) {
 				const left = piece.end - video.currentTime; // seconds of this piece still to show
 				if (next && other) {
-					if (left <= LEAD && other.paused) other.play().catch(() => {});
+					if (left <= leadRef.current + 0.02 && other.paused) other.play().catch(() => {});
 					if (!other.paused) {
 						// Where it should be so it reaches the next piece exactly when this one ends.
+						// Only change speed when clearly off: every change makes Chrome rebuild its audio and drop frames.
 						const behind = next.start - Math.max(0, left) - other.currentTime;
-						other.playbackRate = Math.min(2, Math.max(0.5, 1 + behind * 4));
+						const rate = behind > 0.15 ? 2 : behind > 0.04 ? 1.25 : behind < -0.04 ? 0.8 : 1;
+						if (other.playbackRate !== rate) other.playbackRate = rate;
 					}
 				}
 				if (left <= 0.02 && !video.paused) {
@@ -210,9 +226,9 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 						// The hidden video pauses on every swap; only the one on screen speaks for the player.
 						onPlay={() => i === activeRef.current && setPlaying(true)}
 						onPause={() => i === activeRef.current && !cutRef.current && setPlaying(false)}
-						// Both stay drawn (Safari may not paint a hidden video), the one on screen on top.
+						// On Safari both stay drawn (it may not paint a hidden video), the one on screen on top.
 						className="absolute inset-0 h-full w-full object-cover"
-						style={{ zIndex: i === active ? 1 : 0 }}
+						style={{ zIndex: i === active ? 1 : 0, visibility: i === active || lead ? "visible" : "hidden" }}
 					/>
 				))}
 				<div
