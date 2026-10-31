@@ -80,6 +80,35 @@ BOX_PADDING = 20  # the Box look: space around the letters, px
 LOGO = {"size": 52, "outline": 4, "side": 60, "top": 110}  # the channel name in a corner (LOGO in PlayerFrame.tsx)
 
 
+# Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
+BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
+BANNER_TOP = {"top": 260, "middle": 860, "bottom": 1300}
+
+
+def banner_ink(hex_colour: str) -> str:
+    """Dark letters on a light brand colour, white on a dark one. Same as bannerInk in banners.ts."""
+    n = int(hex_colour.lstrip("#"), 16) if re.fullmatch(r"#[0-9a-fA-F]{6}", hex_colour or "") else 0xFFE600
+    r, g, b = (n >> 16) & 255, (n >> 8) & 255, n & 255
+    return "#111111" if 0.299 * r + 0.587 * g + 0.114 * b > 160 else "#FFFFFF"
+
+
+def banner_events(banners: list[dict]) -> list[str]:
+    """One event per banner, faded in and out, in its place. Text was checked by the app (readBanners)."""
+    events = []
+    fade = int(BANNER["fade"] * 1000)
+    pad_x, pad_y = BANNER["padding"], BANNER["padding"] // 2
+    for b in banners:
+        start, end = float(b.get("start", 0)), float(b.get("end", 0))
+        text = ass_text(str(b.get("text", ""))).strip()
+        if end <= start or not text:
+            continue
+        sub = ass_text(str(b.get("sub", ""))).strip()
+        body = f"{{\\fad({fade},{fade})\\xbord{pad_x}\\ybord{pad_y}}}{text}" + (f"\\N{{\\fs{BANNER['sub_size']}}}{sub}" if sub else "")
+        top = BANNER_TOP.get(b.get("place"), BANNER_TOP["top"])
+        events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,{top},,{body}")
+    return events
+
+
 def ass_colour(hex_colour: str) -> str:
     """#RRGGBB to an ASS colour (&H00BBGGRR&)."""
     h = hex_colour.lstrip("#") if re.fullmatch(r"#[0-9a-fA-F]{6}", hex_colour or "") else "FFE600"
@@ -216,7 +245,7 @@ def ass_time(t: float) -> str:
     return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
 
 
-def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict) -> str:
+def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict, banners: list[dict] | None = None) -> str:
     thai = any(is_thai(w["text"]) for w in words)
     font = FONTS.get(style["font"], FONTS["kanit"])
     look = style.get("look", "clean")
@@ -255,8 +284,9 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     if current:
         lines.append(current)
 
-    highlight = ass_colour(style.get("color", "#FFE600"))
-    events = []
+    brand = style.get("color", "#FFE600")
+    highlight = ass_colour(brand)
+    events = banner_events(banners or [])
     # The channel name stays in its corner for the whole video.
     logo = ass_text(str(style.get("logo") or "")).replace("\n", " ").strip()
     if logo:
@@ -305,6 +335,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             f"Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,{outline_colour},&H64000000,"
             # Bold stays off: the weight comes from the font name (e.g. "Kanit Medium").
             f"0,0,0,0,100,100,0,0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
+            f"Style: Banner,{font},{BANNER['size']},{ass_colour(banner_ink(brand))[:-1]},&H00FFFFFF,{ass_colour(brand)[:-1]},&H00000000,"
+            f"0,0,0,0,100,100,0,0,3,{BANNER['padding']},0,8,80,80,0,1",
             f"Style: Logo,{font},{LOGO['size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
             f"0,0,0,0,100,100,0,0,1,{LOGO['outline']},0,{logo_align},{LOGO['side']},{LOGO['side']},{LOGO['top']},1",
             "",
@@ -384,7 +416,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             keeps = keep_segments(edit["duration"], edit.get("cuts", []))
             if not keeps:
                 raise RuntimeError("nothing left after cutting")
-            subs.write_text(build_subtitles(edit.get("words", []), keeps, style), encoding="utf-8")
+            subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners")), encoding="utf-8")
 
             result = subprocess.run(
                 ffmpeg_command(src, subs, out, keeps, has_audio(src), style.get("zoom", "off")), cwd=workdir, capture_output=True, text=True

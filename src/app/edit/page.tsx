@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
 import type { StudioMedia } from "@/components/StudioPlayer";
+import type { Banner } from "@/lib/banners";
 import { allCuts, cutSeconds, type Fix, fixedWords, type WordFix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, FONTS, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -19,6 +20,7 @@ type Analysis = {
 	fixes?: Fix[];
 	dictionaryApplied?: boolean; // the personal dictionary already ran on this video once
 	style?: unknown;
+	banners?: Banner[];
 	videoUrl: string; // the small preview copy once it exists, else the original
 	studio?: StudioMedia | null; // the preview copy and its sound, for the editor's own player
 	proxy?: "done" | "processing" | "failed" | "none";
@@ -180,7 +182,7 @@ export default function EditPage() {
 
 	// Save edits in the background, one after another so they land in order.
 	const save = useCallback(
-		(patch: { deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; style?: SubtitleStyle }) => {
+		(patch: { deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; style?: SubtitleStyle; banners?: Banner[] }) => {
 			if (!key) return;
 			setSaveError("");
 			const previous = savingRef.current;
@@ -257,6 +259,17 @@ export default function EditPage() {
 		[save],
 	);
 
+	// Banners are typed into, so they are saved a moment after the last change too.
+	const bannersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const changeBanners = useCallback(
+		(banners: Banner[]) => {
+			setAnalysis((a) => (a ? { ...a, banners } : a));
+			if (bannersTimer.current) clearTimeout(bannersTimer.current);
+			bannersTimer.current = setTimeout(() => save({ banners }), STYLE_SAVE_DELAY_MS);
+		},
+		[save],
+	);
+
 	async function toggleDesktopNotify(on: boolean) {
 		setNotifyBlocked(false);
 		if (on && "Notification" in window) {
@@ -279,6 +292,11 @@ export default function EditPage() {
 			clearTimeout(styleTimer.current);
 			styleTimer.current = null;
 			save({ style: subtitle });
+		}
+		if (bannersTimer.current) {
+			clearTimeout(bannersTimer.current);
+			bannersTimer.current = null;
+			save({ banners: analysis?.banners ?? [] });
 		}
 		setRender({ status: "processing" });
 		try {
@@ -430,6 +448,8 @@ export default function EditPage() {
 				onLearn={learn}
 				subtitle={subtitle}
 				onSubtitleChange={changeSubtitle}
+				banners={analysis.banners ?? []}
+				onBannersChange={changeBanners}
 			/>
 		</main>
 	);

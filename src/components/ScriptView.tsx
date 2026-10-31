@@ -2,14 +2,16 @@
 
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, normText, setFix, TRAIL, type WordFix } from "@/lib/edit";
+import type { Banner } from "@/lib/banners";
 import { type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, type Take } from "@/lib/takes";
-import { keepSegments, subtitleLines } from "@/lib/timeline";
+import { FPS, keepSegments, subtitleLines, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
 import { studioSupported } from "@/lib/player/engine";
 import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
 import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { SubtitleControls } from "./SubtitleControls";
+import { BannerControls } from "./BannerControls";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -157,6 +159,8 @@ type Props = {
 	onLearn?: (heard: string, fixed: string | null) => void; // null: forget (original words put back)
 	subtitle: SubtitleStyle;
 	onSubtitleChange: (style: SubtitleStyle) => void;
+	banners: Banner[];
+	onBannersChange: (banners: Banner[]) => void;
 };
 
 // The editor: script on the left, the video on the right (stacked on phones, video first).
@@ -175,6 +179,8 @@ export function ScriptView({
 	onLearn,
 	subtitle,
 	onSubtitleChange,
+	banners,
+	onBannersChange,
 }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
@@ -454,6 +460,7 @@ export function ScriptView({
 						onSubtitleChange={onSubtitleChange}
 						onTime={onPreviewTime}
 						onPlayingChange={setPlaying}
+						banners={banners}
 						onFail={(error) => {
 							reportError("studio player", error.message);
 							setStudioFailed(true);
@@ -470,6 +477,7 @@ export function ScriptView({
 						onSubtitleChange={onSubtitleChange}
 						onTime={onPreviewTime}
 						onPlayingChange={setPlaying}
+						banners={banners}
 					/>
 				) : (
 					<video
@@ -503,6 +511,15 @@ export function ScriptView({
 								{brandSaved === "saved" ? "✓ Saved to Brand Kit" : brandSaved === "failed" ? "❌ Could not save, try again" : "⭐ Save as my Brand Kit"}
 							</button>
 						}
+					/>
+				)}
+				{mode === "preview" && (
+					<BannerControls
+						banners={banners}
+						onChange={onBannersChange}
+						now={() => toOutSeconds(timeRef.current, segments)}
+						total={totalFrames(segments) / FPS}
+						channel={subtitle.logo}
 					/>
 				)}
 			</div>

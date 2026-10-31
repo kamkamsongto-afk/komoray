@@ -91,6 +91,15 @@ export function keepSegments(duration: number, cuts: Span[]): Segment[] {
 
 export const totalFrames = (segments: Segment[]) => segments.reduce((sum, s) => sum + s.frames, 0);
 
+// Seconds of the final video for a moment of the source; a moment that was cut counts as where
+// the video goes on after it.
+export function toOutSeconds(t: number, segments: Segment[]) {
+	const f = placeFrame(t, segments);
+	if (f !== null) return f / FPS;
+	const next = segments.find((s) => s.trim > t * FPS);
+	return (next ? next.from : totalFrames(segments)) / FPS;
+}
+
 // Output frame for a moment of the source, or null if that moment was cut.
 function placeFrame(t: number, segments: Segment[]): number | null {
 	const f = t * FPS;

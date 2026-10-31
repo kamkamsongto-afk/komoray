@@ -2,6 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createDebugLog, type DebugLog, videoState } from "@/lib/debug-log";
+import type { Banner } from "@/lib/banners";
 import type { SubtitleStyle } from "@/lib/subtitle-style";
 import { FPS, type Line, type Segment, zoomOf } from "@/lib/timeline";
 import { PlayerFrame } from "./PlayerFrame";
@@ -16,6 +17,7 @@ export type PreviewProps = {
 	onSubtitleChange: (style: SubtitleStyle) => void; // dragged up or down on the video
 	onTime: (sourceSeconds: number) => void; // where we are in the original video, every frame
 	onPlayingChange: (playing: boolean) => void;
+	banners?: Banner[];
 };
 
 // Kept pieces in seconds: play source [start, end) at output time `out`.
@@ -38,7 +40,7 @@ const isSafari = () => /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chrom
 // Safari takes a moment to start a video, which showed as a freeze and a black flash at each cut.
 // Only on Safari: Chrome starts instantly, and decoding two videos at once made it drop frames.
 export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function PreviewPlayer(
-	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange },
+	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, banners },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -283,6 +285,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function Pr
 			total={total}
 			line={line ?? null}
 			zoom={zoom}
+			banners={banners}
 			subtitle={subtitle}
 			onSubtitleChange={onSubtitleChange}
 			onToggle={toggle}

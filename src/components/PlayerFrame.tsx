@@ -2,7 +2,8 @@
 
 import { Anton, Bebas_Neue, Chakra_Petch, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
-import { type FontId, LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
+import { BANNER, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
+import { type FontId, FONTS, LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { FPS, HEIGHT, type Line, WIDTH, ZOOM_ORIGIN } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
@@ -45,12 +46,28 @@ type Props = {
 	busy?: boolean; // waiting for the picture or sound to load
 	bare?: boolean; // a still sample (Brand Kit page): no play button or time bar
 	zoom?: number; // Auto zoom for pictures that don't zoom themselves (the <video> player)
+	banners?: Banner[];
 };
 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
 // (drawn at full 1080x1920 and shrunk, so sizes match the final video; drag it to move it),
 // the watermark, the play button and the time bar.
-export function PlayerFrame({ children, playing, outTime, total, line, subtitle, onSubtitleChange, onToggle, onScrub, debugCount, busy, bare, zoom = 1 }: Props) {
+export function PlayerFrame({
+	children,
+	playing,
+	outTime,
+	total,
+	line,
+	subtitle,
+	onSubtitleChange,
+	onToggle,
+	onScrub,
+	debugCount,
+	busy,
+	bare,
+	zoom = 1,
+	banners = [],
+}: Props) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [scale, setScale] = useState(0.3);
 	const dragRef = useRef<{ y: number; position: number } | null>(null);
@@ -64,6 +81,8 @@ export function PlayerFrame({ children, playing, outTime, total, line, subtitle,
 	}, []);
 
 	const face = FONT_FACES[subtitle.font] ?? FONT_FACES.kanit;
+	// Letters as big as the final video draws them (see FONTS[].height), rows as far apart.
+	const em = (FONTS[subtitle.font] ?? FONTS.kanit).height;
 	const boxed = subtitle.look === "box";
 	// Box: letters on a dark box. Every other look: white letters with a black outline. The stroke is
 	// drawn half inside the letters; paint-order puts it behind them.
@@ -133,8 +152,8 @@ export function PlayerFrame({ children, playing, outTime, total, line, subtitle,
 								textAlign: "center",
 								fontFamily: face.family,
 								fontWeight: face.weight,
-								fontSize: subtitle.size,
-								lineHeight: boxed ? 1.5 : 1.25,
+								fontSize: subtitle.size / em,
+								lineHeight: em,
 								color: "white",
 								opacity: line ? 1 : 0.5,
 								cursor: "ns-resize",
@@ -146,6 +165,42 @@ export function PlayerFrame({ children, playing, outTime, total, line, subtitle,
 							<span style={letters}>{text}</span>
 						</div>
 					)}
+					{banners.map((b) => {
+						const opacity = bannerOpacity(b, outTime);
+						if (!opacity) return null;
+						const box: CSSProperties = {
+							background: subtitle.color,
+							padding: `${BANNER.padding / 2}px ${BANNER.padding}px`,
+							boxDecorationBreak: "clone",
+							WebkitBoxDecorationBreak: "clone",
+						};
+						return (
+							<div
+								key={b.id}
+								style={{
+									position: "absolute",
+									top: BANNER_TOP[b.place],
+									left: SIDE_MARGIN,
+									right: SIDE_MARGIN,
+									textAlign: "center",
+									fontFamily: face.family,
+									fontWeight: face.weight,
+									fontSize: BANNER.size / em,
+									lineHeight: em,
+									color: bannerInk(subtitle.color),
+									opacity,
+								}}
+							>
+								<span style={box}>{cleanBannerText(b.text)}</span>
+								{cleanBannerText(b.sub) && (
+									<>
+										<br />
+										<span style={{ ...box, fontSize: BANNER.subSize / em }}>{cleanBannerText(b.sub)}</span>
+									</>
+								)}
+							</div>
+						);
+					})}
 					{subtitle.logo && (
 						<div
 							style={{
@@ -154,8 +209,8 @@ export function PlayerFrame({ children, playing, outTime, total, line, subtitle,
 								[subtitle.logoAt === "top-right" ? "right" : "left"]: LOGO.side,
 								fontFamily: face.family,
 								fontWeight: face.weight,
-								fontSize: LOGO.size,
-								lineHeight: 1.25,
+								fontSize: LOGO.size / em,
+								lineHeight: em,
 								color: "white",
 								WebkitTextStroke: `${LOGO.outline * 2}px black`,
 								paintOrder: "stroke fill",

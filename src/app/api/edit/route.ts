@@ -1,3 +1,4 @@
+import { type Banner, readBanners } from "@/lib/banners";
 import { ownsVideo } from "@/lib/supabase/server";
 import { type Fix, readFixes } from "@/lib/edit";
 import { getJson, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
@@ -7,19 +8,21 @@ import { readStyle } from "@/lib/subtitle-style";
 //   deleted  word positions deleted in the script (Make video cuts them)
 //   fixes    words retyped in the script (subtitles read the fixed text)
 //   style    subtitle size / outline / position
+//   banners  price tags, calls to action, "follow me" (lib/banners.ts)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, style } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, style, banners } = (await request.json()) as {
 		key?: string;
 		deleted?: unknown;
 		fixes?: unknown;
 		dictionaryApplied?: unknown;
 		style?: unknown;
+		banners?: unknown;
 	};
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
 	const editKey = siblingKey(key, "edit.json");
-	const edit = await getJson<{ words: unknown[]; deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; style?: unknown }>(editKey);
+	const edit = await getJson<{ words: unknown[]; deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; style?: unknown; banners?: Banner[] }>(editKey);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
 	if (deleted !== undefined) {
@@ -36,6 +39,11 @@ export async function PUT(request: Request) {
 	}
 	if (dictionaryApplied === true) edit.dictionaryApplied = true;
 	if (style !== undefined) edit.style = readStyle(style);
+	if (banners !== undefined) {
+		const checked = readBanners(banners);
+		if (!checked) return Response.json({ error: "Bad banners" }, { status: 400 });
+		edit.banners = checked;
+	}
 
 	await putObject(editKey, JSON.stringify(edit, null, 2), "application/json");
 	return Response.json({ ok: true });

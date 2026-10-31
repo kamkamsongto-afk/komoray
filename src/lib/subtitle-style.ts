@@ -50,15 +50,18 @@ export const LOOKS: Record<Look, { name: string; hint: string; size: number; pos
 
 // Fonts drawn the same in the preview (next/font in PlayerFrame) and the final video (Modal).
 // thai: has Thai letters. English-only fonts can't be picked for a Thai video.
-export const FONTS: Record<FontId, { name: string; thai: boolean }> = {
-	kanit: { name: "Kanit", thai: true },
-	prompt: { name: "Prompt", thai: true },
-	mitr: { name: "Mitr", thai: true },
-	sarabun: { name: "Sarabun", thai: true },
-	chakra: { name: "Chakra Petch", thai: true },
-	poppins: { name: "Poppins", thai: false },
-	anton: { name: "Anton", thai: false },
-	bebas: { name: "Bebas Neue", thai: false },
+// height: the font's full height (usWinAscent + usWinDescent) in ems. The final video's subtitle
+// renderer (libass) makes that whole height the font size, browsers make 1 em the font size, so the
+// preview draws letters at size / height to match (read from the font files with fontTools).
+export const FONTS: Record<FontId, { name: string; thai: boolean; height: number }> = {
+	kanit: { name: "Kanit", thai: true, height: 1.58 },
+	prompt: { name: "Prompt", thai: true, height: 1.512 },
+	mitr: { name: "Mitr", thai: true, height: 1.57 },
+	sarabun: { name: "Sarabun", thai: true, height: 1.853 },
+	chakra: { name: "Chakra Petch", thai: true, height: 1.814 },
+	poppins: { name: "Poppins", thai: false, height: 1.762 },
+	anton: { name: "Anton", thai: false, height: 1.733 },
+	bebas: { name: "Bebas Neue", thai: false, height: 1.3 },
 };
 
 const clamp = (n: number, { min, max }: { min: number; max: number }) => Math.min(max, Math.max(min, n));
