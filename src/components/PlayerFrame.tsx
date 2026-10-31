@@ -4,8 +4,8 @@ import { Anton, Bebas_Neue, Chakra_Petch, Kanit, Mitr, Poppins, Prompt, Sarabun 
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
 import type { OwnFont } from "@/lib/font-info";
-import { type FontId, fontMetrics, LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
-import { FPS, HEIGHT, type Line, WIDTH, ZOOM_ORIGIN } from "@/lib/timeline";
+import { type FontId, fontMetrics, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
+import { FPS, type Line, ZOOM_ORIGIN } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
 const kanit = Kanit({ weight: "500", subsets: ["thai", "latin"] });
@@ -46,6 +46,7 @@ function useOwnFont(font: OwnFont | undefined) {
 }
 
 const SIDE_MARGIN = 80;
+const WATERMARK_BOTTOM = 0.135; // the watermark's gap to the bottom edge, share of the height (render.py)
 const BOX_PADDING = 20; // the Box look: space around the letters (Outline of the box in render.py)
 // The channel name in a corner (the Logo style in render.py).
 const LOGO = { size: 52, outline: 4, side: 60, top: 110 };
@@ -89,13 +90,16 @@ export function PlayerFrame({
 	banners = [],
 }: Props) {
 	const boxRef = useRef<HTMLDivElement>(null);
-	const [scale, setScale] = useState(0.3);
+	const [boxWidth, setBoxWidth] = useState(324);
 	const dragRef = useRef<{ y: number; position: number } | null>(null);
+	// The final video's size (9:16, 1:1 or 16:9); everything on it is laid out at full size and shrunk.
+	const { width: W, height: H } = outputSize(subtitle);
+	const scale = boxWidth / W;
 
 	useEffect(() => {
 		const box = boxRef.current;
 		if (!box) return;
-		const observer = new ResizeObserver(() => setScale(box.clientWidth / WIDTH));
+		const observer = new ResizeObserver(() => setBoxWidth(box.clientWidth));
 		observer.observe(box);
 		return () => observer.disconnect();
 	}, []);
@@ -131,12 +135,12 @@ export function PlayerFrame({
 
 	return (
 		// As wide as fits, but never taller than ~70% of the screen.
-		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: "calc(70vh * 9 / 16)" }}>
+		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: `calc(70vh * ${W} / ${H})` }}>
 			<div
 				ref={boxRef}
 				onClick={onToggle}
 				className="relative w-full cursor-pointer overflow-hidden rounded-lg bg-black"
-				style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
+				style={{ aspectRatio: `${W} / ${H}` }}
 			>
 				<div
 					className="absolute inset-0"
@@ -146,7 +150,7 @@ export function PlayerFrame({
 				</div>
 				<div
 					className="pointer-events-none absolute top-0 left-0"
-					style={{ width: WIDTH, height: HEIGHT, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}
+					style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}
 				>
 					{(line || !playing) && (
 						// Drag the subtitle up or down to move it. While paused with nothing being said,
@@ -172,7 +176,7 @@ export function PlayerFrame({
 								position: "absolute",
 								left: SIDE_MARGIN,
 								right: SIDE_MARGIN,
-								bottom: HEIGHT * subtitle.position,
+								bottom: H * subtitle.position,
 								textAlign: "center",
 								fontFamily: face.family,
 								fontWeight: face.weight,
@@ -203,7 +207,7 @@ export function PlayerFrame({
 								key={b.id}
 								style={{
 									position: "absolute",
-									top: BANNER_TOP[b.place],
+									top: Math.round(BANNER_TOP[subtitle.format][b.place] * H),
 									left: SIDE_MARGIN,
 									right: SIDE_MARGIN,
 									textAlign: "center",
@@ -248,7 +252,7 @@ export function PlayerFrame({
 						style={{
 							position: "absolute",
 							right: 48,
-							bottom: 260,
+							bottom: Math.round(H * WATERMARK_BOTTOM),
 							fontFamily: "sans-serif",
 							fontWeight: 700,
 							fontSize: 40,

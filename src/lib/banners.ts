@@ -1,6 +1,8 @@
 // Banners: a price tag, a call to action or "follow me", shown for a few seconds of the final video
 // in the brand colour. Saved in edit.json as "banners"; drawn by PlayerFrame in the preview and by
 // build_banners in modal_app/render.py for the final video (same sizes, places and fades).
+import type { Format } from "./subtitle-style";
+
 export type BannerKind = "price" | "cta" | "follow";
 export type BannerPlace = "top" | "middle" | "bottom";
 // start / end: seconds of the final video. sub: the small second line (price tag only).
@@ -12,9 +14,15 @@ export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub:
 	follow: { name: "Follow", text: "Follow for more", sub: "" },
 };
 
-// Sizes in px on the 1080x1920 frame; tops of the box for each place. Same as BANNER in render.py.
+// Sizes in px of the final video; where each place starts, as a share of its height, for each video
+// shape, clear of the subtitles' usual place and the watermark (bottom is under the subtitles on
+// 9:16, over them on the wider shapes). Same as BANNER and BANNER_TOP in render.py.
 export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxBanners: 20 };
-export const BANNER_TOP: Record<BannerPlace, number> = { top: 260, middle: 860, bottom: 1300 };
+export const BANNER_TOP: Record<Format, Record<BannerPlace, number>> = {
+	"9:16": { top: 0.135, middle: 0.448, bottom: 0.78 },
+	"1:1": { top: 0.08, middle: 0.35, bottom: 0.55 },
+	"16:9": { top: 0.08, middle: 0.35, bottom: 0.62 },
+};
 
 // Emoji can't be drawn in the final video (its fonts have none), so they are left out everywhere.
 export const cleanBannerText = (text: string) =>

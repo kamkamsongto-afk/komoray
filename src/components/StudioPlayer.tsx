@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { createDebugLog, type DebugLog } from "@/lib/debug-log";
 import { StudioEngine, type StudioMedia } from "@/lib/player/engine";
 import { focusFor, framePiece } from "@/lib/framing";
+import { outputSize } from "@/lib/subtitle-style";
 import { FPS, zoomOf } from "@/lib/timeline";
 import { PlayerFrame } from "./PlayerFrame";
 import { type PreviewHandle, type PreviewProps, toPieces } from "./PreviewPlayer";
@@ -104,9 +105,10 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 
 	// Face crop and Auto zoom are drawn by the engine, frame by frame, so they change exactly at each cut.
 	const focuses = useMemo(() => pieces.map((p) => focusFor(faces ?? null, p.start, p.end)), [pieces, faces]);
+	const size = outputSize(subtitle);
 	useEffect(
-		() => engineRef.current?.setFraming((piece, aspect) => framePiece(aspect, focuses[piece] ?? null, zoomOf(piece, subtitle.zoom))),
-		[focuses, subtitle.zoom, loaded],
+		() => engineRef.current?.setFraming((piece, aspect) => framePiece(aspect, focuses[piece] ?? null, zoomOf(piece, subtitle.zoom), size), size.width),
+		[focuses, subtitle.zoom, size, loaded],
 	);
 
 	useImperativeHandle(

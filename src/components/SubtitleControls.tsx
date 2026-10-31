@@ -2,7 +2,19 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import type { OwnFont } from "@/lib/font-info";
-import { COLORS, FONTS, type FontId, LIMITS, type Look, LOOKS, MAX_LOGO_LENGTH, type SubtitleStyle, type Zoom } from "@/lib/subtitle-style";
+import {
+	COLORS,
+	type Format,
+	FORMATS,
+	FONTS,
+	type FontId,
+	LIMITS,
+	type Look,
+	LOOKS,
+	MAX_LOGO_LENGTH,
+	type SubtitleStyle,
+	type Zoom,
+} from "@/lib/subtitle-style";
 
 type Props = {
 	style: SubtitleStyle;
@@ -54,6 +66,20 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 
 	return (
 		<div className="flex flex-col gap-2 rounded-lg border border-foreground/15 p-3">
+			<label className="flex items-center gap-3 text-sm text-foreground/70">
+				<span className="w-24 shrink-0">Video shape</span>
+				<select
+					value={style.format}
+					onChange={(e) => onChange({ ...style, format: e.target.value as Format, position: FORMATS[e.target.value as Format].position })}
+					className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
+				>
+					{(Object.keys(FORMATS) as Format[]).map((f) => (
+						<option key={f} value={f}>
+							{FORMATS[f].name}
+						</option>
+					))}
+				</select>
+			</label>
 			<p className="text-sm font-medium">Subtitles</p>
 			<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Subtitle style">
 				{(Object.keys(LOOKS) as Look[]).map((look) => (
@@ -62,7 +88,15 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 						role="radio"
 						aria-checked={style.look === look}
 						title={LOOKS[look].hint}
-						onClick={() => onChange({ ...style, look, size: LOOKS[look].size, position: LOOKS[look].position })}
+						onClick={() =>
+							onChange({
+								...style,
+								look,
+								size: LOOKS[look].size,
+								// The looks' heights are for 9:16; other shapes keep theirs (Big still goes to the middle).
+								position: style.format === "9:16" || look === "big" ? LOOKS[look].position : FORMATS[style.format].position,
+							})
+						}
 						className={`rounded-md border px-2.5 py-1 text-sm ${
 							style.look === look ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"
 						}`}

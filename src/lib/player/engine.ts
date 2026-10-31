@@ -50,6 +50,7 @@ export class StudioEngine {
 	private shownFrame: VideoFrame | null = null;
 	private shownOut = 0; // final-video time of shownFrame
 	private framing: (piece: number, aspect: number) => Rect = (_, aspect) => framePiece(aspect, null, 1);
+	private outWidth = WIDTH;
 	private sizeLogged = false;
 	private pumping = false;
 
@@ -434,10 +435,11 @@ export class StudioEngine {
 		this.emitState();
 	}
 
-	// Where each piece's picture goes in the 9:16 frame (face crop, Auto zoom: lib/framing.ts), by
-	// piece number and the picture's width / height. Redraws the picture on screen.
-	setFraming(framing: (piece: number, aspect: number) => Rect) {
+	// Where each piece's picture goes in the final video's frame, outWidth px wide (face crop, Auto
+	// zoom: lib/framing.ts), by piece number and the picture's width / height. Redraws the picture.
+	setFraming(framing: (piece: number, aspect: number) => Rect, outWidth: number) {
 		this.framing = framing;
+		this.outWidth = outWidth;
 		if (this.shownFrame) this.paint(this.shownFrame, this.shownOut);
 	}
 
@@ -459,7 +461,7 @@ export class StudioEngine {
 			this.canvas.width = w;
 			this.canvas.height = h;
 		}
-		// Fill the 9:16 box like the final video does (cropped around the face, zoomed: framing). The
+		// Fill the box like the final video does (cropped around the face, zoomed: framing). The
 		// whole frame is drawn and the canvas edge cuts off the rest: Safari squashes the frame instead
 		// of cropping when drawImage is given a source rectangle.
 		const fw = frame.displayWidth;
@@ -468,7 +470,7 @@ export class StudioEngine {
 		const ch = this.canvas.height;
 		const piece = this.pieces.findLastIndex((p) => p.out <= out + EPS);
 		const rect = this.framing(Math.max(0, piece), fw / fh);
-		const k = cw / WIDTH;
+		const k = cw / this.outWidth;
 		if (!this.sizeLogged) {
 			this.sizeLogged = true;
 			this.events.log("size", { fw, fh, coded: `${frame.codedWidth}x${frame.codedHeight}`, cw, ch });

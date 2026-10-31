@@ -6,6 +6,15 @@ import type { OwnFont } from "./font-info";
 
 export type LogoCorner = "top-left" | "top-right";
 export type Zoom = "off" | "cuts"; // Auto zoom: "cuts" = every other kept piece a little closer (zoomOf in timeline.ts)
+// The final video's shape. Same as FORMATS in render.py.
+export type Format = "9:16" | "1:1" | "16:9";
+// position: where subtitles go when this shape is picked (wide videos keep them near the bottom).
+export const FORMATS: Record<Format, { name: string; width: number; height: number; position: number }> = {
+	"9:16": { name: "9:16 · TikTok, Reels, Shorts", width: 1080, height: 1920, position: 0.31 },
+	"1:1": { name: "1:1 · Square post", width: 1080, height: 1080, position: 0.2 },
+	"16:9": { name: "16:9 · YouTube", width: 1920, height: 1080, position: 0.12 },
+};
+export const outputSize = (style: { format?: Format }) => FORMATS[style.format ?? "9:16"] ?? FORMATS["9:16"];
 // color: the brand colour (the Highlight look's word). logo: the channel name shown in a corner ("" = none).
 export type SubtitleStyle = {
 	size: number;
@@ -18,6 +27,7 @@ export type SubtitleStyle = {
 	logo: string;
 	logoAt: LogoCorner;
 	zoom: Zoom;
+	format: Format;
 };
 
 export const DEFAULT_STYLE: SubtitleStyle = {
@@ -30,6 +40,7 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	logo: "",
 	logoAt: "top-left",
 	zoom: "off",
+	format: "9:16",
 };
 
 export const MAX_LOGO_LENGTH = 30;
@@ -100,5 +111,6 @@ export function readStyle(value: unknown): SubtitleStyle {
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
 		logoAt: v.logoAt === "top-right" ? "top-right" : "top-left",
 		zoom: v.zoom === "cuts" ? "cuts" : "off",
+		format: typeof v.format === "string" && v.format in FORMATS ? (v.format as Format) : DEFAULT_STYLE.format,
 	};
 }

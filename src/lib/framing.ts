@@ -1,14 +1,15 @@
-// Where the picture sits in the 9:16 final video, piece by piece. A wider (landscape) video is
-// cropped around the speaker's face instead of its middle, and Auto zoom grows the picture around
-// the face. Faces come from faces.json, found by Modal in the preview copy (detect_faces in
-// render.py). Same sums as frame_piece in render.py: change one, change the other.
-import { WIDTH, HEIGHT, ZOOM_ORIGIN } from "./timeline";
+// Where the picture sits in the final video, piece by piece. A video wider (or taller) than the
+// final video's shape is cropped around the speaker's face instead of its middle, and Auto zoom
+// grows the picture around the face. Faces come from faces.json, found by Modal in the preview
+// copy (detect_faces in render.py). Same sums as frame_piece in render.py: change one, change the other.
+import { HEIGHT, WIDTH, ZOOM_ORIGIN } from "./timeline";
 
 // Face found every half second: [source seconds, centre x, centre y, width], all but time 0..1 of the picture.
 export type Faces = { width: number; height: number; faces: [number, number, number, number][] };
 export type Focus = { x: number; y: number };
-// Where the whole source picture is drawn, in px of the 1080x1920 final video.
+// Where the whole source picture is drawn, in px of the final video.
 export type Rect = { x: number; y: number; w: number; h: number };
+export type Size = { width: number; height: number };
 
 const FACE_HEIGHT = 0.4; // a face is placed this far down the frame when there's room to move
 const EDGE = 0.15; // zoom never centres closer than this to an edge
@@ -29,18 +30,19 @@ export function focusFor(faces: Faces | null, start: number, end: number): Focus
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
-// aspect = source width / height, zoom = Auto zoom for this piece (1 = none).
-export function framePiece(aspect: number, focus: Focus | null, zoom: number): Rect {
+// aspect = source width / height, zoom = Auto zoom for this piece (1 = none), size = the final video.
+export function framePiece(aspect: number, focus: Focus | null, zoom: number, size: Size = { width: WIDTH, height: HEIGHT }): Rect {
+	const { width: W, height: H } = size;
 	// Cover the frame (like CSS object-fit: cover)...
-	const w0 = Math.max(WIDTH, HEIGHT * aspect);
+	const w0 = Math.max(W, H * aspect);
 	const h0 = w0 / aspect;
 	// ...cropped around the face (or the middle when there is none)...
 	const fx = focus?.x ?? 0.5;
 	const fy = focus?.y ?? 0.5;
-	const cx = clamp(fx * w0 - WIDTH / 2, 0, w0 - WIDTH);
-	const cy = clamp(fy * h0 - (focus ? FACE_HEIGHT : 0.5) * HEIGHT, 0, h0 - HEIGHT);
+	const cx = clamp(fx * w0 - W / 2, 0, w0 - W);
+	const cy = clamp(fy * h0 - (focus ? FACE_HEIGHT : 0.5) * H, 0, h0 - H);
 	// ...and zoomed around the face (or a little above the middle).
-	const ox = focus ? clamp((fx * w0 - cx) / WIDTH, EDGE, 1 - EDGE) * WIDTH : ZOOM_ORIGIN.x * WIDTH;
-	const oy = focus ? clamp((fy * h0 - cy) / HEIGHT, EDGE, 1 - EDGE) * HEIGHT : ZOOM_ORIGIN.y * HEIGHT;
+	const ox = focus ? clamp((fx * w0 - cx) / W, EDGE, 1 - EDGE) * W : ZOOM_ORIGIN.x * W;
+	const oy = focus ? clamp((fy * h0 - cy) / H, EDGE, 1 - EDGE) * H : ZOOM_ORIGIN.y * H;
 	return { x: -(cx * zoom + ox * (zoom - 1)), y: -(cy * zoom + oy * (zoom - 1)), w: w0 * zoom, h: h0 * zoom };
 }

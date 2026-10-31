@@ -82,7 +82,15 @@ LOGO = {"size": 52, "outline": 4, "side": 60, "top": 110}  # the channel name in
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
 BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
-BANNER_TOP = {"top": 260, "middle": 860, "bottom": 1300}
+# Where each banner place starts, share of the video's height, per shape (BANNER_TOP in banners.ts).
+BANNER_TOP = {
+    "9:16": {"top": 0.135, "middle": 0.448, "bottom": 0.78},
+    "1:1": {"top": 0.08, "middle": 0.35, "bottom": 0.55},
+    "16:9": {"top": 0.08, "middle": 0.35, "bottom": 0.62},
+}
+WATERMARK_BOTTOM = 0.135  # the watermark's gap to the bottom edge, share of the height (260 px of 1920)
+# The final video's shape (FORMATS in src/lib/subtitle-style.ts): width, height.
+FORMATS = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
 
 
 def banner_ink(hex_colour: str) -> str:
@@ -92,7 +100,7 @@ def banner_ink(hex_colour: str) -> str:
     return "#111111" if 0.299 * r + 0.587 * g + 0.114 * b > 160 else "#FFFFFF"
 
 
-def banner_events(banners: list[dict]) -> list[str]:
+def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16") -> list[str]:
     """One event per banner, faded in and out, in its place. Text was checked by the app (readBanners)."""
     events = []
     fade = int(BANNER["fade"] * 1000)
@@ -104,7 +112,8 @@ def banner_events(banners: list[dict]) -> list[str]:
             continue
         sub = ass_text(str(b.get("sub", ""))).strip()
         body = f"{{\\fad({fade},{fade})\\xbord{pad_x}\\ybord{pad_y}}}{text}" + (f"\\N{{\\fs{BANNER['sub_size']}}}{sub}" if sub else "")
-        top = BANNER_TOP.get(b.get("place"), BANNER_TOP["top"])
+        places = BANNER_TOP.get(shape, BANNER_TOP["9:16"])
+        top = js_round(places.get(b.get("place"), places["top"]) * height)
         events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,{top},,{body}")
     return events
 
@@ -252,7 +261,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     look = style.get("look", "clean")
     size = int(style["size"])
     outline = int(style["outline"])
-    margin_v = int(HEIGHT * float(style["position"]))
+    video_w, video_h = FORMATS.get(style.get("format"), (WIDTH, HEIGHT))
+    margin_v = js_round(video_h * float(style["position"]))
     limits = LINE_LIMITS.get(look, LINE_LIMITS["normal"])
     per_line = limits["thai_words"] if thai else limits["words"]
     max_seconds = limits["thai_seconds"] if thai else limits["seconds"]
@@ -287,7 +297,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
 
     brand = style.get("color", "#FFE600")
     highlight = ass_colour(brand)
-    events = banner_events(banners or [])
+    events = banner_events(banners or [], video_h, style.get("format", "9:16"))
     # The channel name stays in its corner for the whole video.
     logo = ass_text(str(style.get("logo") or "")).replace("\n", " ").strip()
     if logo:
@@ -325,8 +335,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         [
             "[Script Info]",
             "ScriptType: v4.00+",
-            f"PlayResX: {WIDTH}",
-            f"PlayResY: {HEIGHT}",
+            f"PlayResX: {video_w}",
+            f"PlayResY: {video_h}",
             "WrapStyle: 0",
             "",
             "[V4+ Styles]",
@@ -378,28 +388,32 @@ def focus_for(faces: dict | None, start: float, end: float) -> tuple[float, floa
     return median([f[1] for f in pick]), median([f[2] for f in pick])
 
 
-def frame_piece(aspect: float, focus: tuple[float, float] | None, zoom: float) -> tuple[float, float, float, float]:
-    """Where the whole source picture goes in the 1080x1920 frame (x, y, w, h): cropped around the
-    face, zoomed around it. Same as framePiece in src/lib/framing.ts."""
-    w0 = max(WIDTH, HEIGHT * aspect)
+def frame_piece(
+    aspect: float, focus: tuple[float, float] | None, zoom: float, size: tuple[int, int] = (WIDTH, HEIGHT)
+) -> tuple[float, float, float, float]:
+    """Where the whole source picture goes in the final video's frame (x, y, w, h): cropped around
+    the face, zoomed around it. Same as framePiece in src/lib/framing.ts."""
+    W, H = size
+    w0 = max(W, H * aspect)
     h0 = w0 / aspect
     fx, fy = focus if focus else (0.5, 0.5)
-    cx = min(max(fx * w0 - WIDTH / 2, 0), w0 - WIDTH)
-    cy = min(max(fy * h0 - (FACE_HEIGHT if focus else 0.5) * HEIGHT, 0), h0 - HEIGHT)
+    cx = min(max(fx * w0 - W / 2, 0), w0 - W)
+    cy = min(max(fy * h0 - (FACE_HEIGHT if focus else 0.5) * H, 0), h0 - H)
     if focus:
-        ox = min(max((fx * w0 - cx) / WIDTH, FACE_EDGE), 1 - FACE_EDGE) * WIDTH
-        oy = min(max((fy * h0 - cy) / HEIGHT, FACE_EDGE), 1 - FACE_EDGE) * HEIGHT
+        ox = min(max((fx * w0 - cx) / W, FACE_EDGE), 1 - FACE_EDGE) * W
+        oy = min(max((fy * h0 - cy) / H, FACE_EDGE), 1 - FACE_EDGE) * H
     else:
-        ox, oy = ZOOM_ORIGIN[0] * WIDTH, ZOOM_ORIGIN[1] * HEIGHT
+        ox, oy = ZOOM_ORIGIN[0] * W, ZOOM_ORIGIN[1] * H
     return -(cx * zoom + ox * (zoom - 1)), -(cy * zoom + oy * (zoom - 1)), w0 * zoom, h0 * zoom
 
 
-def piece_filter(aspect: float, focus: tuple[float, float] | None, zoom: float) -> str:
-    """ffmpeg: scale the picture to its framed size, then cut the 1080x1920 window out of it."""
-    x, y, w, h = frame_piece(aspect, focus, zoom)
-    sw, sh = max(WIDTH, round(w / 2) * 2), max(HEIGHT, round(h / 2) * 2)
-    px, py = min(max(round(-x), 0), sw - WIDTH), min(max(round(-y), 0), sh - HEIGHT)
-    return f"scale={sw}:{sh},crop={WIDTH}:{HEIGHT}:{px}:{py}"
+def piece_filter(aspect: float, focus: tuple[float, float] | None, zoom: float, size: tuple[int, int] = (WIDTH, HEIGHT)) -> str:
+    """ffmpeg: scale the picture to its framed size, then cut the final video's window out of it."""
+    W, H = size
+    x, y, w, h = frame_piece(aspect, focus, zoom, size)
+    sw, sh = max(W, round(w / 2) * 2), max(H, round(h / 2) * 2)
+    px, py = min(max(round(-x), 0), sw - W), min(max(round(-y), 0), sh - H)
+    return f"scale={sw}:{sh},crop={W}:{H}:{px}:{py}"
 
 
 def display_aspect(path: Path) -> float:
@@ -424,6 +438,7 @@ def ffmpeg_command(
     zoom: str = "off",
     fonts_dir: str | None = None,
     faces: dict | None = None,
+    size: tuple[int, int] = (WIDTH, HEIGHT),
 ) -> list[str]:
     aspect = display_aspect(src)
     # The pieces in frames, as the preview has them (StudioPlayer), to pick the same faces.
@@ -433,7 +448,7 @@ def ffmpeg_command(
         # Each piece is framed on its own (face crop, Auto zoom), so pieces can differ before they are joined.
         piece_zoom = ZOOM if zoom == "cuts" and i % 2 == 1 else 1.0
         focus = focus_for(faces, *framed[i]) if i < len(framed) else None
-        parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS,{piece_filter(aspect, focus, piece_zoom)},setsar=1[v{i}]")
+        parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS,{piece_filter(aspect, focus, piece_zoom, size)},setsar=1[v{i}]")
         labels.append(f"[v{i}]")
         if audio:
             parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
@@ -443,7 +458,7 @@ def ffmpeg_command(
         f"[cv]fps={FPS},"
         f"subtitles={subs.name}{f':fontsdir={fonts_dir}' if fonts_dir else ''},"
         f"drawtext=fontfile={BOLD_FONT}:text='{WATERMARK}':fontsize=40:fontcolor=white@0.7:"
-        f"shadowcolor=black@0.5:shadowx=2:shadowy=2:x=w-tw-48:y=h-th-260[outv]"
+        f"shadowcolor=black@0.5:shadowx=2:shadowy=2:x=w-tw-48:y=h-th-{js_round(size[1] * WATERMARK_BOTTOM)}[outv]"
     )
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
@@ -485,7 +500,17 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 fonts_dir = "fonts"
 
             result = subprocess.run(
-                ffmpeg_command(src, subs, out, keeps, has_audio(src), style.get("zoom", "off"), fonts_dir, edit.get("faces")),
+                ffmpeg_command(
+                    src,
+                    subs,
+                    out,
+                    keeps,
+                    has_audio(src),
+                    style.get("zoom", "off"),
+                    fonts_dir,
+                    edit.get("faces"),
+                    FORMATS.get(style.get("format"), (WIDTH, HEIGHT)),
+                ),
                 cwd=workdir,
                 capture_output=True,
                 text=True,

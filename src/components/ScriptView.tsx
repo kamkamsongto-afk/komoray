@@ -4,7 +4,7 @@ import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState
 import { allCuts, type Fix, fixedWords, normText, setFix, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
-import { type SubtitleStyle } from "@/lib/subtitle-style";
+import { outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, type Take } from "@/lib/takes";
 import { FPS, keepSegments, subtitleLines, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
@@ -470,7 +470,10 @@ export function ScriptView({
 					))}
 				</div>
 				{mode === "preview" && deciding ? (
-					<div className="mx-auto aspect-[9/16] w-full rounded-lg bg-black" style={{ maxWidth: "calc(70vh * 9 / 16)" }} />
+					<div
+						className="mx-auto w-full rounded-lg bg-black"
+						style={{ aspectRatio: `${outputSize(subtitle).width} / ${outputSize(subtitle).height}`, maxWidth: `calc(70vh * ${outputSize(subtitle).width} / ${outputSize(subtitle).height})` }}
+					/>
 				) : mode === "preview" && useStudio && studio ? (
 					<StudioPlayer
 						key={studio.videoUrl}
