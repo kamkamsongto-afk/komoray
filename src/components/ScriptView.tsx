@@ -270,6 +270,7 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 				</div>
 				{mode === "preview" ? (
 					<PreviewPlayer
+						key={videoUrl} // start fresh when the preview copy replaces the original
 						ref={playerRef}
 						src={videoUrl}
 						segments={segments}

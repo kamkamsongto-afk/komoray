@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
+import { proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { startTranscription } from "@/lib/transcribe";
 
@@ -10,7 +11,7 @@ import { startTranscription } from "@/lib/transcribe";
 //   analyze-error.json  written by the callback if speech-to-text failed
 const LINK_SECONDS = 3 * 3600; // Deepgram may queue long videos for a while before downloading
 
-type AnalyzeEnv = { DEEPGRAM_API_KEY: string; RENDER_TOKEN: string };
+type AnalyzeEnv = { DEEPGRAM_API_KEY: string; RENDER_TOKEN: string; RENDER_URL: string };
 
 // Start finding the silences. Returns right away; the page then polls GET below.
 export async function POST(request: Request) {
@@ -30,6 +31,12 @@ export async function POST(request: Request) {
 		const callbackUrl = await signedCallbackUrl(new URL("/api/analyze/callback", request.url).toString(), key, env.RENDER_TOKEN);
 		// Deepgram downloads the video itself through a temporary read-only link.
 		await startTranscription(await signedUrl(key, "GET", LINK_SECONDS), env.DEEPGRAM_API_KEY, language || "en", callbackUrl);
+		// Make the editor's preview copy meanwhile; it is usually ready before the script is.
+		const proxy = await proxyStatus(key);
+		if (proxy !== "done" && proxy !== "processing") {
+			await deleteObject(siblingKey(key, "proxy-error.json"));
+			await startProxy(key, env);
+		}
 		return Response.json({ status: "processing" });
 	} catch (err) {
 		const error = err instanceof Error ? err.message : "Analysis failed";
@@ -46,8 +53,14 @@ export async function GET(request: Request) {
 
 	const editKey = siblingKey(key, "edit.json");
 	const edit = await getJson<object>(editKey);
-	// videoUrl: the original video, so the Script view can play it next to the transcript.
-	if (edit) return Response.json({ status: "done", editKey, ...edit, videoUrl: await signedUrl(key, "GET", LINK_SECONDS) });
+	if (edit) {
+		// videoUrl: what the Script view plays next to the transcript. The preview copy when it is
+		// ready, else the original. Videos from before preview copies get one the first time they open.
+		let proxy = await proxyStatus(key);
+		if (proxy === "none") proxy = await startProxy(key, getCloudflareContext().env as unknown as AnalyzeEnv);
+		const videoUrl = proxy === "done" ? await proxyUrl(key, LINK_SECONDS) : await signedUrl(key, "GET", LINK_SECONDS);
+		return Response.json({ status: "done", editKey, ...edit, videoUrl, proxy });
+	}
 
 	const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));
 	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Analysis failed" });

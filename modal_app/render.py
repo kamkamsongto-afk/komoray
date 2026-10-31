@@ -3,6 +3,8 @@
 Takes a raw video + its edit.json, then with FFmpeg:
 cuts out the silences, reframes to vertical 1080x1920, burns in subtitles, adds a watermark.
 
+Also makes the editor's preview copy (proxy.mp4) of every upload: see `proxy` below.
+
 Modal never holds R2 keys: the website hands it short-lived signed URLs to read the
 source video and to write the result (or an error report) back.
 
@@ -233,18 +235,62 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
         raise
 
 
+PROXY_SIDE = 540  # px, the short side; the preview is at most ~440px wide on screen
+PROXY_KEYFRAME_FRAMES = 15  # a full picture every half second at 30 fps
+
+
+def proxy_command(src: Path, out: Path, audio: bool) -> list[str]:
+    # Camera files store a full picture only every 1-2 s, so jumping to a cut means decoding up to
+    # 2 s of video first: that was the stutter at every cut in the browser preview. This copy is
+    # small, has a full picture every half second, and skips the decoding tricks that cost time.
+    side = PROXY_SIDE
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-map", "0:v:0"]
+    if audio:
+        cmd += ["-map", "0:a:0", "-c:a", "aac", "-b:a", "128k"]
+    cmd += ["-vf", f"scale='if(gt(iw,ih),-2,{side})':'if(gt(iw,ih),{side},-2)',fps={FPS},format=yuv420p"]
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-tune", "fastdecode"]
+    cmd += ["-g", str(PROXY_KEYFRAME_FRAMES), "-keyint_min", str(PROXY_KEYFRAME_FRAMES), "-sc_threshold", "0"]
+    cmd += ["-movflags", "+faststart", str(out)]
+    return cmd
+
+
+@app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
+def proxy(video_url: str, output_url: str, error_url: str | None = None) -> dict:
+    """The editor's preview copy: same timing as the original, just smaller and quick to jump around in."""
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            src, out = workdir / "source", workdir / "proxy.mp4"
+            urllib.request.urlretrieve(video_url, src)
+            result = subprocess.run(proxy_command(src, out, has_audio(src)), capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
+            put(output_url, out.read_bytes(), "video/mp4")
+            return {"ok": True, "bytes": out.stat().st_size}
+    except Exception as err:
+        if error_url:
+            put(error_url, json.dumps({"error": str(err)}).encode(), "application/json")
+        raise
+
+
 @app.function(image=image, secrets=[modal.Secret.from_name("komoray-render")])
 @modal.fastapi_endpoint(method="POST")
 def start(body: dict) -> dict:
-    """Called by komoray.com. Starts a render in the background and returns right away."""
+    """Called by komoray.com. Starts a render (or, with kind "proxy", a preview copy) in the background."""
     if not hmac.compare_digest(str(body.get("token", "")), os.environ["RENDER_TOKEN"]):
         return {"error": "unauthorized"}
-    call = render.spawn(body["videoUrl"], body["edit"], body["outputUrl"], body.get("errorUrl"), body.get("style"))
+    if body.get("kind") == "proxy":
+        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"))
+    else:
+        call = render.spawn(body["videoUrl"], body["edit"], body["outputUrl"], body.get("errorUrl"), body.get("style"))
     return {"callId": call.object_id}
 
 
 @app.local_entrypoint()
 def main(job: str):
-    """Manual test: python -m modal run modal_app/render.py --job job.json"""
+    """Manual test: python -m modal run modal_app/render.py --job job.json (a job without "edit" makes a proxy)"""
     spec = json.loads(Path(job).read_text(encoding="utf-8"))
+    if "edit" not in spec:
+        print(proxy.remote(spec["videoUrl"], spec["outputUrl"], spec.get("errorUrl")))
+        return
     print(render.remote(spec["videoUrl"], spec["edit"], spec["outputUrl"], spec.get("errorUrl"), spec.get("style")))

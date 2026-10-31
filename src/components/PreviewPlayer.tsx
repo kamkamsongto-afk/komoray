@@ -37,8 +37,6 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 // LEAD seconds early, muted and underneath, and is nudged faster or slower to hit the cut on time:
 // Safari takes a moment to start a video, which showed as a freeze and a black flash at each cut.
 // Only on Safari: Chrome starts instantly, and decoding two videos at once made it drop frames.
-// Also only on Safari: both videos stay unmuted and play through Web Audio, where a cut just
-// switches their volume. Unmuting a <video> on iPhone/iPad restarts its sound and froze the picture.
 export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPlayer(
 	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange },
 	ref,
@@ -60,7 +58,6 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	const cutRef = useRef(false); // shown video stopped at a cut, the other one not there yet
 	const [lead, setLead] = useState(0); // seconds the waiting video starts early (Safari only)
 	const leadRef = useRef(0);
-	const audioRef = useRef<{ ctx: AudioContext; gains: GainNode[] } | null>(null);
 	const [playing, setPlaying] = useState(false);
 	const [outTime, setOutTime] = useState(0);
 	const [scale, setScale] = useState(0.3);
@@ -78,42 +75,10 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		return () => observer.disconnect();
 	}, []);
 
-	// Only video `i` is heard (set directly, not through React, so it changes on the exact frame).
-	const hear = (i: number) => {
-		const audio = audioRef.current;
-		if (audio) {
-			audio.gains.forEach((g, j) => g.gain.setTargetAtTime(j === i ? 1 : 0, audio.ctx.currentTime, 0.003));
-			return;
-		}
-		if (videoA.current) videoA.current.muted = i !== 0;
-		if (videoB.current) videoB.current.muted = i !== 1;
-	};
-
-	// Safari: route both videos through Web Audio. Must happen on a tap, and only once per video.
-	const startAudio = () => {
-		const [a, b] = [videoA.current, videoB.current];
-		if (!leadRef.current || audioRef.current || !a || !b) return;
-		try {
-			// Keep playing with the iPhone's silent switch on, like a normal video does.
-			const session = (navigator as { audioSession?: { type: string } }).audioSession;
-			if (session) session.type = "playback";
-			const ctx = new AudioContext();
-			const gains = [a, b].map((video) => {
-				const gain = ctx.createGain();
-				ctx.createMediaElementSource(video).connect(gain).connect(ctx.destination);
-				return gain;
-			});
-			audioRef.current = { ctx, gains };
-			a.muted = false;
-			b.muted = false;
-			hear(activeRef.current);
-		} catch {
-			// No Web Audio: fall back to muting, which works but may stutter at cuts on iPhone/iPad.
-		}
-	};
-
+	// Only the video on screen is heard (set directly, not through React, so it changes on the exact frame).
 	useEffect(() => {
-		hear(0);
+		if (videoA.current) videoA.current.muted = false;
+		if (videoB.current) videoB.current.muted = true;
 		leadRef.current = isSafari() ? LEAD : 0;
 		setLead(leadRef.current);
 	}, []);
@@ -154,8 +119,6 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		if (!video || !last) return;
 		// Finished? Start again from the top.
 		if (pieceRef.current === pieces.length - 1 && video.currentTime >= last.end - 0.05) seek(pieces[0].start);
-		startAudio();
-		void audioRef.current?.ctx.resume();
 		void video.play();
 		// iPhone/iPad only let a video be unmuted later if it was played from a tap, so tap the waiting one too.
 		const other = waiting();
@@ -202,12 +165,9 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 					if (left <= leadRef.current + 0.02 && other.paused) other.play().catch(() => {});
 					if (!other.paused) {
 						// Where it should be so it reaches the next piece exactly when this one ends.
-						// Safari follows smoothly; elsewhere only change speed when clearly off, since every
-						// change makes Chrome rebuild its audio and drop frames.
+						// Only change speed when clearly off: every change makes Chrome rebuild its audio and drop frames.
 						const behind = next.start - Math.max(0, left) - other.currentTime;
-						const rate = leadRef.current
-							? Math.min(2, Math.max(0.5, 1 + behind * 4))
-							: behind > 0.15 ? 2 : behind > 0.04 ? 1.25 : behind < -0.04 ? 0.8 : 1;
+						const rate = behind > 0.15 ? 2 : behind > 0.04 ? 1.25 : behind < -0.04 ? 0.8 : 1;
 						if (other.playbackRate !== rate) other.playbackRate = rate;
 					}
 				}
@@ -216,9 +176,11 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 					cutRef.current = !!next;
 					video.pause();
 				}
-				if (next && other && !other.paused && other.currentTime >= next.start - 0.01) {
+				// Not while it is still finding its spot: it would show an old frame for a moment.
+				if (next && other && !other.paused && !other.seeking && other.currentTime >= next.start - 0.01) {
 					other.playbackRate = 1;
-					hear(1 - activeRef.current);
+					other.muted = false;
+					video.muted = true;
 					activeRef.current = 1 - activeRef.current;
 					setActive(activeRef.current);
 					if (!video.paused) video.pause();
@@ -262,7 +224,6 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 						src={src}
 						playsInline
 						preload="auto"
-						crossOrigin="anonymous" // Web Audio only hears a video from R2 if it was loaded this way
 						// The hidden video pauses on every swap; only the one on screen speaks for the player.
 						onPlay={() => i === activeRef.current && setPlaying(true)}
 						onPause={() => i === activeRef.current && !cutRef.current && setPlaying(false)}

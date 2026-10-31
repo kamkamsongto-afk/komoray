@@ -15,7 +15,8 @@ type Analysis = {
 	words: { text: string; start: number; end: number }[];
 	deleted?: number[];
 	style?: unknown;
-	videoUrl: string;
+	videoUrl: string; // the small preview copy once it exists, else the original
+	proxy?: "done" | "processing" | "failed" | "none";
 };
 type RenderState = {
 	status: "none" | "processing" | "done" | "failed";
@@ -25,6 +26,7 @@ type RenderState = {
 };
 
 const POLL_MS = 5000;
+const PROXY_POLL_MS = 10000;
 const STYLE_SAVE_DELAY_MS = 600; // dragging a slider changes the style many times a second
 const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
 const NOTIFY_PREF = "komoray.desktopNotify"; // remembers the checkbox in this browser
@@ -116,6 +118,19 @@ export default function EditPage() {
 			if (rendered.status !== "none") setRender(rendered);
 		})();
 	}, [user]);
+
+	// The preview copy is still being made: play the original until it is ready, then switch.
+	const proxyPending = analysis?.proxy === "processing";
+	useEffect(() => {
+		if (!key || !proxyPending) return;
+		const timer = setInterval(async () => {
+			const res = await fetch(`/api/analyze?key=${encodeURIComponent(key)}`);
+			const data = (await res.json().catch(() => ({}))) as Partial<Analysis>;
+			if (!res.ok || data.proxy === "processing" || !data.videoUrl) return;
+			setAnalysis((a) => (a ? { ...a, videoUrl: data.videoUrl!, proxy: data.proxy } : a));
+		}, PROXY_POLL_MS);
+		return () => clearInterval(timer);
+	}, [key, proxyPending]);
 
 	// While Modal is working, ask the server every few seconds whether the video is ready.
 	useEffect(() => {
