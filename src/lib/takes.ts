@@ -3,6 +3,7 @@
 // comparing how sentences start, right in the browser, no AI needed. Each take found here can be
 // cut (its words become deleted words) or kept by the user.
 import { normText } from "./edit";
+import { THAI_ENDINGS } from "./timeline";
 
 type Word = { text: string; start: number; end: number };
 
@@ -14,6 +15,10 @@ const MIN_MATCH_WORDS = 3; // the retry starts with at least this many of the sa
 const MIN_MATCH_LETTERS = 8; // ...and they are not just three short words ("ที่ จะ ไม่")
 const MAX_TAKE_SECONDS = 25; // a bad take is never longer than this
 const MAX_TAKE_WORDS = 60;
+// A retry said straight after, with no pause at all ("ทักมาได้ทั้งแอป ทักมาได้เลย"): any word can
+// start it, so it has to come back sooner.
+const MAX_RESTART_SECONDS = 8;
+const MAX_RESTART_WORDS = 15;
 // Sounds that can sit in front of a retry without making it different ("So, today I...").
 const FILLERS = new Set(["um", "uh", "uhm", "erm", "hmm", "so", "okay", "ok", "and", "เอ่อ", "อ่า", "อืม", "เออ", "แบบ", "คือ"]);
 
@@ -43,11 +48,13 @@ function skipFillers(words: Word[], i: number, limit: number) {
 function sameStart(words: Word[], a: number, b: number) {
 	let n = 0;
 	let letters = 0;
+	let core = 0; // letters without polite endings ("หนึ่ง นะ ครับ" is not much of a match)
 	while (a + n < b && b + n < words.length && key(words[a + n]) && key(words[a + n]) === key(words[b + n])) {
 		letters += key(words[a + n]).length;
+		if (!THAI_ENDINGS.has(key(words[a + n]))) core += key(words[a + n]).length;
 		n++;
 	}
-	return { n, letters };
+	return { n, letters, core };
 }
 
 export function findRepeatedTakes(words: Word[]): Take[] {
@@ -64,6 +71,18 @@ export function findRepeatedTakes(words: Word[]): Take[] {
 			const { n, letters } = sameStart(words, a, b);
 			if (n >= MIN_MATCH_WORDS && letters >= MIN_MATCH_LETTERS) {
 				takes.push({ from, to: again - 1, again, matched: n });
+				break;
+			}
+		}
+	}
+	// Retries with no pause before them: the same words again within a few seconds, from any word.
+	for (let from = 0; from < words.length; from++) {
+		for (let again = from + 1; again < words.length; again++) {
+			if (words[again].start - words[from].start > MAX_RESTART_SECONDS || again - from > MAX_RESTART_WORDS) break;
+			const { n, core } = sameStart(words, from, again);
+			if (n >= MIN_MATCH_WORDS && core >= MIN_MATCH_LETTERS) {
+				if (!takes.some((t) => t.from === from && t.again === again)) takes.push({ from, to: again - 1, again, matched: n });
+				from = again - 1; // go on from the retry, which may be retried again
 				break;
 			}
 		}

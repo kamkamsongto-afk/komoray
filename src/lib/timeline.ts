@@ -113,7 +113,7 @@ const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 const charKind = (ch: string) => (/[฀-๿]/.test(ch) ? "thai" : /\d/.test(ch) ? "number" : /[A-Za-z]/.test(ch) ? "latin" : null);
 
 // Polite endings: a Thai sentence usually ends on one, so a space goes after it ("นะครับ ได้ยินไหม").
-const THAI_ENDINGS = new Set(["ครับ", "คับ", "ค่ะ", "คะ", "ค่า", "นะ", "จ้ะ", "จ้า", "ฮะ", "ฮับ", "เนอะ", "นะครับ", "นะคะ"]);
+export const THAI_ENDINGS = new Set(["ครับ", "คับ", "ค่ะ", "คะ", "ค่า", "นะ", "จ้ะ", "จ้า", "ฮะ", "ฮับ", "เนอะ", "นะครับ", "นะคะ"]);
 const THAI_MARKS = /[ัิ-ฺ็-๎]/g;
 const thaiLetters = (text: string) => text.replace(THAI_MARKS, "").length;
 

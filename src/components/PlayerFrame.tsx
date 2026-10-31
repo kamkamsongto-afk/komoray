@@ -51,6 +51,21 @@ const BOX_PADDING = 20; // the Box look: space around the letters (Outline of th
 // The channel name in a corner (the Logo style in render.py).
 const LOGO = { size: 52, outline: 4, side: 60, top: 110 };
 
+// A black outline with round corners, like the final video's (a text stroke gives sharp spikes at
+// thick sizes): copies of the letters shifted in a circle, plus the soft shadow under them.
+function roundOutline(width: number) {
+	const shadows: string[] = [];
+	for (const r of width > 2 ? [width, width / 2] : width ? [width] : []) {
+		const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 3));
+		for (let i = 0; i < steps; i++) {
+			const a = (2 * Math.PI * i) / steps;
+			shadows.push(`${(r * Math.cos(a)).toFixed(1)}px ${(r * Math.sin(a)).toFixed(1)}px 0 black`);
+		}
+	}
+	shadows.push("2px 2px 0 rgba(0,0,0,0.4)");
+	return shadows.join(",");
+}
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 type Props = {
@@ -112,15 +127,10 @@ export function PlayerFrame({
 	// Letters as big as the final video draws them (see FONTS[].height), rows as far apart.
 	const em = fontMetrics(subtitle).height;
 	const boxed = subtitle.look === "box";
-	// Box: letters on a dark box. Every other look: white letters with a black outline. The stroke is
-	// drawn half inside the letters; paint-order puts it behind them.
+	// Box: letters on a dark box. Every other look: white letters with a black outline.
 	const letters: CSSProperties = boxed
 		? { background: "rgba(0,0,0,0.75)", padding: `${BOX_PADDING / 2}px ${BOX_PADDING}px`, boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }
-		: {
-				WebkitTextStroke: subtitle.outline ? `${subtitle.outline * 2}px black` : undefined,
-				paintOrder: "stroke fill",
-				textShadow: "2px 2px 0 rgba(0,0,0,0.4)",
-			};
+		: { textShadow: roundOutline(subtitle.outline) };
 	// Highlight: the word being said is in the brand colour until the next one starts.
 	const frame = outTime * FPS;
 	const said = line && subtitle.look === "highlight" ? line.parts.findLastIndex((p) => p.from <= frame) : -1;
