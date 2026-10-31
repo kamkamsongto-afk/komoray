@@ -3,6 +3,7 @@
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, normText, setFix, TRAIL, type WordFix } from "@/lib/edit";
 import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
+import { findRepeatedTakes, type Take } from "@/lib/takes";
 import { keepSegments, subtitleLines } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
 import { studioSupported } from "@/lib/player/engine";
@@ -13,6 +14,7 @@ type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
 
 const PARAGRAPH_GAP = 1.5; // a pause this long (seconds) starts a new paragraph
+const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 const isThai = (text: string) => /[฀-๿]/.test(text);
 const script = (text: string) => (isThai(text) ? "thai" : /^\d/.test(text) ? "number" : "latin");
@@ -93,12 +95,14 @@ const WordSpan = memo(function WordSpan({
 	item,
 	gone,
 	active,
+	retake,
 	heardAs,
 	actions,
 }: {
 	item: WordItem;
 	gone: boolean;
 	active: boolean;
+	retake: boolean; // part of a repeated take that could be cut
 	heardAs: string | null;
 	actions: RefObject<WordActions>;
 }) {
@@ -112,8 +116,8 @@ const WordSpan = memo(function WordSpan({
 				onDoubleClick={() => actions.current.edit(item.index, item.last)}
 				title={heardAs !== null ? `Fixed · heard as "${heardAs}"` : undefined}
 				className={`cursor-pointer rounded transition-colors ${
-					gone ? "text-red-600/60 line-through decoration-2" : active ? "bg-blue-600 text-white" : "hover:bg-foreground/10"
-				} ${item.fixed ? "underline decoration-green-600 decoration-2 underline-offset-4" : ""}`}
+					gone ? "text-red-600/60 line-through decoration-2" : active ? "bg-blue-600 text-white" : retake ? "bg-amber-500/15 hover:bg-amber-500/25" : "hover:bg-foreground/10"
+				} ${item.fixed ? "underline decoration-green-600 decoration-2 underline-offset-4" : retake && !gone ? "underline decoration-amber-500 decoration-dashed decoration-2 underline-offset-4" : ""}`}
 			>
 				{item.text}
 			</span>
@@ -315,6 +319,26 @@ export function ScriptView({
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
 	}, [selected, apply, editing]);
+
+	// Repeated takes (lib/takes.ts): cutting one deletes its words, keeping it restores them.
+	const takes = useMemo(() => findRepeatedTakes(words), [words]);
+	const [showTakes, setShowTakes] = useState(false);
+	const takeRange = (t: Take) => Array.from({ length: t.to - t.from + 1 }, (_, k) => t.from + k);
+	const isCut = (t: Take) => takeRange(t).every((i) => gone.has(i));
+	const openTakes = takes.filter((t) => !isCut(t));
+	const retakeWords = useMemo(() => new Set(takes.flatMap((t) => (takeRange(t).every((i) => gone.has(i)) ? [] : takeRange(t)))), [takes, gone]);
+	const cutTakes = (list: Take[], cut: boolean) => {
+		const next = new Set(deleted);
+		for (const t of list) for (const i of takeRange(t)) (cut ? next.add(i) : next.delete(i));
+		onChange([...next].sort((a, b) => a - b));
+	};
+	const shownText = (from: number, to: number, max: number) => {
+		const text = wordItems
+			.filter((it) => it.index >= from && it.last <= to)
+			.map((it, k) => (k > 0 && it.space ? " " : "") + it.text)
+			.join("");
+		return text.length > max ? text.slice(0, max) + "…" : text;
+	};
 
 	const anyKept = selected.some((i) => !gone.has(i));
 	const anyGone = selected.some((i) => gone.has(i));
@@ -582,7 +606,61 @@ export function ScriptView({
 						</span>
 					</form>
 				)}
+				{showTakes && takes.length > 0 && (
+					<div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+						<div className="flex flex-wrap items-center gap-2">
+							<p className="flex-1 text-sm font-medium">
+								🔁 You said these again right after. Cut the first try and keep the last one?
+							</p>
+							{openTakes.length > 0 && (
+								<button onClick={() => cutTakes(openTakes, true)} className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700">
+									✂️ Cut all ({openTakes.length})
+								</button>
+							)}
+							<button onClick={() => setShowTakes(false)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
+								Close
+							</button>
+						</div>
+						<ul className="flex flex-col divide-y divide-foreground/10">
+							{takes.map((t) => {
+								const cut = isCut(t);
+								return (
+									<li key={t.from} className="flex flex-wrap items-center gap-2 py-2 text-sm">
+										<span className="w-10 shrink-0 tabular-nums text-foreground/50">{clock(words[t.from].start)}</span>
+										<span className="min-w-0 flex-1 break-words">
+											<span className={cut ? "text-red-600/60 line-through" : "text-amber-700 dark:text-amber-400"}>{shownText(t.from, t.to, 90)}</span>
+											<span className="text-foreground/50"> → again: </span>
+											<span>{shownText(t.again, Math.min(words.length - 1, t.again + 12), 50)}</span>
+										</span>
+										<button
+											onClick={() => seek(Math.max(0, words[t.from].start - 0.3), cut)}
+											className="shrink-0 rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5"
+										>
+											▶ Listen
+										</button>
+										<button
+											onClick={() => cutTakes([t], !cut)}
+											className={`shrink-0 rounded-md px-2 py-1 ${cut ? "border border-foreground/20 hover:bg-foreground/5" : "bg-amber-600 text-white hover:bg-amber-700"}`}
+										>
+											{cut ? "↩️ Keep" : "✂️ Cut"}
+										</button>
+									</li>
+								);
+							})}
+						</ul>
+						<p className="text-xs text-foreground/60">Cut takes show as deleted words in the script. You can restore them any time.</p>
+					</div>
+				)}
 				<div className="flex min-h-9 flex-wrap items-center gap-2">
+					{takes.length > 0 && !showTakes && !editing && (
+						<button
+							onMouseDown={(e) => e.preventDefault()}
+							onClick={() => setShowTakes(true)}
+							className={`rounded-lg px-3 py-1.5 text-sm ${openTakes.length ? "bg-amber-500/15 font-medium text-amber-800 hover:bg-amber-500/25 dark:text-amber-300" : "border border-foreground/20 hover:bg-foreground/5"}`}
+						>
+							🔁 Repeated takes ({openTakes.length || takes.length})
+						</button>
+					)}
 					{!finding && !editing && (
 						<button
 							onMouseDown={(e) => e.preventDefault()}
@@ -653,6 +731,7 @@ export function ScriptView({
 								item={item}
 								gone={gone.has(item.index)}
 								active={item.index <= current && current <= item.last}
+								retake={retakeWords.has(item.index)}
 								heardAs={item.fixed ? originalText(item.index, item.last) : null}
 								actions={wordActions}
 							/>
