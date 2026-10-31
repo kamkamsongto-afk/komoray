@@ -49,7 +49,7 @@
 | ไฟล์ | หน้าที่ |
 |---|---|
 | `src/app/page.tsx` | หน้าแรก Coming soon + ลิงก์ Privacy · Terms |
-| `src/app/upload/page.tsx` | ต้องล็อกอินก่อน · อัปโหลด → เลือกภาษา → Find silences → เสร็จแล้วพาไป `/edit` เอง · จำงานไว้ใน URL `?key=` |
+| `src/app/upload/page.tsx` | ต้องล็อกอินก่อน · อัปโหลด (หรือ 📱 Upload from your phone) → เลือกภาษา (จำครั้งก่อน/ตามภาษาเบราว์เซอร์) → Find silences → เสร็จแล้วพาไป `/edit` เอง · จำงานไว้ใน URL `?key=` |
 | `src/app/edit/page.tsx` | **หน้าตัดต่อเต็มจอ** `/edit?key=…`: แถบบน (ความยาวเดิม→หลังตัด, Make video, ดาวน์โหลด, แจ้งเตือน) + ScriptView · บันทึกการแก้ลง edit.json ทันที (ซับรอ 0.6 วิหลังเลื่อนเสร็จ) · ยังไม่มีสคริปต์ → ส่งกลับ /upload |
 | `src/app/privacy/page.tsx`, `src/app/terms/page.tsx` | นโยบายความเป็นส่วนตัว / ข้อตกลง (ติดต่อ hello@komoray.com) · ใช้ `src/components/LegalPage.tsx` |
 | `src/app/admin/page.tsx` + `src/app/api/admin/jobs/route.ts` | หน้า admin: ทุกคลิป + สถานะ (done/working/failed/stuck) + error · เข้าได้เฉพาะล็อกอินด้วย `ADMIN_EMAIL` (kamkamsongto@gmail.com) |
@@ -63,8 +63,8 @@
 | `src/lib/timeline.ts` | คิดไทม์ไลน์คลิปจริง + แบ่งบรรทัดซับ **ลอกกติกาจาก `render.py`** (แก้ที่หนึ่งต้องแก้อีกที่ ไม่งั้นตัวอย่างไม่ตรงคลิปจริง) · `joinThai` = `join_thai` เว้นวรรคตรงรอยไทย/ตัวเลข/อังกฤษ, หลังคำลงท้าย, ตรงที่หยุดพูด |
 | `src/lib/thai-words.ts` | ประกอบชิ้นคำไทยของ Deepgram เป็นคำจริง (`Intl.Segmenter`) · ใช้ตอน callback ถอดเสียง + แปลงคลิปเก่าใน GET `/api/analyze` (ธง `wordsJoined` ใน edit.json) |
 | `src/lib/edit.ts` | คำที่ลบ → ช่วงตัด (`wordCuts`, `allCuts`) · คำที่แก้ (`Fix`, `fixedWords`, `setFix`, `readFixes`) · `normText` (กติกาเทียบคำ) · `WordFix` |
-| `src/lib/subtitle-style.ts` | ค่าซับ size / outline / position + ค่าตั้งต้น + ขอบเขต (ใช้ทั้งหน้าเว็บและเซิร์ฟเวอร์) |
-| `src/app/api/edit/route.ts` | PUT: บันทึก `deleted`, `fixes`, `dictionaryApplied`, `style` ลง edit.json (ส่งอย่างไหนก็ได้) |
+| `src/lib/subtitle-style.ts` | ค่าซับ: size/outline/position + **look** (clean/box/highlight/big/two) + **font** (8 ตัว หรือ own) + color + logo/logoAt + **zoom** (off/cuts) · `FONTS[].height` = ความสูงฟอนต์ (libass คิดขนาดจากค่านี้ ตัวอย่างต้องหารด้วยค่านี้ ไม่งั้นตัวใหญ่กว่าคลิปจริง ~1.5 เท่า) · `readStyle` ตรวจทุกช่อง |
+| `src/app/api/edit/route.ts` | PUT: บันทึก `deleted`, `fixes`, `dictionaryApplied`, `style`, `banners` ลง edit.json (ส่งอย่างไหนก็ได้) |
 | `src/app/api/dictionary/route.ts` + `src/app/words/page.tsx` | คัมภีร์คำ: GET/POST (นับ uses)/DELETE · หน้า **My words** ค้นหา ลบ ดาวน์โหลด CSV |
 | `src/lib/proxy.ts` + `src/app/api/media/route.ts` | ไฟล์ตัวอย่าง: `proxyStatus`/`startProxy` (Modal) · `mediaUrl` ลิงก์มีลายเซ็น HMAC + หมดอายุ 3 ชม. → `/api/media` ดึงจาก R2 แบบ Range ให้ (ไม่ต้องเช็ก login ทุกก้อน) |
 | `src/lib/debug-log.ts` + `src/app/api/debug-log/route.ts` | โหมดบันทึก `&debug=1`: ป้ายแดง Recording · ส่งทุก 10 วิไป `logs/debug/` ใน R2 (ลบเองหลัง 90 วัน, หน้า admin ข้าม) |
@@ -81,7 +81,7 @@
 | `src/lib/silences.ts` | กติกาช่วงเงียบ: ช่องว่าง > 0.4 วิ, เว้นระยะรอบคำ 0.1 วิ · `trimStretchedWords`: คำยาวได้ไม่เกิน 0.2 + 0.05×ตัวอักษร วิ (Deepgram ชอบลากหางคำท้ายประโยค) |
 | `modal_app/render.py` | งานบน Modal (FFmpeg): `render` ตัดคลิปจริง · `proxy` ทำไฟล์ตัวอย่าง (540p, ภาพเต็มทุก 0.5 วิ, ไม่มี B-frame) + `proxy-audio.pcm` (mono 16-bit 24 kHz) · deploy: `python -m modal deploy modal_app/render.py` · ทดสอบ: `python -m modal run modal_app/render.py --job job.json` (ไม่มี `edit` = proxy) · endpoint: `https://kamkamsongto--komoray-render-start.us-east.modal.run` (`kind: "proxy"`) |
 
-`edit.json` = `{ source, duration, rules, cuts: [{start, end, reason}], words: [{text, start, end}], deleted?: [ลำดับคำที่ลบ], fixes?: [{from, to, text}], dictionaryApplied?: true, style?: {size, outline, position} }`
+`edit.json` = `{ source, duration, rules, cuts: [{start, end, reason}], words: [{text, start, end}], deleted?: [ลำดับคำที่ลบ], fixes?: [{from, to, text}], dictionaryApplied?: true, style?: {size, outline, position, look, font, ownFont?, color, logo, logoAt, zoom}, banners?: [{id, kind, text, sub, start, end, place}], wordsJoined?: true }`
 
 ไฟล์ในโฟลเดอร์คลิป (R2 `uploads/<id>/`): ต้นฉบับ · `analyze.json` · `edit.json` · `proxy.json` · `proxy-audio.pcm` · `proxy.mp4` (มีทั้งสองไฟล์ = proxy เสร็จ; proxy.mp4 ที่ไม่มี pcm = รุ่นเก่า สร้างใหม่เองตอนเปิด /edit) · `render.json` · `final.mp4` · `*-error.json`
 
@@ -145,6 +145,18 @@
   - **คำไทยเป็นชิ้น ๆ / ซับติดเป็นพรืด**: ต้นเหตุคือ Deepgram แบ่งไทยเป็นพยางค์/ตัวอักษร (`ผู|้|หญิง`) ช่วงห่างแทบทั้งหมด 0 วิ → **`thai-words.ts` ประกอบเป็นคำจริงด้วย `Intl.Segmenter`** ตั้งแต่ตอนถอดเสียง (คลิปเก่าแปลงตอนเปิดครั้งแรก ย้ายคำที่ลบ/แก้ไว้ตามได้ครบ ทดสอบกับ 9 คลิปไทยจริง) · ซับไทย**เว้นวรรคหลังคำลงท้าย (ครับ ค่ะ นะ…) หลัง ๆ และตรงที่หยุดพูด ≥ 0.15 วิ** · บรรทัดละไม่เกิน 16 ตัวอักษร (ไม่นับสระบนล่าง) · ตัวอย่างกับคลิปจริงตรงกัน (ต่างแค่จุดตัดบรรทัดเพราะปัดเฟรม ซึ่งเป็นมาแต่เดิม) · deploy Modal แล้ว
   - **My words แก้คำได้**: ปุ่ม Edit (PATCH `/api/dictionary`)
 - ⚠️ ระบบ Claude Code **ไม่อนุญาตให้แก้ CORS ของ R2** (เปลี่ยนการตั้งค่าที่ใช้ร่วม) จึงใช้ `/api/media` แทน · ถ้าวันหนึ่งอยากให้เบราว์เซอร์อ่าน R2 ตรง ต้องเพิ่ม `Range` ใน allowed headers เอง
+
+**31 ต.ค. คืน → 1 พ.ย. (รอบทำงานยาวอัตโนมัติ, ดึงงานล่วงหน้าวันที่ 15, 17, 18, 19, 22, 24–25, 26)** — ทุกอย่าง deploy แล้ว ทั้งเว็บและ Modal
+- **วันที่ 15 ตรวจเทคซ้ำ** (`ab50b15`, ไม่ใช้ AI): ปุ่ม 🔁 Repeated takes (N) → รายการ ▶ Listen / ✂️ Cut / ↩️ Keep / Cut all · คำในเทคซ้ำขีดเส้นใต้ส้ม · เจอเทคซ้ำจริง 2 ใน 12 คลิปของเรา (ไทย+อังกฤษ) ไม่เจอผิด · ยังไม่ได้ใช้ Claude (ไม่มีกุญแจ) ไว้ช่วยเคสยากทีหลัง
+- **วันที่ 17 สไตล์ซับ 5 แบบ + 8 ฟอนต์** (`5161798`): Clean / Box / Highlight (คำที่พูดเปลี่ยนสี) / Big / Two lines · Kanit Prompt Mitr Sarabun Chakra Petch (+ Poppins Anton Bebas Neue เฉพาะอังกฤษ) · render.py คิดเวลาซับเป็นเฟรมแบบเดียวกับตัวอย่าง → **ตัวอย่างกับคลิปจริงตัดบรรทัดตรงกัน 100%** (9 คลิป × 3 แบบ)
+- **อัปโหลดฟอนต์เอง** (`b7226ca`): .ttf/.otf 1 ตัวต่อบัญชี ทดสอบ render ด้วย Itim ผ่าน
+- **วันที่ 18 Brand Kit** (`d066c76`): หน้า `/brand` + ปุ่ม ⭐ Save as my Brand Kit ในหน้าตัดต่อ · สีประจำช่อง (ใช้กับ Highlight + ป้าย) · ชื่อช่องมุมบนซ้าย/ขวา · คลิปใหม่ใช้อัตโนมัติ
+- ⚠️ ตอนแรกจะเก็บ Brand Kit ในตาราง Supabase แต่ระบบความปลอดภัยไม่ให้ Claude สร้างตารางในฐานข้อมูลจริง → เก็บใน R2 แทน (ไม่ต้องรอโค้ช)
+- **วันที่ 19 อัปโหลดจากมือถือด้วย QR** (`1302b09`): ไม่ต้องล็อกอินบนมือถือ · ทดสอบ: ลายเซ็นปลอม/หมดอายุ 403, ไม่ใช่วิดีโอ 400, ใช้ซ้ำ 409, รับคลิปโดยไม่ล็อกอิน 401
+- **วันที่ 22 ส่วนแรก Auto zoom** (`babd179`): ซูม 112% สลับทุกจุดตัด (เหมือนมีกล้องตัวที่ 2) · ตัวอย่างวาดซูมทีละเฟรมตรงจุดตัดพอดี · คลิป 7 นาทีพร้อมซูม render ~100 วิ · ยังไม่มีหาตำแหน่งหน้า (MediaPipe) จุดซูมคือกลางจอค่อนบน
+- **วันที่ 24–25 ป้าย** (`199316a`): Price (บรรทัดเล็กใต้ราคาได้) / Call to action / Follow · ตั้งเวลา (ปุ่ม Now) ตำแหน่ง บน/กลาง/ล่าง · สีประจำช่อง · เฟดเข้าออก
+- **แก้บั๊กใหญ่ที่มีมาตั้งแต่ต้น**: ตัวอักษรในตัวอย่างใหญ่กว่าคลิปจริง ~1.5 เท่า (libass คิดขนาดจากความสูงเต็มของฟอนต์) → ตอนนี้วัดแล้วตรงกัน (37.5% vs 37.8% ของความกว้างจอ)
+- **ดาวน์โหลดซับ .srt** + หน้าอัปโหลดจำภาษาที่พูด (`457533c`) · ⚠️ ลองให้ Deepgram เดาภาษาเองแล้ว **เดาไทยไม่ได้** (คลิปไทยออกมาเป็นอังกฤษ ไม่มีคำ) จึงยังให้เลือกเอง
 
 ---
 
