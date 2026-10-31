@@ -4,6 +4,7 @@ import { currentUser } from "@/lib/supabase/server";
 // The signed-in user's personal dictionary (table word_fixes, see supabase/migrations/002):
 //   GET     every word they have fixed, newest first
 //   POST    { heard, fixed }  learn a fix (again: counts up `uses`)
+//   PATCH   { heard, fixed }  change what a word is fixed to (from the My words page)
 //   DELETE  { heard }         forget one (they put the original words back)
 // The database only lets each user see and change their own rows.
 const MAX_WORDS = 5000;
@@ -33,6 +34,18 @@ export async function POST(request: Request) {
 	const { error } = await supabase
 		.from("word_fixes")
 		.upsert({ heard, fixed, uses: (before?.uses ?? 0) + 1, updated_at: new Date().toISOString() }, { onConflict: "user_id,heard" });
+	if (error) return Response.json({ error: error.message }, { status: 500 });
+	return Response.json({ ok: true });
+}
+
+export async function PATCH(request: Request) {
+	const supabase = await signedIn();
+	if (!supabase) return Response.json({ error: "Please sign in" }, { status: 401 });
+	const body = (await request.json().catch(() => ({}))) as { heard?: unknown; fixed?: unknown };
+	const heard = normText(String(body.heard ?? ""));
+	const fixed = String(body.fixed ?? "").trim().slice(0, MAX_FIX_LENGTH);
+	if (!heard || !fixed) return Response.json({ error: "Type the word" }, { status: 400 });
+	const { error } = await supabase.from("word_fixes").update({ fixed, updated_at: new Date().toISOString() }).eq("heard", heard);
 	if (error) return Response.json({ error: error.message }, { status: 500 });
 	return Response.json({ ok: true });
 }

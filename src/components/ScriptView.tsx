@@ -24,41 +24,15 @@ type Item =
 	| { kind: "silence"; seconds: number; at: number; end: number }
 	| { kind: "break" };
 
-// Deepgram splits Thai into pieces ("พ" "ัด" "ล" "ม"). Glue the pieces back into real words using the
-// browser's Thai word splitter, keeping each piece whole. Returns the first piece index of each word.
-function thaiWordStarts(words: Word[]): Set<number> {
-	const starts = new Set<number>();
-	const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.Segmenter("th", { granularity: "word" }) : null;
-	let i = 0;
-	while (i < words.length) {
-		// A run of Thai pieces with no real pause between them.
-		let j = i + 1;
-		while (j < words.length && isThai(words[i].text) && isThai(words[j].text) && words[j].start - words[j - 1].end < 0.3) j++;
-		starts.add(i);
-		if (segmenter && j - i > 1) {
-			const offsets: number[] = [];
-			let text = "";
-			for (let k = i; k < j; k++) {
-				offsets.push(text.length);
-				text += fixThai(words[k].text);
-			}
-			const bounds = new Set([...segmenter.segment(text)].map((s) => s.index));
-			for (let k = i + 1; k < j; k++) if (bounds.has(offsets[k - i])) starts.add(k);
-		} else for (let k = i + 1; k < j; k++) starts.add(k);
-		i = j;
-	}
-	return starts;
-}
-
 // Turn the word list into what we draw: words, "silence cut here" markers, and paragraph breaks.
-// A fixed (retyped) run of words is drawn as one word with the new text.
+// A fixed (retyped) run of words is drawn as one word with the new text. Thai words arrive already
+// joined from Deepgram's pieces (lib/thai-words.ts).
 function layout(words: Word[], cuts: Cut[], fixes: Fix[]): Item[] {
 	const fixAt = new Map(fixes.map((f) => [f.from, f]));
 	const items: Item[] = [];
 	// Thai clips only get spaces where Thai, numbers and English meet (Deepgram also splits English
 	// into pieces there: "P r ice"). English clips get a space between every word.
 	const thaiClip = words.filter((w) => isThai(w.text)).length > words.length / 2;
-	const starts = thaiClip ? thaiWordStarts(words) : null;
 	const silenceBetween = (from: number, to: number) => {
 		const inside = cuts.filter((c) => c.start >= from - 0.01 && c.end <= to + 0.01);
 		return inside.length
@@ -71,13 +45,6 @@ function layout(words: Word[], cuts: Cut[], fixes: Fix[]): Item[] {
 		const prev = words[i - 1];
 		const fix = fixAt.get(i);
 		const silence = silenceBetween(prev ? prev.end : 0, w.start);
-		const last = items[items.length - 1];
-		// Glue this piece onto the word before it (same Thai word, nothing in between).
-		if (!fix && starts && !starts.has(i) && !silence && last?.kind === "word" && !last.fixed) {
-			last.text += fixThai(w.text);
-			last.last = i;
-			continue;
-		}
 		if (prev && w.start - prev.end >= PARAGRAPH_GAP) items.push({ kind: "break" });
 		if (silence) items.push({ kind: "silence", ...silence });
 		const space = Boolean(prev) && (thaiClip ? script(prev.text) !== script(fix?.text ?? w.text) : true);

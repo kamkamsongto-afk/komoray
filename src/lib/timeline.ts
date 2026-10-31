@@ -10,7 +10,9 @@ export const WIDTH = 1080;
 export const HEIGHT = 1920;
 
 const WORDS_PER_LINE = 3;
-const THAI_TOKENS_PER_LINE = 7;
+const THAI_WORDS_PER_LINE = 6;
+const THAI_MAX_LETTERS = 16; // letters on the line, not counting marks above and below
+const THAI_PAUSE = 0.15; // a pause this long inside a Thai line gets a space
 const MAX_LINE_SECONDS = 1.6;
 const THAI_MAX_LINE_SECONDS = 2.2;
 const LINE_BREAK_GAP = 0.5;
@@ -56,26 +58,33 @@ const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
 const charKind = (ch: string) => (/[฀-๿]/.test(ch) ? "thai" : /\d/.test(ch) ? "number" : /[A-Za-z]/.test(ch) ? "latin" : null);
 
-// Thai has no spaces between words, so a Thai line is joined without them, except where Thai,
-// numbers and English letters meet ("5 นาที", "ราคา Komoray"). Same as join_thai in render.py.
-function joinThai(texts: string[]) {
+// Polite endings: a Thai sentence usually ends on one, so a space goes after it ("นะครับ ได้ยินไหม").
+const THAI_ENDINGS = new Set(["ครับ", "คับ", "ค่ะ", "คะ", "ค่า", "นะ", "จ้ะ", "จ้า", "ฮะ", "ฮับ", "เนอะ", "นะครับ", "นะคะ"]);
+const THAI_MARKS = /[ัิ-ฺ็-๎]/g;
+const thaiLetters = (text: string) => text.replace(THAI_MARKS, "").length;
+
+// Thai doesn't put spaces between words, only between phrases. A Thai line gets one where Thai,
+// numbers and English letters meet ("5 นาที", "ราคา Komoray"), after a polite ending or ๆ, and
+// where the speaker pauses. Same as join_thai in render.py.
+function joinThai(words: { text: string; start: number; end: number }[]) {
 	let out = "";
-	for (const t of texts) {
-		if (out && t) {
+	words.forEach((w, i) => {
+		const prev = words[i - 1];
+		if (prev && out && w.text) {
 			const a = charKind(out[out.length - 1]);
-			const b = charKind(t[0]);
-			if (a && b && a !== b) out += " ";
+			const b = charKind(w.text[0]);
+			const ending = (THAI_ENDINGS.has(prev.text) && !THAI_ENDINGS.has(w.text)) || prev.text.endsWith("ๆ");
+			if ((a && b && a !== b) || ending || w.start - prev.end >= THAI_PAUSE * FPS) out += " ";
 		}
-		out += t;
-	}
+		out += w.text;
+	});
 	return out;
 }
 
 // Short subtitle lines on the output timeline, grouped the same way as the final video.
 export function subtitleLines(words: Word[], segments: Segment[]): Line[] {
 	const thai = words.some((w) => isThai(w.text));
-	const join = (texts: string[]) => (thai ? joinThai(texts) : texts.join(" "));
-	const perLine = thai ? THAI_TOKENS_PER_LINE : WORDS_PER_LINE;
+	const perLine = thai ? THAI_WORDS_PER_LINE : WORDS_PER_LINE;
 	const maxFrames = (thai ? THAI_MAX_LINE_SECONDS : MAX_LINE_SECONDS) * FPS;
 	const gapFrames = LINE_BREAK_GAP * FPS;
 
@@ -89,15 +98,21 @@ export function subtitleLines(words: Word[], segments: Segment[]): Line[] {
 
 	const groups: (typeof placed)[] = [];
 	let current: typeof placed = [];
+	let letters = 0;
 	for (const w of placed) {
 		if (
 			current.length &&
-			(current.length >= perLine || w.start - current[current.length - 1].end > gapFrames || w.end - current[0].start > maxFrames)
+			(current.length >= perLine ||
+				w.start - current[current.length - 1].end > gapFrames ||
+				w.end - current[0].start > maxFrames ||
+				(thai && letters + thaiLetters(w.text) > THAI_MAX_LETTERS))
 		) {
 			groups.push(current);
 			current = [];
+			letters = 0;
 		}
 		current.push(w);
+		letters += thaiLetters(w.text);
 	}
 	if (current.length) groups.push(current);
 
@@ -106,6 +121,6 @@ export function subtitleLines(words: Word[], segments: Segment[]): Line[] {
 		// Hold each line until the next one starts (if close), so subtitles don't flicker.
 		const next = groups[i + 1];
 		if (next && next[0].start - to < gapFrames) to = next[0].start;
-		return { from: line[0].start, to, text: join(line.map((w) => w.text)) };
+		return { from: line[0].start, to, text: thai ? joinThai(line) : line.map((w) => w.text).join(" ") };
 	});
 }

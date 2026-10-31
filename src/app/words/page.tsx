@@ -12,6 +12,7 @@ export default function WordsPage() {
 	const [words, setWords] = useState<Word[] | null>(null);
 	const [error, setError] = useState("");
 	const [filter, setFilter] = useState("");
+	const [editing, setEditing] = useState<{ heard: string; text: string } | null>(null);
 
 	useEffect(() => {
 		if (!user) return;
@@ -20,6 +21,15 @@ export default function WordsPage() {
 			.then((data) => (data.words ? setWords(data.words) : setError(data.error ?? "Could not load your words")))
 			.catch(() => setError("Could not load your words"));
 	}, [user]);
+
+	async function change(heard: string, fixed: string) {
+		setEditing(null);
+		const clean = fixed.trim();
+		if (!clean) return;
+		setWords((list) => list?.map((w) => (w.heard === heard ? { ...w, fixed: clean } : w)) ?? null);
+		const res = await fetch("/api/dictionary", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ heard, fixed: clean }) });
+		if (!res.ok) setError("Could not save that word. Please reload and try again.");
+	}
 
 	async function forget(heard: string) {
 		setWords((list) => list?.filter((w) => w.heard !== heard) ?? null);
@@ -81,12 +91,47 @@ export default function WordsPage() {
 					<ul className="flex flex-col divide-y divide-foreground/10 rounded-xl border border-foreground/15">
 						{shown.map((w) => (
 							<li key={w.heard} className="flex items-center gap-3 px-4 py-2.5">
-								<span className="min-w-0 flex-1 break-words">
-									<span className="text-foreground/50 line-through">{w.heard}</span> → <span className="font-medium">{w.fixed}</span>
-								</span>
-								<span className="shrink-0 text-xs text-foreground/50" title="Times you made this fix">
-									×{w.uses}
-								</span>
+								{editing?.heard === w.heard ? (
+									<form
+										className="flex min-w-0 flex-1 items-center gap-2"
+										onSubmit={(e) => {
+											e.preventDefault();
+											void change(w.heard, editing.text);
+										}}
+									>
+										<span className="shrink-0 text-foreground/50 line-through">{w.heard}</span> →
+										<input
+											autoFocus
+											value={editing.text}
+											onChange={(e) => setEditing({ heard: w.heard, text: e.target.value })}
+											onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
+											aria-label={`Fix for ${w.heard}`}
+											className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1"
+										/>
+										<button type="submit" className="shrink-0 rounded-md bg-foreground px-2 py-1 text-sm text-background">
+											Save
+										</button>
+										<button type="button" onClick={() => setEditing(null)} className="shrink-0 rounded-md px-2 py-1 text-sm text-foreground/60">
+											Cancel
+										</button>
+									</form>
+								) : (
+									<>
+										<span className="min-w-0 flex-1 break-words">
+											<span className="text-foreground/50 line-through">{w.heard}</span> → <span className="font-medium">{w.fixed}</span>
+										</span>
+										<span className="shrink-0 text-xs text-foreground/50" title="Times you made this fix">
+											×{w.uses}
+										</span>
+										<button
+											onClick={() => setEditing({ heard: w.heard, text: w.fixed })}
+											className="shrink-0 rounded-md px-2 py-1 text-sm text-foreground/60 hover:bg-foreground/5"
+											aria-label={`Edit ${w.fixed}`}
+										>
+											Edit
+										</button>
+									</>
+								)}
 								<button
 									onClick={() => void forget(w.heard)}
 									className="shrink-0 rounded-md px-2 py-1 text-sm text-foreground/60 hover:bg-red-500/10 hover:text-red-600"

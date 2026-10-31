@@ -3,6 +3,7 @@ import { ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
 import { mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { mergeThaiEdit } from "@/lib/thai-words";
 import { startTranscription } from "@/lib/transcribe";
 
 // Finding silences lives in the video's folder:
@@ -12,6 +13,7 @@ import { startTranscription } from "@/lib/transcribe";
 const LINK_SECONDS = 3 * 3600; // Deepgram may queue long videos for a while before downloading
 
 type AnalyzeEnv = { DEEPGRAM_API_KEY: string; RENDER_TOKEN: string; RENDER_URL: string };
+type EditFile = Parameters<typeof mergeThaiEdit>[0] & { wordsJoined?: boolean };
 
 // Start finding the silences. Returns right away; the page then polls GET below.
 export async function POST(request: Request) {
@@ -52,8 +54,13 @@ export async function GET(request: Request) {
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
 	const editKey = siblingKey(key, "edit.json");
-	const edit = await getJson<object>(editKey);
+	let edit = await getJson<EditFile>(editKey);
 	if (edit) {
+		// Thai scripts from before words were joined (lib/thai-words.ts) are joined the first time they open.
+		if (!edit.wordsJoined && Array.isArray(edit.words)) {
+			edit = { ...(mergeThaiEdit(edit) ?? edit), wordsJoined: true };
+			await putObject(editKey, JSON.stringify(edit, null, 2), "application/json");
+		}
 		// videoUrl: what the Script view plays next to the transcript. The preview copy when it is
 		// ready, else the original. Videos from before preview copies get one the first time they open.
 		const env = getCloudflareContext().env as unknown as AnalyzeEnv;

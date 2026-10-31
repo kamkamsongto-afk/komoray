@@ -14,6 +14,7 @@ Deploy:  python -m modal deploy modal_app/render.py
 import hmac
 import json
 import os
+import re
 import subprocess
 import tempfile
 import urllib.request
@@ -46,7 +47,9 @@ image = (
 
 WIDTH, HEIGHT, FPS = 1080, 1920, 30
 WORDS_PER_LINE = 3
-THAI_TOKENS_PER_LINE = 7  # Deepgram splits Thai into syllables, so a line needs more of them
+THAI_WORDS_PER_LINE = 6
+THAI_MAX_LETTERS = 16  # letters on a Thai line, not counting marks above and below
+THAI_PAUSE = 0.15  # a pause this long inside a Thai line gets a space
 MAX_LINE_SECONDS = 1.6
 THAI_MAX_LINE_SECONDS = 2.2
 LINE_BREAK_GAP = 0.5  # a pause this long starts a new subtitle line
@@ -103,14 +106,27 @@ def char_kind(ch: str) -> str | None:
     return None
 
 
-def join_thai(texts: list[str]) -> str:
-    """Thai has no spaces between words, except where Thai, numbers and English meet ("5 นาที").
+# Polite endings: a Thai sentence usually ends on one, so a space goes after it.
+THAI_ENDINGS = {"ครับ", "คับ", "ค่ะ", "คะ", "ค่า", "นะ", "จ้ะ", "จ้า", "ฮะ", "ฮับ", "เนอะ", "นะครับ", "นะคะ"}
+THAI_MARKS = re.compile("[ัิ-ฺ็-๎]")
+
+
+def thai_letters(text: str) -> int:
+    return len(THAI_MARKS.sub("", text))
+
+
+def join_thai(words: list[dict]) -> str:
+    """Thai doesn't put spaces between words, only between phrases. A Thai line gets one where Thai,
+    numbers and English meet ("5 นาที"), after a polite ending or ๆ, and where the speaker pauses.
     Same as joinThai in src/lib/timeline.ts."""
     out = ""
-    for t in texts:
-        if out and t:
+    for i, w in enumerate(words):
+        t = w["text"]
+        if i and out and t:
+            prev = words[i - 1]
             a, b = char_kind(out[-1]), char_kind(t[0])
-            if a and b and a != b:
+            ending = (prev["text"] in THAI_ENDINGS and t not in THAI_ENDINGS) or prev["text"].endswith("ๆ")
+            if (a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE:
                 out += " "
         out += t
     return out
@@ -128,7 +144,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     outline = int(style["outline"])
     margin_v = int(HEIGHT * float(style["position"]))
     joiner = "" if thai else " "
-    per_line = THAI_TOKENS_PER_LINE if thai else WORDS_PER_LINE
+    per_line = THAI_WORDS_PER_LINE if thai else WORDS_PER_LINE
     max_seconds = THAI_MAX_LINE_SECONDS if thai else MAX_LINE_SECONDS
 
     # Move every kept word onto the new (cut) timeline.
@@ -141,16 +157,18 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half})
 
     # Group words into short lines.
-    lines, current = [], []
+    lines, current, letters = [], [], 0
     for w in placed:
         if current and (
             len(current) >= per_line
             or w["start"] - current[-1]["end"] > LINE_BREAK_GAP
             or w["end"] - current[0]["start"] > max_seconds
+            or (thai and letters + thai_letters(w["text"]) > THAI_MAX_LETTERS)
         ):
             lines.append(current)
-            current = []
+            current, letters = [], 0
         current.append(w)
+        letters += thai_letters(w["text"])
     if current:
         lines.append(current)
 
@@ -161,8 +179,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         end = line[-1]["end"]
         if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < LINE_BREAK_GAP:
             end = lines[i + 1][0]["start"]
-        texts = [w["text"] for w in line]
-        text = (join_thai(texts) if thai else joiner.join(texts)).replace("\\", "").replace("{", "(").replace("}", ")")
+        text = (join_thai(line) if thai else joiner.join(w["text"] for w in line)).replace("\\", "").replace("{", "(").replace("}", ")")
         events.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{text}")
 
     return "\n".join(

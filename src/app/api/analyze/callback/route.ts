@@ -9,6 +9,7 @@ import {
 	WORD_BASE_SECONDS,
 	WORD_SECONDS_PER_LETTER,
 } from "@/lib/silences";
+import { mergeThaiWords } from "@/lib/thai-words";
 import { readTranscript } from "@/lib/transcribe";
 
 // Deepgram POSTs the transcript here when it is done. We turn it into edit.json.
@@ -35,7 +36,9 @@ export async function POST(request: Request) {
 				wordSecondsPerLetter: WORD_SECONDS_PER_LETTER,
 			},
 			cuts: findSilences({ duration: transcript.duration, words }),
-			words,
+			// Deepgram's Thai comes in pieces of words; the script works on whole words.
+			words: mergeThaiWords(words),
+			wordsJoined: true,
 		};
 		await putObject(siblingKey(key, "edit.json"), JSON.stringify(edit, null, 2), "application/json");
 	} catch (err) {

@@ -46,6 +46,7 @@ export class StudioEngine {
 	private pending: { out: number | null; generation: number }[] = []; // sent to the decoder, in order
 	private ready: Ready[] = [];
 	private shownFrame: VideoFrame | null = null;
+	private sizeLogged = false;
 	private pumping = false;
 
 	private ctx: AudioContext | null = null;
@@ -439,22 +440,21 @@ export class StudioEngine {
 			this.canvas.width = w;
 			this.canvas.height = h;
 		}
-		// Fill the 9:16 box, cropping the middle, like the final video does.
+		// Fill the 9:16 box, cropping the middle, like the final video does. The whole frame is drawn
+		// scaled and centred and the canvas edge cuts off the rest: Safari squashes the frame instead
+		// of cropping when drawImage is given a source rectangle.
 		const fw = frame.displayWidth;
 		const fh = frame.displayHeight;
-		const target = this.canvas.width / this.canvas.height;
-		let sx = 0;
-		let sy = 0;
-		let sw = fw;
-		let sh = fh;
-		if (fw / fh > target) {
-			sw = fh * target;
-			sx = (fw - sw) / 2;
-		} else {
-			sh = fw / target;
-			sy = (fh - sh) / 2;
+		const cw = this.canvas.width;
+		const ch = this.canvas.height;
+		const scale = Math.max(cw / fw, ch / fh);
+		const dw = fw * scale;
+		const dh = fh * scale;
+		if (!this.sizeLogged) {
+			this.sizeLogged = true;
+			this.events.log("size", { fw, fh, coded: `${frame.codedWidth}x${frame.codedHeight}`, cw, ch });
 		}
-		ctx2d.drawImage(frame, sx, sy, sw, sh, 0, 0, this.canvas.width, this.canvas.height);
+		ctx2d.drawImage(frame, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
 		this.shownFrame?.close();
 		this.shownFrame = frame;
 		this.lastShownOut = this.now();
