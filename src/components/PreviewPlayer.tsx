@@ -24,11 +24,15 @@ type Props = {
 // Kept pieces in seconds: play source [start, end) at output time `out`.
 type Piece = { start: number; end: number; out: number };
 
+const LEAD = 0.5;
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 // The final video, played live: the kept pieces back to back, cropped to 9:16, with subtitles.
-// Two <video> elements take turns: while one plays a piece, the other waits at the start of the
-// next piece, so every cut is an instant swap instead of a seek (which would stutter).
+// Two <video> elements take turns: while one plays a piece, the other waits just before the next
+// piece, so every cut is a swap instead of a seek (which would stutter). The waiting one starts
+// LEAD seconds early, muted and underneath, and is nudged faster or slower to hit the cut on time:
+// Safari takes a moment to start a video, which showed as a freeze and a black flash at each cut.
 export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPlayer(
 	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange },
 	ref,
@@ -47,6 +51,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	const [active, setActive] = useState(0); // which <video> is showing
 	const activeRef = useRef(0);
 	const pieceRef = useRef(0); // which piece is playing
+	const cutRef = useRef(false); // shown video stopped at a cut, the other one not there yet
 	const [playing, setPlaying] = useState(false);
 	const [outTime, setOutTime] = useState(0);
 	const [scale, setScale] = useState(0.3);
@@ -64,12 +69,22 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		return () => observer.disconnect();
 	}, []);
 
-	// Park the waiting <video> at the start of the piece after `index`.
+	// Only the video on screen is heard (set directly, not through React, so it changes on the exact frame).
+	useEffect(() => {
+		if (videoA.current) videoA.current.muted = false;
+		if (videoB.current) videoB.current.muted = true;
+	}, []);
+
+	// Stop the waiting <video> and park it LEAD seconds before the piece after `index`.
 	const prepareNext = useCallback(
 		(index: number) => {
 			const video = waiting();
 			const next = pieces[index + 1];
-			if (video && next && Math.abs(video.currentTime - next.start) > 0.02) video.currentTime = next.start;
+			if (!video) return;
+			if (!video.paused) video.pause();
+			video.playbackRate = 1;
+			const at = next ? Math.max(0, next.start - LEAD) : 0;
+			if (next && Math.abs(video.currentTime - at) > 0.02) video.currentTime = at;
 		},
 		[pieces],
 	);
@@ -78,6 +93,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		(t: number) => {
 			const video = shown();
 			if (!video || !pieces.length) return;
+			cutRef.current = false;
 			let i = pieces.findIndex((p) => t < p.end - 0.01);
 			if (i === -1) i = pieces.length - 1;
 			pieceRef.current = i;
@@ -97,6 +113,14 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		if (pieceRef.current === pieces.length - 1 && video.currentTime >= last.end - 0.05) seek(pieces[0].start);
 		void video.play();
 	}, [pieces, last, seek]);
+
+	// Both videos, since the waiting one may already be running ahead of a cut.
+	const pause = useCallback(() => {
+		cutRef.current = false;
+		shown()?.pause();
+		prepareNext(pieceRef.current);
+		setPlaying(false);
+	}, [prepareNext]);
 
 	useImperativeHandle(ref, () => ({ seek, play }), [seek, play]);
 
@@ -118,22 +142,34 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		let frame = 0;
 		const tick = () => {
 			const video = shown();
+			const other = waiting();
 			const piece = pieces[pieceRef.current];
+			const next = pieces[pieceRef.current + 1];
 			if (video && piece) {
-				if (video.currentTime >= piece.end - 0.02) {
-					const next = pieces[pieceRef.current + 1];
-					const other = waiting();
-					if (!next || !other) {
-						video.pause();
-					} else {
-						if (Math.abs(other.currentTime - next.start) > 0.05) other.currentTime = next.start;
-						void other.play();
-						activeRef.current = 1 - activeRef.current;
-						setActive(activeRef.current);
-						video.pause();
-						pieceRef.current += 1;
-						prepareNext(pieceRef.current);
+				const left = piece.end - video.currentTime; // seconds of this piece still to show
+				if (next && other) {
+					if (left <= LEAD && other.paused) other.play().catch(() => {});
+					if (!other.paused) {
+						// Where it should be so it reaches the next piece exactly when this one ends.
+						const behind = next.start - Math.max(0, left) - other.currentTime;
+						other.playbackRate = Math.min(2, Math.max(0.5, 1 + behind * 4));
 					}
+				}
+				if (left <= 0.02 && !video.paused) {
+					// Hold the last frame on screen (not black) until the other video arrives.
+					cutRef.current = !!next;
+					video.pause();
+				}
+				if (next && other && !other.paused && other.currentTime >= next.start - 0.01) {
+					other.playbackRate = 1;
+					other.muted = false;
+					video.muted = true;
+					activeRef.current = 1 - activeRef.current;
+					setActive(activeRef.current);
+					if (!video.paused) video.pause();
+					cutRef.current = false;
+					pieceRef.current += 1;
+					prepareNext(pieceRef.current);
 				}
 				const now = shown()!;
 				const p = pieces[pieceRef.current];
@@ -147,7 +183,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	}, [playing, pieces, prepareNext, onTime]);
 
 	const line = lines.find((l) => outTime * FPS >= l.from && outTime * FPS < l.to);
-	const toggle = () => (playing ? shown()?.pause() : play());
+	const toggle = () => (playing ? pause() : play());
 
 	// Dragging the bar: final-video time → source time.
 	function scrub(out: number) {
@@ -171,17 +207,17 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 						src={src}
 						playsInline
 						preload="auto"
-						muted={i !== active}
 						// The hidden video pauses on every swap; only the one on screen speaks for the player.
 						onPlay={() => i === activeRef.current && setPlaying(true)}
-						onPause={() => i === activeRef.current && setPlaying(false)}
+						onPause={() => i === activeRef.current && !cutRef.current && setPlaying(false)}
+						// Both stay drawn (Safari may not paint a hidden video), the one on screen on top.
 						className="absolute inset-0 h-full w-full object-cover"
-						style={{ visibility: i === active ? "visible" : "hidden" }}
+						style={{ zIndex: i === active ? 1 : 0 }}
 					/>
 				))}
 				<div
 					className="pointer-events-none absolute top-0 left-0"
-					style={{ width: WIDTH, height: HEIGHT, transform: `scale(${scale})`, transformOrigin: "top left" }}
+					style={{ width: WIDTH, height: HEIGHT, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}
 				>
 					{(line || !playing) && (
 						// Drag the subtitle up or down to move it. While paused with nothing being said,
@@ -244,7 +280,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 					</div>
 				</div>
 				{!playing && (
-					<span className="pointer-events-none absolute inset-0 flex items-center justify-center text-5xl text-white/90 drop-shadow">▶</span>
+					<span className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center text-5xl text-white/90 drop-shadow">▶</span>
 				)}
 			</div>
 			<div className="flex items-center gap-2 text-xs text-foreground/70">
