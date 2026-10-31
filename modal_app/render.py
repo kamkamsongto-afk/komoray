@@ -93,6 +93,29 @@ def fix_thai(text: str) -> str:
     return text.replace("ํา", "ำ")
 
 
+def char_kind(ch: str) -> str | None:
+    if "฀" <= ch <= "๿":
+        return "thai"
+    if ch.isdigit():
+        return "number"
+    if ch.isascii() and ch.isalpha():
+        return "latin"
+    return None
+
+
+def join_thai(texts: list[str]) -> str:
+    """Thai has no spaces between words, except where Thai, numbers and English meet ("5 นาที").
+    Same as joinThai in src/lib/timeline.ts."""
+    out = ""
+    for t in texts:
+        if out and t:
+            a, b = char_kind(out[-1]), char_kind(t[0])
+            if a and b and a != b:
+                out += " "
+        out += t
+    return out
+
+
 def ass_time(t: float) -> str:
     cs = int(round(t * 100))
     return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
@@ -138,7 +161,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         end = line[-1]["end"]
         if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < LINE_BREAK_GAP:
             end = lines[i + 1][0]["start"]
-        text = joiner.join(w["text"] for w in line).replace("\\", "").replace("{", "(").replace("}", ")")
+        texts = [w["text"] for w in line]
+        text = (join_thai(texts) if thai else joiner.join(texts)).replace("\\", "").replace("{", "(").replace("}", ")")
         events.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{text}")
 
     return "\n".join(

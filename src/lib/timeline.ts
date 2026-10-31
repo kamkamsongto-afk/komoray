@@ -54,10 +54,27 @@ function placeFrame(t: number, segments: Segment[]): number | null {
 const isThai = (text: string) => /[฀-๿]/.test(text);
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
+const charKind = (ch: string) => (/[฀-๿]/.test(ch) ? "thai" : /\d/.test(ch) ? "number" : /[A-Za-z]/.test(ch) ? "latin" : null);
+
+// Thai has no spaces between words, so a Thai line is joined without them, except where Thai,
+// numbers and English letters meet ("5 นาที", "ราคา Komoray"). Same as join_thai in render.py.
+function joinThai(texts: string[]) {
+	let out = "";
+	for (const t of texts) {
+		if (out && t) {
+			const a = charKind(out[out.length - 1]);
+			const b = charKind(t[0]);
+			if (a && b && a !== b) out += " ";
+		}
+		out += t;
+	}
+	return out;
+}
+
 // Short subtitle lines on the output timeline, grouped the same way as the final video.
 export function subtitleLines(words: Word[], segments: Segment[]): Line[] {
 	const thai = words.some((w) => isThai(w.text));
-	const joiner = thai ? "" : " ";
+	const join = (texts: string[]) => (thai ? joinThai(texts) : texts.join(" "));
 	const perLine = thai ? THAI_TOKENS_PER_LINE : WORDS_PER_LINE;
 	const maxFrames = (thai ? THAI_MAX_LINE_SECONDS : MAX_LINE_SECONDS) * FPS;
 	const gapFrames = LINE_BREAK_GAP * FPS;
@@ -89,6 +106,6 @@ export function subtitleLines(words: Word[], segments: Segment[]): Line[] {
 		// Hold each line until the next one starts (if close), so subtitles don't flicker.
 		const next = groups[i + 1];
 		if (next && next[0].start - to < gapFrames) to = next[0].start;
-		return { from: line[0].start, to, text: line.map((w) => w.text).join(joiner) };
+		return { from: line[0].start, to, text: join(line.map((w) => w.text)) };
 	});
 }
