@@ -7,7 +7,7 @@ const CONTACT = "hello@komoray.com";
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" updated="October 30, 2026">
+		<LegalPage title="Privacy Policy" updated="October 31, 2026">
 			<p>
 				Komoray is an AI studio for talking-head creators. You upload a video, we cut the silences, add subtitles and give you
 				back a finished video. This page explains what we collect to do that, who helps us, and how long we keep it.
@@ -28,15 +28,25 @@ export default function PrivacyPage() {
 					We never see your Google password.
 				</li>
 				<li>
-					<strong>Your videos:</strong> the files you upload and the videos we make from them.
+					<strong>Your videos:</strong> the files you upload, a smaller copy we make so the editor can play them smoothly, and the
+					videos we make from them.
 				</li>
 				<li>
 					<strong>Transcripts:</strong> the words spoken in your video and when each word is said. We need this to find the
 					silences and to make subtitles.
 				</li>
 				<li>
+					<strong>Your words (My words):</strong> when you fix a word in a script, we remember what the transcript said and what
+					you typed, so we can fix it for you in your next videos. Only you can see your words. We never share them or use them to
+					train anything.
+				</li>
+				<li>
 					<strong>Error reports:</strong> if something breaks, we record what went wrong, the file name and size, and your
 					browser type, so we can fix it.
+				</li>
+				<li>
+					<strong>Troubleshooting recordings:</strong> only if we send you a special troubleshooting link, the editor records how
+					the preview plays (timings, not your video or sound), so we can fix playback problems.
 				</li>
 			</ul>
 			<p>We do not use advertising trackers. Your browser stores a few small settings for Komoray, such as whether you want desktop notifications.</p>
@@ -69,9 +79,13 @@ export default function PrivacyPage() {
 
 			<h2>How long we keep it</h2>
 			<ul>
-				<li>During the beta, uploaded videos, transcripts and finished videos are deleted automatically after 14 days.</li>
-				<li>Error reports are deleted after 90 days.</li>
-				<li>Your account stays until you ask us to delete it.</li>
+				<li>During the beta, uploaded videos, their smaller copies, transcripts and finished videos are deleted automatically after 14 days.</li>
+				<li>Error reports and troubleshooting recordings are deleted after 90 days.</li>
+				<li>
+					Your words stay with your account, so they keep working on your next videos. You can see, download and remove them at any
+					time on the My words page.
+				</li>
+				<li>Your account stays until you ask us to delete it. Deleting your account also deletes your words.</li>
 			</ul>
 			<p>When the beta ends, this may change. If it does, we will update this page and email you before the change.</p>
 

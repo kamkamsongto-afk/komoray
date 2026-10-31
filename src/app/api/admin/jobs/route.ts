@@ -76,7 +76,11 @@ export async function GET() {
 		}),
 	);
 
-	const recentLogs = logs.sort((a, b) => b.key.localeCompare(a.key)).slice(0, SHOW_REPORTS);
+	// logs/debug/ holds the preview's flight recordings (?debug=1), not error reports.
+	const recentLogs = logs
+		.filter((log) => !log.key.startsWith("logs/debug/"))
+		.sort((a, b) => b.key.localeCompare(a.key))
+		.slice(0, SHOW_REPORTS);
 	const reports = (await Promise.all(recentLogs.map((log) => getJson<Record<string, unknown>>(log.key).catch(() => null)))).filter(Boolean);
 
 	return Response.json({ jobs: jobList, reports });

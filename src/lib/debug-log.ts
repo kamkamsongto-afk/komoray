@@ -1,7 +1,7 @@
 // Flight recorder for the editor's preview, on with ?debug=1 in the page address.
 // Problems that only happen on someone's iPad can't be watched from here, so this writes down
-// what both <video> elements do (events, positions, our own decisions) and sends it to
-// debug/ in R2 every few seconds, where it can be read afterwards. Off: every call does nothing.
+// what the player does (events, positions, our own decisions) and sends it to logs/debug/ in R2
+// every few seconds, where it can be read afterwards. Off: every call does nothing.
 export type DebugEvent = { t: number; what: string; [detail: string]: unknown };
 
 const SEND_EVERY_MS = 10000;

@@ -1,7 +1,8 @@
 import { putObject } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
 
-// Saves one batch from the preview's flight recorder (src/lib/debug-log.ts) to debug/ in R2.
+// Saves one batch from the preview's flight recorder (src/lib/debug-log.ts) to logs/debug/ in R2
+// (under logs/ so R2's rule deletes it after 90 days; the admin page skips these).
 // Signed-in users only, and capped in size, since anyone can open a page with ?debug=1.
 const MAX_BYTES = 512 * 1024;
 
@@ -19,6 +20,6 @@ export async function POST(request: Request) {
 	const session = String(body.session ?? "none").replace(/[^a-z0-9-]/gi, "").slice(0, 16);
 	const part = String(Number(body.part) || 0).padStart(3, "0");
 	const record = { email: user.email, at: new Date().toISOString(), browser: request.headers.get("user-agent"), ...body };
-	await putObject(`debug/${record.at.slice(0, 10)}-${session}-${part}.json`, JSON.stringify(record), "application/json");
+	await putObject(`logs/debug/${record.at.slice(0, 10)}-${session}-${part}.json`, JSON.stringify(record), "application/json");
 	return Response.json({ ok: true });
 }
