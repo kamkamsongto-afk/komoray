@@ -62,6 +62,9 @@ export function AccountBar({ user }: { user: User }) {
 				<Link href="/projects" className="hover:text-foreground">
 					My projects
 				</Link>
+				<Link href="/words" className="hover:text-foreground">
+					My words
+				</Link>
 			</div>
 			<div className="flex items-center gap-3">
 				<span className="max-w-[12rem] truncate">{user.email}</span>

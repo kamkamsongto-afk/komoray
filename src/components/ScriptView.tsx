@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { allCuts, type Fix, fixedWords, setFix } from "@/lib/edit";
+import { allCuts, type Fix, fixedWords, normText, setFix, TRAIL, type WordFix } from "@/lib/edit";
 import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
@@ -96,13 +96,7 @@ function layout(words: Word[], cuts: Cut[], fixes: Fix[]): Item[] {
 type WordActions = { click: (index: number) => void; edit: (from: number, to: number) => void };
 type WordItem = Extract<Item, { kind: "word" }>;
 
-// For finding words: ignore capitals, spacing and punctuation at the ends ("People," = "people").
-const TRAIL = /[.,!?;:…]+$/;
-const norm = (text: string) =>
-	text
-		.toLowerCase()
-		.replace(/\s+/g, " ")
-		.replace(/^[\s"'“”‘’([]+|[\s"'“”‘’)\].,!?;:…]+$/g, "");
+const norm = normText;
 
 // Every run of drawn words that reads `query`. Runs can span several words ("the best", or a Thai
 // phrase Deepgram split into pieces). trail = punctuation after the run, kept when replacing.
@@ -185,12 +179,31 @@ type Props = {
 	onChange: (deleted: number[]) => void;
 	fixes: Fix[];
 	onFixesChange: (fixes: Fix[]) => void;
+	// Personal dictionary: apply it once (then onDictionaryApplied), and learn from every fix made here.
+	dictionary?: WordFix[] | null;
+	onDictionaryApplied?: (count: number, before: Fix[]) => void;
+	onLearn?: (heard: string, fixed: string | null) => void; // null: forget (original words put back)
 	subtitle: SubtitleStyle;
 	onSubtitleChange: (style: SubtitleStyle) => void;
 };
 
 // The editor: script on the left, the video on the right (stacked on phones, video first).
-export function ScriptView({ videoUrl, studio, duration, words, cuts, deleted, onChange, fixes, onFixesChange, subtitle, onSubtitleChange }: Props) {
+export function ScriptView({
+	videoUrl,
+	studio,
+	duration,
+	words,
+	cuts,
+	deleted,
+	onChange,
+	fixes,
+	onFixesChange,
+	dictionary,
+	onDictionaryApplied,
+	onLearn,
+	subtitle,
+	onSubtitleChange,
+}: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [current, setCurrent] = useState(-1);
@@ -271,21 +284,53 @@ export function ScriptView({ videoUrl, studio, duration, words, cuts, deleted, o
 		setEditing({ from: start, to: end, text, before: text, original: originalText(start, end) });
 	}
 
+	// Remember a fix in the personal dictionary, keyed by what speech-to-text wrote.
+	function learn(original: string, text: string) {
+		const fixed = text.trim();
+		onLearn?.(original, fixed && norm(fixed) !== norm(original) ? fixed : null);
+	}
+
 	function saveEdit(text: string) {
 		if (!editing) return;
 		onFixesChange(setFix(fixes, editing.from, editing.to, text, editing.original));
+		learn(editing.original, text);
 		setEditing(null);
 	}
 
-	// Put `replacement` everywhere the script reads `query` (keeping a comma or full stop after it).
-	function replaceAll(query: string, replacement: string) {
-		let next = fixes;
-		for (const m of findMatches(wordItems, query)) {
+	// Put `replacement` on every run of words in `matches` (keeping a comma or full stop after it).
+	function fixMatches(current: Fix[], matches: ReturnType<typeof findMatches>, replacement: string) {
+		let next = current;
+		for (const m of matches) {
 			const text = replacement.trim() && m.trail && !TRAIL.test(replacement.trim()) ? replacement.trim() + m.trail : replacement;
 			next = setFix(next, m.from, m.to, text, originalText(m.from, m.to));
 		}
-		onFixesChange(next);
+		return next;
 	}
+
+	// Everywhere the script reads `query`.
+	function replaceAll(query: string, replacement: string) {
+		const matches = findMatches(wordItems, query);
+		onFixesChange(fixMatches(fixes, matches, replacement));
+		for (const original of new Set(matches.map((m) => originalText(m.from, m.to)))) learn(original, replacement);
+	}
+
+	// Personal dictionary, once per video: fix every word it knows that isn't fixed by hand already.
+	const appliedRef = useRef(false);
+	useEffect(() => {
+		if (!dictionary || appliedRef.current) return;
+		appliedRef.current = true;
+		const handFixed = (m: { from: number; to: number }) => fixes.some((f) => f.to >= m.from && f.from <= m.to);
+		let next = fixes;
+		let count = 0;
+		for (const entry of dictionary) {
+			const matches = findMatches(wordItems, entry.heard).filter((m) => !handFixed(m) && norm(originalText(m.from, m.to)) === entry.heard);
+			next = fixMatches(next, matches, entry.fixed);
+			count += matches.length;
+		}
+		if (count) onFixesChange(next);
+		onDictionaryApplied?.(count, fixes);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [dictionary]);
 
 	const editingFixed = editing && fixes.some((f) => f.to >= editing.from && f.from <= editing.to);
 	const sameElsewhere = editing ? findMatches(wordItems, editing.before).filter((m) => m.from !== editing.from).length : 0;

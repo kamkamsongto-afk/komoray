@@ -35,7 +35,19 @@ export function allCuts(edit: { duration: number; cuts: EditCut[]; words: Span[]
 // Deepgram's own words stay untouched, so cuts and deleted words keep working on the same positions.
 export type Fix = { from: number; to: number; text: string };
 
-const MAX_FIX_LENGTH = 200;
+export const MAX_FIX_LENGTH = 200;
+
+// Words compared the way people read them: ignore capitals, spacing and punctuation at the ends
+// ("People," = "people"). Used to find words in the script and as the personal dictionary's key.
+export const TRAIL = /[.,!?;:…]+$/;
+export const normText = (text: string) =>
+	text
+		.toLowerCase()
+		.replace(/\s+/g, " ")
+		.replace(/^[\s"'“”‘’([]+|[\s"'“”‘’)\].,!?;:…]+$/g, "");
+
+// One entry of the personal dictionary (table word_fixes): the script showed `heard`, the user wants `fixed`.
+export type WordFix = { heard: string; fixed: string };
 
 // The words as they should read in subtitles: each fix becomes one word spanning its words' time.
 export function fixedWords<W extends Span & { text: string }>(words: W[], fixes: Fix[] = []): W[] {

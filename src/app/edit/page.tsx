@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
 import type { StudioMedia } from "@/components/StudioPlayer";
-import { cutSeconds, type Fix, wordCuts } from "@/lib/edit";
+import { cutSeconds, type Fix, type WordFix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
 import { readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 
@@ -16,6 +16,7 @@ type Analysis = {
 	words: { text: string; start: number; end: number }[];
 	deleted?: number[];
 	fixes?: Fix[];
+	dictionaryApplied?: boolean; // the personal dictionary already ran on this video once
 	style?: unknown;
 	videoUrl: string; // the small preview copy once it exists, else the original
 	studio?: StudioMedia | null; // the preview copy and its sound, for the editor's own player
@@ -91,6 +92,9 @@ export default function EditPage() {
 	const [loadError, setLoadError] = useState("");
 	const [saveError, setSaveError] = useState("");
 	const [render, setRender] = useState<RenderState>({ status: "none" });
+	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
+	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
+	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
 	const [desktopNotify, setDesktopNotify] = useState(false);
 	const [notifyBlocked, setNotifyBlocked] = useState(false);
 	// Browsers only allow sound after a click, so the Make video click creates this.
@@ -117,6 +121,10 @@ export default function EditPage() {
 			setKey(saved);
 			setAnalysis(data);
 			setSubtitle(readStyle(data.style));
+			if (!data.dictionaryApplied) {
+				const dict = (await (await fetch("/api/dictionary")).json().catch(() => ({}))) as { words?: WordFix[] };
+				setDictionary((dict.words ?? []).map(({ heard, fixed }) => ({ heard, fixed })));
+			}
 			const rendered = (await (await fetch(`/api/render?key=${encodeURIComponent(saved)}`)).json()) as RenderState;
 			if (rendered.status !== "none") setRender(rendered);
 		})();
@@ -160,7 +168,7 @@ export default function EditPage() {
 
 	// Save edits in the background, one after another so they land in order.
 	const save = useCallback(
-		(patch: { deleted?: number[]; fixes?: Fix[]; style?: SubtitleStyle }) => {
+		(patch: { deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; style?: SubtitleStyle }) => {
 			if (!key) return;
 			setSaveError("");
 			const previous = savingRef.current;
@@ -200,6 +208,32 @@ export default function EditPage() {
 			save({ fixes });
 		},
 		[save],
+	);
+
+	const dictionaryApplied = useCallback(
+		(count: number, before: Fix[]) => {
+			setDictionary(null);
+			setAnalysis((a) => (a ? { ...a, dictionaryApplied: true } : a));
+			save({ dictionaryApplied: true });
+			if (count) setDictionaryFixed({ count, before });
+		},
+		[save],
+	);
+
+	// Every fix made in the script goes into the personal dictionary (in the background).
+	const learn = useCallback(
+		(heard: string, fixed: string | null) => {
+			void fetch("/api/dictionary", {
+				method: fixed ? "POST" : "DELETE",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ heard, fixed }),
+			})
+				.then(async (res) => {
+					if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${res.status}`);
+				})
+				.catch((err: Error) => reportError("dictionary", err.message, { key }));
+		},
+		[key],
 	);
 
 	const changeSubtitle = useCallback(
@@ -312,6 +346,25 @@ export default function EditPage() {
 				</p>
 			)}
 			{saveError && <p className="text-sm text-red-500">❌ {saveError}</p>}
+			{dictionaryFixed && (
+				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
+					<span>
+						✨ Your dictionary fixed {dictionaryFixed.count} {dictionaryFixed.count === 1 ? "word" : "words"} (underlined in green).
+					</span>
+					<button
+						onClick={() => {
+							changeFixes(dictionaryFixed.before);
+							setDictionaryFixed(null);
+						}}
+						className="rounded-lg border border-foreground/20 px-3 py-1 hover:bg-foreground/5"
+					>
+						Undo
+					</button>
+					<button onClick={() => setDictionaryFixed(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
+						✕
+					</button>
+				</div>
+			)}
 			{render.status === "processing" && (
 				<div className="flex flex-col gap-2">
 					<div className="h-2 w-full animate-pulse rounded-full bg-blue-600/60" />
@@ -344,6 +397,9 @@ export default function EditPage() {
 				onChange={changeDeleted}
 				fixes={fixes}
 				onFixesChange={changeFixes}
+				dictionary={dictionary}
+				onDictionaryApplied={dictionaryApplied}
+				onLearn={learn}
 				subtitle={subtitle}
 				onSubtitleChange={changeSubtitle}
 			/>

@@ -9,11 +9,17 @@ import { readStyle } from "@/lib/subtitle-style";
 //   style    subtitle size / outline / position
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, style } = (await request.json()) as { key?: string; deleted?: unknown; fixes?: unknown; style?: unknown };
+	const { key, deleted, fixes, dictionaryApplied, style } = (await request.json()) as {
+		key?: string;
+		deleted?: unknown;
+		fixes?: unknown;
+		dictionaryApplied?: unknown;
+		style?: unknown;
+	};
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
 	const editKey = siblingKey(key, "edit.json");
-	const edit = await getJson<{ words: unknown[]; deleted?: number[]; fixes?: Fix[]; style?: unknown }>(editKey);
+	const edit = await getJson<{ words: unknown[]; deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; style?: unknown }>(editKey);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
 	if (deleted !== undefined) {
@@ -28,6 +34,7 @@ export async function PUT(request: Request) {
 		if (!checked) return Response.json({ error: "Bad word fixes" }, { status: 400 });
 		edit.fixes = checked;
 	}
+	if (dictionaryApplied === true) edit.dictionaryApplied = true;
 	if (style !== undefined) edit.style = readStyle(style);
 
 	await putObject(editKey, JSON.stringify(edit, null, 2), "application/json");
