@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
+import { PhoneUpload } from "@/components/PhoneUpload";
+import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
 
 type Status = "idle" | "uploading" | "done" | "error";
@@ -10,21 +12,6 @@ const ANALYZE_POLL_MS = 3000;
 const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// fetch() can't report upload progress yet, so we use XMLHttpRequest for the PUT to R2.
-function putWithProgress(url: string, file: File, onProgress: (percent: number) => void) {
-	return new Promise<void>((resolve, reject) => {
-		const xhr = new XMLHttpRequest();
-		xhr.open("PUT", url);
-		xhr.setRequestHeader("Content-Type", file.type);
-		xhr.upload.onprogress = (e) => {
-			if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-		};
-		xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status})`)));
-		xhr.onerror = () => reject(new Error("Network error while uploading"));
-		xhr.send(file);
-	});
-}
 
 export default function UploadPage() {
 	const user = useUser();
@@ -109,6 +96,15 @@ export default function UploadPage() {
 		}
 	}
 
+	// A video sent from the phone (QR code) is ready: same as an upload made here.
+	const phoneArrived = useCallback((videoKey: string, filename: string) => {
+		setStatus("done");
+		setProgress(100);
+		setMessage(filename);
+		setKey(videoKey);
+		window.history.replaceState(null, "", `/upload?key=${encodeURIComponent(videoKey)}`);
+	}, []);
+
 	// start=false: it is already running (e.g. reopened from My projects), just wait for the result.
 	async function findSilences(videoKey = key, start = true) {
 		if (!videoKey) return;
@@ -192,6 +188,8 @@ export default function UploadPage() {
 					}}
 				/>
 			</label>
+
+			{!key && <PhoneUpload onArrived={phoneArrived} disabled={busy} />}
 
 			{status !== "idle" && (
 				<div className="flex flex-col gap-2">
