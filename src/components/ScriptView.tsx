@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { allCuts } from "@/lib/edit";
+import { allCuts, type Fix, fixedWords, setFix } from "@/lib/edit";
 import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines } from "@/lib/timeline";
 import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
@@ -17,7 +17,7 @@ const script = (text: string) => (isThai(text) ? "thai" : /^\d/.test(text) ? "nu
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
 type Item =
-	| { kind: "word"; index: number; last: number; text: string; space: boolean }
+	| { kind: "word"; index: number; last: number; text: string; space: boolean; fixed: boolean }
 	| { kind: "silence"; seconds: number; at: number; end: number }
 	| { kind: "break" };
 
@@ -48,7 +48,9 @@ function thaiWordStarts(words: Word[]): Set<number> {
 }
 
 // Turn the word list into what we draw: words, "silence cut here" markers, and paragraph breaks.
-function layout(words: Word[], cuts: Cut[]): Item[] {
+// A fixed (retyped) run of words is drawn as one word with the new text.
+function layout(words: Word[], cuts: Cut[], fixes: Fix[]): Item[] {
+	const fixAt = new Map(fixes.map((f) => [f.from, f]));
 	const items: Item[] = [];
 	// Thai clips only get spaces where Thai, numbers and English meet (Deepgram also splits English
 	// into pieces there: "P r ice"). English clips get a space between every word.
@@ -61,21 +63,26 @@ function layout(words: Word[], cuts: Cut[]): Item[] {
 			: null;
 	};
 
-	words.forEach((w, i) => {
+	for (let i = 0; i < words.length; i++) {
+		const w = words[i];
 		const prev = words[i - 1];
+		const fix = fixAt.get(i);
 		const silence = silenceBetween(prev ? prev.end : 0, w.start);
 		const last = items[items.length - 1];
 		// Glue this piece onto the word before it (same Thai word, nothing in between).
-		if (starts && !starts.has(i) && !silence && last?.kind === "word") {
+		if (!fix && starts && !starts.has(i) && !silence && last?.kind === "word" && !last.fixed) {
 			last.text += fixThai(w.text);
 			last.last = i;
-			return;
+			continue;
 		}
 		if (prev && w.start - prev.end >= PARAGRAPH_GAP) items.push({ kind: "break" });
 		if (silence) items.push({ kind: "silence", ...silence });
-		const space = Boolean(prev) && (thaiClip ? script(prev.text) !== script(w.text) : true);
-		items.push({ kind: "word", index: i, last: i, text: fixThai(w.text), space });
-	});
+		const space = Boolean(prev) && (thaiClip ? script(prev.text) !== script(fix?.text ?? w.text) : true);
+		if (fix) {
+			items.push({ kind: "word", index: i, last: fix.to, text: fix.text, space, fixed: true });
+			i = fix.to;
+		} else items.push({ kind: "word", index: i, last: i, text: fixThai(w.text), space, fixed: false });
+	}
 
 	const last = words[words.length - 1];
 	const tail = last && silenceBetween(last.end, Infinity);
@@ -105,18 +112,22 @@ type Props = {
 	cuts: Cut[];
 	deleted: number[];
 	onChange: (deleted: number[]) => void;
+	fixes: Fix[];
+	onFixesChange: (fixes: Fix[]) => void;
 	subtitle: SubtitleStyle;
 	onSubtitleChange: (style: SubtitleStyle) => void;
 };
 
 // The editor: script on the left, the video on the right (stacked on phones, video first).
-export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange, subtitle, onSubtitleChange }: Props) {
+export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange, fixes, onFixesChange, subtitle, onSubtitleChange }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [current, setCurrent] = useState(-1);
 	const [playing, setPlaying] = useState(false);
 	const [selected, setSelected] = useState<number[]>([]);
-	const items = useMemo(() => layout(words, cuts), [words, cuts]);
+	const items = useMemo(() => layout(words, cuts, fixes), [words, cuts, fixes]);
+	// Retyping words: the transcript positions being fixed and what is in the box so far.
+	const [editing, setEditing] = useState<{ from: number; to: number; text: string; original: string } | null>(null);
 	const gone = useMemo(() => new Set(deleted), [deleted]);
 	// Preview = the final video (cuts, 9:16, subtitles), built live in the browser. Original = the raw upload.
 	const [mode, setMode] = useState<"preview" | "original">("preview");
@@ -125,7 +136,7 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 		() => keepSegments(duration, allCuts({ duration, words, cuts: cuts.map((c) => ({ ...c, reason: "silence" as const })), deleted })),
 		[duration, words, cuts, deleted],
 	);
-	const lines = useMemo(() => subtitleLines(words, segments), [words, segments]);
+	const lines = useMemo(() => subtitleLines(fixedWords(words, fixes), segments), [words, fixes, segments]);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);
 
@@ -156,17 +167,47 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 		[deleted, selected, onChange],
 	);
 
+	// The words from..to as Deepgram wrote them, spaced the way the script shows them.
+	const thaiClip = useMemo(() => words.filter((w) => isThai(w.text)).length > words.length / 2, [words]);
+	const originalText = (from: number, to: number) =>
+		words
+			.slice(from, to + 1)
+			.map((w, k, run) => (k > 0 && (!thaiClip || script(run[k - 1].text) !== script(w.text)) ? " " : "") + fixThai(w.text))
+			.join("");
+
+	// Open the box to retype words from..to (stretched to whole drawn words), starting from what shows now.
+	function startEdit(from: number, to: number) {
+		const shown = items.filter((it): it is Extract<Item, { kind: "word" }> => it.kind === "word" && it.last >= from && it.index <= to);
+		if (!shown.length) return;
+		const start = shown[0].index;
+		const end = shown[shown.length - 1].last;
+		const text = shown.map((it, k) => (k > 0 && it.space ? " " : "") + it.text).join("");
+		playerRef.current?.pause();
+		videoRef.current?.pause();
+		window.getSelection()?.removeAllRanges();
+		setEditing({ from: start, to: end, text, original: originalText(start, end) });
+	}
+
+	function saveEdit(text: string) {
+		if (!editing) return;
+		onFixesChange(setFix(fixes, editing.from, editing.to, text, editing.original));
+		setEditing(null);
+	}
+
+	const editingFixed = editing && fixes.some((f) => f.to >= editing.from && f.from <= editing.to);
+
 	// Delete / Backspace removes the highlighted words, like in a text editor.
 	useEffect(() => {
-		if (!selected.length) return;
+		if (!selected.length || editing) return;
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key !== "Delete" && e.key !== "Backspace") return;
+			if (e.target instanceof HTMLInputElement) return;
 			e.preventDefault();
 			apply(true);
 		};
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [selected, apply]);
+	}, [selected, apply, editing]);
 
 	const anyKept = selected.some((i) => !gone.has(i));
 	const anyGone = selected.some((i) => gone.has(i));
@@ -312,10 +353,57 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 					{mode === "preview"
 						? "The video shows how your final video will look. Changes show up right away, no need to make the video first."
 						: "The video as you uploaded it."}{" "}
-					Click a word to jump there. Drag across words to delete them. Click ✂️ to hear a silence that will be cut.
+					Click a word to jump there. Double-click a word to fix its spelling. Drag across words to delete them. Click ✂️ to hear a
+					silence that will be cut.
 				</p>
+				{editing && (
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							saveEdit(editing.text);
+						}}
+						className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-600/40 bg-blue-600/5 p-2"
+					>
+						<input
+							autoFocus
+							value={editing.text}
+							onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+							onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
+							aria-label="Fixed text"
+							className="min-w-40 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
+						/>
+						<button type="submit" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+							Save
+						</button>
+						<button type="button" onClick={() => setEditing(null)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
+							Cancel
+						</button>
+						{editingFixed && (
+							<button
+								type="button"
+								onClick={() => saveEdit("")}
+								title={`Back to "${editing.original}"`}
+								className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+							>
+								↩️ Original
+							</button>
+						)}
+						<span className="w-full text-xs text-foreground/60">
+							Heard as: {editing.original} · The subtitles show what you type. Enter to save, Esc to cancel.
+						</span>
+					</form>
+				)}
 				<div className="flex min-h-9 flex-wrap items-center gap-2">
 					{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
+					{selected.length > 0 && !editing && (
+						<button
+							onMouseDown={(e) => e.preventDefault()}
+							onClick={() => startEdit(Math.min(...selected), Math.max(...selected))}
+							className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+						>
+							✏️ Fix text
+						</button>
+					)}
 					{anyKept && (
 						<button
 							onMouseDown={(e) => e.preventDefault()}
@@ -368,13 +456,15 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 									data-word={item.index}
 									data-last={item.last}
 									onClick={() => seek(words[item.index].start, gone.has(item.index))}
+									onDoubleClick={() => startEdit(item.index, item.last)}
+									title={item.fixed ? `Fixed · heard as "${originalText(item.index, item.last)}"` : undefined}
 									className={`cursor-pointer rounded transition-colors ${
 										gone.has(item.index)
 											? "text-red-600/60 line-through decoration-2"
 											: item.index <= current && current <= item.last
 												? "bg-blue-600 text-white"
 												: "hover:bg-foreground/10"
-									}`}
+									} ${item.fixed ? "underline decoration-green-600 decoration-2 underline-offset-4" : ""}`}
 								>
 									{item.text}
 								</span>

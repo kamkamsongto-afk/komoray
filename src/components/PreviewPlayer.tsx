@@ -10,7 +10,7 @@ import { FPS, HEIGHT, type Line, type Segment, WIDTH } from "@/lib/timeline";
 const kanit = Kanit({ weight: "500", subsets: ["thai", "latin"] });
 const SIDE_MARGIN = 80;
 
-export type PreviewHandle = { seek: (sourceSeconds: number) => void; play: () => void };
+export type PreviewHandle = { seek: (sourceSeconds: number) => void; play: () => void; pause: () => void };
 
 type Props = {
 	src: string;
@@ -188,7 +188,20 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 		setPlaying(false);
 	}, [prepareNext]);
 
-	useImperativeHandle(ref, () => ({ seek, play }), [seek, play]);
+	useImperativeHandle(ref, () => ({ seek, play, pause }), [seek, play, pause]);
+
+	// Safari puts a video back at 0 once its file has loaded, dropping the spot we parked it at.
+	useEffect(() => {
+		const repark = (e: Event) => {
+			if (e.target !== waiting()) return;
+			dbg("reparkLoaded", both());
+			prepareNext(pieceRef.current);
+		};
+		const list = [videoA.current, videoB.current];
+		list.forEach((v) => v?.addEventListener("loadedmetadata", repark));
+		return () => list.forEach((v) => v?.removeEventListener("loadedmetadata", repark));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [prepareNext]);
 
 	// Words deleted or restored: stay at the same moment of the source, re-aim the waiting video.
 	// (Not on first load: the page tells us where to start.)
@@ -221,6 +234,13 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 				const left = piece.end - video.currentTime; // seconds of this piece still to show
 				if (next && other) {
 					if (left <= leadRef.current + 0.02 && other.paused) {
+						// Not parked where it should be (lost its spot)? Move it there first: racing at
+						// double speed to catch up froze the picture for seconds on iPad.
+						const park = Math.max(0, next.start - leadRef.current);
+						if (other.currentTime < park - 0.3 || other.currentTime > next.start) {
+							dbg("repark", { to: Math.round(park * 1000) / 1000, ...both() });
+							other.currentTime = park;
+						}
 						dbg("preroll", { left: Math.round(left * 1000) / 1000, ...both() });
 						void start(other, "preroll");
 					}

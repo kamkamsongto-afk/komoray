@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
-import { cutSeconds, wordCuts } from "@/lib/edit";
+import { cutSeconds, type Fix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
 import { readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 
@@ -14,6 +14,7 @@ type Analysis = {
 	cuts: Cut[];
 	words: { text: string; start: number; end: number }[];
 	deleted?: number[];
+	fixes?: Fix[];
 	style?: unknown;
 	videoUrl: string; // the small preview copy once it exists, else the original
 	proxy?: "done" | "processing" | "failed" | "none";
@@ -157,7 +158,7 @@ export default function EditPage() {
 
 	// Save edits in the background, one after another so they land in order.
 	const save = useCallback(
-		(patch: { deleted?: number[]; style?: SubtitleStyle }) => {
+		(patch: { deleted?: number[]; fixes?: Fix[]; style?: SubtitleStyle }) => {
 			if (!key) return;
 			setSaveError("");
 			const previous = savingRef.current;
@@ -187,6 +188,14 @@ export default function EditPage() {
 		(deleted: number[]) => {
 			setAnalysis((a) => (a ? { ...a, deleted } : a));
 			save({ deleted });
+		},
+		[save],
+	);
+
+	const changeFixes = useCallback(
+		(fixes: Fix[]) => {
+			setAnalysis((a) => (a ? { ...a, fixes } : a));
+			save({ fixes });
 		},
 		[save],
 	);
@@ -261,6 +270,7 @@ export default function EditPage() {
 	if (!analysis || !key) return <main className="font-sans p-8 text-sm text-foreground/60">Loading your video…</main>;
 
 	const deleted = analysis.deleted ?? [];
+	const fixes = analysis.fixes ?? [];
 	const silentSeconds = cutSeconds(analysis.cuts);
 	const finalSeconds = analysis.duration - cutSeconds([...analysis.cuts, ...wordCuts(analysis.words, deleted, analysis.duration)]);
 	const filename = key.split("/").pop() ?? key;
@@ -276,6 +286,7 @@ export default function EditPage() {
 					<p className="text-xs text-foreground/60">
 						{clock(analysis.duration)} → {clock(finalSeconds)} · ✂️ {analysis.cuts.length} silences ({silentSeconds.toFixed(1)}s)
 						{deleted.length > 0 && ` · 🗑️ ${deleted.length} words deleted`}
+						{fixes.length > 0 && ` · ✏️ ${fixes.length} fixed`}
 					</p>
 				</div>
 				<div className="flex flex-col items-end gap-1">
@@ -328,6 +339,8 @@ export default function EditPage() {
 				cuts={analysis.cuts}
 				deleted={deleted}
 				onChange={changeDeleted}
+				fixes={fixes}
+				onFixesChange={changeFixes}
 				subtitle={subtitle}
 				onSubtitleChange={changeSubtitle}
 			/>

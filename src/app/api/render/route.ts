@@ -1,6 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ownsVideo } from "@/lib/supabase/server";
-import { allCuts, type EditCut } from "@/lib/edit";
+import { allCuts, type EditCut, type Fix, fixedWords } from "@/lib/edit";
 import { readStyle } from "@/lib/subtitle-style";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
@@ -23,7 +23,14 @@ export async function POST(request: Request) {
 	const key = await readKey(rawKey ?? null);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 
-	const edit = await getJson<{ duration: number; cuts: EditCut[]; words: { start: number; end: number }[]; deleted?: number[]; style?: unknown }>(
+	const edit = await getJson<{
+		duration: number;
+		cuts: EditCut[];
+		words: { text: string; start: number; end: number }[];
+		deleted?: number[];
+		fixes?: Fix[];
+		style?: unknown;
+	}>(
 		siblingKey(key, "edit.json"),
 	);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
@@ -40,8 +47,9 @@ export async function POST(request: Request) {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
 			token: env.RENDER_TOKEN,
-			// Modal just removes every cut, so hand it the deleted words as cuts too.
-			edit: { ...edit, cuts: allCuts(edit) },
+			// Modal just removes every cut, so hand it the deleted words as cuts too,
+			// and the words already fixed: it only uses them for subtitles.
+			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes) },
 			// Subtitle size / outline / position from the editor; Modal fills in the rest (font).
 			style: readStyle(edit.style),
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.
