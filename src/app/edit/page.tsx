@@ -6,6 +6,7 @@ import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
+import type { Faces } from "@/lib/framing";
 import { type Pace, PACES } from "@/lib/silences";
 import { allCuts, cutSeconds, type Fix, fixedWords, type WordFix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
@@ -23,6 +24,8 @@ type Analysis = {
 	style?: unknown;
 	banners?: Banner[];
 	pace?: Pace;
+	faces?: Faces | null; // where the speaker's face is (found by Modal after the preview copy)
+	facesPending?: boolean;
 	videoUrl: string; // the small preview copy once it exists, else the original
 	studio?: StudioMedia | null; // the preview copy and its sound, for the editor's own player
 	proxy?: "done" | "processing" | "failed" | "none";
@@ -146,15 +149,21 @@ export default function EditPage() {
 		})();
 	}, [user]);
 
-	// The preview copy is still being made: play the original until it is ready, then switch.
-	const proxyPending = analysis?.proxy === "processing";
+	// The preview copy (or where the face is) is still being worked out: play the original / frame the
+	// middle until it is ready, then switch.
+	const proxyPending = analysis?.proxy === "processing" || Boolean(analysis?.facesPending);
 	useEffect(() => {
 		if (!key || !proxyPending) return;
 		const timer = setInterval(async () => {
 			const res = await fetch(`/api/analyze?key=${encodeURIComponent(key)}`);
 			const data = (await res.json().catch(() => ({}))) as Partial<Analysis>;
 			if (!res.ok || data.proxy === "processing" || !data.videoUrl) return;
-			setAnalysis((a) => (a ? { ...a, videoUrl: data.videoUrl!, studio: data.studio, proxy: data.proxy } : a));
+			setAnalysis((a) => {
+				if (!a) return a;
+				// Links already in use stay: new ones (new signatures) would restart the player.
+				const media = a.proxy === "done" ? {} : { videoUrl: data.videoUrl!, studio: data.studio, proxy: data.proxy };
+				return { ...a, ...media, faces: data.faces ?? null, facesPending: data.facesPending };
+			});
 		}, PROXY_POLL_MS);
 		return () => clearInterval(timer);
 	}, [key, proxyPending]);
@@ -489,6 +498,7 @@ export default function EditPage() {
 				onSubtitleChange={changeSubtitle}
 				banners={analysis.banners ?? []}
 				onBannersChange={changeBanners}
+				faces={analysis.faces ?? null}
 			/>
 		</main>
 	);

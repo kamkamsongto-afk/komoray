@@ -3,6 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createDebugLog, type DebugLog, videoState } from "@/lib/debug-log";
 import type { Banner } from "@/lib/banners";
+import type { Faces } from "@/lib/framing";
 import type { SubtitleStyle } from "@/lib/subtitle-style";
 import { FPS, type Line, type Segment, zoomOf } from "@/lib/timeline";
 import { PlayerFrame } from "./PlayerFrame";
@@ -18,6 +19,7 @@ export type PreviewProps = {
 	onTime: (sourceSeconds: number) => void; // where we are in the original video, every frame
 	onPlayingChange: (playing: boolean) => void;
 	banners?: Banner[];
+	faces?: Faces | null; // where the speaker's face is (lib/framing.ts); only the canvas player uses it
 };
 
 // Kept pieces in seconds: play source [start, end) at output time `out`.

@@ -7,7 +7,8 @@
 // throwing away the frames before the cut), so nothing waits on the browser.
 import { type ByteSource, RangeSource } from "./bytes";
 import { type Frame, readVideoTrack, type VideoTrack } from "./mp4";
-import { ZOOM_ORIGIN } from "../timeline";
+import { framePiece, type Rect } from "../framing";
+import { WIDTH } from "../timeline";
 
 export type Piece = { start: number; end: number; out: number }; // play source [start, end) at final-video time `out`
 export type StudioMedia = { videoUrl: string; audioUrl: string };
@@ -48,7 +49,7 @@ export class StudioEngine {
 	private ready: Ready[] = [];
 	private shownFrame: VideoFrame | null = null;
 	private shownOut = 0; // final-video time of shownFrame
-	private zoom: (piece: number) => number = () => 1;
+	private framing: (piece: number, aspect: number) => Rect = (_, aspect) => framePiece(aspect, null, 1);
 	private sizeLogged = false;
 	private pumping = false;
 
@@ -433,9 +434,10 @@ export class StudioEngine {
 		this.emitState();
 	}
 
-	// How much each piece is zoomed in (Auto zoom), by piece number. Redraws the picture on screen.
-	setZoom(zoom: (piece: number) => number) {
-		this.zoom = zoom;
+	// Where each piece's picture goes in the 9:16 frame (face crop, Auto zoom: lib/framing.ts), by
+	// piece number and the picture's width / height. Redraws the picture on screen.
+	setFraming(framing: (piece: number, aspect: number) => Rect) {
+		this.framing = framing;
 		if (this.shownFrame) this.paint(this.shownFrame, this.shownOut);
 	}
 
@@ -457,26 +459,21 @@ export class StudioEngine {
 			this.canvas.width = w;
 			this.canvas.height = h;
 		}
-		// Fill the 9:16 box, cropping the middle, like the final video does. The whole frame is drawn
-		// scaled and centred and the canvas edge cuts off the rest: Safari squashes the frame instead
+		// Fill the 9:16 box like the final video does (cropped around the face, zoomed: framing). The
+		// whole frame is drawn and the canvas edge cuts off the rest: Safari squashes the frame instead
 		// of cropping when drawImage is given a source rectangle.
 		const fw = frame.displayWidth;
 		const fh = frame.displayHeight;
 		const cw = this.canvas.width;
 		const ch = this.canvas.height;
-		// Auto zoom: grow the picture around a point a little above the middle (where faces are),
-		// like the crop in render.py.
 		const piece = this.pieces.findLastIndex((p) => p.out <= out + EPS);
-		const zoom = this.zoom(Math.max(0, piece));		const scale = Math.max(cw / fw, ch / fh) * zoom;
-		const dw = fw * scale;
-		const dh = fh * scale;
-		const ox = cw * ZOOM_ORIGIN.x;
-		const oy = ch * ZOOM_ORIGIN.y;
+		const rect = this.framing(Math.max(0, piece), fw / fh);
+		const k = cw / WIDTH;
 		if (!this.sizeLogged) {
 			this.sizeLogged = true;
 			this.events.log("size", { fw, fh, coded: `${frame.codedWidth}x${frame.codedHeight}`, cw, ch });
 		}
-		ctx2d.drawImage(frame, ox - (ox - (cw - dw / zoom) / 2) * zoom, oy - (oy - (ch - dh / zoom) / 2) * zoom, dw, dh);
+		ctx2d.drawImage(frame, rect.x * k, rect.y * k, rect.w * k, rect.h * k);
 		return true;
 	}
 

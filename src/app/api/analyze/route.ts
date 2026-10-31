@@ -1,7 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
-import { mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
+import { facesFor, mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
 import { startTranscription } from "@/lib/transcribe";
@@ -75,7 +75,9 @@ export async function GET(request: Request) {
 						audioUrl: await mediaUrl(key, "proxy-audio.pcm", env.RENDER_TOKEN, LINK_SECONDS),
 					}
 				: null;
-		return Response.json({ status: "done", editKey, ...edit, videoUrl, studio, proxy });
+		// Where the speaker's face is, once the preview copy exists (found in it).
+		const { faces, pending: facesPending } = proxy === "done" ? await facesFor(key, env) : { faces: null, pending: proxy === "processing" };
+		return Response.json({ status: "done", editKey, ...edit, videoUrl, studio, proxy, faces, facesPending });
 	}
 
 	const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));

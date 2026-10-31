@@ -3,6 +3,7 @@
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, normText, setFix, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
+import type { Faces } from "@/lib/framing";
 import { type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, type Take } from "@/lib/takes";
 import { FPS, keepSegments, subtitleLines, toOutSeconds, totalFrames } from "@/lib/timeline";
@@ -161,6 +162,7 @@ type Props = {
 	onSubtitleChange: (style: SubtitleStyle) => void;
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void;
+	faces: Faces | null; // where the speaker's face is, for cropping and Auto zoom
 };
 
 // The editor: script on the left, the video on the right (stacked on phones, video first).
@@ -181,6 +183,7 @@ export function ScriptView({
 	onSubtitleChange,
 	banners,
 	onBannersChange,
+	faces,
 }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
@@ -461,6 +464,7 @@ export function ScriptView({
 						onTime={onPreviewTime}
 						onPlayingChange={setPlaying}
 						banners={banners}
+						faces={faces}
 						onFail={(error) => {
 							reportError("studio player", error.message);
 							setStudioFailed(true);

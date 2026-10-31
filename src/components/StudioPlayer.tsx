@@ -3,6 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createDebugLog, type DebugLog } from "@/lib/debug-log";
 import { StudioEngine, type StudioMedia } from "@/lib/player/engine";
+import { focusFor, framePiece } from "@/lib/framing";
 import { FPS, zoomOf } from "@/lib/timeline";
 import { PlayerFrame } from "./PlayerFrame";
 import { type PreviewHandle, type PreviewProps, toPieces } from "./PreviewPlayer";
@@ -19,7 +20,7 @@ const SAMPLE_MS = 250; // debug mode: how often the engine's state is written do
 // The final video, played by our own engine (lib/player/engine.ts) on a canvas: smooth cuts on
 // every browser, including Safari on iPhone, iPad and Mac. Same controls and subtitles as PreviewPlayer.
 export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlayer(
-	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners },
+	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, faces },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -101,8 +102,12 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 
 	useEffect(() => onPlayingChange(playing), [playing, onPlayingChange]);
 
-	// Auto zoom is drawn by the engine, frame by frame, so it changes exactly at each cut.
-	useEffect(() => engineRef.current?.setZoom((piece) => zoomOf(piece, subtitle.zoom)), [subtitle.zoom, loaded]);
+	// Face crop and Auto zoom are drawn by the engine, frame by frame, so they change exactly at each cut.
+	const focuses = useMemo(() => pieces.map((p) => focusFor(faces ?? null, p.start, p.end)), [pieces, faces]);
+	useEffect(
+		() => engineRef.current?.setFraming((piece, aspect) => framePiece(aspect, focuses[piece] ?? null, zoomOf(piece, subtitle.zoom))),
+		[focuses, subtitle.zoom, loaded],
+	);
 
 	useImperativeHandle(
 		ref,

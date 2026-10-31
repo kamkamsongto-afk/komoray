@@ -50,7 +50,7 @@ image = (
         ],
         "fc-cache -f",
     )
-    .pip_install("fastapi[standard]")
+    .pip_install("fastapi[standard]", "opencv-python-headless==4.10.0.84", "numpy<2.3")
 )
 
 WIDTH, HEIGHT, FPS = 1080, 1920, 30
@@ -358,26 +358,82 @@ def has_audio(path: Path) -> bool:
     return bool(out.stdout.strip())
 
 
-def zoom_crop(piece: int, mode: str) -> str:
-    """Auto zoom ("cuts"): every other kept piece is cropped closer around a point a little above the
-    middle and scaled back up. Same as zoomOf / ZOOM_ORIGIN in src/lib/timeline.ts."""
-    if mode != "cuts" or piece % 2 == 0:
-        return ""
-    w, h = round(WIDTH / ZOOM / 2) * 2, round(HEIGHT / ZOOM / 2) * 2
-    x, y = round((WIDTH - w) * ZOOM_ORIGIN[0]), round((HEIGHT - h) * ZOOM_ORIGIN[1])
-    return f",crop={w}:{h}:{x}:{y},scale={WIDTH}:{HEIGHT}"
+FACE_HEIGHT = 0.4  # a face is placed this far down the frame when there's room to move
+FACE_EDGE = 0.15  # zoom never centres closer than this to an edge
+
+
+def focus_for(faces: dict | None, start: float, end: float) -> tuple[float, float] | None:
+    """The face to frame for source seconds [start, end]: the middle of the faces seen then, else of
+    all faces in the video, else none. Same as focusFor in src/lib/framing.ts."""
+    found = (faces or {}).get("faces") or []
+    if not found:
+        return None
+    inside = [f for f in found if start <= f[0] <= end]
+    pick = inside or found
+
+    def median(values: list[float]) -> float:
+        values = sorted(values)
+        return values[(len(values) - 1) // 2]
+
+    return median([f[1] for f in pick]), median([f[2] for f in pick])
+
+
+def frame_piece(aspect: float, focus: tuple[float, float] | None, zoom: float) -> tuple[float, float, float, float]:
+    """Where the whole source picture goes in the 1080x1920 frame (x, y, w, h): cropped around the
+    face, zoomed around it. Same as framePiece in src/lib/framing.ts."""
+    w0 = max(WIDTH, HEIGHT * aspect)
+    h0 = w0 / aspect
+    fx, fy = focus if focus else (0.5, 0.5)
+    cx = min(max(fx * w0 - WIDTH / 2, 0), w0 - WIDTH)
+    cy = min(max(fy * h0 - (FACE_HEIGHT if focus else 0.5) * HEIGHT, 0), h0 - HEIGHT)
+    if focus:
+        ox = min(max((fx * w0 - cx) / WIDTH, FACE_EDGE), 1 - FACE_EDGE) * WIDTH
+        oy = min(max((fy * h0 - cy) / HEIGHT, FACE_EDGE), 1 - FACE_EDGE) * HEIGHT
+    else:
+        ox, oy = ZOOM_ORIGIN[0] * WIDTH, ZOOM_ORIGIN[1] * HEIGHT
+    return -(cx * zoom + ox * (zoom - 1)), -(cy * zoom + oy * (zoom - 1)), w0 * zoom, h0 * zoom
+
+
+def piece_filter(aspect: float, focus: tuple[float, float] | None, zoom: float) -> str:
+    """ffmpeg: scale the picture to its framed size, then cut the 1080x1920 window out of it."""
+    x, y, w, h = frame_piece(aspect, focus, zoom)
+    sw, sh = max(WIDTH, round(w / 2) * 2), max(HEIGHT, round(h / 2) * 2)
+    px, py = min(max(round(-x), 0), sw - WIDTH), min(max(round(-y), 0), sh - HEIGHT)
+    return f"scale={sw}:{sh},crop={WIDTH}:{HEIGHT}:{px}:{py}"
+
+
+def display_aspect(path: Path) -> float:
+    """Width / height as the video is shown (phones store some videos sideways with a rotate flag)."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:stream_side_data=rotation:stream_tags=rotate", "-of", "json", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    stream = (json.loads(out.stdout or "{}").get("streams") or [{}])[0]
+    w, h = stream.get("width") or 16, stream.get("height") or 9
+    rotation = stream.get("tags", {}).get("rotate") or next((d.get("rotation") for d in stream.get("side_data_list", []) if "rotation" in d), 0)
+    return h / w if abs(int(float(rotation))) % 180 == 90 else w / h
 
 
 def ffmpeg_command(
-    src: Path, subs: Path, out: Path, keeps: list[tuple[float, float]], audio: bool, zoom: str = "off", fonts_dir: str | None = None
+    src: Path,
+    subs: Path,
+    out: Path,
+    keeps: list[tuple[float, float]],
+    audio: bool,
+    zoom: str = "off",
+    fonts_dir: str | None = None,
+    faces: dict | None = None,
 ) -> list[str]:
+    aspect = display_aspect(src)
+    # The pieces in frames, as the preview has them (StudioPlayer), to pick the same faces.
+    framed = [(trim / FPS, (trim + frames) / FPS) for _, trim, frames in frame_segments(keeps)]
     parts, labels = [], []
     for i, (a, b) in enumerate(keeps):
-        # Each piece is made 9:16 (and zoomed) on its own, so pieces can differ before they are joined.
-        parts.append(
-            f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS,"
-            f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,crop={WIDTH}:{HEIGHT}{zoom_crop(i, zoom)},setsar=1[v{i}]"
-        )
+        # Each piece is framed on its own (face crop, Auto zoom), so pieces can differ before they are joined.
+        piece_zoom = ZOOM if zoom == "cuts" and i % 2 == 1 else 1.0
+        focus = focus_for(faces, *framed[i]) if i < len(framed) else None
+        parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS,{piece_filter(aspect, focus, piece_zoom)},setsar=1[v{i}]")
         labels.append(f"[v{i}]")
         if audio:
             parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
@@ -429,7 +485,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 fonts_dir = "fonts"
 
             result = subprocess.run(
-                ffmpeg_command(src, subs, out, keeps, has_audio(src), style.get("zoom", "off"), fonts_dir),
+                ffmpeg_command(src, subs, out, keeps, has_audio(src), style.get("zoom", "off"), fonts_dir, edit.get("faces")),
                 cwd=workdir,
                 capture_output=True,
                 text=True,
@@ -481,8 +537,53 @@ def proxy_command(src: Path, out: Path, pcm: Path, audio: bool) -> list[str]:
     return cmd
 
 
+FACES_PER_SECOND = 2
+FACE_SCAN_SIDE = 360  # px, the short side faces are looked for at
+
+
+def detect_faces(path: Path) -> dict:
+    """Where the speaker's face is, twice a second: [seconds, centre x, centre y, width] (0..1 of the
+    picture), the biggest face only. Uses OpenCV's built-in face finder: no model to download.
+    Read by focusFor in src/lib/framing.ts."""
+    import cv2
+
+    finder = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    video = cv2.VideoCapture(str(path))
+    fps = video.get(cv2.CAP_PROP_FPS) or FPS
+    step = max(1, round(fps / FACES_PER_SECOND))
+    width = height = 0
+    faces, index = [], 0
+    while video.grab():
+        if index % step == 0:
+            ok, frame = video.retrieve()
+            if ok:
+                height, width = frame.shape[:2]
+                scale = FACE_SCAN_SIDE / min(width, height)
+                small = cv2.cvtColor(cv2.resize(frame, (round(width * scale), round(height * scale))), cv2.COLOR_BGR2GRAY)
+                side = min(small.shape[:2])
+                found = finder.detectMultiScale(small, scaleFactor=1.1, minNeighbors=5, minSize=(side // 10, side // 10))
+                if len(found):
+                    x, y, w, h = max(found, key=lambda f: f[2] * f[3])
+                    sw, sh = small.shape[1], small.shape[0]
+                    faces.append([round(index / fps, 2), round((x + w / 2) / sw, 3), round((y + h / 2) / sh, 3), round(w / sw, 3)])
+        index += 1
+    video.release()
+    return {"width": width, "height": height, "faces": faces}
+
+
+@app.function(image=image, cpu=2, memory=2048, timeout=30 * 60)
+def faces(video_url: str, faces_url: str) -> dict:
+    """Where the face is, for a preview copy made before faces were looked for."""
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "proxy.mp4"
+        urllib.request.urlretrieve(video_url, src)
+        found = detect_faces(src)
+        put(faces_url, json.dumps(found).encode(), "application/json")
+        return {"ok": True, "faces": len(found["faces"])}
+
+
 @app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
-def proxy(video_url: str, output_url: str, error_url: str | None = None, audio_url: str | None = None) -> dict:
+def proxy(video_url: str, output_url: str, error_url: str | None = None, audio_url: str | None = None, faces_url: str | None = None) -> dict:
     """The editor's preview copy: same timing as the original, just smaller and quick to jump around in."""
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -492,6 +593,12 @@ def proxy(video_url: str, output_url: str, error_url: str | None = None, audio_u
             result = subprocess.run(proxy_command(src, out, pcm, has_audio(src)), capture_output=True, text=True)
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
+            # Where the face is, from the small copy (quick). Without it the video is framed in the middle.
+            if faces_url:
+                try:
+                    put(faces_url, json.dumps(detect_faces(out)).encode(), "application/json")
+                except Exception as err:  # never lose the preview copy over this
+                    print("faces failed:", err)
             # Sound first: the website takes proxy.mp4 existing to mean everything is there.
             if audio_url:
                 put(audio_url, pcm.read_bytes(), "application/octet-stream")
@@ -510,7 +617,9 @@ def start(body: dict) -> dict:
     if not hmac.compare_digest(str(body.get("token", "")), os.environ["RENDER_TOKEN"]):
         return {"error": "unauthorized"}
     if body.get("kind") == "proxy":
-        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"))
+        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"))
+    elif body.get("kind") == "faces":
+        call = faces.spawn(body["videoUrl"], body["facesUrl"])
     else:
         call = render.spawn(body["videoUrl"], body["edit"], body["outputUrl"], body.get("errorUrl"), body.get("style"))
     return {"callId": call.object_id}
