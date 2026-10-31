@@ -10,6 +10,7 @@ type Status = "idle" | "uploading" | "done" | "error";
 
 const ANALYZE_POLL_MS = 3000;
 const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
+const LANGUAGE_KEY = "komoray-language"; // the spoken language picked last time (this browser only)
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -20,7 +21,22 @@ export default function UploadPage() {
 	const [message, setMessage] = useState("");
 	const [key, setKey] = useState<string | null>(null);
 
-	const [language, setLanguage] = useState("en");
+	const [language, setLanguageState] = useState("en");
+	// Deepgram can't tell Thai by itself (tried: a Thai clip came back as English, empty), so the
+	// language stays a choice: remembered from last time, else the browser's language.
+	useEffect(() => {
+		let saved: string | null = null;
+		try {
+			saved = localStorage.getItem(LANGUAGE_KEY);
+		} catch {}
+		setLanguageState(saved === "th" || saved === "en" ? saved : navigator.language.toLowerCase().startsWith("th") ? "th" : "en");
+	}, []);
+	const setLanguage = (value: string) => {
+		setLanguageState(value);
+		try {
+			localStorage.setItem(LANGUAGE_KEY, value);
+		} catch {}
+	};
 	const [analyzing, setAnalyzing] = useState(false);
 	const [analysisError, setAnalysisError] = useState("");
 	const [dragging, setDragging] = useState(false);
@@ -210,8 +226,10 @@ export default function UploadPage() {
 			{key && (
 				<div className="flex flex-col gap-4 rounded-2xl border border-foreground/15 p-6">
 					<div className="flex flex-wrap items-center gap-3">
+						<span className="text-sm text-foreground/70">Spoken language</span>
 						<select
 							value={language}
+							aria-label="Spoken language"
 							onChange={(e) => setLanguage(e.target.value)}
 							disabled={analyzing}
 							className="rounded-lg border border-foreground/20 bg-background px-3 py-2"

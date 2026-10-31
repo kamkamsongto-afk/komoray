@@ -5,9 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
 import type { StudioMedia } from "@/components/StudioPlayer";
-import { cutSeconds, type Fix, type WordFix, wordCuts } from "@/lib/edit";
+import { allCuts, cutSeconds, type Fix, fixedWords, type WordFix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, FONTS, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
+import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 
 type Cut = { start: number; end: number };
 type Analysis = {
@@ -322,6 +323,19 @@ export default function EditPage() {
 	const finalSeconds = analysis.duration - cutSeconds([...analysis.cuts, ...wordCuts(analysis.words, deleted, analysis.duration)]);
 	const filename = key.split("/").pop() ?? key;
 
+	// The subtitles of the final video as a file, same lines and timing as the preview.
+	function downloadSrt() {
+		if (!analysis) return;
+		const cuts = analysis.cuts.map((c) => ({ ...c, reason: "silence" as const }));
+		const segments = keepSegments(analysis.duration, allCuts({ ...analysis, cuts, deleted }));
+		const srt = toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look));
+		const link = document.createElement("a");
+		link.href = URL.createObjectURL(new Blob([srt], { type: "application/x-subrip;charset=utf-8" }));
+		link.download = filename.replace(/\.[^.]+$/, "") + ".srt";
+		link.click();
+		URL.revokeObjectURL(link.href);
+	}
+
 	return (
 		<main className="font-sans mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 sm:px-6">
 			<header className="flex flex-wrap items-center justify-between gap-3 border-b border-foreground/10 pb-3">
@@ -343,6 +357,9 @@ export default function EditPage() {
 						className="rounded-lg bg-blue-600 px-5 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 					>
 						{render.status === "processing" ? "Making your video…" : render.status === "done" ? "Make video again" : "Make video"}
+					</button>
+					<button onClick={downloadSrt} className="text-xs text-foreground/60 underline hover:text-foreground">
+						⬇️ Subtitles (.srt)
 					</button>
 					<label className="flex items-center gap-2 text-xs text-foreground/60">
 						<input type="checkbox" checked={desktopNotify} onChange={(e) => void toggleDesktopNotify(e.target.checked)} />

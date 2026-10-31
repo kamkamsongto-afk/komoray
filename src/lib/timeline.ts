@@ -51,6 +51,21 @@ function secondRow(texts: string[]) {
 	return best;
 }
 
+// The subtitle lines as an .srt file (YouTube, Premiere, CapCut…), timed on the final video.
+export function toSrt(lines: Line[]) {
+	const time = (frames: number) => {
+		const ms = Math.round((frames / FPS) * 1000);
+		const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+		return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)},${pad(ms % 1000, 3)}`;
+	};
+	return lines
+		.map((l, i) => {
+			const text = l.parts.map((p, k) => (k === l.row2 ? "\n" : "") + p.text).join("");
+			return `${i + 1}\n${time(l.from)} --> ${time(l.to)}\n${text}\n`;
+		})
+		.join("\n");
+}
+
 // The parts of the video that stay: everything that is not a cut.
 export function keepSegments(duration: number, cuts: Span[]): Segment[] {
 	const keeps: [number, number][] = [];
