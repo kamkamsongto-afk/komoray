@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import type { OwnFont } from "@/lib/font-info";
 import { COLORS, FONTS, type FontId, LIMITS, type Look, LOOKS, MAX_LOGO_LENGTH, type SubtitleStyle, type Zoom } from "@/lib/subtitle-style";
 
 type Props = {
@@ -13,6 +14,28 @@ type Props = {
 // How the subtitles look: style, font, brand colour, channel name, size and outline. Used in the
 // editor (for one video) and on the Brand Kit page (for every new video).
 export function SubtitleControls({ style, onChange, thai, footer }: Props) {
+	// The user's own uploaded font (one per account), if any.
+	const [own, setOwn] = useState<OwnFont | null>(null);
+	const [uploading, setUploading] = useState(false);
+	const [fontError, setFontError] = useState("");
+	useEffect(() => {
+		fetch("/api/font")
+			.then((res) => (res.ok ? (res.json() as Promise<{ font: OwnFont | null }>) : { font: null }))
+			.then((data) => setOwn(data.font))
+			.catch(() => {});
+	}, []);
+
+	async function uploadFont(file: File) {
+		setUploading(true);
+		setFontError("");
+		const res = await fetch("/api/font", { method: "POST", body: file }).catch(() => null);
+		const data = (await res?.json().catch(() => ({}))) as { font?: OwnFont; error?: string };
+		setUploading(false);
+		if (!res?.ok || !data.font) return setFontError(data?.error ?? "Could not upload the font");
+		setOwn(data.font);
+		onChange({ ...style, font: "own", ownFont: data.font });
+	}
+
 	const slider = (label: string, key: "size" | "outline") => (
 		<label className="flex items-center gap-3 text-sm text-foreground/70">
 			<span className="w-24 shrink-0">{label}</span>
@@ -52,9 +75,12 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 				<span className="w-24 shrink-0">Font</span>
 				<select
 					value={style.font}
-					onChange={(e) => onChange({ ...style, font: e.target.value as FontId })}
-					className="flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
+					onChange={(e) =>
+						onChange(e.target.value === "own" && own ? { ...style, font: "own", ownFont: own } : { ...style, font: e.target.value as FontId, ownFont: undefined })
+					}
+					className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
 				>
+					{(own || style.font === "own") && <option value="own">Your font: {(own ?? style.ownFont)?.family}</option>}
 					{(Object.keys(FONTS) as FontId[])
 						.filter((id) => FONTS[id].thai || !thai || id === style.font)
 						.map((id) => (
@@ -65,6 +91,24 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 						))}
 				</select>
 			</label>
+			<div className="flex items-center gap-3 text-xs text-foreground/60">
+				<span className="w-24 shrink-0" />
+				<label className={`cursor-pointer underline hover:text-foreground ${uploading ? "opacity-50" : ""}`}>
+					{uploading ? "Uploading…" : own ? "Upload a different font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
+					<input
+						type="file"
+						accept=".ttf,.otf,font/ttf,font/otf"
+						className="hidden"
+						disabled={uploading}
+						onChange={(e) => {
+							const file = e.target.files?.[0];
+							if (file) void uploadFont(file);
+							e.target.value = "";
+						}}
+					/>
+				</label>
+				{fontError && <span className="text-red-600">❌ {fontError}</span>}
+			</div>
 			{slider("Text size", "size")}
 			{style.look !== "box" && slider("Black outline", "outline")}
 			<div className="flex items-center gap-3 text-sm text-foreground/70">

@@ -3,7 +3,8 @@
 import { Anton, Bebas_Neue, Chakra_Petch, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
-import { type FontId, FONTS, LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
+import type { OwnFont } from "@/lib/font-info";
+import { type FontId, fontMetrics, LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { FPS, HEIGHT, type Line, WIDTH, ZOOM_ORIGIN } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
@@ -25,6 +26,25 @@ const FONT_FACES: Record<FontId, { family: string; weight: number }> = {
 	anton: { family: anton.style.fontFamily, weight: 400 },
 	bebas: { family: bebas.style.fontFamily, weight: 400 },
 };
+// The user's own font: loaded once per upload (version) from /api/font, under its own name.
+const ownFamily = (version: number) => `komoray-own-${version}`;
+const ownLoaded = new Set<number>();
+function useOwnFont(font: OwnFont | undefined) {
+	const [, setReady] = useState(0);
+	useEffect(() => {
+		if (!font || ownLoaded.has(font.version) || typeof FontFace === "undefined") return;
+		ownLoaded.add(font.version);
+		const face = new FontFace(ownFamily(font.version), `url(/api/font?file=1&v=${font.version})`);
+		face
+			.load()
+			.then((loaded) => {
+				document.fonts.add(loaded);
+				setReady((n) => n + 1);
+			})
+			.catch(() => ownLoaded.delete(font.version));
+	}, [font]);
+}
+
 const SIDE_MARGIN = 80;
 const BOX_PADDING = 20; // the Box look: space around the letters (Outline of the box in render.py)
 // The channel name in a corner (the Logo style in render.py).
@@ -80,9 +100,13 @@ export function PlayerFrame({
 		return () => observer.disconnect();
 	}, []);
 
-	const face = FONT_FACES[subtitle.font] ?? FONT_FACES.kanit;
+	useOwnFont(subtitle.font === "own" ? subtitle.ownFont : undefined);
+	const face =
+		subtitle.font === "own" && subtitle.ownFont
+			? { family: `"${ownFamily(subtitle.ownFont.version)}", ${kanit.style.fontFamily}`, weight: 400 }
+			: (FONT_FACES[subtitle.font as FontId] ?? FONT_FACES.kanit);
 	// Letters as big as the final video draws them (see FONTS[].height), rows as far apart.
-	const em = (FONTS[subtitle.font] ?? FONTS.kanit).height;
+	const em = fontMetrics(subtitle).height;
 	const boxed = subtitle.look === "box";
 	// Box: letters on a dark box. Every other look: white letters with a black outline. The stroke is
 	// drawn half inside the letters; paint-order puts it behind them.

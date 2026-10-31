@@ -2,6 +2,8 @@
 // names (DEFAULT_STYLE, FONTS and LOOKS in modal_app/render.py). Sizes are px on the 1080x1920 frame.
 export type Look = "clean" | "box" | "highlight" | "big" | "two";
 export type FontId = "kanit" | "prompt" | "mitr" | "sarabun" | "chakra" | "poppins" | "anton" | "bebas";
+import type { OwnFont } from "./font-info";
+
 export type LogoCorner = "top-left" | "top-right";
 export type Zoom = "off" | "cuts"; // Auto zoom: "cuts" = every other kept piece a little closer (zoomOf in timeline.ts)
 // color: the brand colour (the Highlight look's word). logo: the channel name shown in a corner ("" = none).
@@ -10,7 +12,8 @@ export type SubtitleStyle = {
 	outline: number;
 	position: number;
 	look: Look;
-	font: FontId;
+	font: FontId | "own"; // "own": the font the user uploaded (ownFont)
+	ownFont?: OwnFont;
 	color: string;
 	logo: string;
 	logoAt: LogoCorner;
@@ -66,6 +69,22 @@ export const FONTS: Record<FontId, { name: string; thai: boolean; height: number
 
 const clamp = (n: number, { min, max }: { min: number; max: number }) => Math.min(max, Math.max(min, n));
 
+// One of our fonts, or the user's own with its name and height; anything else is Kanit.
+function readFont(font: unknown, own: unknown): Pick<SubtitleStyle, "font" | "ownFont"> {
+	if (typeof font === "string" && font in FONTS) return { font: font as FontId };
+	const o = (own ?? {}) as Partial<OwnFont>;
+	if (font === "own" && typeof o.family === "string" && o.family.trim() && Number(o.height) > 0.5 && Number(o.height) < 4) {
+		return { font: "own", ownFont: { family: o.family.replace(/[\\{},\n\r]/g, "").trim().slice(0, 60), height: Number(o.height), version: Number(o.version) || 0 } };
+	}
+	return { font: DEFAULT_STYLE.font };
+}
+
+// The height (see FONTS) and whether it has Thai letters, for any font a style can name.
+export function fontMetrics(style: Pick<SubtitleStyle, "font" | "ownFont">) {
+	if (style.font === "own") return { height: style.ownFont?.height ?? FONTS.kanit.height, thai: true };
+	return FONTS[style.font] ?? FONTS.kanit;
+}
+
 // Anything that isn't a sensible style falls back to the defaults, field by field.
 export function readStyle(value: unknown): SubtitleStyle {
 	const v = (value ?? {}) as Partial<Record<keyof SubtitleStyle, unknown>>;
@@ -75,7 +94,7 @@ export function readStyle(value: unknown): SubtitleStyle {
 		outline: Math.round(pick("outline")),
 		position: Math.round(pick("position") * 1000) / 1000,
 		look: typeof v.look === "string" && v.look in LOOKS ? (v.look as Look) : DEFAULT_STYLE.look,
-		font: typeof v.font === "string" && v.font in FONTS ? (v.font as FontId) : DEFAULT_STYLE.font,
+		...readFont(v.font, v.ownFont),
 		color: typeof v.color === "string" && /^#[0-9a-f]{6}$/i.test(v.color) ? v.color.toUpperCase() : DEFAULT_STYLE.color,
 		// Letters, numbers and simple marks only: it is drawn into the video as subtitle text.
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,

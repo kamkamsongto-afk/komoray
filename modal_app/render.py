@@ -247,7 +247,8 @@ def ass_time(t: float) -> str:
 
 def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict, banners: list[dict] | None = None) -> str:
     thai = any(is_thai(w["text"]) for w in words)
-    font = FONTS.get(style["font"], FONTS["kanit"])
+    # "own": the user's uploaded font, put in the fonts folder next to the subtitles (render()).
+    font = str(style.get("ownFamily") or FONTS["kanit"]) if style["font"] == "own" else FONTS.get(style["font"], FONTS["kanit"])
     look = style.get("look", "clean")
     size = int(style["size"])
     outline = int(style["outline"])
@@ -367,7 +368,9 @@ def zoom_crop(piece: int, mode: str) -> str:
     return f",crop={w}:{h}:{x}:{y},scale={WIDTH}:{HEIGHT}"
 
 
-def ffmpeg_command(src: Path, subs: Path, out: Path, keeps: list[tuple[float, float]], audio: bool, zoom: str = "off") -> list[str]:
+def ffmpeg_command(
+    src: Path, subs: Path, out: Path, keeps: list[tuple[float, float]], audio: bool, zoom: str = "off", fonts_dir: str | None = None
+) -> list[str]:
     parts, labels = [], []
     for i, (a, b) in enumerate(keeps):
         # Each piece is made 9:16 (and zoomed) on its own, so pieces can differ before they are joined.
@@ -382,7 +385,7 @@ def ffmpeg_command(src: Path, subs: Path, out: Path, keeps: list[tuple[float, fl
     parts.append(f"{''.join(labels)}concat=n={len(keeps)}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
     parts.append(
         f"[cv]fps={FPS},"
-        f"subtitles={subs.name},"
+        f"subtitles={subs.name}{f':fontsdir={fonts_dir}' if fonts_dir else ''},"
         f"drawtext=fontfile={BOLD_FONT}:text='{WATERMARK}':fontsize=40:fontcolor=white@0.7:"
         f"shadowcolor=black@0.5:shadowx=2:shadowy=2:x=w-tw-48:y=h-th-260[outv]"
     )
@@ -418,8 +421,18 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 raise RuntimeError("nothing left after cutting")
             subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners")), encoding="utf-8")
 
+            # The user's own font: libass also looks in this folder.
+            fonts_dir = None
+            if style.get("font") == "own" and style.get("fontUrl"):
+                (workdir / "fonts").mkdir()
+                urllib.request.urlretrieve(style["fontUrl"], workdir / "fonts" / "own.ttf")
+                fonts_dir = "fonts"
+
             result = subprocess.run(
-                ffmpeg_command(src, subs, out, keeps, has_audio(src), style.get("zoom", "off")), cwd=workdir, capture_output=True, text=True
+                ffmpeg_command(src, subs, out, keeps, has_audio(src), style.get("zoom", "off"), fonts_dir),
+                cwd=workdir,
+                capture_output=True,
+                text=True,
             )
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")

@@ -8,7 +8,7 @@ import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
 import { allCuts, cutSeconds, type Fix, fixedWords, type WordFix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
-import { DEFAULT_STYLE, FONTS, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
+import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 
 type Cut = { start: number; end: number };
@@ -130,7 +130,7 @@ export default function EditPage() {
 				if (brand.style) {
 					// English-only fonts have no Thai letters: a Thai video uses Kanit instead.
 					const thai = data.words.some((w) => /[฀-๿]/.test(w.text));
-					const style = thai && !FONTS[brand.style.font].thai ? { ...brand.style, font: DEFAULT_STYLE.font } : brand.style;
+					const style = thai && !fontMetrics(brand.style).thai ? { ...brand.style, font: DEFAULT_STYLE.font } : brand.style;
 					setSubtitle(style);
 					void fetch("/api/edit", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: saved, style }) });
 				}

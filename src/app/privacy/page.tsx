@@ -41,8 +41,8 @@ export default function PrivacyPage() {
 					train anything.
 				</li>
 				<li>
-					<strong>Your Brand Kit:</strong> the subtitle look you save (style, font, colour) and the channel name you type, so your
-					next videos start with it.
+					<strong>Your Brand Kit:</strong> the subtitle look you save (style, font, colour), the channel name you type and the font
+					file you upload, if any, so your next videos start with it. Only your videos use your font.
 				</li>
 				<li>
 					<strong>Error reports:</strong> if something breaks, we record what went wrong, the file name and size, and your

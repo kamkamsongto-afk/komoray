@@ -39,11 +39,11 @@ export async function signedUrl(
 	return signed.url;
 }
 
-// Server-side write, e.g. saving edit.json next to the video.
-export async function putObject(key: string, body: string, contentType: string) {
+// Server-side write, e.g. saving edit.json next to the video (or a small file's bytes).
+export async function putObject(key: string, body: string | Uint8Array<ArrayBuffer>, contentType: string) {
 	const { client, objectUrl } = r2();
 	// Sign first, then send plain bytes: R2 rejects streamed bodies with no known size (HTTP 411).
-	const bytes = new TextEncoder().encode(body);
+	const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
 	const signed = await client.sign(objectUrl(key), {
 		method: "PUT",
 		body: bytes,

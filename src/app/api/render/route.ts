@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { ownsVideo } from "@/lib/supabase/server";
+import { currentUser, ownsVideo } from "@/lib/supabase/server";
+import { fontKeys, type OwnFont } from "@/lib/font-info";
 import { allCuts, type EditCut, type Fix, fixedWords } from "@/lib/edit";
 import { readStyle } from "@/lib/subtitle-style";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
@@ -41,6 +42,16 @@ export async function POST(request: Request) {
 	await Promise.all([deleteObject(finalKey), deleteObject(errorKey)]);
 	await putObject(siblingKey(key, "render.json"), JSON.stringify({ startedAt: new Date().toISOString() }), "application/json");
 
+	// The user's own font: Modal gets a short-lived link to the file and the name to ask for.
+	const style: Record<string, unknown> = readStyle(edit.style);
+	if (style.font === "own") {
+		const { user } = await currentUser();
+		const keys = user ? fontKeys(user.id) : null;
+		const own = keys ? await getJson<OwnFont>(keys.info) : null;
+		if (keys && own) Object.assign(style, { fontUrl: await signedUrl(keys.file, "GET", LINK_SECONDS), ownFamily: own.family });
+		else style.font = "kanit";
+	}
+
 	const env = getCloudflareContext().env as unknown as RenderEnv;
 	const res = await fetch(env.RENDER_URL, {
 		method: "POST",
@@ -50,8 +61,8 @@ export async function POST(request: Request) {
 			// Modal just removes every cut, so hand it the deleted words as cuts too,
 			// and the words already fixed: it only uses them for subtitles.
 			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes) },
-			// Subtitle size / outline / position from the editor; Modal fills in the rest (font).
-			style: readStyle(edit.style),
+			// How the subtitles look, from the editor (lib/subtitle-style.ts).
+			style,
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.
 			videoUrl: await signedUrl(key, "GET", LINK_SECONDS),
 			outputUrl: await signedUrl(finalKey, "PUT", LINK_SECONDS, "video/mp4"),
