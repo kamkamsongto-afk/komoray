@@ -96,6 +96,36 @@ function layout(words: Word[], cuts: Cut[], fixes: Fix[]): Item[] {
 type WordActions = { click: (index: number) => void; edit: (from: number, to: number) => void };
 type WordItem = Extract<Item, { kind: "word" }>;
 
+// For finding words: ignore capitals, spacing and punctuation at the ends ("People," = "people").
+const TRAIL = /[.,!?;:…]+$/;
+const norm = (text: string) =>
+	text
+		.toLowerCase()
+		.replace(/\s+/g, " ")
+		.replace(/^[\s"'“”‘’([]+|[\s"'“”‘’)\].,!?;:…]+$/g, "");
+
+// Every run of drawn words that reads `query`. Runs can span several words ("the best", or a Thai
+// phrase Deepgram split into pieces). trail = punctuation after the run, kept when replacing.
+function findMatches(words: WordItem[], query: string) {
+	const target = norm(query);
+	const matches: { from: number; to: number; trail: string }[] = [];
+	if (!target) return matches;
+	for (let i = 0; i < words.length; i++) {
+		let text = "";
+		for (let j = i; j < words.length; j++) {
+			text += (j > i && words[j].space ? " " : "") + words[j].text;
+			const n = norm(text);
+			if (n === target) {
+				matches.push({ from: words[i].index, to: words[j].last, trail: words[j].text.match(TRAIL)?.[0] ?? "" });
+				i = j;
+				break;
+			}
+			if (n.length >= target.length || !target.startsWith(n)) break;
+		}
+	}
+	return matches;
+}
+
 // One word of the script. Memoized: while playing, the highlight moves a few times a second, and
 // redrawing thousands of words each time froze long scripts (and the preview drawn on the page).
 const WordSpan = memo(function WordSpan({
@@ -167,8 +197,11 @@ export function ScriptView({ videoUrl, studio, duration, words, cuts, deleted, o
 	const [playing, setPlaying] = useState(false);
 	const [selected, setSelected] = useState<number[]>([]);
 	const items = useMemo(() => layout(words, cuts, fixes), [words, cuts, fixes]);
-	// Retyping words: the transcript positions being fixed and what is in the box so far.
-	const [editing, setEditing] = useState<{ from: number; to: number; text: string; original: string } | null>(null);
+	// Retyping words: the transcript positions being fixed, what showed before and what is in the box now.
+	const [editing, setEditing] = useState<{ from: number; to: number; text: string; before: string; original: string } | null>(null);
+	// Find & replace across the whole script.
+	const [finding, setFinding] = useState<{ find: string; replace: string } | null>(null);
+	const wordItems = useMemo(() => items.filter((it): it is WordItem => it.kind === "word"), [items]);
 	const gone = useMemo(() => new Set(deleted), [deleted]);
 	// Preview = the final video (cuts, 9:16, subtitles), built live in the browser. Original = the raw upload.
 	const [mode, setMode] = useState<"preview" | "original">("preview");
@@ -234,7 +267,8 @@ export function ScriptView({ videoUrl, studio, duration, words, cuts, deleted, o
 		playerRef.current?.pause();
 		videoRef.current?.pause();
 		window.getSelection()?.removeAllRanges();
-		setEditing({ from: start, to: end, text, original: originalText(start, end) });
+		setFinding(null);
+		setEditing({ from: start, to: end, text, before: text, original: originalText(start, end) });
 	}
 
 	function saveEdit(text: string) {
@@ -243,7 +277,19 @@ export function ScriptView({ videoUrl, studio, duration, words, cuts, deleted, o
 		setEditing(null);
 	}
 
+	// Put `replacement` everywhere the script reads `query` (keeping a comma or full stop after it).
+	function replaceAll(query: string, replacement: string) {
+		let next = fixes;
+		for (const m of findMatches(wordItems, query)) {
+			const text = replacement.trim() && m.trail && !TRAIL.test(replacement.trim()) ? replacement.trim() + m.trail : replacement;
+			next = setFix(next, m.from, m.to, text, originalText(m.from, m.to));
+		}
+		onFixesChange(next);
+	}
+
 	const editingFixed = editing && fixes.some((f) => f.to >= editing.from && f.from <= editing.to);
+	const sameElsewhere = editing ? findMatches(wordItems, editing.before).filter((m) => m.from !== editing.from).length : 0;
+	const findCount = finding ? findMatches(wordItems, finding.find).length : 0;
 
 	// Delete / Backspace removes the highlighted words, like in a text editor.
 	useEffect(() => {
@@ -449,6 +495,19 @@ export function ScriptView({ videoUrl, studio, duration, words, cuts, deleted, o
 						<button type="submit" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
 							Save
 						</button>
+						{sameElsewhere > 0 && (
+							<button
+								type="button"
+								onClick={() => {
+									replaceAll(editing.before, editing.text);
+									setEditing(null);
+								}}
+								title={`Also fix the other ${sameElsewhere} places that read "${editing.before}"`}
+								className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-600/10"
+							>
+								Fix all ({sameElsewhere + 1})
+							</button>
+						)}
 						<button type="button" onClick={() => setEditing(null)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
 							Cancel
 						</button>
@@ -467,7 +526,60 @@ export function ScriptView({ videoUrl, studio, duration, words, cuts, deleted, o
 						</span>
 					</form>
 				)}
+				{finding && (
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							if (!findCount || !finding.replace.trim()) return;
+							replaceAll(finding.find, finding.replace);
+							setFinding({ find: finding.replace, replace: "" });
+						}}
+						className="flex flex-wrap items-center gap-2 rounded-lg border border-foreground/20 p-2"
+					>
+						<input
+							autoFocus
+							value={finding.find}
+							onChange={(e) => setFinding({ ...finding, find: e.target.value })}
+							onKeyDown={(e) => e.key === "Escape" && setFinding(null)}
+							placeholder="Find"
+							aria-label="Find"
+							className="min-w-32 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
+						/>
+						<span className="text-foreground/50">→</span>
+						<input
+							value={finding.replace}
+							onChange={(e) => setFinding({ ...finding, replace: e.target.value })}
+							onKeyDown={(e) => e.key === "Escape" && setFinding(null)}
+							placeholder="Replace with"
+							aria-label="Replace with"
+							className="min-w-32 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
+						/>
+						<button
+							type="submit"
+							disabled={!findCount || !finding.replace.trim()}
+							className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+						>
+							Replace all{findCount ? ` (${findCount})` : ""}
+						</button>
+						<button type="button" onClick={() => setFinding(null)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
+							Close
+						</button>
+						<span className="w-full text-xs text-foreground/60">
+							{finding.find.trim() ? (findCount ? `Found ${findCount} in the script.` : "Not found in the script.") : "Type a word as it shows in the script."}{" "}
+							Capitals and punctuation don&apos;t matter.
+						</span>
+					</form>
+				)}
 				<div className="flex min-h-9 flex-wrap items-center gap-2">
+					{!finding && !editing && (
+						<button
+							onMouseDown={(e) => e.preventDefault()}
+							onClick={() => setFinding({ find: "", replace: "" })}
+							className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+						>
+							🔍 Find &amp; replace
+						</button>
+					)}
 					{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
 					{selected.length > 0 && !editing && (
 						<button
