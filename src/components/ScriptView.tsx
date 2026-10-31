@@ -330,6 +330,25 @@ export function ScriptView({
 		return () => document.removeEventListener("keydown", onKey);
 	}, [selected, apply, editing]);
 
+	// Space plays and pauses, like every video editor (not while typing, or on a focused button).
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key !== " " || e.ctrlKey || e.metaKey || e.altKey) return;
+			if ((e.target as HTMLElement | null)?.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
+			e.preventDefault();
+			if (mode === "preview") {
+				if (playing) playerRef.current?.pause();
+				else playerRef.current?.play();
+			} else {
+				const video = videoRef.current;
+				if (video?.paused) void video.play();
+				else video?.pause();
+			}
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [mode, playing]);
+
 	// Repeated takes (lib/takes.ts): cutting one deletes its words, keeping it restores them.
 	const takes = useMemo(() => findRepeatedTakes(words), [words]);
 	const [showTakes, setShowTakes] = useState(false);

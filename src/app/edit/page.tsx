@@ -40,6 +40,7 @@ type RenderState = {
 const POLL_MS = 5000;
 const PROXY_POLL_MS = 10000;
 const STYLE_SAVE_DELAY_MS = 600; // dragging a slider changes the style many times a second
+const UNDO_STEPS = 100;
 const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
 const NOTIFY_PREF = "komoray.desktopNotify"; // remembers the checkbox in this browser
 
@@ -219,20 +220,66 @@ export default function EditPage() {
 		[key],
 	);
 
-	const changeDeleted = useCallback(
-		(deleted: number[]) => {
-			setAnalysis((a) => (a ? { ...a, deleted } : a));
-			save({ deleted });
+	// Undo / Redo for script edits (deleted and fixed words): what they were before each change.
+	type Snapshot = { deleted: number[]; fixes: Fix[] };
+	const analysisRef = useRef(analysis);
+	useEffect(() => {
+		analysisRef.current = analysis;
+	});
+	const history = useRef<{ past: Snapshot[]; future: Snapshot[] }>({ past: [], future: [] });
+	const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
+	const snapshot = (): Snapshot => ({ deleted: analysisRef.current?.deleted ?? [], fixes: analysisRef.current?.fixes ?? [] });
+	const remember = useCallback(() => {
+		const h = history.current;
+		h.past = [...h.past.slice(-(UNDO_STEPS - 1)), snapshot()];
+		h.future = [];
+		setHistorySize({ past: h.past.length, future: 0 });
+	}, []);
+	const restore = useCallback(
+		(from: "past" | "future") => {
+			const h = history.current;
+			const snap = h[from].pop();
+			if (!snap) return;
+			h[from === "past" ? "future" : "past"].push(snapshot());
+			setHistorySize({ past: h.past.length, future: h.future.length });
+			setAnalysis((a) => (a ? { ...a, ...snap } : a));
+			save(snap);
 		},
 		[save],
 	);
 
+	// Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y), ⌘ on a Mac. Not while typing in a box: that has its own undo.
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+			const target = e.target as HTMLElement | null;
+			if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+			const k = e.key.toLowerCase();
+			if (k === "z" && !e.shiftKey) restore("past");
+			else if ((k === "z" && e.shiftKey) || k === "y") restore("future");
+			else return;
+			e.preventDefault();
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [restore]);
+
+	const changeDeleted = useCallback(
+		(deleted: number[]) => {
+			remember();
+			setAnalysis((a) => (a ? { ...a, deleted } : a));
+			save({ deleted });
+		},
+		[save, remember],
+	);
+
 	const changeFixes = useCallback(
 		(fixes: Fix[]) => {
+			remember();
 			setAnalysis((a) => (a ? { ...a, fixes } : a));
 			save({ fixes });
 		},
-		[save],
+		[save, remember],
 	);
 
 	const dictionaryApplied = useCallback(
@@ -399,6 +446,24 @@ export default function EditPage() {
 						{deleted.length > 0 && ` · 🗑️ ${deleted.length} words deleted`}
 						{fixes.length > 0 && ` · ✏️ ${fixes.length} fixed`}
 					</p>
+					<div className="flex items-center gap-1 text-xs">
+						<button
+							onClick={() => restore("past")}
+							disabled={!historySize.past}
+							title="Undo (Ctrl+Z)"
+							className="rounded border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-30"
+						>
+							↶ Undo
+						</button>
+						<button
+							onClick={() => restore("future")}
+							disabled={!historySize.future}
+							title="Redo (Ctrl+Shift+Z)"
+							className="rounded border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-30"
+						>
+							↷ Redo
+						</button>
+					</div>
 					<label className="flex items-center gap-2 text-xs text-foreground/60" title="How short a pause has to be to stay in the video">
 						Pace
 						<select
