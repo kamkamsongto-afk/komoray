@@ -61,6 +61,12 @@ export async function getJson<T>(key: string): Promise<T | null> {
 	return (await res.json()) as T;
 }
 
+// Server-side read of part of a file (range: an HTTP Range header such as "bytes=0-1023"), as R2 answers it.
+export async function fetchObject(key: string, range?: string | null) {
+	const { client, objectUrl } = r2();
+	return client.fetch(objectUrl(key), { headers: range ? { Range: range } : {} });
+}
+
 export async function exists(key: string) {
 	const { client, objectUrl } = r2();
 	const res = await client.fetch(objectUrl(key), { method: "HEAD" });

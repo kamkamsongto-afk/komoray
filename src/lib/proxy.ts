@@ -1,19 +1,24 @@
+import { hmac } from "@/lib/callback";
 import { exists, getJson, putObject, siblingKey, signedUrl } from "@/lib/r2";
 
 // The editor's preview copy lives next to the original video:
 //   proxy.json        written when we ask Modal to make it
-//   proxy.mp4         written by Modal: 540p, a full picture every half second (quick to jump around in)
+//   proxy-audio.pcm   written by Modal: the sound as raw samples (mono, 16-bit, PROXY_AUDIO_RATE)
+//   proxy.mp4         written by Modal last: 540p, a full picture every half second, no B-frames
 //   proxy-error.json  written by Modal if it failed
 // The final video is still made from the original, so this only affects what the editor plays.
+// A proxy.mp4 without proxy-audio.pcm is from before the sound file existed and gets made again.
 export type ProxyStatus = "done" | "processing" | "failed" | "none";
 
+export const PROXY_AUDIO_RATE = 24000;
 const LINK_SECONDS = 3600;
 const GIVE_UP_MS = 30 * 60 * 1000; // no proxy after this long: Modal died quietly, ask again
 
 type ProxyEnv = { RENDER_URL: string; RENDER_TOKEN: string };
 
 export async function proxyStatus(key: string): Promise<ProxyStatus> {
-	if (await exists(siblingKey(key, "proxy.mp4"))) return "done";
+	const [video, audio] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm"))]);
+	if (video && audio) return "done";
 	if (await exists(siblingKey(key, "proxy-error.json"))) return "failed";
 	const started = await getJson<{ startedAt?: string }>(siblingKey(key, "proxy.json"));
 	if (started?.startedAt && Date.now() - Date.parse(started.startedAt) < GIVE_UP_MS) return "processing";
@@ -21,6 +26,15 @@ export async function proxyStatus(key: string): Promise<ProxyStatus> {
 }
 
 export const proxyUrl = (key: string, seconds = LINK_SECONDS) => signedUrl(siblingKey(key, "proxy.mp4"), "GET", seconds);
+
+// Links for the editor's own player, read through /api/media on our site (see there why).
+export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm"];
+export const mediaMessage = (key: string, file: string, exp: number) => `media:${key}:${file}:${exp}`;
+export async function mediaUrl(key: string, file: string, secret: string, seconds = LINK_SECONDS) {
+	const exp = Math.floor(Date.now() / 1000) + seconds;
+	const sig = await hmac(secret, mediaMessage(key, file, exp));
+	return `/api/media?${new URLSearchParams({ key, file, exp: String(exp), sig })}`;
+}
 
 // Ask Modal to make the preview copy. Never throws: without it the editor just plays the original.
 export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatus> {
@@ -35,6 +49,7 @@ export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatu
 				// Modal only ever gets these one-file, time-limited links, never our R2 keys.
 				videoUrl: await signedUrl(key, "GET", LINK_SECONDS),
 				outputUrl: await signedUrl(siblingKey(key, "proxy.mp4"), "PUT", LINK_SECONDS, "video/mp4"),
+				audioUrl: await signedUrl(siblingKey(key, "proxy-audio.pcm"), "PUT", LINK_SECONDS, "application/octet-stream"),
 				errorUrl: await signedUrl(siblingKey(key, "proxy-error.json"), "PUT", LINK_SECONDS, "application/json"),
 			}),
 		});

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
+import type { StudioMedia } from "@/components/StudioPlayer";
 import { cutSeconds, type Fix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
 import { readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -17,6 +18,7 @@ type Analysis = {
 	fixes?: Fix[];
 	style?: unknown;
 	videoUrl: string; // the small preview copy once it exists, else the original
+	studio?: StudioMedia | null; // the preview copy and its sound, for the editor's own player
 	proxy?: "done" | "processing" | "failed" | "none";
 };
 type RenderState = {
@@ -128,7 +130,7 @@ export default function EditPage() {
 			const res = await fetch(`/api/analyze?key=${encodeURIComponent(key)}`);
 			const data = (await res.json().catch(() => ({}))) as Partial<Analysis>;
 			if (!res.ok || data.proxy === "processing" || !data.videoUrl) return;
-			setAnalysis((a) => (a ? { ...a, videoUrl: data.videoUrl!, proxy: data.proxy } : a));
+			setAnalysis((a) => (a ? { ...a, videoUrl: data.videoUrl!, studio: data.studio, proxy: data.proxy } : a));
 		}, PROXY_POLL_MS);
 		return () => clearInterval(timer);
 	}, [key, proxyPending]);
@@ -334,6 +336,7 @@ export default function EditPage() {
 
 			<ScriptView
 				videoUrl={analysis.videoUrl}
+				studio={analysis.studio ?? null}
 				duration={analysis.duration}
 				words={analysis.words}
 				cuts={analysis.cuts}

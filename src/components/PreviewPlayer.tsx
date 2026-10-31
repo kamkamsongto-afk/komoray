@@ -1,18 +1,14 @@
 "use client";
 
-import { Kanit } from "next/font/google";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createDebugLog, type DebugLog, videoState } from "@/lib/debug-log";
-import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
-import { FPS, HEIGHT, type Line, type Segment, WIDTH } from "@/lib/timeline";
-
-// Same look as the final video (Kanit Medium, side margins 80px in modal_app/render.py).
-const kanit = Kanit({ weight: "500", subsets: ["thai", "latin"] });
-const SIDE_MARGIN = 80;
+import type { SubtitleStyle } from "@/lib/subtitle-style";
+import { FPS, type Line, type Segment } from "@/lib/timeline";
+import { PlayerFrame } from "./PlayerFrame";
 
 export type PreviewHandle = { seek: (sourceSeconds: number) => void; play: () => void; pause: () => void };
 
-type Props = {
+export type PreviewProps = {
 	src: string;
 	segments: Segment[];
 	lines: Line[];
@@ -23,7 +19,10 @@ type Props = {
 };
 
 // Kept pieces in seconds: play source [start, end) at output time `out`.
-type Piece = { start: number; end: number; out: number };
+export type Piece = { start: number; end: number; out: number };
+
+export const toPieces = (segments: Segment[]): Piece[] =>
+	segments.map((s) => ({ start: s.trim / FPS, end: (s.trim + s.frames) / FPS, out: s.from / FPS }));
 
 const LEAD = 0.5;
 const SAMPLE_MS = 250; // debug mode: how often both videos' state is written down
@@ -32,29 +31,23 @@ const MEDIA_EVENTS = ["play", "playing", "pause", "waiting", "stalled", "seeking
 // Every browser on iPhone/iPad is Safari underneath; their names say CriOS, FxiOS, EdgiOS, not Chrome.
 const isSafari = () => /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Android/.test(navigator.userAgent);
 
-const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-
 // The final video, played live: the kept pieces back to back, cropped to 9:16, with subtitles.
 // Two <video> elements take turns: while one plays a piece, the other waits just before the next
 // piece, so every cut is a swap instead of a seek (which would stutter). The waiting one starts
 // LEAD seconds early, muted and underneath, and is nudged faster or slower to hit the cut on time:
 // Safari takes a moment to start a video, which showed as a freeze and a black flash at each cut.
 // Only on Safari: Chrome starts instantly, and decoding two videos at once made it drop frames.
-export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPlayer(
+export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function PreviewPlayer(
 	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange },
 	ref,
 ) {
-	const pieces = useMemo<Piece[]>(
-		() => segments.map((s) => ({ start: s.trim / FPS, end: (s.trim + s.frames) / FPS, out: s.from / FPS })),
-		[segments],
-	);
+	const pieces = useMemo(() => toPieces(segments), [segments]);
 	const last = pieces[pieces.length - 1];
 	const total = last ? last.out + last.end - last.start : 0;
 
 	const videoA = useRef<HTMLVideoElement>(null);
 	const videoB = useRef<HTMLVideoElement>(null);
 	const videos = [videoA, videoB];
-	const boxRef = useRef<HTMLDivElement>(null);
 	const [active, setActive] = useState(0); // which <video> is showing
 	const activeRef = useRef(0);
 	const pieceRef = useRef(0); // which piece is playing
@@ -63,8 +56,6 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	const leadRef = useRef(0);
 	const [playing, setPlaying] = useState(false);
 	const [outTime, setOutTime] = useState(0);
-	const [scale, setScale] = useState(0.3);
-	const dragRef = useRef<{ y: number; position: number } | null>(null);
 	const debugRef = useRef<DebugLog | null>(null);
 	const framesRef = useRef([0, 0]); // debug: frames each video put on screen since the last sample
 	const [debugCount, setDebugCount] = useState<number | null>(null);
@@ -76,15 +67,6 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	// play() can be refused (e.g. iPhone/iPad rules on sound); write down why instead of hiding it.
 	const start = (video: HTMLVideoElement, why: string) =>
 		video.play().catch((err: Error) => dbg("playRefused", { v: video === videoA.current ? 0 : 1, why, name: err.name, message: err.message }));
-
-	// The subtitle layer is drawn at full 1080x1920 and shrunk to fit, so sizes match the final video.
-	useEffect(() => {
-		const box = boxRef.current;
-		if (!box) return;
-		const observer = new ResizeObserver(() => setScale(box.clientWidth / WIDTH));
-		observer.observe(box);
-		return () => observer.disconnect();
-	}, []);
 
 	// Only the video on screen is heard (set directly, not through React, so it changes on the exact frame).
 	useEffect(() => {
@@ -294,120 +276,32 @@ export const PreviewPlayer = forwardRef<PreviewHandle, Props>(function PreviewPl
 	}
 
 	return (
-		// As wide as fits, but never taller than ~70% of the screen.
-		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: "calc(70vh * 9 / 16)" }}>
-			<div
-				ref={boxRef}
-				onClick={toggle}
-				className="relative w-full cursor-pointer overflow-hidden rounded-lg bg-black"
-				style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
-			>
-				{videos.map((r, i) => (
-					<video
-						key={i}
-						ref={r}
-						src={src}
-						playsInline
-						preload="auto"
-						// The hidden video pauses on every swap; only the one on screen speaks for the player.
-						onPlay={() => i === activeRef.current && setPlaying(true)}
-						onPause={() => i === activeRef.current && !cutRef.current && setPlaying(false)}
-						// On Safari both stay drawn (it may not paint a hidden video), the one on screen on top.
-						className="absolute inset-0 h-full w-full object-cover"
-						style={{ zIndex: i === active ? 1 : 0, visibility: i === active || lead ? "visible" : "hidden" }}
-					/>
-				))}
-				<div
-					className="pointer-events-none absolute top-0 left-0"
-					style={{ width: WIDTH, height: HEIGHT, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}
-				>
-					{(line || !playing) && (
-						// Drag the subtitle up or down to move it. While paused with nothing being said,
-						// a faded sample shows where subtitles will sit.
-						<div
-							onClick={(e) => e.stopPropagation()}
-							onPointerDown={(e) => {
-								e.stopPropagation();
-								e.currentTarget.setPointerCapture(e.pointerId);
-								dragRef.current = { y: e.clientY, position: subtitle.position };
-							}}
-							onPointerMove={(e) => {
-								const drag = dragRef.current;
-								const box = boxRef.current;
-								if (!drag || !box) return;
-								const { min, max } = LIMITS.position;
-								const position = drag.position - (e.clientY - drag.y) / box.clientHeight;
-								onSubtitleChange({ ...subtitle, position: Math.round(Math.min(max, Math.max(min, position)) * 1000) / 1000 });
-							}}
-							onPointerUp={() => (dragRef.current = null)}
-							title="Drag to move the subtitles"
-							style={{
-								position: "absolute",
-								left: SIDE_MARGIN,
-								right: SIDE_MARGIN,
-								bottom: HEIGHT * subtitle.position,
-								textAlign: "center",
-								fontFamily: kanit.style.fontFamily,
-								fontWeight: 500,
-								fontSize: subtitle.size,
-								lineHeight: 1.25,
-								color: "white",
-								// The stroke is drawn half inside the letters; paint-order puts it behind them.
-								WebkitTextStroke: subtitle.outline ? `${subtitle.outline * 2}px black` : undefined,
-								paintOrder: "stroke fill",
-								textShadow: "2px 2px 0 rgba(0,0,0,0.4)",
-								opacity: line ? 1 : 0.5,
-								cursor: "ns-resize",
-								pointerEvents: "auto",
-								touchAction: "none",
-								userSelect: "none",
-							}}
-						>
-							{line ? line.text : "Your subtitles"}
-						</div>
-					)}
-					<div
-						style={{
-							position: "absolute",
-							right: 48,
-							bottom: 260,
-							fontFamily: "sans-serif",
-							fontWeight: 700,
-							fontSize: 40,
-							color: "rgba(255,255,255,0.7)",
-							textShadow: "2px 2px 0 rgba(0,0,0,0.5)",
-						}}
-					>
-						komoray.com
-					</div>
-				</div>
-				{debugCount !== null && (
-					<span className="pointer-events-none absolute top-2 left-2 z-[2] rounded bg-red-600 px-2 py-0.5 text-xs text-white">
-						Recording · {debugCount}
-					</span>
-				)}
-				{!playing && (
-					<span className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center text-5xl text-white/90 drop-shadow">▶</span>
-				)}
-			</div>
-			<div className="flex items-center gap-2 text-xs text-foreground/70">
-				<button onClick={toggle} className="w-8 rounded border border-foreground/20 py-0.5" aria-label={playing ? "Pause" : "Play"}>
-					{playing ? "❚❚" : "▶"}
-				</button>
-				<input
-					type="range"
-					min={0}
-					max={total || 1}
-					step={0.05}
-					value={outTime}
-					onChange={(e) => scrub(Number(e.target.value))}
-					className="flex-1"
-					aria-label="Position in the final video"
+		<PlayerFrame
+			playing={playing}
+			outTime={outTime}
+			total={total}
+			line={line?.text ?? null}
+			subtitle={subtitle}
+			onSubtitleChange={onSubtitleChange}
+			onToggle={toggle}
+			onScrub={scrub}
+			debugCount={debugCount}
+		>
+			{videos.map((r, i) => (
+				<video
+					key={i}
+					ref={r}
+					src={src}
+					playsInline
+					preload="auto"
+					// The hidden video pauses on every swap; only the one on screen speaks for the player.
+					onPlay={() => i === activeRef.current && setPlaying(true)}
+					onPause={() => i === activeRef.current && !cutRef.current && setPlaying(false)}
+					// On Safari both stay drawn (it may not paint a hidden video), the one on screen on top.
+					className="absolute inset-0 h-full w-full object-cover"
+					style={{ zIndex: i === active ? 1 : 0, visibility: i === active || lead ? "visible" : "hidden" }}
 				/>
-				<span className="tabular-nums">
-					{clock(outTime)} / {clock(total)}
-				</span>
-			</div>
-		</div>
+			))}
+		</PlayerFrame>
 	);
 });

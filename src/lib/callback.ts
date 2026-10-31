@@ -1,6 +1,7 @@
 // Signs callback URLs so only the service we sent the link to can report a result for that video.
+// (Also signs the editor's media links, see /api/media.)
 
-async function hmac(secret: string, message: string) {
+export async function hmac(secret: string, message: string) {
 	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
 		"sign",
 	]);

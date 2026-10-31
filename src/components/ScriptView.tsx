@@ -1,10 +1,13 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, setFix } from "@/lib/edit";
 import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines } from "@/lib/timeline";
+import { reportError } from "@/lib/report";
+import { studioSupported } from "@/lib/player/engine";
 import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
+import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -90,6 +93,43 @@ function layout(words: Word[], cuts: Cut[], fixes: Fix[]): Item[] {
 	return items;
 }
 
+type WordActions = { click: (index: number) => void; edit: (from: number, to: number) => void };
+type WordItem = Extract<Item, { kind: "word" }>;
+
+// One word of the script. Memoized: while playing, the highlight moves a few times a second, and
+// redrawing thousands of words each time froze long scripts (and the preview drawn on the page).
+const WordSpan = memo(function WordSpan({
+	item,
+	gone,
+	active,
+	heardAs,
+	actions,
+}: {
+	item: WordItem;
+	gone: boolean;
+	active: boolean;
+	heardAs: string | null;
+	actions: RefObject<WordActions>;
+}) {
+	return (
+		<>
+			{item.space && " "}
+			<span
+				data-word={item.index}
+				data-last={item.last}
+				onClick={() => actions.current.click(item.index)}
+				onDoubleClick={() => actions.current.edit(item.index, item.last)}
+				title={heardAs !== null ? `Fixed · heard as "${heardAs}"` : undefined}
+				className={`cursor-pointer rounded transition-colors ${
+					gone ? "text-red-600/60 line-through decoration-2" : active ? "bg-blue-600 text-white" : "hover:bg-foreground/10"
+				} ${item.fixed ? "underline decoration-green-600 decoration-2 underline-offset-4" : ""}`}
+			>
+				{item.text}
+			</span>
+		</>
+	);
+});
+
 // Index of the word being said at time t (-1 before the first word).
 function wordAt(words: Word[], t: number) {
 	let lo = 0;
@@ -107,6 +147,7 @@ function wordAt(words: Word[], t: number) {
 
 type Props = {
 	videoUrl: string;
+	studio: StudioMedia | null; // the preview copy for our own player; null until it is made
 	duration: number;
 	words: Word[];
 	cuts: Cut[];
@@ -119,7 +160,7 @@ type Props = {
 };
 
 // The editor: script on the left, the video on the right (stacked on phones, video first).
-export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange, fixes, onFixesChange, subtitle, onSubtitleChange }: Props) {
+export function ScriptView({ videoUrl, studio, duration, words, cuts, deleted, onChange, fixes, onFixesChange, subtitle, onSubtitleChange }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [current, setCurrent] = useState(-1);
@@ -132,6 +173,14 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 	// Preview = the final video (cuts, 9:16, subtitles), built live in the browser. Original = the raw upload.
 	const [mode, setMode] = useState<"preview" | "original">("preview");
 	const playerRef = useRef<PreviewHandle>(null);
+	// Our own player (smooth on every browser) once the preview copy is ready and the browser can
+	// run it; else the <video> player. ?engine=old in the address forces the old one, to compare.
+	const [studioFailed, setStudioFailed] = useState(false);
+	const [canStudio, setCanStudio] = useState<boolean | null>(null); // null: not checked yet (first render)
+	useEffect(() => setCanStudio(studioSupported() && !new URLSearchParams(window.location.search).has("engine", "old")), []);
+	const useStudio = Boolean(studio) && canStudio === true && !studioFailed;
+	// Don't start the <video> player for a moment only to swap it for ours.
+	const deciding = Boolean(studio) && canStudio === null;
 	const segments = useMemo(
 		() => keepSegments(duration, allCuts({ duration, words, cuts: cuts.map((c) => ({ ...c, reason: "silence" as const })), deleted })),
 		[duration, words, cuts, deleted],
@@ -278,6 +327,13 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 		void video.play();
 	}
 
+	// What clicking a word does, behind a ref so word spans never re-render just for new handlers.
+	const wordActions = useRef<WordActions>({ click: () => {}, edit: () => {} });
+	wordActions.current = {
+		click: (index) => seek(words[index].start, gone.has(index)),
+		edit: (from, to) => startEdit(from, to),
+	};
+
 	const styleSlider = (label: string, key: "size" | "outline") => (
 		<label className="flex items-center gap-3 text-sm text-foreground/70">
 			<span className="w-24 shrink-0">{label}</span>
@@ -309,7 +365,25 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 						</button>
 					))}
 				</div>
-				{mode === "preview" ? (
+				{mode === "preview" && deciding ? (
+					<div className="mx-auto aspect-[9/16] w-full rounded-lg bg-black" style={{ maxWidth: "calc(70vh * 9 / 16)" }} />
+				) : mode === "preview" && useStudio && studio ? (
+					<StudioPlayer
+						key={studio.videoUrl}
+						ref={playerRef}
+						media={studio}
+						segments={segments}
+						lines={lines}
+						subtitle={subtitle}
+						onSubtitleChange={onSubtitleChange}
+						onTime={onPreviewTime}
+						onPlayingChange={setPlaying}
+						onFail={(error) => {
+							reportError("studio player", error.message);
+							setStudioFailed(true);
+						}}
+					/>
+				) : mode === "preview" ? (
 					<PreviewPlayer
 						key={videoUrl} // start fresh when the preview copy replaces the original
 						ref={playerRef}
@@ -450,25 +524,14 @@ export function ScriptView({ videoUrl, duration, words, cuts, deleted, onChange,
 							);
 						}
 						return (
-							<Fragment key={i}>
-								{item.space && " "}
-								<span
-									data-word={item.index}
-									data-last={item.last}
-									onClick={() => seek(words[item.index].start, gone.has(item.index))}
-									onDoubleClick={() => startEdit(item.index, item.last)}
-									title={item.fixed ? `Fixed · heard as "${originalText(item.index, item.last)}"` : undefined}
-									className={`cursor-pointer rounded transition-colors ${
-										gone.has(item.index)
-											? "text-red-600/60 line-through decoration-2"
-											: item.index <= current && current <= item.last
-												? "bg-blue-600 text-white"
-												: "hover:bg-foreground/10"
-									} ${item.fixed ? "underline decoration-green-600 decoration-2 underline-offset-4" : ""}`}
-								>
-									{item.text}
-								</span>
-							</Fragment>
+							<WordSpan
+								key={i}
+								item={item}
+								gone={gone.has(item.index)}
+								active={item.index <= current && current <= item.last}
+								heardAs={item.fixed ? originalText(item.index, item.last) : null}
+								actions={wordActions}
+							/>
 						);
 					})}
 				</div>

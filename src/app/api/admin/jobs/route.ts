@@ -16,6 +16,7 @@ const JOB_FILES = [
 	"render-error.json",
 	"proxy.json",
 	"proxy.mp4",
+	"proxy-audio.pcm",
 	"proxy-error.json",
 ];
 

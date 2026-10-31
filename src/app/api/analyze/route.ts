@@ -1,7 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
-import { proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
+import { mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { startTranscription } from "@/lib/transcribe";
 
@@ -56,10 +56,19 @@ export async function GET(request: Request) {
 	if (edit) {
 		// videoUrl: what the Script view plays next to the transcript. The preview copy when it is
 		// ready, else the original. Videos from before preview copies get one the first time they open.
+		const env = getCloudflareContext().env as unknown as AnalyzeEnv;
 		let proxy = await proxyStatus(key);
-		if (proxy === "none") proxy = await startProxy(key, getCloudflareContext().env as unknown as AnalyzeEnv);
+		if (proxy === "none") proxy = await startProxy(key, env);
 		const videoUrl = proxy === "done" ? await proxyUrl(key, LINK_SECONDS) : await signedUrl(key, "GET", LINK_SECONDS);
-		return Response.json({ status: "done", editKey, ...edit, videoUrl, proxy });
+		// The editor's own player reads the preview copy and its sound through /api/media.
+		const studio =
+			proxy === "done"
+				? {
+						videoUrl: await mediaUrl(key, "proxy.mp4", env.RENDER_TOKEN, LINK_SECONDS),
+						audioUrl: await mediaUrl(key, "proxy-audio.pcm", env.RENDER_TOKEN, LINK_SECONDS),
+					}
+				: null;
+		return Response.json({ status: "done", editKey, ...edit, videoUrl, studio, proxy });
 	}
 
 	const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));

@@ -237,36 +237,56 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
 
 PROXY_SIDE = 540  # px, the short side; the preview is at most ~440px wide on screen
 PROXY_KEYFRAME_FRAMES = 15  # a full picture every half second at 30 fps
+PROXY_AUDIO_RATE = 24000  # Hz, mono, 16-bit: plenty for speech, and no codec to decode in the browser
 
 
-def proxy_command(src: Path, out: Path, audio: bool) -> list[str]:
+def duration_of(path: Path) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    return float(out.stdout.strip() or 0)
+
+
+def proxy_command(src: Path, out: Path, pcm: Path, audio: bool) -> list[str]:
     # Camera files store a full picture only every 1-2 s, so jumping to a cut means decoding up to
     # 2 s of video first: that was the stutter at every cut in the browser preview. This copy is
     # small, has a full picture every half second, and skips the decoding tricks that cost time.
+    # No B-frames (-bf 0): frames come out of the decoder in the order they are shown, which the
+    # editor's own player relies on.
+    # The sound also goes out as raw samples (pcm): the player cuts and joins it sample-exact.
     side = PROXY_SIDE
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-map", "0:v:0"]
-    if audio:
-        cmd += ["-map", "0:a:0", "-c:a", "aac", "-b:a", "128k"]
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
+    if not audio:
+        # Silence as long as the video, so every video has a sound file to keep time with.
+        cmd += ["-f", "lavfi", "-t", f"{duration_of(src):.3f}", "-i", f"anullsrc=r={PROXY_AUDIO_RATE}:cl=mono"]
+    sound = "0:a:0" if audio else "1:a:0"
+    cmd += ["-map", "0:v:0", "-map", sound, "-c:a", "aac", "-b:a", "128k"]
     cmd += ["-vf", f"scale='if(gt(iw,ih),-2,{side})':'if(gt(iw,ih),{side},-2)',fps={FPS},format=yuv420p"]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-tune", "fastdecode"]
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-tune", "fastdecode", "-bf", "0"]
     cmd += ["-g", str(PROXY_KEYFRAME_FRAMES), "-keyint_min", str(PROXY_KEYFRAME_FRAMES), "-sc_threshold", "0"]
     cmd += ["-movflags", "+faststart", str(out)]
+    cmd += ["-map", sound, "-ac", "1", "-ar", str(PROXY_AUDIO_RATE), "-f", "s16le", str(pcm)]
     return cmd
 
 
 @app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
-def proxy(video_url: str, output_url: str, error_url: str | None = None) -> dict:
+def proxy(video_url: str, output_url: str, error_url: str | None = None, audio_url: str | None = None) -> dict:
     """The editor's preview copy: same timing as the original, just smaller and quick to jump around in."""
     try:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
-            src, out = workdir / "source", workdir / "proxy.mp4"
+            src, out, pcm = workdir / "source", workdir / "proxy.mp4", workdir / "proxy-audio.pcm"
             urllib.request.urlretrieve(video_url, src)
-            result = subprocess.run(proxy_command(src, out, has_audio(src)), capture_output=True, text=True)
+            result = subprocess.run(proxy_command(src, out, pcm, has_audio(src)), capture_output=True, text=True)
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
+            # Sound first: the website takes proxy.mp4 existing to mean everything is there.
+            if audio_url:
+                put(audio_url, pcm.read_bytes(), "application/octet-stream")
             put(output_url, out.read_bytes(), "video/mp4")
-            return {"ok": True, "bytes": out.stat().st_size}
+            return {"ok": True, "bytes": out.stat().st_size, "audioBytes": pcm.stat().st_size}
     except Exception as err:
         if error_url:
             put(error_url, json.dumps({"error": str(err)}).encode(), "application/json")
@@ -280,7 +300,7 @@ def start(body: dict) -> dict:
     if not hmac.compare_digest(str(body.get("token", "")), os.environ["RENDER_TOKEN"]):
         return {"error": "unauthorized"}
     if body.get("kind") == "proxy":
-        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"))
+        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"))
     else:
         call = render.spawn(body["videoUrl"], body["edit"], body["outputUrl"], body.get("errorUrl"), body.get("style"))
     return {"callId": call.object_id}
@@ -291,6 +311,6 @@ def main(job: str):
     """Manual test: python -m modal run modal_app/render.py --job job.json (a job without "edit" makes a proxy)"""
     spec = json.loads(Path(job).read_text(encoding="utf-8"))
     if "edit" not in spec:
-        print(proxy.remote(spec["videoUrl"], spec["outputUrl"], spec.get("errorUrl")))
+        print(proxy.remote(spec["videoUrl"], spec["outputUrl"], spec.get("errorUrl"), spec.get("audioUrl")))
         return
     print(render.remote(spec["videoUrl"], spec["edit"], spec["outputUrl"], spec.get("errorUrl"), spec.get("style")))
