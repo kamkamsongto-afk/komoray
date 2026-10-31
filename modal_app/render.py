@@ -13,6 +13,7 @@ Deploy:  python -m modal deploy modal_app/render.py
 
 import hmac
 import json
+import math
 import os
 import re
 import subprocess
@@ -38,6 +39,13 @@ image = (
                 ("kanit", "Kanit-Medium.ttf"),
                 ("kanit", "Kanit-SemiBold.ttf"),
                 ("kanit", "Kanit-Bold.ttf"),
+                ("prompt", "Prompt-Medium.ttf"),
+                ("mitr", "Mitr-Medium.ttf"),
+                ("sarabun", "Sarabun-SemiBold.ttf"),
+                ("chakrapetch", "ChakraPetch-SemiBold.ttf"),
+                ("poppins", "Poppins-SemiBold.ttf"),
+                ("anton", "Anton-Regular.ttf"),
+                ("bebasneue", "BebasNeue-Regular.ttf"),
             ]
         ],
         "fc-cache -f",
@@ -46,18 +54,35 @@ image = (
 )
 
 WIDTH, HEIGHT, FPS = 1080, 1920, 30
-WORDS_PER_LINE = 3
-THAI_WORDS_PER_LINE = 6
-THAI_MAX_LETTERS = 16  # letters on a Thai line, not counting marks above and below
+# How long a subtitle line may get, per look. Thai letters don't count marks above and below.
+# Same as LINE_LIMITS in src/lib/timeline.ts.
+LINE_LIMITS = {
+    "normal": {"words": 3, "seconds": 1.6, "thai_words": 6, "thai_letters": 16, "thai_seconds": 2.2},
+    "big": {"words": 2, "seconds": 1.2, "thai_words": 4, "thai_letters": 10, "thai_seconds": 1.6},
+    "two": {"words": 7, "seconds": 3.0, "thai_words": 12, "thai_letters": 30, "thai_seconds": 3.6},
+}
 THAI_PAUSE = 0.15  # a pause this long inside a Thai line gets a space
-MAX_LINE_SECONDS = 1.6
-THAI_MAX_LINE_SECONDS = 2.2
 LINE_BREAK_GAP = 0.5  # a pause this long starts a new subtitle line
 WATERMARK = "komoray.com"
 
-# Subtitle look. Users will pick these in the app later (subtitle styles / Brand Kit).
+# The editor's fonts (FONTS in src/lib/subtitle-style.ts) by their name inside the font file.
+FONTS = {
+    "kanit": "Kanit Medium",
+    "prompt": "Prompt Medium",
+    "mitr": "Mitr Medium",
+    "sarabun": "Sarabun SemiBold",
+    "chakra": "Chakra Petch SemiBold",
+    "poppins": "Poppins SemiBold",
+    "anton": "Anton",
+    "bebas": "Bebas Neue",
+}
+BOX_PADDING = 20  # the Box look: space around the letters, px
+HIGHLIGHT = "&H0000E6FF&"  # the Highlight look's yellow (#FFE600; ASS colours are blue-green-red)
+
+# Subtitle look, as picked in the editor (src/lib/subtitle-style.ts).
 DEFAULT_STYLE = {
-    "font": "Kanit Medium",  # Kanit covers both Thai and English; also "Kanit", "Kanit SemiBold", "Kanit Bold"
+    "font": "kanit",
+    "look": "clean",  # clean | box | highlight | big | two
     "size": 100,  # px on a 1080x1920 frame
     "outline": 10,  # black border around the white letters, px
     "position": 0.31,  # 0 = bottom edge, 0.5 = middle of the screen
@@ -77,13 +102,30 @@ def keep_segments(duration: float, cuts: list[dict]) -> list[tuple[float, float]
     return [(a, b) for a, b in keeps if b - a > 0.05]
 
 
-def to_new_timeline(t: float, keeps: list[tuple[float, float]]) -> float | None:
-    """Where a moment of the original video lands after the cuts (None if it was cut)."""
-    offset = 0.0
+def js_round(x: float) -> int:
+    # Math.round in the browser (Python's round() sends halves to the even number).
+    return math.floor(x + 0.5)
+
+
+def frame_segments(keeps: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
+    """The kept parts in frames: (output frame, source frame, frame count). Same as keepSegments in timeline.ts."""
+    segments, start = [], 0
     for a, b in keeps:
-        if a <= t <= b:
-            return offset + (t - a)
-        offset += b - a
+        trim = js_round(a * FPS)
+        frames = js_round(b * FPS) - trim
+        if frames <= 0:
+            continue
+        segments.append((start, trim, frames))
+        start += frames
+    return segments
+
+
+def place_frame(t: float, segments: list[tuple[int, int, int]]) -> float | None:
+    """The output frame for a moment of the original video (None if it was cut). Same as placeFrame in timeline.ts."""
+    f = t * FPS
+    for start, trim, frames in segments:
+        if trim <= f <= trim + frames:
+            return start + (f - trim)
     return None
 
 
@@ -115,21 +157,46 @@ def thai_letters(text: str) -> int:
     return len(THAI_MARKS.sub("", text))
 
 
-def join_thai(words: list[dict]) -> str:
+def join_thai(words: list[dict]) -> list[str]:
     """Thai doesn't put spaces between words, only between phrases. A Thai line gets one where Thai,
     numbers and English meet ("5 นาที"), after a polite ending or ๆ, and where the speaker pauses.
-    Same as joinThai in src/lib/timeline.ts."""
-    out = ""
+    Returns each word with the space before it. Same as joinThai in src/lib/timeline.ts."""
+    out, parts = "", []
     for i, w in enumerate(words):
         t = w["text"]
+        space = ""
         if i and out and t:
             prev = words[i - 1]
             a, b = char_kind(out[-1]), char_kind(t[0])
             ending = (prev["text"] in THAI_ENDINGS and t not in THAI_ENDINGS) or prev["text"].endswith("ๆ")
-            if (a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE:
-                out += " "
-        out += t
-    return out
+            if (a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE * FPS:
+                space = " "
+        out += space + t
+        parts.append(space + t)
+    return parts
+
+
+TWO_ROWS_FROM = 14  # Two lines look: a line with more letters than this is split in two rows
+
+
+def second_row(texts: list[str]) -> int | None:
+    """Where to split a line into two rows: between the words closest to half its letters.
+    Same as secondRow in src/lib/timeline.ts."""
+    sizes = [thai_letters(t.strip()) for t in texts]
+    total = sum(sizes)
+    if len(texts) < 2 or total <= TWO_ROWS_FROM:
+        return None
+    best, before, best_diff = 1, 0, math.inf
+    for k in range(1, len(texts)):
+        before += sizes[k - 1]
+        diff = abs(before - total / 2)
+        if diff < best_diff:
+            best, best_diff = k, diff
+    return best
+
+
+def ass_text(text: str) -> str:
+    return text.replace("\\", "").replace("{", "(").replace("}", ")")
 
 
 def ass_time(t: float) -> str:
@@ -139,31 +206,35 @@ def ass_time(t: float) -> str:
 
 def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict) -> str:
     thai = any(is_thai(w["text"]) for w in words)
-    font = style["font"]
+    font = FONTS.get(style["font"], FONTS["kanit"])
+    look = style.get("look", "clean")
     size = int(style["size"])
     outline = int(style["outline"])
     margin_v = int(HEIGHT * float(style["position"]))
-    joiner = "" if thai else " "
-    per_line = THAI_WORDS_PER_LINE if thai else WORDS_PER_LINE
-    max_seconds = THAI_MAX_LINE_SECONDS if thai else MAX_LINE_SECONDS
+    limits = LINE_LIMITS.get(look, LINE_LIMITS["normal"])
+    per_line = limits["thai_words"] if thai else limits["words"]
+    max_seconds = limits["thai_seconds"] if thai else limits["seconds"]
 
-    # Move every kept word onto the new (cut) timeline.
+    # Move every kept word onto the new (cut) timeline, counted in frames like the preview does
+    # (placeFrame in timeline.ts), so both break lines in the same places.
+    segments = frame_segments(keeps)
     placed = []
     for w in words:
-        mid = to_new_timeline((w["start"] + w["end"]) / 2, keeps)
+        mid = place_frame((w["start"] + w["end"]) / 2, segments)
         if mid is None:
             continue
-        half = (w["end"] - w["start"]) / 2
+        half = (w["end"] - w["start"]) / 2 * FPS
         placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half})
 
     # Group words into short lines.
+    gap_frames = LINE_BREAK_GAP * FPS
     lines, current, letters = [], [], 0
     for w in placed:
         if current and (
             len(current) >= per_line
-            or w["start"] - current[-1]["end"] > LINE_BREAK_GAP
-            or w["end"] - current[0]["start"] > max_seconds
-            or (thai and letters + thai_letters(w["text"]) > THAI_MAX_LETTERS)
+            or w["start"] - current[-1]["end"] > gap_frames
+            or w["end"] - current[0]["start"] > max_seconds * FPS
+            or (thai and letters + thai_letters(w["text"]) > limits["thai_letters"])
         ):
             lines.append(current)
             current, letters = [], 0
@@ -177,10 +248,28 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         start = line[0]["start"]
         # Hold each line until the next one starts (if close), so subtitles don't flicker.
         end = line[-1]["end"]
-        if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < LINE_BREAK_GAP:
+        if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < gap_frames:
             end = lines[i + 1][0]["start"]
-        text = (join_thai(line) if thai else joiner.join(w["text"] for w in line)).replace("\\", "").replace("{", "(").replace("}", ")")
-        events.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{text}")
+        parts = [ass_text(p) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
+        row2 = second_row(parts) if look == "two" else None
+        if row2 is not None:
+            parts[row2] = "\\N" + parts[row2].lstrip()
+        if look != "highlight":
+            events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{''.join(parts)}")
+            continue
+        # Highlight: one event per word, that word yellow until the next one starts.
+        for k in range(len(line)):
+            a = start if k == 0 else line[k]["start"]
+            b = line[k + 1]["start"] if k + 1 < len(line) else end
+            if b <= a:
+                continue
+            text = "".join(f"{{\\1c{HIGHLIGHT}}}{p}{{\\1c&H00FFFFFF&}}" if j == k else p for j, p in enumerate(parts))
+            events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{text}")
+
+    # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
+    boxed = look == "box"
+    border_style, border, shadow = (3, BOX_PADDING, 0) if boxed else (1, outline, 2)
+    outline_colour = "&H40000000" if boxed else "&H00000000"
 
     return "\n".join(
         [
@@ -194,9 +283,9 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
             "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
             "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-            f"Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
+            f"Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,{outline_colour},&H64000000,"
             # Bold stays off: the weight comes from the font name (e.g. "Kanit Medium").
-            f"0,0,0,0,100,100,0,0,1,{outline},2,2,80,80,{margin_v},1",
+            f"0,0,0,0,100,100,0,0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

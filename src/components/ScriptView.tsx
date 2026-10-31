@@ -2,7 +2,7 @@
 
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, normText, setFix, TRAIL, type WordFix } from "@/lib/edit";
-import { LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
+import { FONTS, type FontId, LIMITS, type Look, LOOKS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, type Take } from "@/lib/takes";
 import { keepSegments, subtitleLines } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
@@ -202,7 +202,7 @@ export function ScriptView({
 		() => keepSegments(duration, allCuts({ duration, words, cuts: cuts.map((c) => ({ ...c, reason: "silence" as const })), deleted })),
 		[duration, words, cuts, deleted],
 	);
-	const lines = useMemo(() => subtitleLines(fixedWords(words, fixes), segments), [words, fixes, segments]);
+	const lines = useMemo(() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look), [words, fixes, segments, subtitle.look]);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);
 
@@ -497,8 +497,41 @@ export function ScriptView({
 				{mode === "preview" && (
 					<div className="flex flex-col gap-2 rounded-lg border border-foreground/15 p-3">
 						<p className="text-sm font-medium">Subtitles</p>
+						<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Subtitle style">
+							{(Object.keys(LOOKS) as Look[]).map((look) => (
+								<button
+									key={look}
+									role="radio"
+									aria-checked={subtitle.look === look}
+									title={LOOKS[look].hint}
+									onClick={() => onSubtitleChange({ ...subtitle, look, size: LOOKS[look].size, position: LOOKS[look].position })}
+									className={`rounded-md border px-2.5 py-1 text-sm ${
+										subtitle.look === look ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"
+									}`}
+								>
+									{LOOKS[look].name}
+								</button>
+							))}
+						</div>
+						<label className="flex items-center gap-3 text-sm text-foreground/70">
+							<span className="w-24 shrink-0">Font</span>
+							<select
+								value={subtitle.font}
+								onChange={(e) => onSubtitleChange({ ...subtitle, font: e.target.value as FontId })}
+								className="flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
+							>
+								{(Object.keys(FONTS) as FontId[])
+									.filter((id) => FONTS[id].thai || !thaiClip || id === subtitle.font)
+									.map((id) => (
+										<option key={id} value={id}>
+											{FONTS[id].name}
+											{FONTS[id].thai ? "" : " (English only)"}
+										</option>
+									))}
+							</select>
+						</label>
 						{styleSlider("Text size", "size")}
-						{styleSlider("Black outline", "outline")}
+						{subtitle.look !== "box" && styleSlider("Black outline", "outline")}
 						<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>
 					</div>
 				)}
