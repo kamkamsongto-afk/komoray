@@ -1,6 +1,6 @@
 # Komoray: บันทึกความคืบหน้า
 
-อัปเดตล่าสุด: **30 ต.ค. 2026 (ค่ำ)** · ตอนนี้เร็วกว่าแผน ~5 วัน
+อัปเดตล่าสุด: **31 ต.ค. 2026 (บ่าย, รอบทำงานยาวอัตโนมัติ)** · ตอนนี้เร็วกว่าแผน ~5 วัน
 แผน 67 วัน: [Google Sheet](https://docs.google.com/spreadsheets/d/177tM1wyvNRYY82ykldY7aoKK9YSHDi8JJ1SKtCfR5v4/edit) (1 แถว = 1 วันในปฏิทิน, คอลัมน์ K = สถานะ)
 
 ---
@@ -26,11 +26,12 @@
 - **Cloudflare Workers ผ่าน OpenNext** (`@opennextjs/cloudflare`) เลือกแทน vinext เพราะ vinext ยังเป็น beta
 - **Workers Builds**: push ขึ้น `main` แล้ว Cloudflare build + deploy เองอัตโนมัติ
   - Build: `npx opennextjs-cloudflare build` · Deploy: `npx opennextjs-cloudflare deploy` · Preview: `npx opennextjs-cloudflare upload`
-- **Cloudflare R2**: ตู้ `komoray-uploads` (CORS อนุญาต localhost:3000, komoray.com, www, workers.dev)
+- **Cloudflare R2**: ตู้ `komoray-uploads` (CORS อนุญาต localhost:3000, komoray.com, www, workers.dev · headers แค่ `Content-Type` **ไม่มี Range** → ตัวเล่นใหม่อ่านไฟล์ผ่าน `/api/media` บนเว็บเราแทน)
 - **Deepgram** (model `nova-3`) ถอดเสียงพร้อมเวลารายคำ รองรับ `en` และ `th`
 - **Modal** ตัดคลิปด้วย FFmpeg (แอป `komoray-render`)
 - **Supabase** (โปรเจกต์ `komoray`, Free, ฐานข้อมูลอยู่ us-west-2) สำหรับ login · Google provider เปิดแล้ว · URL `https://icjjeinussbapihdjiym.supabase.co`
   - ตาราง `projects` (1 แถว = 1 คลิป, `id` = โฟลเดอร์ใน R2) + Row Level Security: เห็น/เพิ่ม/ลบได้เฉพาะของตัวเอง · SQL อยู่ที่ `supabase/migrations/`
+  - ตาราง `word_fixes` (คัมภีร์คำส่วนตัว, 31 ต.ค., `002_word_fixes.sql`): `heard` (คำที่สคริปต์เขียน แบบตัวเล็ก ไม่มีวรรคตอนท้าย) → `fixed`, `uses` · RLS เฉพาะเจ้าของ (ทดสอบแล้ว ผู้ใช้อื่นมองไม่เห็น/ลบไม่ได้) · ลบบัญชีแล้วคำหายด้วย (cascade)
   - รันคำสั่ง SQL จากเครื่อง: ต่อผ่าน `aws-1-us-west-2.pooler.supabase.com:5432` user `postgres.icjjeinussbapihdjiym` + `SUPABASE_DB_PASSWORD`
   - URL Configuration: Site URL `https://komoray.com` · Redirect URLs komoray.com/**, www.komoray.com/**, localhost:3000/**
 - **Google Cloud** โปรเจกต์ `komoray` → Google Auth Platform: แอป Komoray (External, **Published** 30 ต.ค., ไม่มีโลโก้), OAuth client `Komoray web` (redirect ไป Supabase callback)
@@ -54,13 +55,18 @@
 | `src/app/admin/page.tsx` + `src/app/api/admin/jobs/route.ts` | หน้า admin: ทุกคลิป + สถานะ (done/working/failed/stuck) + error · เข้าได้เฉพาะล็อกอินด้วย `ADMIN_EMAIL` (kamkamsongto@gmail.com) |
 | `src/app/projects/page.tsx` | My projects: คลิปของตัวเอง เรียงใหม่→เก่า + อีกกี่วันถูกลบ · กดแล้วไป `/edit?key=…` |
 | `src/app/auth/callback/route.ts` | Google ส่งกลับมาที่นี่หลังล็อกอิน → แลกเป็น session cookie |
-| `src/components/Account.tsx` | `useUser`, ปุ่ม Sign in with Google, แถบบน (New video · My projects · Sign out) |
-| `src/components/ScriptView.tsx` | ตัวตัดต่อ: ซ้าย = ข้อความ (ต่อชิ้นคำไทยด้วย `Intl.Segmenter`, ✂️ ช่วงเงียบ, ลากคลุมคำ → Delete/Restore, คลิกคำ → กระโดด, ไฮไลต์คำที่พูด) · ขวา = สลับ Preview / Original + แถบปรับซับ |
-| `src/components/PreviewPlayer.tsx` | **ตัวอย่างคลิปจริงในเบราว์เซอร์**: 9:16 + ซับ Kanit + ลายน้ำ · ใช้ `<video>` 2 ตัวสลับกันที่จุดตัด (ตัวหนึ่งเล่น อีกตัวรอที่ชิ้นถัดไป) จึงไม่สะดุด · ลากซับขึ้นลงได้ |
-| `src/lib/timeline.ts` | คิดไทม์ไลน์คลิปจริง + แบ่งบรรทัดซับ **ลอกกติกาจาก `render.py`** (แก้ที่หนึ่งต้องแก้อีกที่ ไม่งั้นตัวอย่างไม่ตรงคลิปจริง) |
-| `src/lib/edit.ts` | คำที่ลบ → ช่วงตัด (`wordCuts`), รวมกับช่วงเงียบ (`allCuts`), รวมวินาทีที่ตัด |
+| `src/components/Account.tsx` | `useUser`, ปุ่ม Sign in with Google, แถบบน (New video · My projects · My words · Sign out) |
+| `src/components/ScriptView.tsx` | ตัวตัดต่อ: ซ้าย = ข้อความ (ต่อชิ้นคำไทยด้วย `Intl.Segmenter`, ✂️ ช่วงเงียบ, ลากคลุมคำ → Delete/Restore/✏️ Fix text, **ดับเบิลคลิกคำ → แก้คำ** + Fix all, 🔍 Find & replace, คลิกคำ → กระโดด, ไฮไลต์คำที่พูด, คำเป็น `WordSpan` memo กันสคริปต์ยาวค้าง) · ใช้คัมภีร์คำครั้งแรกที่เปิดคลิป · ขวา = เลือกตัวเล่น (StudioPlayer ถ้ามี proxy + เบราว์เซอร์รองรับ, ไม่งั้น PreviewPlayer) / Original + แถบปรับซับ |
+| `src/components/PlayerFrame.tsx` | กรอบที่ตัวเล่นทั้งสองใช้ร่วมกัน: 9:16, ซับ Kanit (ลากขึ้นลง), ลายน้ำ, ปุ่ม Play, แถบเวลา, ป้าย Recording, วงกลมหมุนตอนโหลด |
+| `src/components/StudioPlayer.tsx` + `src/lib/player/` | **ตัวเล่นของเราเอง (ตัวหลัก, 31 ต.ค.)**: `mp4.ts` อ่านตารางเฟรมของ proxy.mp4 เอง · `bytes.ts` โหลดทีละ 1 MB (Range, จำ ~48 MB) · `engine.ts` WebCodecs แกะภาพวาดลง canvas + Web Audio เล่น `proxy-audio.pcm` เป็นนาฬิกา (ตัดตรง sample, เฟด 3 ms) · error/ไม่รองรับ → กลับไปใช้ PreviewPlayer เอง · `?engine=old` บังคับใช้ตัวเก่า |
+| `src/components/PreviewPlayer.tsx` | ตัวเล่นสำรอง: `<video>` 2 ตัวสลับกันที่จุดตัด · Safari เล่นล่วงหน้า 0.5 วิ (ยังสะดุดบน iPad/Mac เพราะ Safari สั่ง play/seek ช้า) |
+| `src/lib/timeline.ts` | คิดไทม์ไลน์คลิปจริง + แบ่งบรรทัดซับ **ลอกกติกาจาก `render.py`** (แก้ที่หนึ่งต้องแก้อีกที่ ไม่งั้นตัวอย่างไม่ตรงคลิปจริง) · `joinThai` = `join_thai` เว้นวรรคตรงรอยไทย/ตัวเลข/อังกฤษ |
+| `src/lib/edit.ts` | คำที่ลบ → ช่วงตัด (`wordCuts`, `allCuts`) · คำที่แก้ (`Fix`, `fixedWords`, `setFix`, `readFixes`) · `normText` (กติกาเทียบคำ) · `WordFix` |
 | `src/lib/subtitle-style.ts` | ค่าซับ size / outline / position + ค่าตั้งต้น + ขอบเขต (ใช้ทั้งหน้าเว็บและเซิร์ฟเวอร์) |
-| `src/app/api/edit/route.ts` | PUT: บันทึก `deleted` และ/หรือ `style` ลง edit.json |
+| `src/app/api/edit/route.ts` | PUT: บันทึก `deleted`, `fixes`, `dictionaryApplied`, `style` ลง edit.json (ส่งอย่างไหนก็ได้) |
+| `src/app/api/dictionary/route.ts` + `src/app/words/page.tsx` | คัมภีร์คำ: GET/POST (นับ uses)/DELETE · หน้า **My words** ค้นหา ลบ ดาวน์โหลด CSV |
+| `src/lib/proxy.ts` + `src/app/api/media/route.ts` | ไฟล์ตัวอย่าง: `proxyStatus`/`startProxy` (Modal) · `mediaUrl` ลิงก์มีลายเซ็น HMAC + หมดอายุ 3 ชม. → `/api/media` ดึงจาก R2 แบบ Range ให้ (ไม่ต้องเช็ก login ทุกก้อน) |
+| `src/lib/debug-log.ts` + `src/app/api/debug-log/route.ts` | โหมดบันทึก `&debug=1`: ป้ายแดง Recording · ส่งทุก 10 วิไป `logs/debug/` ใน R2 (ลบเองหลัง 90 วัน, หน้า admin ข้าม) |
 | `src/lib/report.ts` | ส่ง error ฝั่งเบราว์เซอร์ไปหน้า admin |
 | `src/lib/supabase/` | `config.ts` (URL, key, ADMIN_EMAIL) · `browser.ts` · `server.ts` (`currentUser`, `ownsVideo`, `isAdmin`) |
 | `src/app/api/report/route.ts` | หน้าเว็บส่ง error ฝั่งเบราว์เซอร์มาเก็บที่ `logs/` ใน R2 (ลบเองหลัง 90 วัน) |
@@ -72,9 +78,11 @@
 | `src/lib/callback.ts` | ลายเซ็นลับของลิงก์ callback |
 | `src/lib/transcribe.ts` | **ไฟล์เดียวที่รู้จัก Deepgram** (เปลี่ยนเจ้าแก้ไฟล์นี้ไฟล์เดียว) |
 | `src/lib/silences.ts` | กติกาช่วงเงียบ: ช่องว่าง > 0.4 วิ, เว้นระยะรอบคำ 0.1 วิ · `trimStretchedWords`: คำยาวได้ไม่เกิน 0.2 + 0.05×ตัวอักษร วิ (Deepgram ชอบลากหางคำท้ายประโยค) |
-| `modal_app/render.py` | งานตัดคลิปบน Modal (FFmpeg) · deploy: `python -m modal deploy modal_app/render.py` · ทดสอบ: `python -m modal run modal_app/render.py --job job.json` · endpoint: `https://kamkamsongto--komoray-render-start.us-east.modal.run` |
+| `modal_app/render.py` | งานบน Modal (FFmpeg): `render` ตัดคลิปจริง · `proxy` ทำไฟล์ตัวอย่าง (540p, ภาพเต็มทุก 0.5 วิ, ไม่มี B-frame) + `proxy-audio.pcm` (mono 16-bit 24 kHz) · deploy: `python -m modal deploy modal_app/render.py` · ทดสอบ: `python -m modal run modal_app/render.py --job job.json` (ไม่มี `edit` = proxy) · endpoint: `https://kamkamsongto--komoray-render-start.us-east.modal.run` (`kind: "proxy"`) |
 
-`edit.json` = `{ source, duration, rules, cuts: [{start, end, reason}], words: [{text, start, end}], deleted?: [ลำดับคำที่ลบ], style?: {size, outline, position} }`
+`edit.json` = `{ source, duration, rules, cuts: [{start, end, reason}], words: [{text, start, end}], deleted?: [ลำดับคำที่ลบ], fixes?: [{from, to, text}], dictionaryApplied?: true, style?: {size, outline, position} }`
+
+ไฟล์ในโฟลเดอร์คลิป (R2 `uploads/<id>/`): ต้นฉบับ · `analyze.json` · `edit.json` · `proxy.json` · `proxy-audio.pcm` · `proxy.mp4` (มีทั้งสองไฟล์ = proxy เสร็จ; proxy.mp4 ที่ไม่มี pcm = รุ่นเก่า สร้างใหม่เองตอนเปิด /edit) · `render.json` · `final.mp4` · `*-error.json`
 
 ---
 
@@ -124,6 +132,15 @@
 - **หน้าตัดต่อเต็มจอ `/edit`** (`0f2dde6`, ตามไอเดียโค้ช): ซ้ายข้อความ ขวาคลิป · หาช่วงเงียบเสร็จพาไปเอง · **ปรับซับ**: ลากขึ้นลงบนคลิป + แถบ Text size / Black outline · Make video ใช้ค่าเดียวกัน (ส่วนหนึ่งของวันที่ 17–18)
 - ✅ โค้ชทดสอบบนเว็บจริง (31 ต.ค.): My projects → /edit ผ่าน · ซับคลิปจริงตรงกับตัวอย่าง ผ่าน · F5 ค่าซับยังอยู่ ผ่าน · ⏳ iPhone ยังไม่ได้ทดสอบ (ไม่มีเครื่อง)
 
+**31 ต.ค. (ตัวอย่างลื่นทุกเครื่อง + แก้คำ + คัมภีร์คำ: ทำครบแผนคู่ขนาน A1–A7, B1–B4)**
+- เส้นทางตัวอย่างบน iPad (เรียนรู้ระหว่างทาง): เล่นล่วงหน้าแบบปิดเสียง → iPad ลื่นแต่เสียงหาย · Web Audio ผูกกับ `<video>` → iPad พัง (ย้อนแล้ว) · **ไฟล์ตัวอย่าง proxy** (`bb223d9`) Chrome ลื่น · **โหมดบันทึก `&debug=1`** (`97825ed`) พบว่า Safari สั่ง play ช้า 0.5–0.65 วิ, seek 1–1.6 วิ → ตัดสินใจทำตัวเล่นเอง
+- **A1** แก้จุดตัดแรกค้าง 2.7 วิในตัวเล่นเดิม (`a138cca`)
+- **A2** Modal ทำ `proxy-audio.pcm` + proxy ไม่มี B-frame (deploy แล้ว, ทำใหม่ให้คลิปทดสอบ 3 คลิป: Eng01, 18 วิ .MOV, 7 นาที)
+- **A3–A7 ตัวเล่นของเราเอง เป็นตัวหลักแล้ว** (`33f05df`): WebCodecs + canvas + Web Audio · วัดบน build แบบเว็บจริงในเครื่อง: คลิป 7 นาที **30 ภาพ/วิ ไม่ทิ้งภาพ ไม่ต้องรอโหลด** · ทดสอบคลิกคำกระโดด / ลบคำระหว่างเล่น / Pause / Play ผ่าน · อ่านไฟล์ผ่าน `/api/media` (เว็บจริงตอบ 206, ลายเซ็นผิด 404) · ⏳ **ยังไม่ได้ทดสอบบน iPad จริง**
+- **B1** ดับเบิลคลิกคำ → แก้คำ (`a138cca`) · **B2** Fix all + Find & replace (`ed39009`) · **B3** คัมภีร์คำ + หน้า My words (`c675c12`) · **B4** เว้นวรรคไทย/ตัวเลข/อังกฤษในซับ ตัวอย่างกับคลิปจริงตรงกัน 5/5 กรณี (`7910cb9`, deploy Modal แล้ว)
+- หน้า Privacy เพิ่ม My words / ไฟล์ตัวอย่าง / บันทึก debug · บันทึก debug ย้ายไป `logs/debug/` (ลบเองหลัง 90 วัน) (`cc1590b`)
+- ⚠️ ระบบ Claude Code **ไม่อนุญาตให้แก้ CORS ของ R2** (เปลี่ยนการตั้งค่าที่ใช้ร่วม) จึงใช้ `/api/media` แทน · ถ้าวันหนึ่งอยากให้เบราว์เซอร์อ่าน R2 ตรง ต้องเพิ่ม `Range` ใน allowed headers เอง
+
 ---
 
 ## ⚠️ ติดอยู่ / เรื่องที่ต้องรู้
@@ -132,7 +149,9 @@
 |---|---|---|
 | 🖼️ Google consent screen | **ห้ามอัปโหลดโลโก้** ในหน้า Branding (ต้องรอ Google ตรวจหลายวัน) · หน้าเลือกบัญชีจะโชว์ `icjjeinussbapihdjiym.supabase.co` (แก้ได้ด้วย Supabase custom domain แบบเสียเงิน) | ภายหลัง |
 | 📧 เมล hello@ ที่ส่งออกตกสแปม | แบบฟรีเซ็น DKIM เป็น gmail.com · แก้จริง = Google Workspace (~$7/เดือน) | **ก่อนส่งเมลชวน beta** |
-| 🇹🇭 Deepgram ภาษาไทย | ตกตัวอักษรบางตัว (เช่น "จุดเด่คือ", "โค้") · ต่อชิ้นคำได้แล้ว แต่ตัวที่ตกต้องรอฟีเจอร์แก้ข้อความ | ทำพร้อมฟีเจอร์แก้คำ/คัมภีร์ |
+| 🇹🇭 Deepgram ภาษาไทย | ตกตัวอักษรบางตัว (เช่น "จุดเด่คือ", "โค้") · แก้ได้แล้วด้วยดับเบิลคลิกคำ + คัมภีร์จำไว้ (31 ต.ค.) | ทดสอบกับคลิปไทยจริง |
+| 🎬 ตัวเล่นใหม่ยังไม่ได้ลองบนเครื่อง Apple จริง | ทดสอบแค่ Chrome ในเครื่อง · iPad/iPhone/Mac Safari ต้องรองรับ WebCodecs (Safari 16.4+) · ถ้าพังจะกลับไปตัวเล่นเดิมเอง (เห็นวิดีโอแต่สะดุด) · ดูผลด้วย `&debug=1` | **พรุ่งนี้ (โค้ชทดสอบ)** |
+| 🗃️ บันทึก debug เก่า | 2 ชุดแรกจาก iPad อยู่ที่ `debug/` (ก่อนย้ายไป `logs/debug/`) ไม่มีกฎลบเอง · เล็กมาก | ลบเมื่อว่าง |
 | 🗂️ คลิปก่อนมี login | 10 คลิปทดสอบไม่มีเจ้าของในตาราง projects → เปิดจาก /upload ไม่ได้ ดูได้ใน admin · หมดอายุเองตามกฎ 14 วัน | ไม่ต้องทำอะไร |
 | 💸 Deepgram opt out อาจแพงขึ้น | ยังไม่รู้ตัวเลขจริง · เช็กใน Deepgram Console → Usage หลังมีคลิปใหม่ | ครั้งถัดไปที่ทดสอบ |
 | 🌐 ไม่มีปุ่มจากหน้าแรกไป /upload | มี login แล้ว (30 ต.ค.) · ยังตั้งใจส่งลิงก์ให้เฉพาะคน beta · R2 ลบไฟล์ใน `uploads/` เองหลัง 14 วัน | ใส่ปุ่มตอน soft launch |
@@ -141,7 +160,6 @@
 | 🖼️ Banner บน X | ใช้ภาพคนที่ AI สร้าง + ตัวเลขยอดไลก์ อาจทำให้เข้าใจผิดว่าเป็นลูกค้าจริง | แนะนำลบตัวเลข / เปลี่ยนเป็นภาพจริงภายหลัง |
 | 📣 งานตลาด / launch / ติดต่อ creator | โค้ชสั่ง**ข้ามไปก่อน** (29 ต.ค.) · 0 โพสต์ · ยังไม่มี beta · soft launch จึงยังไม่เกิด | รอโค้ชตัดสินใจวันใหม่ |
 | 💻 บทเรียน | เวลาทดสอบด้วย `next dev` เบื้องหลัง ต้องปิด process ให้หมด ไม่งั้น `npm run dev` ของโค้ชจะเปิดไม่ได้ · ทดสอบหน้าตาได้ด้วย Chrome headless + สคริปต์ CDP (ทำหน้า dev ชั่วคราวที่ไม่ต้อง login แล้วลบทิ้ง) | ทุกครั้งที่ทดสอบ |
-| 🔤 ซับไทยไม่เว้นวรรคระหว่างไทยกับตัวเลข | เช่น "5นาที" ทั้งตัวอย่างและคลิปจริง (กติกาเดียวกัน) · แก้ต้อง deploy Modal ใหม่ด้วย | พร้อมงานฟอนต์วันที่ 17 |
 | 🔁 คลิปที่หาช่วงเงียบแล้ว | ตอนนี้กด Find silences ใหม่จากหน้า /edit ไม่ได้ (หน้า upload ส่งไป /edit เลย) | ถ้าต้องการค่อยเพิ่มปุ่ม |
 | 🏠 Find silences บน localhost | Deepgram ส่งผล callback มาที่เครื่องในบ้านไม่ได้ จะค้างที่ Listening · ทดสอบบน komoray.com หรือจำลอง callback ด้วยลายเซ็น HMAC | ทุกครั้งที่ทดสอบในเครื่อง |
 | 📦 ขนาดไฟล์ 500 MB | คลิป 4K ของมืออาชีพเกินแน่นอน · โค้ชเลือก**ยังไม่ขยาย**ตอนนี้ · ของจริงควรจำกัดตามความยาวคลิป/แพ็กเกจ + อัปโหลดแบบแบ่งชิ้น (multipart) | หลังมี login |
@@ -151,27 +169,12 @@
 ## ⏭️ ขั้นต่อไป
 
 
-**แผนคู่ขนาน (31 ต.ค., โค้ชตัดสิน):** ทำ 2 สายสลับกันครึ่งต่อครึ่ง · ชิ้นละ 1–3 ชม. ทดสอบได้ทันที · ลำดับ **A1 → B1 → A2 → B2 → A3 → B3 → A4 → B4 → A5 → A6 → A7** · เวลาเหลือค่อยเพิ่มทีละชิ้น
+**แผนคู่ขนาน A1–A7, B1–B4 เสร็จครบ 31 ต.ค.** (ดูหัวข้อเสร็จแล้ว) · ยังใช้วิธีเดิมต่อได้: 2 สายสลับกัน ชิ้นละ 1–3 ชม.
 
-สาย A: **ตัวเล่นของเราเอง** (เหตุผล: บันทึกจาก iPad 31 ต.ค. พบ Safari สั่ง play ช้า 0.5–0.65 วิ, seek 1–1.6 วิ, เปลี่ยนความเร็วแล้วตกเฟรม → วิดีโอ 2 ตัวสลับกันไปได้แค่นี้บน Safari/Mac)
-- A1 แก้บั๊กจุดตัดแรกค้าง 2.7 วิ (Safari รีเซ็ตตำแหน่งวิดีโอที่รอเป็น 0 ตอนโหลดไฟล์)
-- A2 Modal ทำไฟล์เสียงเล็ก ๆ แยก (ต่อจาก proxy)
-- A3 เสียง: Web Audio เล่นช่วงที่เก็บต่อกันไร้รอยต่อ (ทดสอบแค่เสียงบน iPad)
-- A4 ภาพ: WebCodecs แกะเฟรมจาก proxy.mp4 วาดลง canvas
-- A5 ภาพเดินตามนาฬิกาเสียง ข้ามช่วงตัด
-- A6 ต่อเข้า /edit แบบลิงก์พิเศษ (Play/Pause, ลากแถบเวลา, คลิกคำแล้วกระโดด)
-- A7 เป็นตัวหลัก เบราว์เซอร์ที่ไม่มี WebCodecs ใช้ตัวเดิม
-
-สาย B: **งานขายได้**
-- B1 คลิกคำแล้วพิมพ์แก้ (ซับตัวอย่าง + คลิปจริงเปลี่ยนตาม)
-- B2 Replace all (เกด → เกตุ ทั้งคลิป)
-- B3 คัมภีร์คำส่วนตัวใน Supabase (คลิปต่อไปแก้เอง)
-- B4 เว้นวรรคไทย/ตัวเลขในซับ (`timeline.ts` + `render.py`)
-
-**งานอื่น (เรียงตามลำดับ หลังแผนคู่ขนาน):**
-1. **ทดสอบตัวอย่างบน iPhone** · ดู debug: เพิ่ม `&debug=1` ท้ายลิงก์ /edit → ป้ายแดง Recording → บันทึกเข้า `debug/` ใน R2
-2. **วันที่ 15: ตรวจเทคซ้ำด้วย Claude API** (เก็บเทคสุดท้ายที่พูดจบ แสดงให้เห็น กดคืนได้)
-3. วันที่ 17 ที่เหลือ: สไตล์ซับ 5 แบบ + เลือกฟอนต์ + อัปโหลดฟอนต์ + แก้ช่องว่างไทย/ตัวเลขในซับ (ทั้ง `timeline.ts` และ `render.py`)
+**งานถัดไป (เรียงตามลำดับ):**
+1. **โค้ชทดสอบตาม checklist 31 ต.ค.** โดยเฉพาะตัวเล่นใหม่บน iPad (`&debug=1` → Claude อ่านด้วยสคริปต์ที่ `logs/debug/`) แล้วแก้ตามที่เจอ
+2. **วันที่ 15: ตรวจเทคซ้ำด้วย Claude API** (เก็บเทคสุดท้ายที่พูดจบ แสดงให้เห็น กดคืนได้) · ต้องมีกุญแจ Anthropic API ใน `.dev.vars` + Worker secret ก่อน
+3. วันที่ 17 ที่เหลือ: สไตล์ซับ 5 แบบ + เลือกฟอนต์ + อัปโหลดฟอนต์
 4. วันที่ 18 ที่เหลือ: Brand Kit (ตั้งค่าซับครั้งเดียวใช้ทุกคลิป)
 5. **Google Workspace** (~45 นาที, ก่อนส่งเมลหา creator): สมัคร Business Starter (yoshi@komoray.com, hello@/support@ เป็น alias) → ยืนยันโดเมน (TXT) → MX เป็นของ Google + ปิด Cloudflare Email Routing → DKIM (`google._domainkey`) → SPF เหลือ `include:_spf.google.com` → ลบ "Send mail as" + App password `Komoray mail` → ทดสอบส่งหาภรรยา
 6. ทดสอบคลิปที่เหลือ 6 คลิป + คลิปแนวนอน + .mov จาก iPhone (โค้ช)
