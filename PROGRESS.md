@@ -50,6 +50,9 @@
 |---|---|
 | `src/app/page.tsx` | หน้าแรก Coming soon + ลิงก์ Privacy · Terms |
 | `src/app/upload/page.tsx` | ต้องล็อกอินก่อน · อัปโหลด (หรือ 📱 Upload from your phone) → เลือกภาษา (จำครั้งก่อน/ตามภาษาเบราว์เซอร์) → Find silences → เสร็จแล้วพาไป `/edit` เอง · จำงานไว้ใน URL `?key=` |
+| `src/app/phone/page.tsx` + `src/app/api/phone/route.ts` + `src/components/PhoneUpload.tsx` | อัปโหลดจากมือถือด้วย QR: คอมออกลิงก์ลายเซ็น 15 นาที → มือถืออัปไฟล์เดียวเข้าโฟลเดอร์ที่เตรียมไว้ (ไม่ต้องล็อกอิน) → คอม claim เป็นโปรเจกต์ตัวเอง · สถานะใน `uploads/<id>/phone.json` |
+| `src/app/brand/page.tsx` + `src/app/api/brand/route.ts` | **Brand Kit**: ตั้งสไตล์ซับ/ฟอนต์/สี/ชื่อช่อง/Auto zoom ครั้งเดียว · เก็บที่ R2 `brand/<user id>.json` · คลิปที่ยังไม่มี style ใช้ค่านี้ตอนเปิดครั้งแรก |
+| `src/app/api/font/route.ts` + `src/lib/font-info.ts` | ฟอนต์ของผู้ใช้ 1 ตัว/บัญชี (.ttf/.otf ≤ 5 MB) ที่ R2 `fonts/<user id>/` · อ่านชื่อ family + ความสูงฟอนต์จากไฟล์ · Modal โหลดผ่านลิงก์ชั่วคราว (fontsdir) |
 | `src/app/edit/page.tsx` | **หน้าตัดต่อเต็มจอ** `/edit?key=…`: แถบบน (ความยาวเดิม→หลังตัด, Make video, ดาวน์โหลด, แจ้งเตือน) + ScriptView · บันทึกการแก้ลง edit.json ทันที (ซับรอ 0.6 วิหลังเลื่อนเสร็จ) · ยังไม่มีสคริปต์ → ส่งกลับ /upload |
 | `src/app/privacy/page.tsx`, `src/app/terms/page.tsx` | นโยบายความเป็นส่วนตัว / ข้อตกลง (ติดต่อ hello@komoray.com) · ใช้ `src/components/LegalPage.tsx` |
 | `src/app/admin/page.tsx` + `src/app/api/admin/jobs/route.ts` | หน้า admin: ทุกคลิป + สถานะ (done/working/failed/stuck) + error · เข้าได้เฉพาะล็อกอินด้วย `ADMIN_EMAIL` (kamkamsongto@gmail.com) |
@@ -64,6 +67,9 @@
 | `src/lib/thai-words.ts` | ประกอบชิ้นคำไทยของ Deepgram เป็นคำจริง (`Intl.Segmenter`) · ใช้ตอน callback ถอดเสียง + แปลงคลิปเก่าใน GET `/api/analyze` (ธง `wordsJoined` ใน edit.json) |
 | `src/lib/edit.ts` | คำที่ลบ → ช่วงตัด (`wordCuts`, `allCuts`) · คำที่แก้ (`Fix`, `fixedWords`, `setFix`, `readFixes`) · `normText` (กติกาเทียบคำ) · `WordFix` |
 | `src/lib/subtitle-style.ts` | ค่าซับ: size/outline/position + **look** (clean/box/highlight/big/two) + **font** (8 ตัว หรือ own) + color + logo/logoAt + **zoom** (off/cuts) · `FONTS[].height` = ความสูงฟอนต์ (libass คิดขนาดจากค่านี้ ตัวอย่างต้องหารด้วยค่านี้ ไม่งั้นตัวใหญ่กว่าคลิปจริง ~1.5 เท่า) · `readStyle` ตรวจทุกช่อง |
+| `src/components/SubtitleControls.tsx` + `BannerControls.tsx` | แผงตั้งค่าซับ (ใช้ทั้งหน้าตัดต่อและ Brand Kit, อัปโหลดฟอนต์ได้) · แผงป้าย Price / Call to action / Follow |
+| `src/lib/banners.ts` | ป้าย: ชนิด ข้อความ เวลา (วินาทีของคลิปจริง) ตำแหน่ง · ตัดอีโมจิ (ฟอนต์ในคลิปจริงไม่มี) · เฟด 0.25 วิ · `readBanners` |
+| `src/lib/takes.ts` | **ตรวจเทคซ้ำ** (ไม่ใช้ AI): ประโยคที่เริ่มด้วยคำเดิม ≥ 3 คำภายใน 25 วิ = เทคแรกเสีย · ข้ามคำเติม (um, เอ่อ) · ไม่ตัดเข้าต้นเทคที่เก็บ |
 | `src/app/api/edit/route.ts` | PUT: บันทึก `deleted`, `fixes`, `dictionaryApplied`, `style`, `banners` ลง edit.json (ส่งอย่างไหนก็ได้) |
 | `src/app/api/dictionary/route.ts` + `src/app/words/page.tsx` | คัมภีร์คำ: GET/POST (นับ uses)/DELETE · หน้า **My words** ค้นหา ลบ ดาวน์โหลด CSV |
 | `src/lib/proxy.ts` + `src/app/api/media/route.ts` | ไฟล์ตัวอย่าง: `proxyStatus`/`startProxy` (Modal) · `mediaUrl` ลิงก์มีลายเซ็น HMAC + หมดอายุ 3 ชม. → `/api/media` ดึงจาก R2 แบบ Range ให้ (ไม่ต้องเช็ก login ทุกก้อน) |
