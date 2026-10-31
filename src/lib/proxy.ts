@@ -8,6 +8,7 @@ import { exists, getJson, putObject, siblingKey, signedUrl } from "@/lib/r2";
 //   proxy.mp4         written by Modal last: 540p, a full picture every half second, no B-frames
 //   proxy-error.json  written by Modal if it failed
 //   faces.json        written by Modal: where the speaker's face is, every half second (facesFor)
+//   thumb.jpg         written by Modal: the picture on My projects (/api/thumb)
 // The final video is still made from the original, so this only affects what the editor plays.
 // A proxy.mp4 without proxy-audio.pcm is from before the sound file existed and gets made again.
 export type ProxyStatus = "done" | "processing" | "failed" | "none";
@@ -56,6 +57,7 @@ export async function facesFor(key: string, env: ProxyEnv): Promise<{ faces: Fac
 				kind: "faces",
 				videoUrl: await proxyUrl(key),
 				facesUrl: await signedUrl(siblingKey(key, "faces.json"), "PUT", LINK_SECONDS, "application/json"),
+				thumbUrl: await signedUrl(siblingKey(key, "thumb.jpg"), "PUT", LINK_SECONDS, "image/jpeg"),
 			}),
 		});
 		return { faces: null, pending: res.ok };
@@ -79,6 +81,7 @@ export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatu
 				outputUrl: await signedUrl(siblingKey(key, "proxy.mp4"), "PUT", LINK_SECONDS, "video/mp4"),
 				audioUrl: await signedUrl(siblingKey(key, "proxy-audio.pcm"), "PUT", LINK_SECONDS, "application/octet-stream"),
 				facesUrl: await signedUrl(siblingKey(key, "faces.json"), "PUT", LINK_SECONDS, "application/json"),
+				thumbUrl: await signedUrl(siblingKey(key, "thumb.jpg"), "PUT", LINK_SECONDS, "image/jpeg"),
 				errorUrl: await signedUrl(siblingKey(key, "proxy-error.json"), "PUT", LINK_SECONDS, "application/json"),
 			}),
 		});

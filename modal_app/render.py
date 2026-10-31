@@ -571,19 +571,41 @@ def detect_faces(path: Path) -> dict:
     return {"width": width, "height": height, "faces": faces}
 
 
+THUMB_WIDTH = 270  # px, the picture for My projects
+
+
+def make_thumb(video: Path, thumb: Path) -> None:
+    """One picture from a second in (or the middle of a short video), for My projects."""
+    at = min(1.0, duration_of(video) / 2)
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{at:.2f}", "-i", str(video), "-frames:v", "1", "-vf", f"scale={THUMB_WIDTH}:-2", "-q:v", "4", str(thumb)],
+        check=True,
+    )
+
+
 @app.function(image=image, cpu=2, memory=2048, timeout=30 * 60)
-def faces(video_url: str, faces_url: str) -> dict:
-    """Where the face is, for a preview copy made before faces were looked for."""
+def faces(video_url: str, faces_url: str, thumb_url: str | None = None) -> dict:
+    """Where the face is (and the My projects picture), for a preview copy made before these existed."""
     with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "proxy.mp4"
+        src, thumb = Path(tmp) / "proxy.mp4", Path(tmp) / "thumb.jpg"
         urllib.request.urlretrieve(video_url, src)
+        if thumb_url:
+            make_thumb(src, thumb)
+            put(thumb_url, thumb.read_bytes(), "image/jpeg")
         found = detect_faces(src)
         put(faces_url, json.dumps(found).encode(), "application/json")
         return {"ok": True, "faces": len(found["faces"])}
 
 
 @app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
-def proxy(video_url: str, output_url: str, error_url: str | None = None, audio_url: str | None = None, faces_url: str | None = None) -> dict:
+def proxy(
+    video_url: str,
+    output_url: str,
+    error_url: str | None = None,
+    audio_url: str | None = None,
+    faces_url: str | None = None,
+    thumb_url: str | None = None,
+) -> dict:
     """The editor's preview copy: same timing as the original, just smaller and quick to jump around in."""
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -599,6 +621,12 @@ def proxy(video_url: str, output_url: str, error_url: str | None = None, audio_u
                     put(faces_url, json.dumps(detect_faces(out)).encode(), "application/json")
                 except Exception as err:  # never lose the preview copy over this
                     print("faces failed:", err)
+            if thumb_url:
+                try:
+                    make_thumb(out, workdir / "thumb.jpg")
+                    put(thumb_url, (workdir / "thumb.jpg").read_bytes(), "image/jpeg")
+                except Exception as err:
+                    print("thumb failed:", err)
             # Sound first: the website takes proxy.mp4 existing to mean everything is there.
             if audio_url:
                 put(audio_url, pcm.read_bytes(), "application/octet-stream")
@@ -617,9 +645,9 @@ def start(body: dict) -> dict:
     if not hmac.compare_digest(str(body.get("token", "")), os.environ["RENDER_TOKEN"]):
         return {"error": "unauthorized"}
     if body.get("kind") == "proxy":
-        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"))
+        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"))
     elif body.get("kind") == "faces":
-        call = faces.spawn(body["videoUrl"], body["facesUrl"])
+        call = faces.spawn(body["videoUrl"], body["facesUrl"], body.get("thumbUrl"))
     else:
         call = render.spawn(body["videoUrl"], body["edit"], body["outputUrl"], body.get("errorUrl"), body.get("style"))
     return {"callId": call.object_id}
