@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { COLORS, FONTS, type FontId, LIMITS, type Look, LOOKS, MAX_LOGO_LENGTH, type SubtitleStyle } from "@/lib/subtitle-style";
+import { COLORS, FONTS, type FontId, LIMITS, type Look, LOOKS, MAX_LOGO_LENGTH, type SubtitleStyle, type Zoom } from "@/lib/subtitle-style";
 
 type Props = {
 	style: SubtitleStyle;
@@ -108,6 +108,17 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 				>
 					<option value="top-left">Top left</option>
 					<option value="top-right">Top right</option>
+				</select>
+			</label>
+			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Every other part is shown a little closer, so cuts look like a second camera">
+				<span className="w-24 shrink-0">Auto zoom</span>
+				<select
+					value={style.zoom}
+					onChange={(e) => onChange({ ...style, zoom: e.target.value as Zoom })}
+					className="flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
+				>
+					<option value="off">Off</option>
+					<option value="cuts">Zoom in and out at every cut</option>
 				</select>
 			</label>
 			<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>

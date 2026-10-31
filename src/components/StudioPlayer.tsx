@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createDebugLog, type DebugLog } from "@/lib/debug-log";
 import { StudioEngine, type StudioMedia } from "@/lib/player/engine";
-import { FPS } from "@/lib/timeline";
+import { FPS, zoomOf } from "@/lib/timeline";
 import { PlayerFrame } from "./PlayerFrame";
 import { type PreviewHandle, type PreviewProps, toPieces } from "./PreviewPlayer";
 
@@ -100,6 +100,9 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 	}, [pieces, loaded]);
 
 	useEffect(() => onPlayingChange(playing), [playing, onPlayingChange]);
+
+	// Auto zoom is drawn by the engine, frame by frame, so it changes exactly at each cut.
+	useEffect(() => engineRef.current?.setZoom((piece) => zoomOf(piece, subtitle.zoom)), [subtitle.zoom, loaded]);
 
 	useImperativeHandle(
 		ref,

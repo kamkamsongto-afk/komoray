@@ -19,6 +19,13 @@ const LINE_LIMITS = {
 const THAI_PAUSE = 0.15; // a pause this long inside a Thai line gets a space
 const LINE_BREAK_GAP = 0.5;
 
+// Auto zoom ("cuts"): every other kept piece is shown a little closer, so a cut looks like a camera
+// change instead of a jump. Zoomed around a point a little above the middle, where the face
+// usually is. Same as ZOOM in render.py.
+export const ZOOM = 1.12;
+export const ZOOM_ORIGIN = { x: 0.5, y: 0.4 };
+export const zoomOf = (piece: number, mode: string) => (mode === "cuts" && piece % 2 === 1 ? ZOOM : 1);
+
 // One kept piece of the source: plays `frames` frames from source frame `trim`, at output frame `from`.
 export type Segment = { from: number; trim: number; frames: number };
 // A subtitle line; parts = its words as shown (with the space before them) and when each is said.

@@ -3,6 +3,7 @@
 export type Look = "clean" | "box" | "highlight" | "big" | "two";
 export type FontId = "kanit" | "prompt" | "mitr" | "sarabun" | "chakra" | "poppins" | "anton" | "bebas";
 export type LogoCorner = "top-left" | "top-right";
+export type Zoom = "off" | "cuts"; // Auto zoom: "cuts" = every other kept piece a little closer (zoomOf in timeline.ts)
 // color: the brand colour (the Highlight look's word). logo: the channel name shown in a corner ("" = none).
 export type SubtitleStyle = {
 	size: number;
@@ -13,6 +14,7 @@ export type SubtitleStyle = {
 	color: string;
 	logo: string;
 	logoAt: LogoCorner;
+	zoom: Zoom;
 };
 
 export const DEFAULT_STYLE: SubtitleStyle = {
@@ -24,6 +26,7 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	color: "#FFE600",
 	logo: "",
 	logoAt: "top-left",
+	zoom: "off",
 };
 
 export const MAX_LOGO_LENGTH = 30;
@@ -74,5 +77,6 @@ export function readStyle(value: unknown): SubtitleStyle {
 		// Letters, numbers and simple marks only: it is drawn into the video as subtitle text.
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
 		logoAt: v.logoAt === "top-right" ? "top-right" : "top-left",
+		zoom: v.zoom === "cuts" ? "cuts" : "off",
 	};
 }

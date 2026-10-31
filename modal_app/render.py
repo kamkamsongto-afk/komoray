@@ -95,7 +95,10 @@ DEFAULT_STYLE = {
     "color": "#FFE600",  # brand colour: the Highlight look's word
     "logo": "",  # channel name in a corner, "" = none
     "logoAt": "top-left",  # or "top-right"
+    "zoom": "off",  # Auto zoom: "cuts" = every other kept piece a little closer
 }
+ZOOM = 1.12  # Auto zoom (ZOOM in src/lib/timeline.ts)
+ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
 BOLD_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
@@ -322,17 +325,31 @@ def has_audio(path: Path) -> bool:
     return bool(out.stdout.strip())
 
 
-def ffmpeg_command(src: Path, subs: Path, out: Path, keeps: list[tuple[float, float]], audio: bool) -> list[str]:
+def zoom_crop(piece: int, mode: str) -> str:
+    """Auto zoom ("cuts"): every other kept piece is cropped closer around a point a little above the
+    middle and scaled back up. Same as zoomOf / ZOOM_ORIGIN in src/lib/timeline.ts."""
+    if mode != "cuts" or piece % 2 == 0:
+        return ""
+    w, h = round(WIDTH / ZOOM / 2) * 2, round(HEIGHT / ZOOM / 2) * 2
+    x, y = round((WIDTH - w) * ZOOM_ORIGIN[0]), round((HEIGHT - h) * ZOOM_ORIGIN[1])
+    return f",crop={w}:{h}:{x}:{y},scale={WIDTH}:{HEIGHT}"
+
+
+def ffmpeg_command(src: Path, subs: Path, out: Path, keeps: list[tuple[float, float]], audio: bool, zoom: str = "off") -> list[str]:
     parts, labels = [], []
     for i, (a, b) in enumerate(keeps):
-        parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS[v{i}]")
+        # Each piece is made 9:16 (and zoomed) on its own, so pieces can differ before they are joined.
+        parts.append(
+            f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS,"
+            f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,crop={WIDTH}:{HEIGHT}{zoom_crop(i, zoom)},setsar=1[v{i}]"
+        )
         labels.append(f"[v{i}]")
         if audio:
             parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
             labels.append(f"[a{i}]")
     parts.append(f"{''.join(labels)}concat=n={len(keeps)}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
     parts.append(
-        f"[cv]scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,crop={WIDTH}:{HEIGHT},setsar=1,fps={FPS},"
+        f"[cv]fps={FPS},"
         f"subtitles={subs.name},"
         f"drawtext=fontfile={BOLD_FONT}:text='{WATERMARK}':fontsize=40:fontcolor=white@0.7:"
         f"shadowcolor=black@0.5:shadowx=2:shadowy=2:x=w-tw-48:y=h-th-260[outv]"
@@ -370,7 +387,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             subs.write_text(build_subtitles(edit.get("words", []), keeps, style), encoding="utf-8")
 
             result = subprocess.run(
-                ffmpeg_command(src, subs, out, keeps, has_audio(src)), cwd=workdir, capture_output=True, text=True
+                ffmpeg_command(src, subs, out, keeps, has_audio(src), style.get("zoom", "off")), cwd=workdir, capture_output=True, text=True
             )
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")

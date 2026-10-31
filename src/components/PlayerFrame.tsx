@@ -3,7 +3,7 @@
 import { Anton, Bebas_Neue, Chakra_Petch, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { type FontId, LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
-import { FPS, HEIGHT, type Line, WIDTH } from "@/lib/timeline";
+import { FPS, HEIGHT, type Line, WIDTH, ZOOM_ORIGIN } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
 const kanit = Kanit({ weight: "500", subsets: ["thai", "latin"] });
@@ -44,12 +44,13 @@ type Props = {
 	debugCount: number | null; // debug mode: events recorded so far
 	busy?: boolean; // waiting for the picture or sound to load
 	bare?: boolean; // a still sample (Brand Kit page): no play button or time bar
+	zoom?: number; // Auto zoom for pictures that don't zoom themselves (the <video> player)
 };
 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
 // (drawn at full 1080x1920 and shrunk, so sizes match the final video; drag it to move it),
 // the watermark, the play button and the time bar.
-export function PlayerFrame({ children, playing, outTime, total, line, subtitle, onSubtitleChange, onToggle, onScrub, debugCount, busy, bare }: Props) {
+export function PlayerFrame({ children, playing, outTime, total, line, subtitle, onSubtitleChange, onToggle, onScrub, debugCount, busy, bare, zoom = 1 }: Props) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [scale, setScale] = useState(0.3);
 	const dragRef = useRef<{ y: number; position: number } | null>(null);
@@ -94,7 +95,12 @@ export function PlayerFrame({ children, playing, outTime, total, line, subtitle,
 				className="relative w-full cursor-pointer overflow-hidden rounded-lg bg-black"
 				style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
 			>
-				{children}
+				<div
+					className="absolute inset-0"
+					style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: `${ZOOM_ORIGIN.x * 100}% ${ZOOM_ORIGIN.y * 100}%` } : undefined}
+				>
+					{children}
+				</div>
 				<div
 					className="pointer-events-none absolute top-0 left-0"
 					style={{ width: WIDTH, height: HEIGHT, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}

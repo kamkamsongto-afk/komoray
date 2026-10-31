@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createDebugLog, type DebugLog, videoState } from "@/lib/debug-log";
 import type { SubtitleStyle } from "@/lib/subtitle-style";
-import { FPS, type Line, type Segment } from "@/lib/timeline";
+import { FPS, type Line, type Segment, zoomOf } from "@/lib/timeline";
 import { PlayerFrame } from "./PlayerFrame";
 
 export type PreviewHandle = { seek: (sourceSeconds: number) => void; play: () => void; pause: () => void };
@@ -267,6 +267,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function Pr
 	}, [playing, pieces, prepareNext, onTime]);
 
 	const line = lines.find((l) => outTime * FPS >= l.from && outTime * FPS < l.to);
+	const zoom = zoomOf(Math.max(0, pieces.findLastIndex((p) => p.out <= outTime + 1e-3)), subtitle.zoom);
 	const toggle = () => (playing ? pause() : play());
 
 	// Dragging the bar: final-video time → source time.
@@ -281,6 +282,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function Pr
 			outTime={outTime}
 			total={total}
 			line={line ?? null}
+			zoom={zoom}
 			subtitle={subtitle}
 			onSubtitleChange={onSubtitleChange}
 			onToggle={toggle}

@@ -7,6 +7,7 @@
 // throwing away the frames before the cut), so nothing waits on the browser.
 import { type ByteSource, RangeSource } from "./bytes";
 import { type Frame, readVideoTrack, type VideoTrack } from "./mp4";
+import { ZOOM_ORIGIN } from "../timeline";
 
 export type Piece = { start: number; end: number; out: number }; // play source [start, end) at final-video time `out`
 export type StudioMedia = { videoUrl: string; audioUrl: string };
@@ -46,6 +47,8 @@ export class StudioEngine {
 	private pending: { out: number | null; generation: number }[] = []; // sent to the decoder, in order
 	private ready: Ready[] = [];
 	private shownFrame: VideoFrame | null = null;
+	private shownOut = 0; // final-video time of shownFrame
+	private zoom: (piece: number) => number = () => 1;
 	private sizeLogged = false;
 	private pumping = false;
 
@@ -393,7 +396,7 @@ export class StudioEngine {
 			this.shownSinceJump = true;
 			this.counts.drawn++;
 			this.counts.lateMs = Math.max(this.counts.lateMs, Math.round((out - due.out) * 1000));
-			this.draw(due.frame);
+			this.draw(due.frame, due.out);
 		}
 
 		if (this.running) {
@@ -430,9 +433,23 @@ export class StudioEngine {
 		this.emitState();
 	}
 
-	private draw(frame: VideoFrame) {
+	// How much each piece is zoomed in (Auto zoom), by piece number. Redraws the picture on screen.
+	setZoom(zoom: (piece: number) => number) {
+		this.zoom = zoom;
+		if (this.shownFrame) this.paint(this.shownFrame, this.shownOut);
+	}
+
+	private draw(frame: VideoFrame, out: number) {
+		if (!this.paint(frame, out)) return frame.close();
+		this.shownFrame?.close();
+		this.shownFrame = frame;
+		this.shownOut = out;
+		this.lastShownOut = this.now();
+	}
+
+	private paint(frame: VideoFrame, out: number) {
 		const ctx2d = this.canvas.getContext("2d");
-		if (!ctx2d) return frame.close();
+		if (!ctx2d) return false;
 		const dpr = Math.min(window.devicePixelRatio || 1, 2);
 		const w = Math.round(this.canvas.clientWidth * dpr);
 		const h = Math.round(this.canvas.clientHeight * dpr);
@@ -447,17 +464,20 @@ export class StudioEngine {
 		const fh = frame.displayHeight;
 		const cw = this.canvas.width;
 		const ch = this.canvas.height;
-		const scale = Math.max(cw / fw, ch / fh);
+		// Auto zoom: grow the picture around a point a little above the middle (where faces are),
+		// like the crop in render.py.
+		const piece = this.pieces.findLastIndex((p) => p.out <= out + EPS);
+		const zoom = this.zoom(Math.max(0, piece));		const scale = Math.max(cw / fw, ch / fh) * zoom;
 		const dw = fw * scale;
 		const dh = fh * scale;
+		const ox = cw * ZOOM_ORIGIN.x;
+		const oy = ch * ZOOM_ORIGIN.y;
 		if (!this.sizeLogged) {
 			this.sizeLogged = true;
 			this.events.log("size", { fw, fh, coded: `${frame.codedWidth}x${frame.codedHeight}`, cw, ch });
 		}
-		ctx2d.drawImage(frame, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
-		this.shownFrame?.close();
-		this.shownFrame = frame;
-		this.lastShownOut = this.now();
+		ctx2d.drawImage(frame, ox - (ox - (cw - dw / zoom) / 2) * zoom, oy - (oy - (ch - dh / zoom) / 2) * zoom, dw, dh);
+		return true;
 	}
 
 	private emitState() {
