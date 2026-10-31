@@ -2,7 +2,7 @@
 
 import { Anton, Bebas_Neue, Chakra_Petch, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
-import { type FontId, HIGHLIGHT, LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
+import { type FontId, LIMITS, type SubtitleStyle } from "@/lib/subtitle-style";
 import { FPS, HEIGHT, type Line, WIDTH } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
@@ -26,6 +26,8 @@ const FONT_FACES: Record<FontId, { family: string; weight: number }> = {
 };
 const SIDE_MARGIN = 80;
 const BOX_PADDING = 20; // the Box look: space around the letters (Outline of the box in render.py)
+// The channel name in a corner (the Logo style in render.py).
+const LOGO = { size: 52, outline: 4, side: 60, top: 110 };
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
@@ -41,12 +43,13 @@ type Props = {
 	onScrub: (outSeconds: number) => void;
 	debugCount: number | null; // debug mode: events recorded so far
 	busy?: boolean; // waiting for the picture or sound to load
+	bare?: boolean; // a still sample (Brand Kit page): no play button or time bar
 };
 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
 // (drawn at full 1080x1920 and shrunk, so sizes match the final video; drag it to move it),
 // the watermark, the play button and the time bar.
-export function PlayerFrame({ children, playing, outTime, total, line, subtitle, onSubtitleChange, onToggle, onScrub, debugCount, busy }: Props) {
+export function PlayerFrame({ children, playing, outTime, total, line, subtitle, onSubtitleChange, onToggle, onScrub, debugCount, busy, bare }: Props) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [scale, setScale] = useState(0.3);
 	const dragRef = useRef<{ y: number; position: number } | null>(null);
@@ -70,14 +73,14 @@ export function PlayerFrame({ children, playing, outTime, total, line, subtitle,
 				paintOrder: "stroke fill",
 				textShadow: "2px 2px 0 rgba(0,0,0,0.4)",
 			};
-	// Highlight: the word being said is yellow until the next one starts.
+	// Highlight: the word being said is in the brand colour until the next one starts.
 	const frame = outTime * FPS;
 	const said = line && subtitle.look === "highlight" ? line.parts.findLastIndex((p) => p.from <= frame) : -1;
 	const text = line
 		? line.parts.map((p, k) => (
 				<span key={k}>
 					{k === line.row2 && <br />}
-					<span style={k === said ? { color: HIGHLIGHT } : undefined}>{p.text}</span>
+					<span style={k === said ? { color: subtitle.color } : undefined}>{p.text}</span>
 				</span>
 			))
 		: "Your subtitles";
@@ -137,6 +140,25 @@ export function PlayerFrame({ children, playing, outTime, total, line, subtitle,
 							<span style={letters}>{text}</span>
 						</div>
 					)}
+					{subtitle.logo && (
+						<div
+							style={{
+								position: "absolute",
+								top: LOGO.top,
+								[subtitle.logoAt === "top-right" ? "right" : "left"]: LOGO.side,
+								fontFamily: face.family,
+								fontWeight: face.weight,
+								fontSize: LOGO.size,
+								lineHeight: 1.25,
+								color: "white",
+								WebkitTextStroke: `${LOGO.outline * 2}px black`,
+								paintOrder: "stroke fill",
+								whiteSpace: "nowrap",
+							}}
+						>
+							{subtitle.logo}
+						</div>
+					)}
 					<div
 						style={{
 							position: "absolute",
@@ -162,12 +184,13 @@ export function PlayerFrame({ children, playing, outTime, total, line, subtitle,
 						<span className="h-10 w-10 animate-spin rounded-full border-4 border-white/30 border-t-white" />
 					</span>
 				) : (
-					!playing && (
+					!playing &&
+					!bare && (
 						<span className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center text-5xl text-white/90 drop-shadow">▶</span>
 					)
 				)}
 			</div>
-			<div className="flex items-center gap-2 text-xs text-foreground/70">
+			<div className={`flex items-center gap-2 text-xs text-foreground/70 ${bare ? "hidden" : ""}`}>
 				<button onClick={onToggle} className="w-8 rounded border border-foreground/20 py-0.5" aria-label={playing ? "Pause" : "Play"}>
 					{playing ? "❚❚" : "▶"}
 				</button>

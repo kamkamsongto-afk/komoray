@@ -7,7 +7,7 @@ import { ScriptView } from "@/components/ScriptView";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import { cutSeconds, type Fix, type WordFix, wordCuts } from "@/lib/edit";
 import { reportError } from "@/lib/report";
-import { readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
+import { DEFAULT_STYLE, FONTS, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 
 type Cut = { start: number; end: number };
 type Analysis = {
@@ -121,6 +121,17 @@ export default function EditPage() {
 			setKey(saved);
 			setAnalysis(data);
 			setSubtitle(readStyle(data.style));
+			// A video without its own look yet starts with the Brand Kit (saved, so Make video uses it too).
+			if (!data.style) {
+				const brand = (await (await fetch("/api/brand")).json().catch(() => ({}))) as { style?: SubtitleStyle | null };
+				if (brand.style) {
+					// English-only fonts have no Thai letters: a Thai video uses Kanit instead.
+					const thai = data.words.some((w) => /[฀-๿]/.test(w.text));
+					const style = thai && !FONTS[brand.style.font].thai ? { ...brand.style, font: DEFAULT_STYLE.font } : brand.style;
+					setSubtitle(style);
+					void fetch("/api/edit", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: saved, style }) });
+				}
+			}
 			if (!data.dictionaryApplied) {
 				const dict = (await (await fetch("/api/dictionary")).json().catch(() => ({}))) as { words?: WordFix[] };
 				setDictionary((dict.words ?? []).map(({ heard, fixed }) => ({ heard, fixed })));

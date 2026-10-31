@@ -77,7 +77,13 @@ FONTS = {
     "bebas": "Bebas Neue",
 }
 BOX_PADDING = 20  # the Box look: space around the letters, px
-HIGHLIGHT = "&H0000E6FF&"  # the Highlight look's yellow (#FFE600; ASS colours are blue-green-red)
+LOGO = {"size": 52, "outline": 4, "side": 60, "top": 110}  # the channel name in a corner (LOGO in PlayerFrame.tsx)
+
+
+def ass_colour(hex_colour: str) -> str:
+    """#RRGGBB to an ASS colour (&H00BBGGRR&)."""
+    h = hex_colour.lstrip("#") if re.fullmatch(r"#[0-9a-fA-F]{6}", hex_colour or "") else "FFE600"
+    return f"&H00{h[4:6]}{h[2:4]}{h[0:2]}&".upper()
 
 # Subtitle look, as picked in the editor (src/lib/subtitle-style.ts).
 DEFAULT_STYLE = {
@@ -86,6 +92,9 @@ DEFAULT_STYLE = {
     "size": 100,  # px on a 1080x1920 frame
     "outline": 10,  # black border around the white letters, px
     "position": 0.31,  # 0 = bottom edge, 0.5 = middle of the screen
+    "color": "#FFE600",  # brand colour: the Highlight look's word
+    "logo": "",  # channel name in a corner, "" = none
+    "logoAt": "top-left",  # or "top-right"
 }
 BOLD_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
@@ -243,7 +252,14 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     if current:
         lines.append(current)
 
+    highlight = ass_colour(style.get("color", "#FFE600"))
     events = []
+    # The channel name stays in its corner for the whole video.
+    logo = ass_text(str(style.get("logo") or "")).replace("\n", " ").strip()
+    if logo:
+        total = sum(frames for _, _, frames in segments) / FPS
+        events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{logo}")
+    logo_align = 9 if style.get("logoAt") == "top-right" else 7
     for i, line in enumerate(lines):
         start = line[0]["start"]
         # Hold each line until the next one starts (if close), so subtitles don't flicker.
@@ -263,7 +279,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             b = line[k + 1]["start"] if k + 1 < len(line) else end
             if b <= a:
                 continue
-            text = "".join(f"{{\\1c{HIGHLIGHT}}}{p}{{\\1c&H00FFFFFF&}}" if j == k else p for j, p in enumerate(parts))
+            text = "".join(f"{{\\1c{highlight}}}{p}{{\\1c&H00FFFFFF&}}" if j == k else p for j, p in enumerate(parts))
             events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{text}")
 
     # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
@@ -286,6 +302,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             f"Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,{outline_colour},&H64000000,"
             # Bold stays off: the weight comes from the font name (e.g. "Kanit Medium").
             f"0,0,0,0,100,100,0,0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
+            f"Style: Logo,{font},{LOGO['size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
+            f"0,0,0,0,100,100,0,0,1,{LOGO['outline']},0,{logo_align},{LOGO['side']},{LOGO['side']},{LOGO['top']},1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

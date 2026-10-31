@@ -41,6 +41,10 @@ export default function PrivacyPage() {
 					train anything.
 				</li>
 				<li>
+					<strong>Your Brand Kit:</strong> the subtitle look you save (style, font, colour) and the channel name you type, so your
+					next videos start with it.
+				</li>
+				<li>
 					<strong>Error reports:</strong> if something breaks, we record what went wrong, the file name and size, and your
 					browser type, so we can fix it.
 				</li>
@@ -85,7 +89,8 @@ export default function PrivacyPage() {
 					Your words stay with your account, so they keep working on your next videos. You can see, download and remove them at any
 					time on the My words page.
 				</li>
-				<li>Your account stays until you ask us to delete it. Deleting your account also deletes your words.</li>
+				<li>Your Brand Kit stays with your account. You can change it any time on the Brand Kit page.</li>
+				<li>Your account stays until you ask us to delete it. Deleting your account also deletes your words and your Brand Kit.</li>
 			</ul>
 			<p>When the beta ends, this may change. If it does, we will update this page and email you before the change.</p>
 

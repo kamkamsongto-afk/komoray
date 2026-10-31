@@ -2,9 +2,33 @@
 // names (DEFAULT_STYLE, FONTS and LOOKS in modal_app/render.py). Sizes are px on the 1080x1920 frame.
 export type Look = "clean" | "box" | "highlight" | "big" | "two";
 export type FontId = "kanit" | "prompt" | "mitr" | "sarabun" | "chakra" | "poppins" | "anton" | "bebas";
-export type SubtitleStyle = { size: number; outline: number; position: number; look: Look; font: FontId };
+export type LogoCorner = "top-left" | "top-right";
+// color: the brand colour (the Highlight look's word). logo: the channel name shown in a corner ("" = none).
+export type SubtitleStyle = {
+	size: number;
+	outline: number;
+	position: number;
+	look: Look;
+	font: FontId;
+	color: string;
+	logo: string;
+	logoAt: LogoCorner;
+};
 
-export const DEFAULT_STYLE: SubtitleStyle = { size: 100, outline: 10, position: 0.31, look: "clean", font: "kanit" };
+export const DEFAULT_STYLE: SubtitleStyle = {
+	size: 100,
+	outline: 10,
+	position: 0.31,
+	look: "clean",
+	font: "kanit",
+	color: "#FFE600",
+	logo: "",
+	logoAt: "top-left",
+};
+
+export const MAX_LOGO_LENGTH = 30;
+// Brand colours to pick from in one click (any other colour works too).
+export const COLORS = ["#FFE600", "#22D3EE", "#4ADE80", "#FB7185", "#F97316", "#A78BFA"];
 
 export const LIMITS = {
 	size: { min: 50, max: 180, step: 2 },
@@ -34,9 +58,6 @@ export const FONTS: Record<FontId, { name: string; thai: boolean }> = {
 	bebas: { name: "Bebas Neue", thai: false },
 };
 
-// The yellow of the Highlight look.
-export const HIGHLIGHT = "#FFE600";
-
 const clamp = (n: number, { min, max }: { min: number; max: number }) => Math.min(max, Math.max(min, n));
 
 // Anything that isn't a sensible style falls back to the defaults, field by field.
@@ -49,5 +70,9 @@ export function readStyle(value: unknown): SubtitleStyle {
 		position: Math.round(pick("position") * 1000) / 1000,
 		look: typeof v.look === "string" && v.look in LOOKS ? (v.look as Look) : DEFAULT_STYLE.look,
 		font: typeof v.font === "string" && v.font in FONTS ? (v.font as FontId) : DEFAULT_STYLE.font,
+		color: typeof v.color === "string" && /^#[0-9a-f]{6}$/i.test(v.color) ? v.color.toUpperCase() : DEFAULT_STYLE.color,
+		// Letters, numbers and simple marks only: it is drawn into the video as subtitle text.
+		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
+		logoAt: v.logoAt === "top-right" ? "top-right" : "top-left",
 	};
 }
