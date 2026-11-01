@@ -5,7 +5,8 @@ export type FontId = "kanit" | "prompt" | "mitr" | "sarabun" | "chakra" | "poppi
 import type { OwnFont } from "./font-info";
 import { type Motion, MOTIONS } from "./motion";
 
-export type LogoCorner = "top-left" | "top-right";
+export type LogoCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+export const LOGO_CORNERS: Record<LogoCorner, string> = { "top-left": "Top left", "top-right": "Top right", "bottom-left": "Bottom left", "bottom-right": "Bottom right" };
 export type Zoom = "off" | "cuts"; // Auto zoom: "cuts" = every other kept piece a little closer (zoomOf in timeline.ts)
 // The final video's shape. Same as FORMATS in render.py.
 export type Format = "9:16" | "1:1" | "16:9";
@@ -17,6 +18,8 @@ export const FORMATS: Record<Format, { name: string; width: number; height: numb
 };
 export const outputSize = (style: { format?: Format }) => FORMATS[style.format ?? "9:16"] ?? FORMATS["9:16"];
 // color: the brand colour (the Highlight look's word). logo: the channel name shown in a corner ("" = none).
+// logoImage: the user's logo picture (lib/logo.ts) shown in that corner instead of the name, logoSize px
+// wide, logoOpacity 0..1.
 export type SubtitleStyle = {
 	size: number;
 	outline: number;
@@ -27,6 +30,9 @@ export type SubtitleStyle = {
 	color: string;
 	logo: string;
 	logoAt: LogoCorner;
+	logoImage?: { version: number };
+	logoSize: number;
+	logoOpacity: number;
 	zoom: Zoom;
 	format: Format;
 	motion: Motion; // lines pop in, words bounce (lib/motion.ts)
@@ -41,6 +47,8 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	color: "#FFE600",
 	logo: "",
 	logoAt: "top-left",
+	logoSize: 180,
+	logoOpacity: 1,
 	zoom: "off",
 	format: "9:16",
 	motion: "none",
@@ -54,6 +62,8 @@ export const LIMITS = {
 	size: { min: 50, max: 180, step: 2 },
 	outline: { min: 0, max: 20, step: 1 },
 	position: { min: 0.03, max: 0.85, step: 0.01 }, // 0 = bottom edge, 1 = top edge
+	logoSize: { min: 60, max: 480, step: 10 },
+	logoOpacity: { min: 0.2, max: 1, step: 0.05 },
 } as const;
 
 // The five looks. Picking one also sets its size and height on screen (the user can change them after).
@@ -105,6 +115,9 @@ export function readStyle(value: unknown): SubtitleStyle {
 	const pick = (k: keyof typeof LIMITS) => (typeof v[k] === "number" && Number.isFinite(v[k]) ? clamp(v[k] as number, LIMITS[k]) : DEFAULT_STYLE[k]);
 	return {
 		size: Math.round(pick("size")),
+		logoSize: Math.round(pick("logoSize")),
+		logoOpacity: Math.round(pick("logoOpacity") * 100) / 100,
+		...(typeof (v.logoImage as { version?: unknown })?.version === "number" && { logoImage: { version: (v.logoImage as { version: number }).version } }),
 		outline: Math.round(pick("outline")),
 		position: Math.round(pick("position") * 1000) / 1000,
 		look: typeof v.look === "string" && v.look in LOOKS ? (v.look as Look) : DEFAULT_STYLE.look,
@@ -112,7 +125,7 @@ export function readStyle(value: unknown): SubtitleStyle {
 		color: typeof v.color === "string" && /^#[0-9a-f]{6}$/i.test(v.color) ? v.color.toUpperCase() : DEFAULT_STYLE.color,
 		// Letters, numbers and simple marks only: it is drawn into the video as subtitle text.
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
-		logoAt: v.logoAt === "top-right" ? "top-right" : "top-left",
+		logoAt: typeof v.logoAt === "string" && v.logoAt in LOGO_CORNERS ? (v.logoAt as LogoCorner) : "top-left",
 		zoom: v.zoom === "cuts" ? "cuts" : "off",
 		format: typeof v.format === "string" && v.format in FORMATS ? (v.format as Format) : DEFAULT_STYLE.format,
 		motion: typeof v.motion === "string" && v.motion in MOTIONS ? (v.motion as Motion) : DEFAULT_STYLE.motion,

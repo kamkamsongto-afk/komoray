@@ -19,6 +19,7 @@ export type PreviewProps = {
 	onTime: (sourceSeconds: number) => void; // where we are in the original video, every frame
 	onPlayingChange: (playing: boolean) => void;
 	banners?: Banner[];
+	onBannersChange?: (banners: Banner[]) => void; // a banner dragged or resized on the video
 	faces?: Faces | null; // where the speaker's face is (lib/framing.ts); only the canvas player uses it
 };
 
@@ -42,7 +43,7 @@ const isSafari = () => /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chrom
 // Safari takes a moment to start a video, which showed as a freeze and a black flash at each cut.
 // Only on Safari: Chrome starts instantly, and decoding two videos at once made it drop frames.
 export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function PreviewPlayer(
-	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, banners },
+	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, banners, onBannersChange },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -288,6 +289,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function Pr
 			line={line ?? null}
 			zoom={zoom}
 			banners={banners}
+			onBannersChange={onBannersChange}
 			subtitle={subtitle}
 			onSubtitleChange={onSubtitleChange}
 			onToggle={toggle}

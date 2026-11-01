@@ -552,6 +552,7 @@ export function ScriptView({
 							onTime={onPreviewTime}
 							onPlayingChange={setPlaying}
 							banners={banners}
+							onBannersChange={onBannersChange}
 							faces={faces}
 							onFail={(error) => {
 								reportError("studio player", error.message);
@@ -570,6 +571,7 @@ export function ScriptView({
 							onTime={onPreviewTime}
 							onPlayingChange={setPlaying}
 							banners={banners}
+							onBannersChange={onBannersChange}
 						/>
 					) : (
 						<video

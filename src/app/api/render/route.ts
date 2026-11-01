@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
+import { logoKey } from "@/lib/logo";
 import type { Faces } from "@/lib/framing";
 import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
 import { readStyle } from "@/lib/subtitle-style";
@@ -51,6 +52,12 @@ export async function POST(request: Request) {
 		const own = keys ? await getJson<OwnFont>(keys.info) : null;
 		if (keys && own) Object.assign(style, { fontUrl: await signedUrl(keys.file, "GET", LINK_SECONDS), ownFamily: own.family });
 		else style.font = "kanit";
+	}
+
+	// The logo picture: Modal gets a short-lived link to it (no picture saved → the channel name instead).
+	if (style.logoImage) {
+		const { user } = await currentUser();
+		if (user && (await exists(logoKey(user.id)))) style.logoUrl = await signedUrl(logoKey(user.id), "GET", LINK_SECONDS);
 	}
 
 	const env = getCloudflareContext().env as unknown as RenderEnv;

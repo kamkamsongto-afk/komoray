@@ -10,6 +10,8 @@ import {
 	FONTS,
 	type FontId,
 	LIMITS,
+	LOGO_CORNERS,
+	type LogoCorner,
 	type Look,
 	LOOKS,
 	MAX_LOGO_LENGTH,
@@ -37,6 +39,19 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 			.then((data) => setOwn(data.font))
 			.catch(() => {});
 	}, []);
+
+	// The logo picture (one per account): uploading it turns it on for this look.
+	const [logoBusy, setLogoBusy] = useState(false);
+	const [logoError, setLogoError] = useState("");
+	async function uploadLogo(file: File) {
+		setLogoBusy(true);
+		setLogoError("");
+		const res = await fetch("/api/logo", { method: "POST", body: file }).catch(() => null);
+		const data = (await res?.json().catch(() => ({}))) as { version?: number; error?: string };
+		setLogoBusy(false);
+		if (!res?.ok || !data.version) return setLogoError(data?.error ?? "Could not upload the logo");
+		onChange({ ...style, logoImage: { version: data.version } });
+	}
 
 	async function uploadFont(file: File) {
 		setUploading(true);
@@ -199,15 +214,74 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 				/>
 				<select
 					value={style.logoAt}
-					onChange={(e) => onChange({ ...style, logoAt: e.target.value as SubtitleStyle["logoAt"] })}
-					aria-label="Channel name corner"
-					disabled={!style.logo}
+					onChange={(e) => onChange({ ...style, logoAt: e.target.value as LogoCorner })}
+					aria-label="Logo corner"
+					disabled={!style.logo && !style.logoImage}
 					className="rounded-md border border-foreground/20 bg-background px-1 py-1 text-foreground disabled:opacity-40"
 				>
-					<option value="top-left">Top left</option>
-					<option value="top-right">Top right</option>
+					{(Object.keys(LOGO_CORNERS) as LogoCorner[]).map((c) => (
+						<option key={c} value={c}>
+							{LOGO_CORNERS[c]}
+						</option>
+					))}
 				</select>
 			</label>
+			<div className="flex items-center gap-3 text-sm text-foreground/70">
+				<span className="w-24 shrink-0">Logo</span>
+				<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs">
+					<label className={`cursor-pointer rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5 ${logoBusy ? "opacity-50" : ""}`}>
+						{logoBusy ? "Uploading…" : style.logoImage ? "Change picture" : "Upload a picture"}
+						<input
+							type="file"
+							accept="image/png,image/jpeg,image/webp"
+							className="hidden"
+							disabled={logoBusy}
+							onChange={(e) => {
+								const file = e.target.files?.[0];
+								if (file) void uploadLogo(file);
+								e.target.value = "";
+							}}
+						/>
+					</label>
+					{style.logoImage && (
+						<button onClick={() => onChange({ ...style, logoImage: undefined })} className="rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
+							Don&apos;t show
+						</button>
+					)}
+					{!style.logoImage && <span className="text-foreground/50">PNG with a see-through background looks best. Shown instead of the name.</span>}
+					{logoError && <span className="text-red-600">❌ {logoError}</span>}
+				</div>
+			</div>
+			{style.logoImage && (
+				<>
+					<label className="flex items-center gap-3 text-sm text-foreground/70">
+						<span className="w-24 shrink-0">Logo size</span>
+						<input
+							type="range"
+							min={LIMITS.logoSize.min}
+							max={LIMITS.logoSize.max}
+							step={LIMITS.logoSize.step}
+							value={style.logoSize}
+							onChange={(e) => onChange({ ...style, logoSize: Number(e.target.value) })}
+							className="flex-1"
+						/>
+						<span className="w-8 text-right tabular-nums">{style.logoSize}</span>
+					</label>
+					<label className="flex items-center gap-3 text-sm text-foreground/70">
+						<span className="w-24 shrink-0">Logo opacity</span>
+						<input
+							type="range"
+							min={LIMITS.logoOpacity.min}
+							max={LIMITS.logoOpacity.max}
+							step={LIMITS.logoOpacity.step}
+							value={style.logoOpacity}
+							onChange={(e) => onChange({ ...style, logoOpacity: Number(e.target.value) })}
+							className="flex-1"
+						/>
+						<span className="w-8 text-right tabular-nums">{Math.round(style.logoOpacity * 100)}%</span>
+					</label>
+				</>
+			)}
 			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Every other part is shown a little closer, so cuts look like a second camera">
 				<span className="w-24 shrink-0">Auto zoom</span>
 				<select

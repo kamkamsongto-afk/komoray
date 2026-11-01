@@ -81,6 +81,7 @@ LOGO = {"size": 52, "outline": 4, "side": 60, "top": 110}  # the channel name in
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
 BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
+BANNER_SCALE = (0.5, 2.5)  # smallest and biggest size (BANNER_SCALE in banners.ts)
 # Where each banner place starts, share of the video's height, per shape (BANNER_TOP in banners.ts).
 BANNER_TOP = {
     "9:16": {"top": 0.135, "middle": 0.448, "bottom": 0.78},
@@ -99,17 +100,23 @@ def banner_ink(hex_colour: str) -> str:
 
 
 def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16") -> list[str]:
-    """One event per banner, faded in and out, in its place. Text was checked by the app (readBanners)."""
+    """One event per banner, faded in and out, in its place, or with its middle where it was dragged
+    (x, y: share of the width / height), at its size (scale). Text was checked by the app (readBanners)."""
     events = []
     fade = int(BANNER["fade"] * 1000)
-    pad_x, pad_y = BANNER["padding"], BANNER["padding"] // 2
+    width = FORMATS.get(shape, (WIDTH, HEIGHT))[0]
     for b in banners:
         start, end = float(b.get("start", 0)), float(b.get("end", 0))
         text = ass_text(str(b.get("text", ""))).strip()
         if end <= start or not text:
             continue
+        size = min(BANNER_SCALE[1], max(BANNER_SCALE[0], float(b.get("scale") or 1)))
+        pad_x, pad_y = js_round(BANNER["padding"] * size), js_round(BANNER["padding"] / 2 * size)
+        x, y = b.get("x"), b.get("y")
+        spot = f"\\an5\\pos({js_round(float(x) * width)},{js_round(float(y) * height)})" if x is not None and y is not None else ""
+        scale = f"\\fscx{size * 100:g}\\fscy{size * 100:g}" if size != 1 else ""
         sub = ass_text(str(b.get("sub", ""))).strip()
-        body = f"{{\\fad({fade},{fade})\\xbord{pad_x}\\ybord{pad_y}}}{text}" + (f"\\N{{\\fs{BANNER['sub_size']}}}{sub}" if sub else "")
+        body = f"{{{spot}\\fad({fade},{fade})\\xbord{pad_x}\\ybord{pad_y}{scale}}}{text}" + (f"\\N{{\\fs{BANNER['sub_size']}}}{sub}" if sub else "")
         places = BANNER_TOP.get(shape, BANNER_TOP["9:16"])
         top = js_round(places.get(b.get("place"), places["top"]) * height)
         events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,{top},,{body}")
@@ -130,7 +137,9 @@ DEFAULT_STYLE = {
     "position": 0.31,  # 0 = bottom edge, 0.5 = middle of the screen
     "color": "#FFE600",  # brand colour: the Highlight look's word
     "logo": "",  # channel name in a corner, "" = none
-    "logoAt": "top-left",  # or "top-right"
+    "logoAt": "top-left",  # or top-right, bottom-left, bottom-right
+    "logoSize": 180,  # the logo picture's width, px (logoUrl: a link to the picture, sent by the app)
+    "logoOpacity": 1,
     "zoom": "off",  # Auto zoom: "cuts" = every other kept piece a little closer
     "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
 }
@@ -330,11 +339,12 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     highlight = ass_colour(brand)
     events = banner_events(banners or [], video_h, style.get("format", "9:16"))
     # The channel name stays in its corner for the whole video.
-    logo = ass_text(str(style.get("logo") or "")).replace("\n", " ").strip()
+    # (A logo picture, if there is one, is put on by FFmpeg instead: logo_filter.)
+    logo = "" if style.get("logoUrl") else ass_text(str(style.get("logo") or "")).replace("\n", " ").strip()
     if logo:
         total = sum(frames for _, _, frames in segments) / FPS
         events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{logo}")
-    logo_align = 9 if style.get("logoAt") == "top-right" else 7
+    logo_align = {"top-left": 7, "top-right": 9, "bottom-left": 1, "bottom-right": 3}.get(style.get("logoAt"), 7)
     for i, line in enumerate(lines):
         start = line[0]["start"]
         # Hold each line until the next one starts (if close), so subtitles don't flicker.
@@ -475,7 +485,9 @@ def ffmpeg_command(
     fonts_dir: str | None = None,
     faces: dict | None = None,
     size: tuple[int, int] = (WIDTH, HEIGHT),
+    logo: dict | None = None,
 ) -> list[str]:
+    """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles."""
     aspect = display_aspect(src)
     # The pieces in frames, as the preview has them (StudioPlayer), to pick the same faces.
     framed = [(trim / FPS, (trim + frames) / FPS) for _, trim, frames in frame_segments(keeps)]
@@ -490,12 +502,24 @@ def ffmpeg_command(
             parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
             labels.append(f"[a{i}]")
     parts.append(f"{''.join(labels)}concat=n={len(keeps)}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
+    base = "[cv]"
+    if logo:
+        # Same place as the preview (PlayerFrame): LOGO side / top px from its corner, size px wide.
+        side, edge = LOGO["side"], LOGO["top"]
+        x = f"main_w-overlay_w-{side}" if str(logo["at"]).endswith("right") else str(side)
+        y = f"main_h-overlay_h-{edge}" if str(logo["at"]).startswith("bottom") else str(edge)
+        opacity = min(1.0, max(0.2, float(logo["opacity"])))
+        parts.append(f"[1:v]scale={int(logo['size'])}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[lg]")
+        parts.append(f"[cv][lg]overlay={x}:{y}:format=auto[cl]")
+        base = "[cl]"
     parts.append(
-        f"[cv]fps={FPS},"
+        f"{base}fps={FPS},"
         f"subtitles={subs.name}{f':fontsdir={fonts_dir}' if fonts_dir else ''}[outv]"
     )
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
+    if logo:
+        cmd += ["-i", str(logo["path"])]
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         cmd += ["-map", "[ca]", "-c:a", "aac", "-b:a", "160k"]
@@ -533,6 +557,13 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 urllib.request.urlretrieve(style["fontUrl"], workdir / "fonts" / "own.ttf")
                 fonts_dir = "fonts"
 
+            # The user's logo picture, if this look shows it.
+            logo = None
+            if style.get("logoUrl"):
+                logo_path = workdir / "logo"
+                urllib.request.urlretrieve(style["logoUrl"], logo_path)
+                logo = {"path": logo_path, "size": style.get("logoSize", 180), "opacity": style.get("logoOpacity", 1), "at": style.get("logoAt", "top-left")}
+
             result = subprocess.run(
                 ffmpeg_command(
                     src,
@@ -544,6 +575,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     fonts_dir,
                     edit.get("faces"),
                     FORMATS.get(style.get("format"), (WIDTH, HEIGHT)),
+                    logo,
                 ),
                 cwd=workdir,
                 capture_output=True,

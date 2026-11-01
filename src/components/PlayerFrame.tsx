@@ -1,8 +1,8 @@
 "use client";
 
 import { Anton, Bebas_Neue, Chakra_Petch, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
 import type { OwnFont } from "@/lib/font-info";
 import { type FontId, fontMetrics, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { motionScale } from "@/lib/motion";
@@ -83,6 +83,7 @@ type Props = {
 	bare?: boolean; // a still sample (Brand Kit page): no play button or time bar
 	zoom?: number; // Auto zoom for pictures that don't zoom themselves (the <video> player)
 	banners?: Banner[];
+	onBannersChange?: (banners: Banner[]) => void; // dragged or resized on the video (while paused)
 };
 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
@@ -103,8 +104,55 @@ export function PlayerFrame({
 	bare,
 	zoom = 1,
 	banners = [],
+	onBannersChange,
 }: Props) {
 	const boxRef = useRef<HTMLDivElement>(null);
+
+	// Move a banner (its middle follows the pointer) or resize it (by how far the pointer is from its
+	// middle, compared with where the drag started). Changes are sent while dragging.
+	function startBannerDrag(e: ReactPointerEvent<HTMLElement>, banner: Banner, mode: "move" | "size") {
+		const box = boxRef.current;
+		const target = (mode === "size" ? e.currentTarget.parentElement : e.currentTarget) as HTMLElement | null;
+		if (!box || !target || !onBannersChange) return;
+		e.stopPropagation();
+		e.preventDefault();
+		const frame = box.getBoundingClientRect();
+		const rect = target.getBoundingClientRect();
+		const middle = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+		const from = { x: (middle.x - frame.left) / frame.width, y: (middle.y - frame.top) / frame.height };
+		const start = { x: e.clientX, y: e.clientY, reach: Math.max(8, Math.hypot(e.clientX - middle.x, e.clientY - middle.y)) };
+		const scale0 = banner.scale ?? 1;
+		const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+		const move = (ev: globalThis.PointerEvent) => {
+			const patch =
+				mode === "move"
+					? {
+							x: Math.round(clamp(from.x + (ev.clientX - start.x) / frame.width, 0.05, 0.95) * 1000) / 1000,
+							y: Math.round(clamp(from.y + (ev.clientY - start.y) / frame.height, 0.03, 0.97) * 1000) / 1000,
+						}
+					: {
+							x: banner.x ?? Math.round(from.x * 1000) / 1000,
+							y: banner.y ?? Math.round(from.y * 1000) / 1000,
+							scale:
+								Math.round(clamp((scale0 * Math.hypot(ev.clientX - middle.x, ev.clientY - middle.y)) / start.reach, BANNER_SCALE.min, BANNER_SCALE.max) * 100) /
+								100,
+						};
+			bannersRef.current = bannersRef.current.map((b) => (b.id === banner.id ? { ...b, ...patch } : b));
+			onBannersChange(bannersRef.current);
+		};
+		const stop = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", stop);
+			window.removeEventListener("pointercancel", stop);
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", stop);
+		window.addEventListener("pointercancel", stop);
+	}
+	const bannersRef = useRef(banners);
+	useEffect(() => {
+		bannersRef.current = banners;
+	}, [banners]);
 	const [boxWidth, setBoxWidth] = useState(324);
 	const dragRef = useRef<{ y: number; position: number } | null>(null);
 	// The final video's size (9:16, 1:1 or 16:9); everything on it is laid out at full size and shrunk.
@@ -220,45 +268,80 @@ export function PlayerFrame({
 					{banners.map((b) => {
 						const opacity = bannerOpacity(b, outTime);
 						if (!opacity) return null;
+						const size = b.scale ?? 1;
 						const box: CSSProperties = {
 							background: subtitle.color,
-							padding: `${BANNER.padding / 2}px ${BANNER.padding}px`,
+							padding: `${(BANNER.padding / 2) * size}px ${BANNER.padding * size}px`,
 							boxDecorationBreak: "clone",
 							WebkitBoxDecorationBreak: "clone",
 						};
+						const movable = Boolean(onBannersChange) && !playing;
+						// Dragged somewhere: its middle sits there. Else the top of its place (top, middle, bottom).
+						const spot: CSSProperties =
+							b.x !== undefined && b.y !== undefined
+								? { left: b.x * W, top: b.y * H, width: W - 2 * SIDE_MARGIN, transform: "translate(-50%, -50%)" }
+								: { left: SIDE_MARGIN, right: SIDE_MARGIN, top: Math.round(BANNER_TOP[subtitle.format][b.place] * H) };
 						return (
 							<div
 								key={b.id}
 								style={{
 									position: "absolute",
-									top: Math.round(BANNER_TOP[subtitle.format][b.place] * H),
-									left: SIDE_MARGIN,
-									right: SIDE_MARGIN,
+									...spot,
 									textAlign: "center",
 									fontFamily: face.family,
 									fontWeight: face.weight,
-									fontSize: BANNER.size / em,
+									fontSize: (BANNER.size / em) * size,
 									lineHeight: em,
 									color: bannerInk(subtitle.color),
 									opacity,
 								}}
 							>
-								<span style={box}>{cleanBannerText(b.text)}</span>
-								{cleanBannerText(b.sub) && (
-									<>
-										<br />
-										<span style={{ ...box, fontSize: BANNER.subSize / em }}>{cleanBannerText(b.sub)}</span>
-									</>
-								)}
+								<span
+									className="relative inline-block"
+									onClick={(e) => movable && e.stopPropagation()}
+									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
+									style={movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : undefined}
+									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
+								>
+									<span style={box}>{cleanBannerText(b.text)}</span>
+									{cleanBannerText(b.sub) && (
+										<>
+											<br />
+											<span style={{ ...box, fontSize: (BANNER.subSize / em) * size }}>{cleanBannerText(b.sub)}</span>
+										</>
+									)}
+									{movable && (
+										<span
+											onPointerDown={(e) => startBannerDrag(e, b, "size")}
+											className="absolute rounded-full border-4 border-black bg-white"
+											style={{ width: 44, height: 44, right: -30, bottom: -30, cursor: "nwse-resize" }}
+										/>
+									)}
+								</span>
 							</div>
 						);
 					})}
-					{subtitle.logo && (
+					{subtitle.logoImage ? (
+						// The logo picture, logoSize px wide, in its corner (the overlay in render.py).
+						// eslint-disable-next-line @next/next/no-img-element
+						<img
+							src={`/api/logo?v=${subtitle.logoImage.version}`}
+							alt=""
+							style={{
+								position: "absolute",
+								[subtitle.logoAt.startsWith("bottom") ? "bottom" : "top"]: LOGO.top,
+								[subtitle.logoAt.endsWith("right") ? "right" : "left"]: LOGO.side,
+								width: subtitle.logoSize,
+								height: "auto",
+								opacity: subtitle.logoOpacity,
+							}}
+						/>
+					) : subtitle.logo && (
 						<div
 							style={{
 								position: "absolute",
-								top: LOGO.top,
-								[subtitle.logoAt === "top-right" ? "right" : "left"]: LOGO.side,
+								[subtitle.logoAt.startsWith("bottom") ? "bottom" : "top"]: LOGO.top,
+								[subtitle.logoAt.endsWith("right") ? "right" : "left"]: LOGO.side,
 								fontFamily: face.family,
 								fontWeight: face.weight,
 								fontSize: LOGO.size / em,

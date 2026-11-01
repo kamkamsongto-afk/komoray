@@ -1,6 +1,6 @@
 "use client";
 
-import { BANNER, BANNER_KINDS, type Banner, type BannerKind, type BannerPlace, cleanBannerText } from "@/lib/banners";
+import { BANNER, BANNER_KINDS, BANNER_SCALE, type Banner, type BannerKind, type BannerPlace, cleanBannerText } from "@/lib/banners";
 
 type Props = {
 	banners: Banner[];
@@ -99,19 +99,36 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 						<span>to</span>
 						{time(b, "end")}
 						<select
-							value={b.place}
-							onChange={(e) => update(b.id, { place: e.target.value as BannerPlace })}
+							value={b.x !== undefined ? "dragged" : b.place}
+							onChange={(e) => e.target.value !== "dragged" && update(b.id, { place: e.target.value as BannerPlace, x: undefined, y: undefined })}
 							aria-label="Where on the video"
 							className="rounded-md border border-foreground/20 bg-background px-1 py-0.5"
 						>
+							{b.x !== undefined && <option value="dragged">Where you dragged it</option>}
 							<option value="top">Top</option>
 							<option value="middle">Middle</option>
 							<option value="bottom">Bottom</option>
 						</select>
 					</div>
+					<label className="ml-[5.5rem] flex items-center gap-2 text-xs text-foreground/70">
+						Size
+						<input
+							type="range"
+							min={BANNER_SCALE.min}
+							max={BANNER_SCALE.max}
+							step={0.05}
+							value={b.scale ?? 1}
+							onChange={(e) => update(b.id, { scale: Number(e.target.value) })}
+							className="min-w-0 flex-1 accent-blue-600"
+						/>
+						<span className="w-10 tabular-nums">{Math.round((b.scale ?? 1) * 100)}%</span>
+					</label>
 				</div>
 			))}
-			{banners.length > 0 && <p className="text-xs text-foreground/60">Times are seconds of the final video. Emoji can&apos;t be shown in banners.</p>}
+			{banners.length > 0 && <p className="text-xs text-foreground/60">
+					Times are seconds of the final video. Pause the video on a banner to drag it anywhere, or drag its round corner to resize it.
+					Emoji can&apos;t be shown in banners.
+				</p>}
 		</div>
 	);
 }

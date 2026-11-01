@@ -6,7 +6,20 @@ import type { Format } from "./subtitle-style";
 export type BannerKind = "price" | "cta" | "follow";
 export type BannerPlace = "top" | "middle" | "bottom";
 // start / end: seconds of the final video. sub: the small second line (price tag only).
-export type Banner = { id: string; kind: BannerKind; text: string; sub: string; start: number; end: number; place: BannerPlace };
+// x / y: where its middle is once dragged on the preview (share of the video's width / height);
+// without them it sits in its place (top, middle, bottom). scale: its size, 1 = normal.
+export type Banner = {
+	id: string;
+	kind: BannerKind;
+	text: string;
+	sub: string;
+	start: number;
+	end: number;
+	place: BannerPlace;
+	x?: number;
+	y?: number;
+	scale?: number;
+};
 
 export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub: string }> = {
 	price: { name: "Price", text: "$29", sub: "Today only" },
@@ -18,6 +31,7 @@ export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub:
 // shape, clear of the subtitles' usual place (bottom is under the subtitles on
 // 9:16, over them on the wider shapes). Same as BANNER and BANNER_TOP in render.py.
 export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxBanners: 20 };
+export const BANNER_SCALE = { min: 0.5, max: 2.5 };
 export const BANNER_TOP: Record<Format, Record<BannerPlace, number>> = {
 	"9:16": { top: 0.135, middle: 0.448, bottom: 0.78 },
 	"1:1": { top: 0.08, middle: 0.35, bottom: 0.55 },
@@ -46,6 +60,15 @@ export function bannerOpacity(b: Banner, t: number) {
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
+const share = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000 : null);
+function readSpot(x: unknown, y: unknown) {
+	const [sx, sy] = [share(x), share(y)];
+	return sx === null || sy === null ? {} : { x: sx, y: sy };
+}
+function readScale(scale: unknown) {
+	if (typeof scale !== "number" || !Number.isFinite(scale) || scale === 1) return {};
+	return { scale: round(Math.min(BANNER_SCALE.max, Math.max(BANNER_SCALE.min, scale))) };
+}
 
 // Banners sent by the browser, checked. Null if it isn't a list.
 export function readBanners(value: unknown): Banner[] | null {
@@ -67,6 +90,8 @@ export function readBanners(value: unknown): Banner[] | null {
 			start: round(start),
 			end: round(end),
 			place: raw.place === "middle" || raw.place === "bottom" ? raw.place : "top",
+			...readSpot(raw.x, raw.y),
+			...readScale(raw.scale),
 		});
 	}
 	return out;
