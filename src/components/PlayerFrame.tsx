@@ -46,7 +46,6 @@ function useOwnFont(font: OwnFont | undefined) {
 }
 
 const SIDE_MARGIN = 80;
-const WATERMARK_BOTTOM = 0.135; // the watermark's gap to the bottom edge, share of the height (render.py)
 const BOX_PADDING = 20; // the Box look: space around the letters (Outline of the box in render.py)
 // The channel name in a corner (the Logo style in render.py).
 const LOGO = { size: 52, outline: 4, side: 60, top: 110 };
@@ -87,7 +86,7 @@ type Props = {
 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
 // (drawn at full 1080x1920 and shrunk, so sizes match the final video; drag it to move it),
-// the watermark, the play button and the time bar.
+// the play button and the time bar.
 export function PlayerFrame({
 	children,
 	playing,
@@ -258,20 +257,6 @@ export function PlayerFrame({
 							{subtitle.logo}
 						</div>
 					)}
-					<div
-						style={{
-							position: "absolute",
-							right: 48,
-							bottom: Math.round(H * WATERMARK_BOTTOM),
-							fontFamily: "sans-serif",
-							fontWeight: 700,
-							fontSize: 40,
-							color: "rgba(255,255,255,0.7)",
-							textShadow: "2px 2px 0 rgba(0,0,0,0.5)",
-						}}
-					>
-						komoray.com
-					</div>
 				</div>
 				{debugCount !== null && (
 					<span className="pointer-events-none absolute top-2 left-2 z-[2] rounded bg-red-600 px-2 py-0.5 text-xs text-white">

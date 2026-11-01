@@ -1,7 +1,7 @@
 """Komoray render worker on Modal.
 
 Takes a raw video + its edit.json, then with FFmpeg:
-cuts out the silences, reframes to vertical 1080x1920, burns in subtitles, adds a watermark.
+cuts out the silences, reframes to vertical 1080x1920, burns in subtitles.
 
 Also makes the editor's preview copy (proxy.mp4) of every upload: see `proxy` below.
 
@@ -63,7 +63,6 @@ LINE_LIMITS = {
 }
 THAI_PAUSE = 0.15  # a pause this long inside a Thai line gets a space
 LINE_BREAK_GAP = 0.5  # a pause this long starts a new subtitle line
-WATERMARK = "komoray.com"
 
 # The editor's fonts (FONTS in src/lib/subtitle-style.ts) by their name inside the font file.
 FONTS = {
@@ -88,7 +87,6 @@ BANNER_TOP = {
     "1:1": {"top": 0.08, "middle": 0.35, "bottom": 0.55},
     "16:9": {"top": 0.08, "middle": 0.35, "bottom": 0.62},
 }
-WATERMARK_BOTTOM = 0.135  # the watermark's gap to the bottom edge, share of the height (260 px of 1920)
 # The final video's shape (FORMATS in src/lib/subtitle-style.ts): width, height.
 FORMATS = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
 
@@ -137,7 +135,6 @@ DEFAULT_STYLE = {
 }
 ZOOM = 1.12  # Auto zoom (ZOOM in src/lib/timeline.ts)
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
-BOLD_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
 def keep_segments(duration: float, cuts: list[dict]) -> list[tuple[float, float]]:
@@ -456,9 +453,7 @@ def ffmpeg_command(
     parts.append(f"{''.join(labels)}concat=n={len(keeps)}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
     parts.append(
         f"[cv]fps={FPS},"
-        f"subtitles={subs.name}{f':fontsdir={fonts_dir}' if fonts_dir else ''},"
-        f"drawtext=fontfile={BOLD_FONT}:text='{WATERMARK}':fontsize=40:fontcolor=white@0.7:"
-        f"shadowcolor=black@0.5:shadowx=2:shadowy=2:x=w-tw-48:y=h-th-{js_round(size[1] * WATERMARK_BOTTOM)}[outv]"
+        f"subtitles={subs.name}{f':fontsdir={fonts_dir}' if fonts_dir else ''}[outv]"
     )
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]

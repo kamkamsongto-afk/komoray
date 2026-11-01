@@ -57,6 +57,31 @@ function sameStart(words: Word[], a: number, b: number) {
 	return { n, letters, core };
 }
 
+// All the tries of one sentence, oldest first (word positions from..to). The last try is the one
+// said after all the others: the keeper, which the editor keeps unless the user picks another.
+export type TakeGroup = { takes: { from: number; to: number }[] };
+
+const KEEPER_EXTRA_WORDS = 10; // the keeper may run this many words past the length of the try before it
+
+// Retries of retries become one group: take 1, take 2, ... and the keeper. The keeper runs from where
+// the last retry starts to the end of its sentence (a pause, or . ! ?), never into the next group.
+export function groupTakes(words: Word[], takes: Take[]): TakeGroup[] {
+	const chains: Take[][] = [];
+	for (const t of [...takes].sort((a, b) => a.from - b.from)) {
+		const chain = chains.find((c) => c[c.length - 1].again === t.from);
+		if (chain) chain.push(t);
+		else chains.push([t]);
+	}
+	chains.sort((a, b) => a[0].from - b[0].from);
+	return chains.map((chain, g) => {
+		const last = chain[chain.length - 1];
+		const limit = Math.min(words.length - 1, (chains[g + 1]?.[0].from ?? words.length) - 1, last.again + last.to - last.from + KEEPER_EXTRA_WORDS);
+		let end = Math.min(limit, last.again + last.matched - 1);
+		while (end < limit && !ENDS_SENTENCE.test(words[end].text.trim()) && words[end + 1].start - words[end].end < SENTENCE_PAUSE) end++;
+		return { takes: [...chain.map((t) => ({ from: t.from, to: t.to })), { from: last.again, to: Math.max(last.again, end) }] };
+	});
+}
+
 export function findRepeatedTakes(words: Word[]): Take[] {
 	const starts = sentenceStarts(words);
 	const takes: Take[] = [];

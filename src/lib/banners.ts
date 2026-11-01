@@ -15,7 +15,7 @@ export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub:
 };
 
 // Sizes in px of the final video; where each place starts, as a share of its height, for each video
-// shape, clear of the subtitles' usual place and the watermark (bottom is under the subtitles on
+// shape, clear of the subtitles' usual place (bottom is under the subtitles on
 // 9:16, over them on the wider shapes). Same as BANNER and BANNER_TOP in render.py.
 export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxBanners: 20 };
 export const BANNER_TOP: Record<Format, Record<BannerPlace, number>> = {

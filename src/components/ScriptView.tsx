@@ -5,7 +5,7 @@ import { allCuts, type Fix, fixedWords, normText, setFix, TRAIL, type WordFix } 
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
 import { outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
-import { findRepeatedTakes, type Take } from "@/lib/takes";
+import { findRepeatedTakes, groupTakes, type TakeGroup } from "@/lib/takes";
 import { FPS, keepSegments, subtitleLines, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
 import { studioSupported } from "@/lib/player/engine";
@@ -13,12 +13,12 @@ import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
 import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
+import { Timeline } from "./Timeline";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
 
 const PARAGRAPH_GAP = 1.5; // a pause this long (seconds) starts a new paragraph
-const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 const isThai = (text: string) => /[฀-๿]/.test(text);
 const script = (text: string) => (isThai(text) ? "thai" : /^\d/.test(text) ? "number" : "latin");
@@ -106,7 +106,7 @@ const WordSpan = memo(function WordSpan({
 	item: WordItem;
 	gone: boolean;
 	active: boolean;
-	retake: boolean; // part of a repeated take that could be cut
+	retake: boolean; // the kept take of a sentence said more than once (🔁 on the timeline)
 	heardAs: string | null;
 	actions: RefObject<WordActions>;
 }) {
@@ -163,6 +163,9 @@ type Props = {
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void;
 	faces: Faces | null; // where the speaker's face is, for cropping and Auto zoom
+	// Repeated takes are cut once, when the video is first opened (keeping the last try).
+	takesApplied?: boolean;
+	onTakesApplied?: (count: number, before: number[]) => void;
 };
 
 // The editor: script on the left, the video on the right (stacked on phones, video first).
@@ -184,6 +187,8 @@ export function ScriptView({
 	banners,
 	onBannersChange,
 	faces,
+	takesApplied,
+	onTakesApplied,
 }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
@@ -330,44 +335,62 @@ export function ScriptView({
 		return () => document.removeEventListener("keydown", onKey);
 	}, [selected, apply, editing]);
 
+	const togglePlay = useCallback(() => {
+		if (mode === "preview") {
+			if (playing) playerRef.current?.pause();
+			else playerRef.current?.play();
+		} else {
+			const video = videoRef.current;
+			if (video?.paused) void video.play();
+			else video?.pause();
+		}
+	}, [mode, playing]);
+
 	// Space plays and pauses, like every video editor (not while typing, or on a focused button).
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key !== " " || e.ctrlKey || e.metaKey || e.altKey) return;
 			if ((e.target as HTMLElement | null)?.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
 			e.preventDefault();
-			if (mode === "preview") {
-				if (playing) playerRef.current?.pause();
-				else playerRef.current?.play();
-			} else {
-				const video = videoRef.current;
-				if (video?.paused) void video.play();
-				else video?.pause();
-			}
+			togglePlay();
 		};
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [mode, playing]);
+	}, [togglePlay]);
 
-	// Repeated takes (lib/takes.ts): cutting one deletes its words, keeping it restores them.
-	const takes = useMemo(() => findRepeatedTakes(words), [words]);
-	const [showTakes, setShowTakes] = useState(false);
-	const takeRange = (t: Take) => Array.from({ length: t.to - t.from + 1 }, (_, k) => t.from + k);
-	const isCut = (t: Take) => takeRange(t).every((i) => gone.has(i));
-	const openTakes = takes.filter((t) => !isCut(t));
-	const retakeWords = useMemo(() => new Set(takes.flatMap((t) => (takeRange(t).every((i) => gone.has(i)) ? [] : takeRange(t)))), [takes, gone]);
-	const cutTakes = (list: Take[], cut: boolean) => {
+	// Repeated takes (lib/takes.ts): every try of a sentence, the last one kept unless the user picks
+	// another on the timeline. Takes not kept are deleted words.
+	const groups = useMemo(() => groupTakes(words, findRepeatedTakes(words)), [words]);
+	const takeRange = (t: { from: number; to: number }) => Array.from({ length: t.to - t.from + 1 }, (_, k) => t.from + k);
+	const retakeWords = useMemo(
+		() => new Set(groups.flatMap((g) => g.takes.filter((t) => !gone.has(t.from) && !gone.has(t.to)).flatMap(takeRange))),
+		[groups, gone],
+	);
+	const pickTake = (group: TakeGroup, pick: number) => {
 		const next = new Set(deleted);
-		for (const t of list) for (const i of takeRange(t)) (cut ? next.add(i) : next.delete(i));
+		group.takes.forEach((t, k) => takeRange(t).forEach((i) => (k === pick ? next.delete(i) : next.add(i))));
 		onChange([...next].sort((a, b) => a - b));
 	};
-	const shownText = (from: number, to: number, max: number) => {
-		const text = wordItems
-			.filter((it) => it.index >= from && it.last <= to)
-			.map((it, k) => (k > 0 && it.space ? " " : "") + it.text)
-			.join("");
-		return text.length > max ? text.slice(0, max) + "…" : text;
-	};
+
+	// First time the video is opened: cut every earlier try, keep the last one (the user's own
+	// deletions and restores stay as they are on takes they already touched).
+	const takesRef = useRef(false);
+	useEffect(() => {
+		if (takesApplied !== false || takesRef.current) return;
+		takesRef.current = true;
+		const next = new Set(deleted);
+		let count = 0;
+		for (const g of groups) {
+			for (const t of g.takes.slice(0, -1)) {
+				if (takeRange(t).some((i) => next.has(i))) continue;
+				takeRange(t).forEach((i) => next.add(i));
+				count++;
+			}
+		}
+		if (count) onChange([...next].sort((a, b) => a - b));
+		onTakesApplied?.(count, deleted);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [takesApplied]);
 
 	const anyKept = selected.some((i) => !gone.has(i));
 	const anyGone = selected.some((i) => gone.has(i));
@@ -438,6 +461,14 @@ export function ScriptView({
 		void video.play();
 	}
 
+	// The timeline moves the playhead without starting or stopping playback.
+	function jump(seconds: number) {
+		timeRef.current = seconds;
+		setCurrent(wordAt(words, seconds));
+		if (mode === "preview") playerRef.current?.seek(seconds);
+		else if (videoRef.current) videoRef.current.currentTime = seconds;
+	}
+
 	// What clicking a word does, behind a ref so word spans never re-render just for new handlers.
 	const wordActions = useRef<WordActions>({ click: () => {}, edit: () => {} });
 	wordActions.current = {
@@ -455,335 +486,301 @@ export function ScriptView({
 	useEffect(() => setBrandSaved((s) => (s === "saved" ? null : s)), [subtitle]);
 
 	return (
-		<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,440px)] lg:items-start">
-			{/* Right on big screens (sticky while the script scrolls), on top on phones. */}
-			<div className="flex flex-col gap-3 lg:sticky lg:top-4 lg:order-2">
-				<div className="flex self-center rounded-lg border border-foreground/20 p-0.5 text-sm">
-					{(["preview", "original"] as const).map((m) => (
-						<button
-							key={m}
-							onClick={() => setMode(m)}
-							className={`rounded-md px-3 py-1 ${mode === m ? "bg-foreground text-background" : "text-foreground/70 hover:text-foreground"}`}
-						>
-							{m === "preview" ? "Preview (final video)" : "Original"}
-						</button>
-					))}
+		<div className="flex flex-col gap-4">
+			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,440px)] lg:items-start">
+				{/* Right on big screens (sticky while the script scrolls), on top on phones. */}
+				<div className="flex flex-col gap-3 lg:sticky lg:top-4 lg:order-2">
+					<div className="flex self-center rounded-lg border border-foreground/20 p-0.5 text-sm">
+						{(["preview", "original"] as const).map((m) => (
+							<button
+								key={m}
+								onClick={() => setMode(m)}
+								className={`rounded-md px-3 py-1 ${mode === m ? "bg-foreground text-background" : "text-foreground/70 hover:text-foreground"}`}
+							>
+								{m === "preview" ? "Preview (final video)" : "Original"}
+							</button>
+						))}
+					</div>
+					{mode === "preview" && deciding ? (
+						<div
+							className="mx-auto w-full rounded-lg bg-black"
+							style={{ aspectRatio: `${outputSize(subtitle).width} / ${outputSize(subtitle).height}`, maxWidth: `calc(70vh * ${outputSize(subtitle).width} / ${outputSize(subtitle).height})` }}
+						/>
+					) : mode === "preview" && useStudio && studio ? (
+						<StudioPlayer
+							key={studio.videoUrl}
+							ref={playerRef}
+							media={studio}
+							segments={segments}
+							lines={lines}
+							subtitle={subtitle}
+							onSubtitleChange={onSubtitleChange}
+							onTime={onPreviewTime}
+							onPlayingChange={setPlaying}
+							banners={banners}
+							faces={faces}
+							onFail={(error) => {
+								reportError("studio player", error.message);
+								setStudioFailed(true);
+							}}
+						/>
+					) : mode === "preview" ? (
+						<PreviewPlayer
+							key={videoUrl} // start fresh when the preview copy replaces the original
+							ref={playerRef}
+							src={videoUrl}
+							segments={segments}
+							lines={lines}
+							subtitle={subtitle}
+							onSubtitleChange={onSubtitleChange}
+							onTime={onPreviewTime}
+							onPlayingChange={setPlaying}
+							banners={banners}
+						/>
+					) : (
+						<video
+							ref={videoRef}
+							src={videoUrl}
+							controls
+							playsInline
+							preload="metadata"
+							onPlay={() => setPlaying(true)}
+							onPause={() => setPlaying(false)}
+							onEnded={() => setPlaying(false)}
+							onSeeked={(e) => {
+								timeRef.current = e.currentTarget.currentTime;
+								setCurrent(wordAt(words, e.currentTarget.currentTime));
+							}}
+							className="max-h-[65vh] w-full rounded-lg bg-black"
+						/>
+					)}
+					{mode === "preview" && (
+						<SubtitleControls
+							style={subtitle}
+							onChange={onSubtitleChange}
+							thai={thaiClip}
+							footer={
+								<button
+									onClick={() => void saveBrand()}
+									disabled={brandSaved === "saving"}
+									className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
+									title="Use this look for every new video"
+								>
+									{brandSaved === "saved" ? "✓ Saved to Brand Kit" : brandSaved === "failed" ? "❌ Could not save, try again" : "⭐ Save as my Brand Kit"}
+								</button>
+							}
+						/>
+					)}
+					{mode === "preview" && (
+						<BannerControls
+							banners={banners}
+							onChange={onBannersChange}
+							now={() => toOutSeconds(timeRef.current, segments)}
+							total={totalFrames(segments) / FPS}
+							channel={subtitle.logo}
+						/>
+					)}
 				</div>
-				{mode === "preview" && deciding ? (
-					<div
-						className="mx-auto w-full rounded-lg bg-black"
-						style={{ aspectRatio: `${outputSize(subtitle).width} / ${outputSize(subtitle).height}`, maxWidth: `calc(70vh * ${outputSize(subtitle).width} / ${outputSize(subtitle).height})` }}
-					/>
-				) : mode === "preview" && useStudio && studio ? (
-					<StudioPlayer
-						key={studio.videoUrl}
-						ref={playerRef}
-						media={studio}
-						segments={segments}
-						lines={lines}
-						subtitle={subtitle}
-						onSubtitleChange={onSubtitleChange}
-						onTime={onPreviewTime}
-						onPlayingChange={setPlaying}
-						banners={banners}
-						faces={faces}
-						onFail={(error) => {
-							reportError("studio player", error.message);
-							setStudioFailed(true);
-						}}
-					/>
-				) : mode === "preview" ? (
-					<PreviewPlayer
-						key={videoUrl} // start fresh when the preview copy replaces the original
-						ref={playerRef}
-						src={videoUrl}
-						segments={segments}
-						lines={lines}
-						subtitle={subtitle}
-						onSubtitleChange={onSubtitleChange}
-						onTime={onPreviewTime}
-						onPlayingChange={setPlaying}
-						banners={banners}
-					/>
-				) : (
-					<video
-						ref={videoRef}
-						src={videoUrl}
-						controls
-						playsInline
-						preload="metadata"
-						onPlay={() => setPlaying(true)}
-						onPause={() => setPlaying(false)}
-						onEnded={() => setPlaying(false)}
-						onSeeked={(e) => {
-							timeRef.current = e.currentTarget.currentTime;
-							setCurrent(wordAt(words, e.currentTarget.currentTime));
-						}}
-						className="max-h-[65vh] w-full rounded-lg bg-black"
-					/>
-				)}
-				{mode === "preview" && (
-					<SubtitleControls
-						style={subtitle}
-						onChange={onSubtitleChange}
-						thai={thaiClip}
-						footer={
-							<button
-								onClick={() => void saveBrand()}
-								disabled={brandSaved === "saving"}
-								className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
-								title="Use this look for every new video"
-							>
-								{brandSaved === "saved" ? "✓ Saved to Brand Kit" : brandSaved === "failed" ? "❌ Could not save, try again" : "⭐ Save as my Brand Kit"}
-							</button>
-						}
-					/>
-				)}
-				{mode === "preview" && (
-					<BannerControls
-						banners={banners}
-						onChange={onBannersChange}
-						now={() => toOutSeconds(timeRef.current, segments)}
-						total={totalFrames(segments) / FPS}
-						channel={subtitle.logo}
-					/>
-				)}
-			</div>
-
-			<div className="flex min-w-0 flex-col gap-3 lg:order-1">
-				<p className="text-xs text-foreground/60">
-					{mode === "preview"
-						? "The video shows how your final video will look. Changes show up right away, no need to make the video first."
-						: "The video as you uploaded it."}{" "}
-					Click a word to jump there. Double-click a word to fix its spelling. Drag across words to delete them. Click ✂️ to hear a
-					silence that will be cut.
-				</p>
-				{editing && (
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							saveEdit(editing.text);
-						}}
-						className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-600/40 bg-blue-600/5 p-2"
-					>
-						<input
-							autoFocus
-							value={editing.text}
-							onChange={(e) => setEditing({ ...editing, text: e.target.value })}
-							onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
-							aria-label="Fixed text"
-							className="min-w-40 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
-						/>
-						<button type="submit" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
-							Save
-						</button>
-						{sameElsewhere > 0 && (
-							<button
-								type="button"
-								onClick={() => {
-									replaceAll(editing.before, editing.text);
-									setEditing(null);
-								}}
-								title={`Also fix the other ${sameElsewhere} places that read "${editing.before}"`}
-								className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-600/10"
-							>
-								Fix all ({sameElsewhere + 1})
-							</button>
-						)}
-						<button type="button" onClick={() => setEditing(null)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
-							Cancel
-						</button>
-						{editingFixed && (
-							<button
-								type="button"
-								onClick={() => saveEdit("")}
-								title={`Back to "${editing.original}"`}
-								className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
-							>
-								↩️ Original
-							</button>
-						)}
-						<span className="w-full text-xs text-foreground/60">
-							Heard as: {editing.original} · The subtitles show what you type. Enter to save, Esc to cancel.
-						</span>
-					</form>
-				)}
-				{finding && (
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							if (!findCount || !finding.replace.trim()) return;
-							replaceAll(finding.find, finding.replace);
-							setFinding({ find: finding.replace, replace: "" });
-						}}
-						className="flex flex-wrap items-center gap-2 rounded-lg border border-foreground/20 p-2"
-					>
-						<input
-							autoFocus
-							value={finding.find}
-							onChange={(e) => setFinding({ ...finding, find: e.target.value })}
-							onKeyDown={(e) => e.key === "Escape" && setFinding(null)}
-							placeholder="Find"
-							aria-label="Find"
-							className="min-w-32 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
-						/>
-						<span className="text-foreground/50">→</span>
-						<input
-							value={finding.replace}
-							onChange={(e) => setFinding({ ...finding, replace: e.target.value })}
-							onKeyDown={(e) => e.key === "Escape" && setFinding(null)}
-							placeholder="Replace with"
-							aria-label="Replace with"
-							className="min-w-32 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
-						/>
-						<button
-							type="submit"
-							disabled={!findCount || !finding.replace.trim()}
-							className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+	
+				<div className="flex min-w-0 flex-col gap-3 lg:order-1">
+					<p className="text-xs text-foreground/60">
+						{mode === "preview"
+							? "The video shows how your final video will look. Changes show up right away, no need to make the video first."
+							: "The video as you uploaded it."}{" "}
+						Click a word to jump there. Double-click a word to fix its spelling. Drag across words to delete them. Click ✂️ to hear a
+						silence that will be cut. 🔁 on the timeline marks a sentence you said more than once: pick the take to keep.
+					</p>
+					{editing && (
+						<form
+							onSubmit={(e) => {
+								e.preventDefault();
+								saveEdit(editing.text);
+							}}
+							className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-600/40 bg-blue-600/5 p-2"
 						>
-							Replace all{findCount ? ` (${findCount})` : ""}
-						</button>
-						<button type="button" onClick={() => setFinding(null)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
-							Close
-						</button>
-						<span className="w-full text-xs text-foreground/60">
-							{finding.find.trim() ? (findCount ? `Found ${findCount} in the script.` : "Not found in the script.") : "Type a word as it shows in the script."}{" "}
-							Capitals and punctuation don&apos;t matter.
-						</span>
-					</form>
-				)}
-				{showTakes && takes.length > 0 && (
-					<div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
-						<div className="flex flex-wrap items-center gap-2">
-							<p className="flex-1 text-sm font-medium">
-								🔁 You said these again right after. Cut the first try and keep the last one?
-							</p>
-							{openTakes.length > 0 && (
-								<button onClick={() => cutTakes(openTakes, true)} className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700">
-									✂️ Cut all ({openTakes.length})
+							<input
+								autoFocus
+								value={editing.text}
+								onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+								onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
+								aria-label="Fixed text"
+								className="min-w-40 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
+							/>
+							<button type="submit" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+								Save
+							</button>
+							{sameElsewhere > 0 && (
+								<button
+									type="button"
+									onClick={() => {
+										replaceAll(editing.before, editing.text);
+										setEditing(null);
+									}}
+									title={`Also fix the other ${sameElsewhere} places that read "${editing.before}"`}
+									className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-600/10"
+								>
+									Fix all ({sameElsewhere + 1})
 								</button>
 							)}
-							<button onClick={() => setShowTakes(false)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
+							<button type="button" onClick={() => setEditing(null)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
+								Cancel
+							</button>
+							{editingFixed && (
+								<button
+									type="button"
+									onClick={() => saveEdit("")}
+									title={`Back to "${editing.original}"`}
+									className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+								>
+									↩️ Original
+								</button>
+							)}
+							<span className="w-full text-xs text-foreground/60">
+								Heard as: {editing.original} · The subtitles show what you type. Enter to save, Esc to cancel.
+							</span>
+						</form>
+					)}
+					{finding && (
+						<form
+							onSubmit={(e) => {
+								e.preventDefault();
+								if (!findCount || !finding.replace.trim()) return;
+								replaceAll(finding.find, finding.replace);
+								setFinding({ find: finding.replace, replace: "" });
+							}}
+							className="flex flex-wrap items-center gap-2 rounded-lg border border-foreground/20 p-2"
+						>
+							<input
+								autoFocus
+								value={finding.find}
+								onChange={(e) => setFinding({ ...finding, find: e.target.value })}
+								onKeyDown={(e) => e.key === "Escape" && setFinding(null)}
+								placeholder="Find"
+								aria-label="Find"
+								className="min-w-32 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
+							/>
+							<span className="text-foreground/50">→</span>
+							<input
+								value={finding.replace}
+								onChange={(e) => setFinding({ ...finding, replace: e.target.value })}
+								onKeyDown={(e) => e.key === "Escape" && setFinding(null)}
+								placeholder="Replace with"
+								aria-label="Replace with"
+								className="min-w-32 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
+							/>
+							<button
+								type="submit"
+								disabled={!findCount || !finding.replace.trim()}
+								className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+							>
+								Replace all{findCount ? ` (${findCount})` : ""}
+							</button>
+							<button type="button" onClick={() => setFinding(null)} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
 								Close
 							</button>
-						</div>
-						<ul className="flex flex-col divide-y divide-foreground/10">
-							{takes.map((t) => {
-								const cut = isCut(t);
-								return (
-									<li key={t.from} className="flex flex-wrap items-center gap-2 py-2 text-sm">
-										<span className="w-10 shrink-0 tabular-nums text-foreground/50">{clock(words[t.from].start)}</span>
-										<span className="min-w-0 flex-1 break-words">
-											<span className={cut ? "text-red-600/60 line-through" : "text-amber-700 dark:text-amber-400"}>{shownText(t.from, t.to, 90)}</span>
-											<span className="text-foreground/50"> → again: </span>
-											<span>{shownText(t.again, Math.min(words.length - 1, t.again + 12), 50)}</span>
-										</span>
-										<button
-											onClick={() => seek(Math.max(0, words[t.from].start - 0.3), cut)}
-											className="shrink-0 rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5"
-										>
-											▶ Listen
-										</button>
-										<button
-											onClick={() => cutTakes([t], !cut)}
-											className={`shrink-0 rounded-md px-2 py-1 ${cut ? "border border-foreground/20 hover:bg-foreground/5" : "bg-amber-600 text-white hover:bg-amber-700"}`}
-										>
-											{cut ? "↩️ Keep" : "✂️ Cut"}
-										</button>
-									</li>
-								);
-							})}
-						</ul>
-						<p className="text-xs text-foreground/60">Cut takes show as deleted words in the script. You can restore them any time.</p>
+							<span className="w-full text-xs text-foreground/60">
+								{finding.find.trim() ? (findCount ? `Found ${findCount} in the script.` : "Not found in the script.") : "Type a word as it shows in the script."}{" "}
+								Capitals and punctuation don&apos;t matter.
+							</span>
+						</form>
+					)}
+					<div className="flex min-h-9 flex-wrap items-center gap-2">
+						{!finding && !editing && (
+							<button
+								onMouseDown={(e) => e.preventDefault()}
+								onClick={() => setFinding({ find: "", replace: "" })}
+								className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+							>
+								🔍 Find &amp; replace
+							</button>
+						)}
+						{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
+						{selected.length > 0 && !editing && (
+							<button
+								onMouseDown={(e) => e.preventDefault()}
+								onClick={() => startEdit(Math.min(...selected), Math.max(...selected))}
+								className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+							>
+								✏️ Fix text
+							</button>
+						)}
+						{anyKept && (
+							<button
+								onMouseDown={(e) => e.preventDefault()}
+								onClick={() => apply(true)}
+								className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
+							>
+								🗑️ Delete
+							</button>
+						)}
+						{anyGone && (
+							<button
+								onMouseDown={(e) => e.preventDefault()}
+								onClick={() => apply(false)}
+								className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
+							>
+								↩️ Restore
+							</button>
+						)}
+						{!selected.length && deleted.length > 0 && (
+							<button
+								onClick={() => onChange([])}
+								className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+							>
+								↩️ Restore all deleted words
+							</button>
+						)}
 					</div>
-				)}
-				<div className="flex min-h-9 flex-wrap items-center gap-2">
-					{takes.length > 0 && !showTakes && !editing && (
-						<button
-							onMouseDown={(e) => e.preventDefault()}
-							onClick={() => setShowTakes(true)}
-							className={`rounded-lg px-3 py-1.5 text-sm ${openTakes.length ? "bg-amber-500/15 font-medium text-amber-800 hover:bg-amber-500/25 dark:text-amber-300" : "border border-foreground/20 hover:bg-foreground/5"}`}
-						>
-							🔁 Repeated takes ({openTakes.length || takes.length})
-						</button>
-					)}
-					{!finding && !editing && (
-						<button
-							onMouseDown={(e) => e.preventDefault()}
-							onClick={() => setFinding({ find: "", replace: "" })}
-							className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
-						>
-							🔍 Find &amp; replace
-						</button>
-					)}
-					{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
-					{selected.length > 0 && !editing && (
-						<button
-							onMouseDown={(e) => e.preventDefault()}
-							onClick={() => startEdit(Math.min(...selected), Math.max(...selected))}
-							className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-						>
-							✏️ Fix text
-						</button>
-					)}
-					{anyKept && (
-						<button
-							onMouseDown={(e) => e.preventDefault()}
-							onClick={() => apply(true)}
-							className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
-						>
-							🗑️ Delete
-						</button>
-					)}
-					{anyGone && (
-						<button
-							onMouseDown={(e) => e.preventDefault()}
-							onClick={() => apply(false)}
-							className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
-						>
-							↩️ Restore
-						</button>
-					)}
-					{!selected.length && deleted.length > 0 && (
-						<button
-							onClick={() => onChange([])}
-							className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
-						>
-							↩️ Restore all deleted words
-						</button>
-					)}
-				</div>
-				<div
-					ref={boxRef}
-					className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-12rem)] lg:text-lg lg:leading-9"
-				>
-					{items.map((item, i) => {
-						if (item.kind === "break") return <span key={i} className="block h-3" />;
-						if (item.kind === "silence") {
+					<div
+						ref={boxRef}
+						className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-22rem)] lg:text-lg lg:leading-9"
+					>
+						{items.map((item, i) => {
+							if (item.kind === "break") return <span key={i} className="block h-3" />;
+							if (item.kind === "silence") {
+								return (
+									<button
+										key={i}
+										onClick={() => seek(item.at, true)}
+										title="Silence that will be cut"
+										className="mx-1 rounded bg-red-500/15 px-1.5 align-middle text-xs leading-5 text-red-600 hover:bg-red-500/25"
+									>
+										✂️ {item.seconds.toFixed(1)}s
+									</button>
+								);
+							}
 							return (
-								<button
+								<WordSpan
 									key={i}
-									onClick={() => seek(item.at, true)}
-									title="Silence that will be cut"
-									className="mx-1 rounded bg-red-500/15 px-1.5 align-middle text-xs leading-5 text-red-600 hover:bg-red-500/25"
-								>
-									✂️ {item.seconds.toFixed(1)}s
-								</button>
+									item={item}
+									gone={gone.has(item.index)}
+									active={item.index <= current && current <= item.last}
+									retake={retakeWords.has(item.index)}
+									heardAs={item.fixed ? originalText(item.index, item.last) : null}
+									actions={wordActions}
+								/>
 							);
-						}
-						return (
-							<WordSpan
-								key={i}
-								item={item}
-								gone={gone.has(item.index)}
-								active={item.index <= current && current <= item.last}
-								retake={retakeWords.has(item.index)}
-								heardAs={item.fixed ? originalText(item.index, item.last) : null}
-								actions={wordActions}
-							/>
-						);
-					})}
+						})}
+					</div>
 				</div>
+			</div>
+			{/* Pinned to the bottom of the screen on big screens, like a video editor's timeline. */}
+			<div className="z-20 lg:sticky lg:bottom-2">
+				<Timeline
+					duration={duration}
+					words={words}
+					scriptWords={wordItems}
+					gone={gone}
+					segments={segments}
+					timeRef={timeRef}
+					playing={playing}
+					onTogglePlay={togglePlay}
+					onSeek={jump}
+					audioUrl={studio?.audioUrl ?? null}
+					groups={groups}
+					onPickTake={pickTake}
+					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}
+				/>
 			</div>
 		</div>
 	);

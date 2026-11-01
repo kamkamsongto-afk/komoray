@@ -14,12 +14,13 @@ import { readStyle } from "@/lib/subtitle-style";
 //   pace     tight / natural / relaxed: finds the silences again (answers with the new cuts)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, style, banners, pace } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, takesApplied, style, banners, pace } = (await request.json()) as {
 		key?: string;
 		pace?: unknown;
 		deleted?: unknown;
 		fixes?: unknown;
 		dictionaryApplied?: unknown;
+		takesApplied?: unknown;
 		style?: unknown;
 		banners?: unknown;
 	};
@@ -34,6 +35,7 @@ export async function PUT(request: Request) {
 		deleted?: number[];
 		fixes?: Fix[];
 		dictionaryApplied?: boolean;
+		takesApplied?: boolean;
 		style?: unknown;
 		banners?: Banner[];
 	}>(editKey);
@@ -52,6 +54,7 @@ export async function PUT(request: Request) {
 		edit.fixes = checked;
 	}
 	if (dictionaryApplied === true) edit.dictionaryApplied = true;
+	if (takesApplied === true) edit.takesApplied = true;
 	if (style !== undefined) edit.style = readStyle(style);
 	if (banners !== undefined) {
 		const checked = readBanners(banners);

@@ -21,6 +21,7 @@ type Analysis = {
 	deleted?: number[];
 	fixes?: Fix[];
 	dictionaryApplied?: boolean; // the personal dictionary already ran on this video once
+	takesApplied?: boolean; // repeated takes were already cut on this video once
 	style?: unknown;
 	banners?: Banner[];
 	pace?: Pace;
@@ -104,6 +105,7 @@ export default function EditPage() {
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
 	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
+	const [takesCut, setTakesCut] = useState<{ count: number; before: number[] } | null>(null);
 	const [desktopNotify, setDesktopNotify] = useState(false);
 	const [notifyBlocked, setNotifyBlocked] = useState(false);
 	// Browsers only allow sound after a click, so the Make video click creates this.
@@ -194,7 +196,7 @@ export default function EditPage() {
 
 	// Save edits in the background, one after another so they land in order.
 	const save = useCallback(
-		(patch: { deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; style?: SubtitleStyle; banners?: Banner[] }) => {
+		(patch: { deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; takesApplied?: boolean; style?: SubtitleStyle; banners?: Banner[] }) => {
 			if (!key) return;
 			setSaveError("");
 			const previous = savingRef.current;
@@ -288,6 +290,15 @@ export default function EditPage() {
 			setAnalysis((a) => (a ? { ...a, dictionaryApplied: true } : a));
 			save({ dictionaryApplied: true });
 			if (count) setDictionaryFixed({ count, before });
+		},
+		[save],
+	);
+
+	const takesApplied = useCallback(
+		(count: number, before: number[]) => {
+			setAnalysis((a) => (a ? { ...a, takesApplied: true } : a));
+			save({ takesApplied: true });
+			if (count) setTakesCut({ count, before });
 		},
 		[save],
 	);
@@ -524,6 +535,26 @@ export default function EditPage() {
 					</button>
 				</div>
 			)}
+			{takesCut && (
+				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+					<span>
+						🔁 You said {takesCut.count === 1 ? "a sentence" : `${takesCut.count} sentences`} more than once, so we kept your last take and cut the
+						others. Click 🔁 on the timeline to pick a different take.
+					</span>
+					<button
+						onClick={() => {
+							changeDeleted(takesCut.before);
+							setTakesCut(null);
+						}}
+						className="rounded-lg border border-foreground/20 px-3 py-1 hover:bg-foreground/5"
+					>
+						Undo
+					</button>
+					<button onClick={() => setTakesCut(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
+						✕
+					</button>
+				</div>
+			)}
 			{render.status === "processing" && (
 				<div className="flex flex-col gap-2">
 					<div className="h-2 w-full animate-pulse rounded-full bg-blue-600/60" />
@@ -564,6 +595,8 @@ export default function EditPage() {
 				banners={analysis.banners ?? []}
 				onBannersChange={changeBanners}
 				faces={analysis.faces ?? null}
+				takesApplied={analysis.takesApplied ?? false}
+				onTakesApplied={takesApplied}
 			/>
 		</main>
 	);
