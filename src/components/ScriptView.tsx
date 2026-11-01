@@ -399,6 +399,13 @@ export function ScriptView({
 		onTimelineChange({ deleted: [...next].sort((x, y) => x - y), manual: subtractSpans(manual, [span]), keep: mergeSpans([...keep, span]) });
 	};
 
+	// Back to the automatic cuts in a stretch: the hand cuts and keeps there are forgotten.
+	const autoRange = (a: number, b: number) => {
+		const span = { start: a, end: b };
+		onTimelineChange({ deleted, manual: subtractSpans(manual, [span]), keep: subtractSpans(keep, [span]) });
+	};
+	const handSpans = useMemo(() => mergeSpans([...manual, ...keep]), [manual, keep]);
+
 	// First time the video is opened: cut every earlier try, keep the last one (the user's own
 	// deletions and restores stay as they are on takes they already touched).
 	const takesRef = useRef(false);
@@ -809,6 +816,9 @@ export function ScriptView({
 					onPickTake={pickTake}
 					onCut={cutRange}
 					onKeep={keepRange}
+					onAuto={autoRange}
+					handSpans={handSpans}
+					onPlayFrom={(t) => seek(t)}
 					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}
 				/>
 			</div>

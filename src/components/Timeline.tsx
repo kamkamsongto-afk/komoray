@@ -25,6 +25,9 @@ type Props = {
 	onListen: (from: number, to: number) => void; // play these words (in the Original if they are cut)
 	onCut: (start: number, end: number) => void; // cut this stretch of the source by hand
 	onKeep: (start: number, end: number) => void; // keep it (bring back what was cut there)
+	onAuto: (start: number, end: number) => void; // forget the hand cuts and keeps there (back to the automatic cuts)
+	handSpans: { start: number; end: number }[]; // where cuts were changed by hand (marked on the timeline)
+	onPlayFrom: (source: number) => void; // play from here (to hear a cut edge just moved)
 };
 
 // Heights, px: time ruler, sentence chips, waveform.
@@ -89,6 +92,9 @@ export function Timeline({
 	onListen,
 	onCut,
 	onKeep,
+	onAuto,
+	handSpans,
+	onPlayFrom,
 }: Props) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -101,6 +107,8 @@ export function Timeline({
 	const [openGroup, setOpenGroup] = useState<number | null>(null);
 	// The stretch picked by dragging, in source seconds: cut it or keep it.
 	const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
+	// A cut's edge being dragged (Show cuts on): which cut, which side, and where it is now.
+	const [edge, setEdge] = useState<{ cut: [number, number]; side: "start" | "end"; to: number } | null>(null);
 	const anchor = useRef<{ time: number; at: number } | null>(null); // keep this moment under this x after zooming
 
 	useEffect(() => {
@@ -218,6 +226,14 @@ export function Timeline({
 				if (x1 < 0 || x0 > w) continue;
 				ctx.fillRect(x0, CHIPS_TOP - 2, Math.max(1, x1 - x0), HEIGHT - CHIPS_TOP);
 			}
+			// Cuts changed by hand: a thin amber bar along the bottom.
+			ctx.fillStyle = "rgba(245, 158, 11, 0.9)";
+			for (const h of handSpans) {
+				const x0 = h.start * scale - left;
+				const x1 = h.end * scale - left;
+				if (x1 < 0 || x0 > w) continue;
+				ctx.fillRect(x0, HEIGHT - 3, Math.max(2, x1 - x0), 3);
+			}
 		} else {
 			// The joins between kept pieces.
 			ctx.fillStyle = ink;
@@ -253,7 +269,7 @@ export function Timeline({
 			ctx.fillRect(0, WAVE_TOP, w, WAVE);
 			ctx.globalAlpha = 1;
 		}
-	}, [scale, showCuts, cutSpans, segments, peaks, timeAt]);
+	}, [scale, showCuts, cutSpans, segments, peaks, timeAt, handSpans]);
 
 	// Zooming keeps the moment under the mouse (or the playhead) where it was.
 	useLayoutEffect(() => {
@@ -313,13 +329,23 @@ export function Timeline({
 	// Pressing on the ruler moves the playhead (drag to scrub). Anywhere else: a click moves the
 	// playhead (or, in a red cut, picks that cut), a drag picks a stretch, and an edge of the picked
 	// stretch can be dragged to fine-tune it.
-	const press = useRef<{ kind: "scrub" | "pick" | "start" | "end"; x: number; at: number; moved: boolean } | null>(null);
+	type Press = { kind: "scrub" | "pick" | "start" | "end" | "cut"; x: number; at: number; moved: boolean; cut?: [number, number]; side?: "start" | "end" };
+	const press = useRef<Press | null>(null);
 	const xAt = (clientX: number) => {
 		const el = scrollRef.current;
 		return el ? clientX - el.getBoundingClientRect().left + el.scrollLeft : 0;
 	};
 	const nearEdge = (x: number) =>
 		!selection ? null : Math.abs(x - xOf(selection.start)) <= EDGE_PX ? "start" : Math.abs(x - xOf(selection.end)) <= EDGE_PX ? "end" : null;
+	// The edge of a cut under x (Show cuts on): drag it to cut a little more or less than the automatic cut.
+	const cutEdgeAt = (x: number) => {
+		if (!showCuts) return null;
+		for (const cut of cutSpans) {
+			if (Math.abs(x - cut[0] * scale) <= EDGE_PX && cut[0] > 0) return { cut, side: "start" as const };
+			if (Math.abs(x - cut[1] * scale) <= EDGE_PX && cut[1] < duration) return { cut, side: "end" as const };
+		}
+		return null;
+	};
 	const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
 		if ((e.target as HTMLElement).closest("button")) return;
 		const el = scrollRef.current;
@@ -332,22 +358,27 @@ export function Timeline({
 		}
 		const x = xAt(e.clientX);
 		const onRuler = e.clientY - el.getBoundingClientRect().top < RULER + 2;
-		const kind = onRuler ? "scrub" : (nearEdge(x) ?? "pick");
-		press.current = { kind, x, at: timeAt(x), moved: false };
+		const grab = onRuler || nearEdge(x) ? null : cutEdgeAt(x);
+		const kind = onRuler ? "scrub" : (nearEdge(x) ?? (grab ? "cut" : "pick"));
+		press.current = { kind, x, at: timeAt(x), moved: false, cut: grab?.cut, side: grab?.side };
 		if (kind === "scrub") onSeek(timeAt(x));
 	};
 	const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
 		const p = press.current;
 		const x = xAt(e.clientX);
 		if (!p) {
-			e.currentTarget.style.cursor = nearEdge(x) ? "ew-resize" : "";
+			e.currentTarget.style.cursor = nearEdge(x) || cutEdgeAt(x) ? "ew-resize" : "";
 			return;
 		}
 		if (!p.moved && Math.abs(x - p.x) < DRAG_PX) return;
 		p.moved = true;
 		const t = timeAt(x);
 		if (p.kind === "scrub") onSeek(t);
-		else if (p.kind === "pick") setSelection({ start: Math.min(p.at, t), end: Math.max(p.at, t) });
+		else if (p.kind === "cut" && p.cut && p.side) {
+			// An edge never crosses the other edge of its cut.
+			const to = p.side === "start" ? Math.min(t, p.cut[1] - MIN_PICK) : Math.max(t, p.cut[0] + MIN_PICK);
+			setEdge({ cut: p.cut, side: p.side, to });
+		} else if (p.kind === "pick") setSelection({ start: Math.min(p.at, t), end: Math.max(p.at, t) });
 		else if (selection) {
 			const other = p.kind === "start" ? selection.end : selection.start;
 			setSelection({ start: Math.min(other, t), end: Math.max(other, t) });
@@ -358,6 +389,11 @@ export function Timeline({
 		press.current = null;
 		follow.current = true;
 		if (!p) return;
+		if (p.kind === "cut" && p.moved) {
+			if (edge) moveEdge(edge);
+			setEdge(null);
+			return;
+		}
 		if (p.moved) return setSelection((s) => (s && s.end - s.start >= MIN_PICK ? s : null));
 		if (p.kind === "scrub") return;
 		const cut = showCuts ? cutSpans.find(([a, b]) => p.at >= a && p.at < b) : undefined;
@@ -368,6 +404,17 @@ export function Timeline({
 		}
 	};
 
+	// A cut edge let go: the stretch between where it was and where it is now is kept (cut shrunk)
+	// or cut (cut grown). Then play across the new join, so it can be heard right away.
+	const moveEdge = ({ cut: [a, b], side, to }: { cut: [number, number]; side: "start" | "end"; to: number }) => {
+		const from = side === "start" ? a : b;
+		if (Math.abs(to - from) < 0.01) return;
+		const shrinks = side === "start" ? to > from : to < from;
+		if (shrinks) onKeep(Math.min(from, to), Math.max(from, to));
+		else onCut(Math.min(from, to), Math.max(from, to));
+		onPlayFrom(Math.max(0, (side === "start" ? to : a) - 1.5));
+	};
+
 	// What the picked stretch holds: any of it still in the video? any of it cut?
 	const picked = useMemo(() => {
 		if (!selection) return null;
@@ -375,8 +422,9 @@ export function Timeline({
 		const f1 = selection.end * FPS;
 		let kept = 0;
 		for (const s of segments) kept += Math.max(0, Math.min(f1, s.trim + s.frames) - Math.max(f0, s.trim));
-		return { kept: kept > 1, cut: f1 - f0 - kept > 1, seconds: selection.end - selection.start };
-	}, [selection, segments]);
+		const hand = handSpans.some((h) => h.end > selection.start && h.start < selection.end);
+		return { kept: kept > 1, cut: f1 - f0 - kept > 1, hand, seconds: selection.end - selection.start };
+	}, [selection, segments, handSpans]);
 	const cutPicked = useCallback(() => {
 		if (!selection) return;
 		onCut(selection.start, selection.end);
@@ -469,15 +517,27 @@ export function Timeline({
 								↩️ Keep
 							</button>
 						)}
+						{picked.hand && (
+							<button
+								onClick={() => {
+									onAuto(selection.start, selection.end);
+									setSelection(null);
+								}}
+								className="rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
+								title="Undo the hand changes here and go back to the automatic cuts"
+							>
+								↺ Auto
+							</button>
+						)}
 						<button onClick={() => setSelection(null)} className="px-1 text-foreground/50 hover:text-foreground" aria-label="Clear the selection" title="Esc">
 							✕
 						</button>
 					</span>
 				) : (
-					<span className="text-xs text-foreground/50" title="Drag across the timeline to cut or keep any part. Click a red cut to pick it.">
+					<span className="text-xs text-foreground/50" title="Drag across the timeline to cut or keep any part. Drag the edge of a red cut to cut a little more or less (to keep the end of a word). Click a red cut to pick it.">
 						{cutSpans.length} cuts
 						{groups.length > 0 && ` · 🔁 ${groups.length} repeated ${groups.length === 1 ? "take" : "takes"}`}
-						<span className="hidden sm:inline"> · drag across to cut</span>
+						<span className="hidden sm:inline"> · drag across to cut · drag a red edge to fine-tune</span>
 					</span>
 				)}
 				<div className="ml-auto flex items-center gap-2">
@@ -559,6 +619,19 @@ export function Timeline({
 							</button>
 						);
 					})}
+					{edge && (
+						<div
+							className={`pointer-events-none absolute z-[1] border-blue-600 ${
+								(edge.side === "start" ? edge.to > edge.cut[0] : edge.to < edge.cut[1]) ? "bg-emerald-500/30" : "bg-red-500/35"
+							} ${edge.side === "start" ? "border-l-2" : "border-r-2"}`}
+							style={{
+								left: Math.min(edge.to, edge.side === "start" ? edge.cut[0] : edge.cut[1]) * scale,
+								width: Math.max(2, Math.abs(edge.to - (edge.side === "start" ? edge.cut[0] : edge.cut[1])) * scale),
+								top: CHIPS_TOP - 3,
+								height: HEIGHT - CHIPS_TOP + 3,
+							}}
+						/>
+					)}
 					{selection && (
 						<div
 							className="pointer-events-none absolute z-[1] rounded-sm border-x-2 border-blue-600 bg-blue-500/20"

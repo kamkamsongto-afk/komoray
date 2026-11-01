@@ -27,15 +27,19 @@ export function wordCuts(words: Span[], deleted: number[], duration: number): Ed
 }
 
 // Cut or kept by hand on the timeline (source seconds). `manual` is cut whatever is said there;
-// `keep` brings back silence the pace would have cut (deleted words inside it are still cut).
+// `keep` stays in the video although a silence or a deleted word's cut covered it (e.g. the end of
+// a word dragged back in). Deleting words again takes their part out of `keep` (page.tsx).
 export type HandEdits = { manual?: Span[]; keep?: Span[] };
 
-// Every cut for the final video: the silences (minus what was kept by hand), the deleted words and
-// the hand cuts.
+// Every cut for the final video: the silences and the deleted words (minus what was kept by hand),
+// plus the hand cuts.
 export function allCuts(edit: { duration: number; cuts: Span[]; words: Span[]; deleted?: number[] } & HandEdits): EditCut[] {
-	const silences = subtractSpans(edit.cuts, edit.keep ?? []).map((c) => ({ ...c, reason: "silence" as const }));
+	const auto = [
+		...edit.cuts.map((c) => ({ start: c.start, end: c.end, reason: "silence" as const })),
+		...wordCuts(edit.words, edit.deleted ?? [], edit.duration),
+	];
 	const manual = (edit.manual ?? []).map((c) => ({ start: c.start, end: c.end, reason: "manual" as const }));
-	return [...silences, ...wordCuts(edit.words, edit.deleted ?? [], edit.duration), ...manual].sort((a, b) => a.start - b.start);
+	return [...subtractSpans(auto, edit.keep ?? []), ...manual].sort((a, b) => a.start - b.start);
 }
 
 // Spans sorted and joined where they touch or overlap.

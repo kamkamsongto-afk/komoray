@@ -297,17 +297,24 @@ export default function EditPage() {
 		return () => document.removeEventListener("keydown", onKey);
 	}, [restore]);
 
-	// Words put back in the script also come back where they were cut by hand on the timeline.
+	// Words put back in the script also come back where they were cut by hand on the timeline, and
+	// words deleted again are cut again even where an edge was dragged to keep them.
 	const changeDeleted = useCallback(
 		(deleted: number[]) => {
 			const a = analysisRef.current;
 			if (!a) return;
 			remember();
 			const now = new Set(deleted);
-			const back = (a.deleted ?? []).filter((i) => !now.has(i));
+			const before = new Set(a.deleted ?? []);
+			const back = [...before].filter((i) => !now.has(i));
+			const gone = deleted.filter((i) => !before.has(i));
 			const manual = a.manual?.length && back.length ? subtractSpans(a.manual, back.map((i) => wordRoom(a.words, i))) : a.manual;
-			setAnalysis((b) => (b ? { ...b, deleted, manual } : b));
-			save(manual !== a.manual ? { deleted, manual } : { deleted });
+			const keep =
+				a.keep?.length && gone.length
+					? subtractSpans(a.keep, gone.map((i) => ({ start: a.words[i - 1]?.end ?? 0, end: a.words[i + 1]?.start ?? a.duration })))
+					: a.keep;
+			setAnalysis((b) => (b ? { ...b, deleted, manual, keep } : b));
+			save({ deleted, ...(manual !== a.manual && { manual }), ...(keep !== a.keep && { keep }) });
 		},
 		[save, remember],
 	);
