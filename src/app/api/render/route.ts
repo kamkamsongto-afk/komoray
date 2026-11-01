@@ -2,7 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
 import type { Faces } from "@/lib/framing";
-import { allCuts, type EditCut, type Fix, fixedWords } from "@/lib/edit";
+import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
 import { readStyle } from "@/lib/subtitle-style";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
 		deleted?: number[];
 		fixes?: Fix[];
 		style?: unknown;
-	}>(
+	} & HandEdits>(
 		siblingKey(key, "edit.json"),
 	);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
 			token: env.RENDER_TOKEN,
-			// Modal just removes every cut, so hand it the deleted words as cuts too,
+			// Modal just removes every cut, so hand it the deleted words and the timeline's hand cuts as cuts too,
 			// and the words already fixed: it only uses them for subtitles.
 			// faces: frame wide videos around the speaker, as the preview does (lib/framing.ts).
 			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes), faces: await getJson<Faces>(siblingKey(key, "faces.json")) },

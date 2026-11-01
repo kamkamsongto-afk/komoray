@@ -132,6 +132,7 @@ DEFAULT_STYLE = {
     "logo": "",  # channel name in a corner, "" = none
     "logoAt": "top-left",  # or "top-right"
     "zoom": "off",  # Auto zoom: "cuts" = every other kept piece a little closer
+    "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
 }
 ZOOM = 1.12  # Auto zoom (ZOOM in src/lib/timeline.ts)
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
@@ -242,6 +243,38 @@ def second_row(texts: list[str]) -> int | None:
     return best
 
 
+# Motion: (milliseconds after the start, size in %), straight lines between. Same as src/lib/motion.ts.
+POP = [(0, 70), (90, 110), (170, 100)]
+BOUNCE = [(0, 100), (80, 125), (200, 100)]
+POP_END = POP[-1][0]
+
+
+def scale_at(keys: list[tuple[int, int]], ms: float) -> float:
+    if ms <= keys[0][0]:
+        return keys[0][1]
+    for (t0, s0), (t1, s1) in zip(keys, keys[1:]):
+        if ms < t1:
+            return s0 + (s1 - s0) * (ms - t0) / (t1 - t0)
+    return keys[-1][1]
+
+
+def scale_tags(keys: list[tuple[int, int]], offset: float) -> str:
+    """ASS tags that play `keys` from `offset` ms in (where the event starts): the size now, then a \\t
+    to each later keyframe. libass draws the letters bigger, so the words around them make room."""
+    now = round(scale_at(keys, offset), 1)
+    tags, prev = f"\\fscx{now:g}\\fscy{now:g}", offset
+    for ms, size in keys:
+        if ms > offset:
+            tags += f"\\t({js_round(prev - offset)},{js_round(ms - offset)},\\fscx{size}\\fscy{size})"
+            prev = ms
+    return tags
+
+
+def pop_tags(motion: str, since: float) -> str:
+    """The line popping in, for an event `since` ms after the line started ("" once it is done)."""
+    return f"{{{scale_tags(POP, since)}}}" if motion in ("pop", "bounce") and since < POP_END else ""
+
+
 def ass_text(text: str) -> str:
     return text.replace("\\", "").replace("{", "(").replace("}", ")")
 
@@ -256,6 +289,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     # "own": the user's uploaded font, put in the fonts folder next to the subtitles (render()).
     font = str(style.get("ownFamily") or FONTS["kanit"]) if style["font"] == "own" else FONTS.get(style["font"], FONTS["kanit"])
     look = style.get("look", "clean")
+    motion = style.get("motion", "none")
     size = int(style["size"])
     outline = int(style["outline"])
     video_w, video_h = FORMATS.get(style.get("format"), (WIDTH, HEIGHT))
@@ -311,17 +345,22 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         row2 = second_row(parts) if look == "two" else None
         if row2 is not None:
             parts[row2] = "\\N" + parts[row2].lstrip()
-        if look != "highlight":
-            events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{''.join(parts)}")
+        if look != "highlight" and motion != "bounce":
+            events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{pop_tags(motion, 0)}{''.join(parts)}")
             continue
-        # Highlight: one event per word, that word yellow until the next one starts.
+        # Highlight / Bounce: one event per word, that word yellow (or bouncing) until the next one starts.
         for k in range(len(line)):
             a = start if k == 0 else line[k]["start"]
             b = line[k + 1]["start"] if k + 1 < len(line) else end
             if b <= a:
                 continue
-            text = "".join(f"{{\\1c{highlight}}}{p}{{\\1c&H00FFFFFF&}}" if j == k else p for j, p in enumerate(parts))
-            events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{text}")
+            since = (a - start) / FPS * 1000  # ms since the line started
+            # A word bounces once the line has finished popping in (the first word rides the pop).
+            bounce = motion == "bounce" and k > 0 and since >= POP_END
+            on = (f"\\1c{highlight}" if look == "highlight" else "") + (scale_tags(BOUNCE, 0) if bounce else "")
+            off = ("\\1c&H00FFFFFF&" if look == "highlight" else "") + ("\\fscx100\\fscy100" if bounce else "")
+            text = "".join(f"{{{on}}}{p}{{{off}}}" if j == k and on else p for j, p in enumerate(parts))
+            events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{pop_tags(motion, since)}{text}")
 
     # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
     boxed = look == "box"

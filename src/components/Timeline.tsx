@@ -1,6 +1,6 @@
 "use client";
 
-import { type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
@@ -23,6 +23,8 @@ type Props = {
 	groups: TakeGroup[];
 	onPickTake: (group: TakeGroup, take: number) => void;
 	onListen: (from: number, to: number) => void; // play these words (in the Original if they are cut)
+	onCut: (start: number, end: number) => void; // cut this stretch of the source by hand
+	onKeep: (start: number, end: number) => void; // keep it (bring back what was cut there)
 };
 
 // Heights, px: time ruler, sentence chips, waveform.
@@ -39,6 +41,9 @@ const MAX_PPS = 300; // most zoomed in: pixels per second
 const START_PPS = 40;
 const TICK_STEPS = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 const SHOW_CUTS = "komoray.timelineCuts"; // remembers the Show cuts switch in this browser
+const DRAG_PX = 4; // the mouse has to move this far before a press becomes a drag (else it is a click)
+const EDGE_PX = 6; // how close to a picked stretch's edge grabs the edge
+const MIN_PICK = 0.05; // seconds
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const clockTenths = (s: number) => `${clock(s)}.${Math.floor((s * 10) % 10)}`;
@@ -82,6 +87,8 @@ export function Timeline({
 	groups,
 	onPickTake,
 	onListen,
+	onCut,
+	onKeep,
 }: Props) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -92,6 +99,8 @@ export function Timeline({
 	const [showCuts, setShowCuts] = useState(true);
 	const [peaks, setPeaks] = useState<{ data: Float32Array; version: number } | null>(null);
 	const [openGroup, setOpenGroup] = useState<number | null>(null);
+	// The stretch picked by dragging, in source seconds: cut it or keep it.
+	const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
 	const anchor = useRef<{ time: number; at: number } | null>(null); // keep this moment under this x after zooming
 
 	useEffect(() => {
@@ -301,13 +310,98 @@ export function Timeline({
 		return () => cancelAnimationFrame(frame);
 	}, [xOf, showCuts, segments, playing, timeRef]);
 
-	// Click or drag on the timeline to move the playhead.
-	const dragging = useRef(false);
-	const seekAt = (clientX: number) => {
+	// Pressing on the ruler moves the playhead (drag to scrub). Anywhere else: a click moves the
+	// playhead (or, in a red cut, picks that cut), a drag picks a stretch, and an edge of the picked
+	// stretch can be dragged to fine-tune it.
+	const press = useRef<{ kind: "scrub" | "pick" | "start" | "end"; x: number; at: number; moved: boolean } | null>(null);
+	const xAt = (clientX: number) => {
+		const el = scrollRef.current;
+		return el ? clientX - el.getBoundingClientRect().left + el.scrollLeft : 0;
+	};
+	const nearEdge = (x: number) =>
+		!selection ? null : Math.abs(x - xOf(selection.start)) <= EDGE_PX ? "start" : Math.abs(x - xOf(selection.end)) <= EDGE_PX ? "end" : null;
+	const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+		if ((e.target as HTMLElement).closest("button")) return;
 		const el = scrollRef.current;
 		if (!el) return;
-		onSeek(timeAt(clientX - el.getBoundingClientRect().left + el.scrollLeft));
+		follow.current = false;
+		try {
+			e.currentTarget.setPointerCapture(e.pointerId);
+		} catch {
+			// the pointer is already gone: the press still works while it stays over the timeline
+		}
+		const x = xAt(e.clientX);
+		const onRuler = e.clientY - el.getBoundingClientRect().top < RULER + 2;
+		const kind = onRuler ? "scrub" : (nearEdge(x) ?? "pick");
+		press.current = { kind, x, at: timeAt(x), moved: false };
+		if (kind === "scrub") onSeek(timeAt(x));
 	};
+	const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+		const p = press.current;
+		const x = xAt(e.clientX);
+		if (!p) {
+			e.currentTarget.style.cursor = nearEdge(x) ? "ew-resize" : "";
+			return;
+		}
+		if (!p.moved && Math.abs(x - p.x) < DRAG_PX) return;
+		p.moved = true;
+		const t = timeAt(x);
+		if (p.kind === "scrub") onSeek(t);
+		else if (p.kind === "pick") setSelection({ start: Math.min(p.at, t), end: Math.max(p.at, t) });
+		else if (selection) {
+			const other = p.kind === "start" ? selection.end : selection.start;
+			setSelection({ start: Math.min(other, t), end: Math.max(other, t) });
+		}
+	};
+	const onPointerUp = () => {
+		const p = press.current;
+		press.current = null;
+		follow.current = true;
+		if (!p) return;
+		if (p.moved) return setSelection((s) => (s && s.end - s.start >= MIN_PICK ? s : null));
+		if (p.kind === "scrub") return;
+		const cut = showCuts ? cutSpans.find(([a, b]) => p.at >= a && p.at < b) : undefined;
+		if (cut) setSelection({ start: cut[0], end: cut[1] });
+		else {
+			setSelection(null);
+			onSeek(p.at);
+		}
+	};
+
+	// What the picked stretch holds: any of it still in the video? any of it cut?
+	const picked = useMemo(() => {
+		if (!selection) return null;
+		const f0 = selection.start * FPS;
+		const f1 = selection.end * FPS;
+		let kept = 0;
+		for (const s of segments) kept += Math.max(0, Math.min(f1, s.trim + s.frames) - Math.max(f0, s.trim));
+		return { kept: kept > 1, cut: f1 - f0 - kept > 1, seconds: selection.end - selection.start };
+	}, [selection, segments]);
+	const cutPicked = useCallback(() => {
+		if (!selection) return;
+		onCut(selection.start, selection.end);
+		setSelection(null);
+	}, [selection, onCut]);
+	const keepPicked = () => {
+		if (!selection) return;
+		onKeep(selection.start, selection.end);
+		setSelection(null);
+	};
+
+	// Delete / Backspace cuts the picked stretch, Esc lets it go (not while typing or with script words highlighted).
+	useEffect(() => {
+		if (!selection) return;
+		const onKey = (e: KeyboardEvent) => {
+			if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return;
+			if (e.key === "Escape") setSelection(null);
+			else if ((e.key === "Delete" || e.key === "Backspace") && window.getSelection()?.isCollapsed !== false) {
+				e.preventDefault();
+				cutPicked();
+			}
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [selection, cutPicked]);
 
 	// Slider position 0..100 ↔ zoom (pixels per second), on a log scale.
 	const sliderMax = Math.max(fit * 1.001, MAX_PPS);
@@ -354,10 +448,38 @@ export function Timeline({
 					</span>
 					Show cuts
 				</label>
-				<span className="text-xs text-foreground/50">
-					{cutSpans.length} cuts
-					{groups.length > 0 && ` · 🔁 ${groups.length} repeated ${groups.length === 1 ? "take" : "takes"}`}
-				</span>
+				{selection && picked ? (
+					<span className="flex items-center gap-1.5">
+						<span className="text-xs tabular-nums text-foreground/60">{picked.seconds.toFixed(1)}s picked</span>
+						{picked.kept && (
+							<button
+								onClick={cutPicked}
+								className="rounded-md bg-red-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-red-700"
+								title="Cut this part out of the video (Delete)"
+							>
+								✂️ Cut
+							</button>
+						)}
+						{picked.cut && (
+							<button
+								onClick={keepPicked}
+								className="rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
+								title="Put this part back in the video"
+							>
+								↩️ Keep
+							</button>
+						)}
+						<button onClick={() => setSelection(null)} className="px-1 text-foreground/50 hover:text-foreground" aria-label="Clear the selection" title="Esc">
+							✕
+						</button>
+					</span>
+				) : (
+					<span className="text-xs text-foreground/50" title="Drag across the timeline to cut or keep any part. Click a red cut to pick it.">
+						{cutSpans.length} cuts
+						{groups.length > 0 && ` · 🔁 ${groups.length} repeated ${groups.length === 1 ? "take" : "takes"}`}
+						<span className="hidden sm:inline"> · drag across to cut</span>
+					</span>
+				)}
 				<div className="ml-auto flex items-center gap-2">
 					<button onClick={() => zoomTo(scale / 1.5)} className="rounded px-1.5 text-lg leading-none text-foreground/70 hover:text-foreground" aria-label="Zoom out">
 						−
@@ -387,17 +509,15 @@ export function Timeline({
 					draw();
 					if (openGroup !== null) setOpenGroup(null);
 				}}
-				onPointerDown={(e) => {
-					if ((e.target as HTMLElement).closest("button")) return;
-					dragging.current = true;
-					follow.current = false;
-					e.currentTarget.setPointerCapture(e.pointerId);
-					seekAt(e.clientX);
-				}}
-				onPointerMove={(e) => dragging.current && seekAt(e.clientX)}
-				onPointerUp={() => {
-					dragging.current = false;
-					follow.current = true;
+				onPointerDown={onPointerDown}
+				onPointerMove={onPointerMove}
+				onPointerUp={onPointerUp}
+				onPointerCancel={onPointerUp}
+				onDoubleClick={(e) => {
+					// Double-click a sentence to pick it.
+					const t = timeAt(xAt(e.clientX));
+					const chip = chips.find((c) => t >= c.start && t <= c.end && (showCuts || !c.gone));
+					if (chip) setSelection({ start: chip.start, end: chip.end });
 				}}
 				className="relative cursor-text overflow-x-auto overflow-y-hidden text-foreground select-none"
 				style={{ height: HEIGHT + 12, touchAction: "pan-x" }}
@@ -439,6 +559,17 @@ export function Timeline({
 							</button>
 						);
 					})}
+					{selection && (
+						<div
+							className="pointer-events-none absolute z-[1] rounded-sm border-x-2 border-blue-600 bg-blue-500/20"
+							style={{
+								left: xOf(selection.start),
+								width: Math.max(2, xOf(selection.end) - xOf(selection.start)),
+								top: CHIPS_TOP - 3,
+								height: HEIGHT - CHIPS_TOP + 3,
+							}}
+						/>
+					)}
 					<div ref={headRef} className="pointer-events-none absolute top-0 left-0 z-[2]" style={{ height: HEIGHT }}>
 						<div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[5px] border-t-[7px] border-x-transparent border-t-blue-600" />
 						<div className="absolute -left-px top-0 h-full w-0.5 bg-blue-600" />

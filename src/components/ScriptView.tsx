@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { allCuts, type Fix, fixedWords, normText, setFix, TRAIL, type WordFix } from "@/lib/edit";
+import { allCuts, type Fix, fixedWords, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
 import { outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -152,6 +152,10 @@ type Props = {
 	cuts: Cut[];
 	deleted: number[];
 	onChange: (deleted: number[]) => void;
+	// Cut and kept by hand on the timeline; a timeline edit changes them and the deleted words together.
+	manual: Cut[];
+	keep: Cut[];
+	onTimelineChange: (change: { deleted: number[]; manual: Cut[]; keep: Cut[] }) => void;
 	fixes: Fix[];
 	onFixesChange: (fixes: Fix[]) => void;
 	// Personal dictionary: apply it once (then onDictionaryApplied), and learn from every fix made here.
@@ -177,6 +181,9 @@ export function ScriptView({
 	cuts,
 	deleted,
 	onChange,
+	manual,
+	keep,
+	onTimelineChange,
 	fixes,
 	onFixesChange,
 	dictionary,
@@ -195,7 +202,9 @@ export function ScriptView({
 	const [current, setCurrent] = useState(-1);
 	const [playing, setPlaying] = useState(false);
 	const [selected, setSelected] = useState<number[]>([]);
-	const items = useMemo(() => layout(words, cuts, fixes), [words, cuts, fixes]);
+	// What the script marks with ✂️: the silences still cut, and the parts cut by hand.
+	const shownCuts = useMemo(() => mergeSpans([...subtractSpans(cuts, keep), ...manual]), [cuts, keep, manual]);
+	const items = useMemo(() => layout(words, shownCuts, fixes), [words, shownCuts, fixes]);
 	// Retyping words: the transcript positions being fixed, what showed before and what is in the box now.
 	const [editing, setEditing] = useState<{ from: number; to: number; text: string; before: string; original: string } | null>(null);
 	// Find & replace across the whole script.
@@ -214,8 +223,8 @@ export function ScriptView({
 	// Don't start the <video> player for a moment only to swap it for ours.
 	const deciding = Boolean(studio) && canStudio === null;
 	const segments = useMemo(
-		() => keepSegments(duration, allCuts({ duration, words, cuts: cuts.map((c) => ({ ...c, reason: "silence" as const })), deleted })),
-		[duration, words, cuts, deleted],
+		() => keepSegments(duration, allCuts({ duration, words, cuts, deleted, manual, keep })),
+		[duration, words, cuts, deleted, manual, keep],
 	);
 	const lines = useMemo(() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look), [words, fixes, segments, subtitle.look]);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
@@ -370,6 +379,24 @@ export function ScriptView({
 		const next = new Set(deleted);
 		group.takes.forEach((t, k) => takeRange(t).forEach((i) => (k === pick ? next.delete(i) : next.add(i))));
 		onChange([...next].sort((a, b) => a - b));
+	};
+
+	// Cut or keep a stretch of the source picked on the timeline. Words said mostly inside it are
+	// deleted (or put back), so the script shows the change too; the stretch itself is cut by hand
+	// (or kept, which also brings back silence the pace would cut).
+	const wordsInside = (a: number, b: number) =>
+		words.flatMap((w, i) => ((w.start + w.end) / 2 >= a && (w.start + w.end) / 2 <= b ? [i] : []));
+	const cutRange = (a: number, b: number) => {
+		const next = new Set(deleted);
+		wordsInside(a, b).forEach((i) => next.add(i));
+		const span = { start: a, end: b };
+		onTimelineChange({ deleted: [...next].sort((x, y) => x - y), manual: mergeSpans([...manual, span]), keep: subtractSpans(keep, [span]) });
+	};
+	const keepRange = (a: number, b: number) => {
+		const next = new Set(deleted);
+		wordsInside(a, b).forEach((i) => next.delete(i));
+		const span = { start: a, end: b };
+		onTimelineChange({ deleted: [...next].sort((x, y) => x - y), manual: subtractSpans(manual, [span]), keep: mergeSpans([...keep, span]) });
 	};
 
 	// First time the video is opened: cut every earlier try, keep the last one (the user's own
@@ -588,7 +615,8 @@ export function ScriptView({
 							? "The video shows how your final video will look. Changes show up right away, no need to make the video first."
 							: "The video as you uploaded it."}{" "}
 						Click a word to jump there. Double-click a word to fix its spelling. Drag across words to delete them. Click ✂️ to hear a
-						silence that will be cut. 🔁 on the timeline marks a sentence you said more than once: pick the take to keep.
+						silence that will be cut. On the timeline, drag across any part to cut it or keep it. 🔁 marks a sentence you said more
+						than once: pick the take to keep.
 					</p>
 					{editing && (
 						<form
@@ -779,6 +807,8 @@ export function ScriptView({
 					audioUrl={studio?.audioUrl ?? null}
 					groups={groups}
 					onPickTake={pickTake}
+					onCut={cutRange}
+					onKeep={keepRange}
 					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}
 				/>
 			</div>

@@ -7,8 +7,8 @@ import { ScriptView } from "@/components/ScriptView";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
-import { type Pace, PACES } from "@/lib/silences";
-import { allCuts, cutSeconds, type Fix, fixedWords, type WordFix, wordCuts } from "@/lib/edit";
+import { type Pace, PACES, PADDING } from "@/lib/silences";
+import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpans, type WordFix } from "@/lib/edit";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
@@ -24,6 +24,8 @@ type Analysis = {
 	takesApplied?: boolean; // repeated takes were already cut on this video once
 	style?: unknown;
 	banners?: Banner[];
+	manual?: Cut[]; // cut by hand on the timeline
+	keep?: Cut[]; // silences kept by hand on the timeline
 	pace?: Pace;
 	faces?: Faces | null; // where the speaker's face is (found by Modal after the preview copy)
 	facesPending?: boolean;
@@ -91,6 +93,13 @@ function saveNotifyPref(on: boolean) {
 	} catch {
 		// private window etc. — the checkbox just won't be remembered
 	}
+}
+
+// A word and the room around it (up to its neighbours, at most PADDING): what comes back with it.
+function wordRoom(words: { start: number; end: number }[], i: number) {
+	const prev = words[i - 1];
+	const next = words[i + 1];
+	return { start: Math.max(prev ? prev.end : 0, words[i].start - PADDING), end: Math.min(next ? next.start : Infinity, words[i].end + PADDING) };
 }
 
 // The editor, full width: script on the left, the final video preview on the right.
@@ -197,7 +206,16 @@ export default function EditPage() {
 
 	// Save edits in the background, one after another so they land in order.
 	const save = useCallback(
-		(patch: { deleted?: number[]; fixes?: Fix[]; dictionaryApplied?: boolean; takesApplied?: boolean; style?: SubtitleStyle; banners?: Banner[] }) => {
+		(patch: {
+			deleted?: number[];
+			fixes?: Fix[];
+			dictionaryApplied?: boolean;
+			takesApplied?: boolean;
+			style?: SubtitleStyle;
+			banners?: Banner[];
+			manual?: Cut[];
+			keep?: Cut[];
+		}) => {
 			if (!key) return;
 			setSaveError("");
 			const previous = savingRef.current;
@@ -231,15 +249,19 @@ export default function EditPage() {
 		[key],
 	);
 
-	// Undo / Redo for script edits (deleted and fixed words): what they were before each change.
-	type Snapshot = { deleted: number[]; fixes: Fix[] };
+	// Undo / Redo for script and timeline edits (deleted and fixed words, hand cuts): what they were
+	// before each change.
+	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[] };
 	const analysisRef = useRef(analysis);
 	useEffect(() => {
 		analysisRef.current = analysis;
 	});
 	const history = useRef<{ past: Snapshot[]; future: Snapshot[] }>({ past: [], future: [] });
 	const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
-	const snapshot = (): Snapshot => ({ deleted: analysisRef.current?.deleted ?? [], fixes: analysisRef.current?.fixes ?? [] });
+	const snapshot = (): Snapshot => {
+		const a = analysisRef.current;
+		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [] };
+	};
 	const remember = useCallback(() => {
 		const h = history.current;
 		h.past = [...h.past.slice(-(UNDO_STEPS - 1)), snapshot()];
@@ -275,11 +297,27 @@ export default function EditPage() {
 		return () => document.removeEventListener("keydown", onKey);
 	}, [restore]);
 
+	// Words put back in the script also come back where they were cut by hand on the timeline.
 	const changeDeleted = useCallback(
 		(deleted: number[]) => {
+			const a = analysisRef.current;
+			if (!a) return;
 			remember();
-			setAnalysis((a) => (a ? { ...a, deleted } : a));
-			save({ deleted });
+			const now = new Set(deleted);
+			const back = (a.deleted ?? []).filter((i) => !now.has(i));
+			const manual = a.manual?.length && back.length ? subtractSpans(a.manual, back.map((i) => wordRoom(a.words, i))) : a.manual;
+			setAnalysis((b) => (b ? { ...b, deleted, manual } : b));
+			save(manual !== a.manual ? { deleted, manual } : { deleted });
+		},
+		[save, remember],
+	);
+
+	// A cut or keep made on the timeline: deleted words and hand cuts change together.
+	const changeTimeline = useCallback(
+		(change: { deleted: number[] } & Required<HandEdits>) => {
+			remember();
+			setAnalysis((a) => (a ? { ...a, ...change } : a));
+			save(change);
 		},
 		[save, remember],
 	);
@@ -391,7 +429,14 @@ export default function EditPage() {
 		if (styleTimer.current) clearTimeout(styleTimer.current);
 		if (bannersTimer.current) clearTimeout(bannersTimer.current);
 		styleTimer.current = bannersTimer.current = null;
-		save({ deleted: analysis?.deleted ?? [], fixes: analysis?.fixes ?? [], style: subtitle, banners: analysis?.banners ?? [] });
+		save({
+			deleted: analysis?.deleted ?? [],
+			fixes: analysis?.fixes ?? [],
+			style: subtitle,
+			banners: analysis?.banners ?? [],
+			manual: analysis?.manual ?? [],
+			keep: analysis?.keep ?? [],
+		});
 		setRender({ status: "processing" });
 		try {
 			if (!(await savingRef.current)) throw new Error("Your edits could not be saved. Please try again.");
@@ -432,14 +477,13 @@ export default function EditPage() {
 	const deleted = analysis.deleted ?? [];
 	const fixes = analysis.fixes ?? [];
 	const silentSeconds = cutSeconds(analysis.cuts);
-	const finalSeconds = analysis.duration - cutSeconds([...analysis.cuts, ...wordCuts(analysis.words, deleted, analysis.duration)]);
+	const finalSeconds = analysis.duration - cutSeconds(allCuts(analysis));
 	const filename = key.split("/").pop() ?? key;
 
 	// The subtitles of the final video as a file, same lines and timing as the preview.
 	function downloadSrt() {
 		if (!analysis) return;
-		const cuts = analysis.cuts.map((c) => ({ ...c, reason: "silence" as const }));
-		const segments = keepSegments(analysis.duration, allCuts({ ...analysis, cuts, deleted }));
+		const segments = keepSegments(analysis.duration, allCuts(analysis));
 		const srt = toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look));
 		const link = document.createElement("a");
 		link.href = URL.createObjectURL(new Blob([srt], { type: "application/x-subrip;charset=utf-8" }));
@@ -460,6 +504,7 @@ export default function EditPage() {
 						{clock(analysis.duration)} → {clock(finalSeconds)} · ✂️ {analysis.cuts.length} silences ({silentSeconds.toFixed(1)}s)
 						{deleted.length > 0 && ` · 🗑️ ${deleted.length} words deleted`}
 						{fixes.length > 0 && ` · ✏️ ${fixes.length} fixed`}
+						{(analysis.manual?.length ?? 0) > 0 && ` · ✂️ ${analysis.manual!.length} cut by hand`}
 					</p>
 					<div className="flex items-center gap-1 text-xs">
 						<button
@@ -589,6 +634,9 @@ export default function EditPage() {
 				cuts={analysis.cuts}
 				deleted={deleted}
 				onChange={changeDeleted}
+				manual={analysis.manual ?? []}
+				keep={analysis.keep ?? []}
+				onTimelineChange={changeTimeline}
 				fixes={fixes}
 				onFixesChange={changeFixes}
 				dictionary={dictionary}

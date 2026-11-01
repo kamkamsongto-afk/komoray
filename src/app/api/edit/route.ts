@@ -2,7 +2,7 @@ import { type Banner, readBanners } from "@/lib/banners";
 import { type Cut, findSilences, type Pace, readPace } from "@/lib/silences";
 import type { Word } from "@/lib/transcribe";
 import { ownsVideo } from "@/lib/supabase/server";
-import { type Fix, readFixes } from "@/lib/edit";
+import { type Fix, readFixes, readSpans } from "@/lib/edit";
 import { getJson, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { readStyle } from "@/lib/subtitle-style";
 
@@ -11,10 +11,12 @@ import { readStyle } from "@/lib/subtitle-style";
 //   fixes    words retyped in the script (subtitles read the fixed text)
 //   style    subtitle size / outline / position
 //   banners  price tags, calls to action, "follow me" (lib/banners.ts)
+//   manual   parts cut by hand on the timeline (source seconds)
+//   keep     silences kept by hand on the timeline
 //   pace     tight / natural / relaxed: finds the silences again (answers with the new cuts)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, takesApplied, style, banners, pace } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, takesApplied, style, banners, pace, manual, keep } = (await request.json()) as {
 		key?: string;
 		pace?: unknown;
 		deleted?: unknown;
@@ -23,6 +25,8 @@ export async function PUT(request: Request) {
 		takesApplied?: unknown;
 		style?: unknown;
 		banners?: unknown;
+		manual?: unknown;
+		keep?: unknown;
 	};
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
@@ -38,6 +42,8 @@ export async function PUT(request: Request) {
 		takesApplied?: boolean;
 		style?: unknown;
 		banners?: Banner[];
+		manual?: { start: number; end: number }[];
+		keep?: { start: number; end: number }[];
 	}>(editKey);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
@@ -52,6 +58,15 @@ export async function PUT(request: Request) {
 		const checked = readFixes(fixes, edit.words.length);
 		if (!checked) return Response.json({ error: "Bad word fixes" }, { status: 400 });
 		edit.fixes = checked;
+	}
+	for (const [name, value] of [
+		["manual", manual],
+		["keep", keep],
+	] as const) {
+		if (value === undefined) continue;
+		const checked = readSpans(value, edit.duration);
+		if (!checked) return Response.json({ error: "Bad timeline cuts" }, { status: 400 });
+		edit[name] = checked;
 	}
 	if (dictionaryApplied === true) edit.dictionaryApplied = true;
 	if (takesApplied === true) edit.takesApplied = true;

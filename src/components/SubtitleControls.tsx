@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import type { OwnFont } from "@/lib/font-info";
+import { type Motion, MOTIONS } from "@/lib/motion";
 import {
 	COLORS,
 	type Format,
@@ -104,6 +105,25 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 						{LOOKS[look].name}
 					</button>
 				))}
+			</div>
+			<div className="flex items-center gap-3 text-sm text-foreground/70">
+				<span className="w-24 shrink-0">Motion</span>
+				<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Subtitle motion">
+					{(Object.keys(MOTIONS) as Motion[]).map((m) => (
+						<button
+							key={m}
+							role="radio"
+							aria-checked={style.motion === m}
+							title={MOTIONS[m].hint}
+							onClick={() => onChange({ ...style, motion: m })}
+							className={`rounded-md border px-2.5 py-0.5 text-sm ${
+								style.motion === m ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"
+							}`}
+						>
+							{MOTIONS[m].name}
+						</button>
+					))}
+				</div>
 			</div>
 			<label className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Font</span>

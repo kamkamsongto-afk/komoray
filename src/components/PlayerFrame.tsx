@@ -5,6 +5,7 @@ import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 
 import { BANNER, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
 import type { OwnFont } from "@/lib/font-info";
 import { type FontId, fontMetrics, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
+import { motionScale } from "@/lib/motion";
 import { FPS, type Line, ZOOM_ORIGIN } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
@@ -132,12 +133,26 @@ export function PlayerFrame({
 		: { textShadow: roundOutline(subtitle.outline) };
 	// Highlight: the word being said is in the brand colour until the next one starts.
 	const frame = outTime * FPS;
-	const said = line && subtitle.look === "highlight" ? line.parts.findLastIndex((p) => p.from <= frame) : -1;
+	const now = line ? line.parts.findLastIndex((p) => p.from <= frame) : -1;
+	const said = subtitle.look === "highlight" ? now : -1;
+	// Motion (lib/motion.ts): the line pops in, the word being said bounces. Drawn bigger (not
+	// stretched) so the words around it make room, as they do in the final video.
+	const motion = line
+		? motionScale(subtitle.motion, FPS, frame - line.from, now, now >= 0 ? line.parts[now].from - line.from : 0, now >= 0 ? frame - line.parts[now].from : 0)
+		: { line: 1, word: 1 };
 	const text = line
 		? line.parts.map((p, k) => (
 				<span key={k}>
 					{k === line.row2 && <br />}
-					<span style={k === said ? { color: subtitle.color } : undefined}>{p.text}</span>
+					<span
+						style={
+							k === said || (k === now && motion.word !== 1)
+								? { color: k === said ? subtitle.color : undefined, fontSize: k === now && motion.word !== 1 ? `${motion.word}em` : undefined }
+								: undefined
+						}
+					>
+						{p.text}
+					</span>
 				</span>
 			))
 		: "Your subtitles";
@@ -189,7 +204,7 @@ export function PlayerFrame({
 								textAlign: "center",
 								fontFamily: face.family,
 								fontWeight: face.weight,
-								fontSize: subtitle.size / em,
+								fontSize: (subtitle.size / em) * motion.line,
 								lineHeight: em,
 								color: "white",
 								opacity: line ? 1 : 0.5,

@@ -1,7 +1,7 @@
 import { PADDING } from "./silences";
 
 type Span = { start: number; end: number };
-export type EditCut = Span & { reason: "silence" | "words" };
+export type EditCut = Span & { reason: "silence" | "words" | "manual" };
 
 // Words the user deleted in the Script view become cuts. Each run of deleted words is cut
 // from just before its first word to just before the next kept word, so the pause after it goes too.
@@ -26,9 +26,58 @@ export function wordCuts(words: Span[], deleted: number[], duration: number): Ed
 	return cuts;
 }
 
-// Every cut for the final video: the silences plus the deleted words.
-export function allCuts(edit: { duration: number; cuts: EditCut[]; words: Span[]; deleted?: number[] }): EditCut[] {
-	return [...edit.cuts, ...wordCuts(edit.words, edit.deleted ?? [], edit.duration)].sort((a, b) => a.start - b.start);
+// Cut or kept by hand on the timeline (source seconds). `manual` is cut whatever is said there;
+// `keep` brings back silence the pace would have cut (deleted words inside it are still cut).
+export type HandEdits = { manual?: Span[]; keep?: Span[] };
+
+// Every cut for the final video: the silences (minus what was kept by hand), the deleted words and
+// the hand cuts.
+export function allCuts(edit: { duration: number; cuts: Span[]; words: Span[]; deleted?: number[] } & HandEdits): EditCut[] {
+	const silences = subtractSpans(edit.cuts, edit.keep ?? []).map((c) => ({ ...c, reason: "silence" as const }));
+	const manual = (edit.manual ?? []).map((c) => ({ start: c.start, end: c.end, reason: "manual" as const }));
+	return [...silences, ...wordCuts(edit.words, edit.deleted ?? [], edit.duration), ...manual].sort((a, b) => a.start - b.start);
+}
+
+// Spans sorted and joined where they touch or overlap.
+export function mergeSpans(spans: Span[]): Span[] {
+	const out: Span[] = [];
+	for (const s of [...spans].sort((a, b) => a.start - b.start)) {
+		const last = out[out.length - 1];
+		if (last && s.start <= last.end + 0.001) last.end = Math.max(last.end, s.end);
+		else if (s.end > s.start) out.push({ start: s.start, end: s.end });
+	}
+	return out;
+}
+
+// `spans` with the parts inside any of `holes` taken out.
+export function subtractSpans<S extends Span>(spans: S[], holes: Span[]): S[] {
+	if (!holes.length) return spans;
+	const gaps = mergeSpans(holes);
+	const out: S[] = [];
+	for (const s of spans) {
+		let pos = s.start;
+		for (const h of gaps) {
+			if (h.end <= pos || h.start >= s.end) continue;
+			if (h.start - pos > 0.01) out.push({ ...s, start: pos, end: h.start });
+			pos = Math.max(pos, h.end);
+		}
+		if (s.end - pos > 0.01) out.push({ ...s, start: pos, end: s.end });
+	}
+	return out;
+}
+
+// Hand spans sent by the browser, checked: inside the video, at most MAX_HAND_SPANS. Null if bad.
+export const MAX_HAND_SPANS = 1000;
+export function readSpans(value: unknown, duration: number): Span[] | null {
+	if (!Array.isArray(value) || value.length > MAX_HAND_SPANS) return null;
+	const spans: Span[] = [];
+	for (const v of value as Partial<Span>[]) {
+		const { start, end } = v ?? {};
+		if (typeof start !== "number" || typeof end !== "number" || !Number.isFinite(start) || !Number.isFinite(end)) return null;
+		if (start < 0 || end > duration + 0.01 || end <= start) return null;
+		spans.push({ start: Math.round(start * 1000) / 1000, end: Math.round(Math.min(end, duration) * 1000) / 1000 });
+	}
+	return mergeSpans(spans);
 }
 
 // Words the user retyped in the script: words from..to (positions in the transcript) read as `text`.
