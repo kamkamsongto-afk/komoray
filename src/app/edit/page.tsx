@@ -42,6 +42,7 @@ const POLL_MS = 5000;
 const PROXY_POLL_MS = 10000;
 const STYLE_SAVE_DELAY_MS = 600; // dragging a slider changes the style many times a second
 const UNDO_STEPS = 100;
+const SAVE_TRIES = 3;
 const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
 const NOTIFY_PREF = "komoray.desktopNotify"; // remembers the checkbox in this browser
 
@@ -203,14 +204,22 @@ export default function EditPage() {
 			savingRef.current = (async () => {
 				await previous;
 				try {
-					const res = await fetch("/api/edit", {
-						method: "PUT",
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ key, ...patch }),
-					});
-					const data = (await res.json()) as { error?: string };
-					if (!res.ok) throw new Error(data.error ?? "Could not save");
-					return true;
+					// The server sometimes hiccups (an error page instead of an answer): try a second time.
+					for (let attempt = 1; ; attempt++) {
+						try {
+							const res = await fetch("/api/edit", {
+								method: "PUT",
+								headers: { "Content-Type": "application/json" },
+								body: JSON.stringify({ key, ...patch }),
+							});
+							const data = (await res.json().catch(() => ({}))) as { error?: string };
+							if (!res.ok) throw new Error(data.error ?? `server error ${res.status}`);
+							return true;
+						} catch (err) {
+							if (attempt >= SAVE_TRIES) throw err;
+							await new Promise((r) => setTimeout(r, 1000 * attempt));
+						}
+					}
 				} catch (err) {
 					const error = err instanceof Error ? err.message : "Could not save";
 					setSaveError(`Your last change was not saved (${error}). Please try again.`);
@@ -377,17 +386,12 @@ export default function EditPage() {
 		if (!key) return;
 		if (!audioRef.current && "AudioContext" in window) audioRef.current = new AudioContext();
 		void audioRef.current?.resume();
-		// A style change still waiting for its delay goes out now.
-		if (styleTimer.current) {
-			clearTimeout(styleTimer.current);
-			styleTimer.current = null;
-			save({ style: subtitle });
-		}
-		if (bannersTimer.current) {
-			clearTimeout(bannersTimer.current);
-			bannersTimer.current = null;
-			save({ banners: analysis?.banners ?? [] });
-		}
+		// Save everything as it is on screen once more, so the render uses it even if an earlier save
+		// failed (and a style change still waiting for its delay goes out now).
+		if (styleTimer.current) clearTimeout(styleTimer.current);
+		if (bannersTimer.current) clearTimeout(bannersTimer.current);
+		styleTimer.current = bannersTimer.current = null;
+		save({ deleted: analysis?.deleted ?? [], fixes: analysis?.fixes ?? [], style: subtitle, banners: analysis?.banners ?? [] });
 		setRender({ status: "processing" });
 		try {
 			if (!(await savingRef.current)) throw new Error("Your edits could not be saved. Please try again.");
