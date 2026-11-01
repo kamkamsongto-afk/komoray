@@ -145,6 +145,7 @@ DEFAULT_STYLE = {
     "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
 }
 ZOOM = 1.12  # Auto zoom (ZOOM in src/lib/timeline.ts)
+CUT_FADE = 0.004  # seconds of sound faded in and out at every cut
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
 
 
@@ -522,19 +523,29 @@ def ffmpeg_command(
 ) -> list[str]:
     """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles."""
     aspect = display_aspect(src)
-    # The pieces in frames, as the preview has them (StudioPlayer), to pick the same faces.
-    framed = [(trim / FPS, (trim + frames) / FPS) for _, trim, frames in frame_segments(keeps)]
+    # The pieces in whole frames of the final video, as the preview has them (StudioPlayer): each piece's
+    # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
+    pieces = frame_segments(keeps)
     parts, labels = [], []
-    for i, (a, b) in enumerate(keeps):
+    for i, (_, trim, frames) in enumerate(pieces):
+        a, b, length = trim / FPS, (trim + frames) / FPS, frames / FPS
         # Each piece is framed on its own (face crop, Auto zoom), so pieces can differ before they are joined.
         piece_zoom = ZOOM if zoom == "cuts" and i % 2 == 1 else 1.0
-        focus = focus_for(faces, *framed[i]) if i < len(framed) else None
-        parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS,{piece_filter(aspect, focus, piece_zoom, size)},setsar=1[v{i}]")
+        focus = focus_for(faces, a, b)
+        parts.append(
+            f"[0:v]trim=start={a:.6f}:end={b:.6f},setpts=PTS-STARTPTS,fps={FPS},"
+            f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={frames},setpts=PTS-STARTPTS,"
+            f"{piece_filter(aspect, focus, piece_zoom, size)},setsar=1[v{i}]"
+        )
         labels.append(f"[v{i}]")
         if audio:
-            parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
+            # A few ms fade in and out at every cut, so the sound doesn't click (FADE_SAMPLES in the preview).
+            parts.append(
+                f"[0:a]atrim=start={a:.6f}:end={b:.6f},asetpts=PTS-STARTPTS,apad=whole_dur={length:.6f},atrim=end={length:.6f},"
+                f"afade=t=in:d={CUT_FADE},afade=t=out:st={max(0.0, length - CUT_FADE):.6f}:d={CUT_FADE}[a{i}]"
+            )
             labels.append(f"[a{i}]")
-    parts.append(f"{''.join(labels)}concat=n={len(keeps)}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
+    parts.append(f"{''.join(labels)}concat=n={len(pieces)}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
     base = "[cv]"
     if logo:
         # Same place as the preview (PlayerFrame): LOGO side / top px from its corner, size px wide.
