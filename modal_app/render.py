@@ -54,12 +54,13 @@ image = (
 )
 
 WIDTH, HEIGHT, FPS = 1080, 1920, 30
-# How long a subtitle line may get, per look. Thai letters don't count marks above and below.
+# How long a subtitle line may get, per look. Thai letters don't count marks above and below;
+# thai_letters fits text size `size` (bigger letters: fewer per line, so a line never wraps).
 # Same as LINE_LIMITS in src/lib/timeline.ts.
 LINE_LIMITS = {
-    "normal": {"words": 3, "seconds": 1.6, "thai_words": 6, "thai_letters": 16, "thai_seconds": 2.2},
-    "big": {"words": 2, "seconds": 1.2, "thai_words": 4, "thai_letters": 10, "thai_seconds": 1.6},
-    "two": {"words": 7, "seconds": 3.0, "thai_words": 12, "thai_letters": 30, "thai_seconds": 3.6},
+    "normal": {"words": 3, "seconds": 1.6, "thai_words": 6, "thai_letters": 16, "thai_seconds": 2.2, "size": 130},
+    "big": {"words": 2, "seconds": 1.2, "thai_words": 4, "thai_letters": 10, "thai_seconds": 1.6, "size": 195},
+    "two": {"words": 7, "seconds": 3.0, "thai_words": 12, "thai_letters": 30, "thai_seconds": 3.6, "size": 117},
 }
 THAI_PAUSE = 0.15  # a pause this long inside a Thai line gets a space
 LINE_BREAK_GAP = 0.5  # a pause this long starts a new subtitle line
@@ -214,6 +215,50 @@ def thai_letters(text: str) -> int:
     return len(THAI_MARKS.sub("", text))
 
 
+# Where a Thai line may break: never before a word that belongs to the one before it ("ชุด|นี้"),
+# best at a pause or before a word that starts a phrase. Same as THAI_NO_START / THAI_STARTS in timeline.ts.
+THAI_NO_START = {"นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"}
+THAI_STARTS = {"แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"}
+START_BONUS = 8  # frames: a phrase start or a polite ending is worth a pause this long
+
+
+def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float, max_letters: int, gap_frames: float) -> list[list[dict]]:
+    """Words into short subtitle lines. Same as the grouping in subtitleLines (timeline.ts)."""
+    letters_of = lambda run: sum(thai_letters(w["text"]) for w in run)
+
+    def fits(run: list[dict]) -> bool:
+        return len(run) <= per_line and run[-1]["end"] - run[0]["start"] <= max_frames and (not thai or letters_of(run) <= max_letters)
+
+    def best_break(run: list[dict], nxt: dict) -> int:
+        # A full Thai line: k = how many words stay, the rest is carried to the next line if it fits.
+        every = run + [nxt]
+        best, best_score = len(run), -math.inf
+        for k in range(1, len(run) + 1):
+            first, last = every[k], every[k - 1]
+            if first["text"] in THAI_NO_START or first["text"] in THAI_ENDINGS or first["text"].startswith("ๆ"):
+                continue
+            if k < len(run) and (letters_of(run[:k]) < max(3, max_letters * 0.4) or not fits(every[k:])):
+                continue
+            score = first["start"] - last["end"] + (START_BONUS if first["text"] in THAI_STARTS else 0) + (START_BONUS if last["text"] in THAI_ENDINGS else 0) + 0.3 * k
+            if score >= best_score:
+                best, best_score = k, score
+        return best
+
+    lines, current = [], []
+    for w in placed:
+        if current and w["start"] - current[-1]["end"] > gap_frames:
+            lines.append(current)
+            current = []
+        elif current and not fits(current + [w]):
+            k = best_break(current, w) if thai else len(current)
+            lines.append(current[:k])
+            current = current[k:]
+        current.append(w)
+    if current:
+        lines.append(current)
+    return lines
+
+
 def join_thai(words: list[dict]) -> list[str]:
     """Thai doesn't put spaces between words, only between phrases. A Thai line gets one where Thai,
     numbers and English meet ("5 นาที"), after a polite ending or ๆ, and where the speaker pauses.
@@ -320,20 +365,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
 
     # Group words into short lines.
     gap_frames = LINE_BREAK_GAP * FPS
-    lines, current, letters = [], [], 0
-    for w in placed:
-        if current and (
-            len(current) >= per_line
-            or w["start"] - current[-1]["end"] > gap_frames
-            or w["end"] - current[0]["start"] > max_seconds * FPS
-            or (thai and letters + thai_letters(w["text"]) > limits["thai_letters"])
-        ):
-            lines.append(current)
-            current, letters = [], 0
-        current.append(w)
-        letters += thai_letters(w["text"])
-    if current:
-        lines.append(current)
+    max_letters = math.floor(limits["thai_letters"] * min(1, limits["size"] / size))
+    lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames)
 
     brand = style.get("color", "#FFE600")
     highlight = ass_colour(brand)
@@ -514,7 +547,8 @@ def ffmpeg_command(
         base = "[cl]"
     parts.append(
         f"{base}fps={FPS},"
-        f"subtitles={subs.name}{f':fontsdir={fonts_dir}' if fonts_dir else ''}[outv]"
+        # shaping=complex: Thai tone marks sit above the vowels (simple shaping draws them on top of each other).
+        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}[outv]"
     )
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]

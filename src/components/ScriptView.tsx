@@ -226,7 +226,10 @@ export function ScriptView({
 		() => keepSegments(duration, allCuts({ duration, words, cuts, deleted, manual, keep })),
 		[duration, words, cuts, deleted, manual, keep],
 	);
-	const lines = useMemo(() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look), [words, fixes, segments, subtitle.look]);
+	const lines = useMemo(
+		() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look, subtitle.size),
+		[words, fixes, segments, subtitle.look, subtitle.size],
+	);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);
 

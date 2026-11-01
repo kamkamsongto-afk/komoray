@@ -10,12 +10,20 @@ export const WIDTH = 1080;
 export const HEIGHT = 1920;
 
 // How long a subtitle line may get, per look (subtitle-style.ts). Thai letters don't count marks
-// above and below the line. Same as LINE_LIMITS in render.py.
+// above and below the line; thaiLetters fits text size `size` (bigger letters: fewer per line, so a
+// line never wraps onto a second row). Same as LINE_LIMITS in render.py.
 const LINE_LIMITS = {
-	normal: { words: 3, seconds: 1.6, thaiWords: 6, thaiLetters: 16, thaiSeconds: 2.2 },
-	big: { words: 2, seconds: 1.2, thaiWords: 4, thaiLetters: 10, thaiSeconds: 1.6 },
-	two: { words: 7, seconds: 3.0, thaiWords: 12, thaiLetters: 30, thaiSeconds: 3.6 },
+	normal: { words: 3, seconds: 1.6, thaiWords: 6, thaiLetters: 16, thaiSeconds: 2.2, size: 130 },
+	big: { words: 2, seconds: 1.2, thaiWords: 4, thaiLetters: 10, thaiSeconds: 1.6, size: 195 },
+	two: { words: 7, seconds: 3.0, thaiWords: 12, thaiLetters: 30, thaiSeconds: 3.6, size: 117 },
 };
+
+// Where a Thai line may break. A line never starts with a word that belongs to the one before it
+// ("ชุด|นี้", "ได้|ไหม", a polite ending), and breaks best at a pause or before a word that starts a
+// new phrase ("แต่", "ถ้า"). Same as THAI_NO_START / THAI_STARTS in render.py.
+const THAI_NO_START = new Set(["นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"]);
+const THAI_STARTS = new Set(["แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"]);
+const START_BONUS = 8; // frames: a phrase start or a polite ending is worth a pause this long
 const THAI_PAUSE = 0.15; // a pause this long inside a Thai line gets a space
 const LINE_BREAK_GAP = 0.5;
 
@@ -137,9 +145,10 @@ function joinThai(words: { text: string; start: number; end: number }[]) {
 }
 
 // Short subtitle lines on the output timeline, grouped the same way as the final video.
-export function subtitleLines(words: Word[], segments: Segment[], look = "clean"): Line[] {
+export function subtitleLines(words: Word[], segments: Segment[], look = "clean", size = 100): Line[] {
 	const thai = words.some((w) => isThai(w.text));
 	const limits = look === "big" || look === "two" ? LINE_LIMITS[look] : LINE_LIMITS.normal;
+	const maxLetters = Math.floor(limits.thaiLetters * Math.min(1, limits.size / size));
 	const perLine = thai ? limits.thaiWords : limits.words;
 	const maxFrames = (thai ? limits.thaiSeconds : limits.seconds) * FPS;
 	const gapFrames = LINE_BREAK_GAP * FPS;
@@ -152,23 +161,39 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half });
 	}
 
-	const groups: (typeof placed)[] = [];
-	let current: typeof placed = [];
-	let letters = 0;
+	type Placed = (typeof placed)[number];
+	const lettersOf = (run: Placed[]) => run.reduce((sum, w) => sum + thaiLetters(w.text), 0);
+	const fits = (run: Placed[]) =>
+		run.length <= perLine && run[run.length - 1].end - run[0].start <= maxFrames && (!thai || lettersOf(run) <= maxLetters);
+	// A full Thai line: break where it reads best (see THAI_NO_START), carrying the rest to the next
+	// line, as long as that still fits. k = how many words stay on this line.
+	const bestBreak = (run: Placed[], next: Placed) => {
+		const all = [...run, next];
+		let best = run.length;
+		let bestScore = -Infinity;
+		for (let k = 1; k <= run.length; k++) {
+			const first = all[k];
+			const last = all[k - 1];
+			if (THAI_NO_START.has(first.text) || THAI_ENDINGS.has(first.text) || first.text.startsWith("ๆ")) continue;
+			if (k < run.length && (lettersOf(run.slice(0, k)) < Math.max(3, maxLetters * 0.4) || !fits(all.slice(k)))) continue;
+			const score = first.start - last.end + (THAI_STARTS.has(first.text) ? START_BONUS : 0) + (THAI_ENDINGS.has(last.text) ? START_BONUS : 0) + 0.3 * k;
+			if (score >= bestScore) [best, bestScore] = [k, score];
+		}
+		return best;
+	};
+
+	const groups: Placed[][] = [];
+	let current: Placed[] = [];
 	for (const w of placed) {
-		if (
-			current.length &&
-			(current.length >= perLine ||
-				w.start - current[current.length - 1].end > gapFrames ||
-				w.end - current[0].start > maxFrames ||
-				(thai && letters + thaiLetters(w.text) > limits.thaiLetters))
-		) {
+		if (current.length && w.start - current[current.length - 1].end > gapFrames) {
 			groups.push(current);
 			current = [];
-			letters = 0;
+		} else if (current.length && !fits([...current, w])) {
+			const k = thai ? bestBreak(current, w) : current.length;
+			groups.push(current.slice(0, k));
+			current = current.slice(k);
 		}
 		current.push(w);
-		letters += thaiLetters(w.text);
 	}
 	if (current.length) groups.push(current);
 

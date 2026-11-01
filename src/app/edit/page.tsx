@@ -491,7 +491,7 @@ export default function EditPage() {
 	function downloadSrt() {
 		if (!analysis) return;
 		const segments = keepSegments(analysis.duration, allCuts(analysis));
-		const srt = toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look));
+		const srt = toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look, subtitle.size));
 		const link = document.createElement("a");
 		link.href = URL.createObjectURL(new Blob([srt], { type: "application/x-subrip;charset=utf-8" }));
 		link.download = filename.replace(/\.[^.]+$/, "") + ".srt";
