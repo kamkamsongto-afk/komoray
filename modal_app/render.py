@@ -151,6 +151,9 @@ DEFAULT_STYLE = {
     "size": 100,  # px on a 1080x1920 frame
     "outline": 10,  # black border around the white letters, px
     "position": 0.31,  # 0 = bottom edge, 0.5 = middle of the screen
+    "textColor": "#FFFFFF",  # the letters
+    "letterSpacing": 0,  # px between letters
+    "lineSpacing": 0,  # px added between the rows of the Two lines look
     "color": "#FFE600",  # brand colour: the Highlight look's word
     "logo": "",  # channel name in a corner, "" = none
     "logoAt": "top-left",  # or top-right, bottom-left, bottom-right
@@ -408,9 +411,13 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             end = lines[i + 1][0]["start"]
         parts = [ass_text(p) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
         row2 = second_row(parts) if look == "two" else None
-        if row2 is not None:
-            parts[row2] = "\\N" + parts[row2].lstrip()
         line_font = font_tag("".join(parts), own_font, size)
+        if row2 is not None:
+            # ASS has no line spacing: an empty row as tall as the gap goes between the two rows.
+            gap = int(style.get("lineSpacing") or 0)
+            back = size * CYRILLIC_SCALE if line_font else size
+            spacer = f"\\N{{\\fs{gap}}}\\h\\N{{\\fs{back:g}}}" if gap > 0 else "\\N"
+            parts[row2] = spacer + parts[row2].lstrip()
         line_font = f"{{{line_font}}}" if line_font else ""
         if look != "highlight" and motion != "bounce":
             events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
@@ -425,11 +432,12 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             # A word bounces once the line has finished popping in (the first word rides the pop).
             bounce = motion == "bounce" and k > 0 and since >= POP_END
             on = (f"\\1c{highlight}" if look == "highlight" else "") + (scale_tags(BOUNCE, 0) if bounce else "")
-            off = ("\\1c&H00FFFFFF&" if look == "highlight" else "") + ("\\fscx100\\fscy100" if bounce else "")
+            off = (f"\\1c{ass_colour(style.get('textColor', '#FFFFFF'))}" if look == "highlight" else "") + ("\\fscx100\\fscy100" if bounce else "")
             text = "".join(f"{{{on}}}{p}{{{off}}}" if j == k and on else p for j, p in enumerate(parts))
             events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, since)}{text}")
 
     # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
+    # Letter spacing stays off for Thai below: libass spaces every mark too, which pulls them off their letters.
     boxed = look == "box"
     border_style, border, shadow = (3, BOX_PADDING, 0) if boxed else (1, outline, 2)
     outline_colour = "&H40000000" if boxed else "&H00000000"
@@ -446,9 +454,9 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
             "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
             "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-            f"Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,{outline_colour},&H64000000,"
+            f"Style: Default,{font},{size},{ass_colour(style.get('textColor', '#FFFFFF'))[:-1]},&H00FFFFFF,{outline_colour},&H64000000,"
             # Bold stays off: the weight comes from the font name (e.g. "Kanit Medium").
-            f"0,0,0,0,100,100,0,0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
+            f"0,0,0,0,100,100,{0 if thai else int(style.get('letterSpacing') or 0)},0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
             f"Style: Banner,{font},{BANNER['size']},{ass_colour(banner_ink(brand))[:-1]},&H00FFFFFF,{ass_colour(brand)[:-1]},&H00000000,"
             f"0,0,0,0,100,100,0,0,3,{BANNER['padding']},0,8,80,80,0,1",
             f"Style: Logo,{font},{LOGO['size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"

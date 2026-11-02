@@ -28,19 +28,22 @@ type Props = {
 	onKeep: (start: number, end: number) => void; // keep it (bring back what was cut there)
 	onAuto: (start: number, end: number) => void; // forget the hand cuts and keeps there (back to the automatic cuts)
 	handSpans: { start: number; end: number }[]; // where cuts were changed by hand (marked on the timeline)
-	zoomStyle: ZoomStyle; // Auto zoom: "off" hides the zoom strip
+	zoomStyle: ZoomStyle;
+	zoomEditing: boolean; // the Zoom panel is open: the zoom strip shows over the waveform
+	onOpenZoom: () => void; // the 🔍 on the waveform
+	onOpenSubtitles: () => void; // a sentence chip clicked
 	noZoom: { start: number; end: number }[]; // parts with Auto zoom turned off
 	onZoomRange: (start: number, end: number, on: boolean) => void;
 	onPlayFrom: (source: number) => void; // play from here (to hear a cut edge just moved)
 };
 
-// Heights, px: time ruler, sentence chips, zoom strip, waveform.
+// Heights, px: time ruler, sentence chips, waveform (the zoom strip lies on top of it while it shows).
 const RULER = 22;
 const CHIPS_TOP = RULER + 4;
 const CHIPS = 26;
-const ZOOM_TOP = CHIPS_TOP + CHIPS + 3;
-const ZOOM_STRIP = 9;
-const WAVE_TOP = ZOOM_TOP + ZOOM_STRIP + 3;
+const WAVE_TOP = CHIPS_TOP + CHIPS + 6;
+const ZOOM_TOP = WAVE_TOP;
+const ZOOM_STRIP = 12;
 const WAVE = 58;
 const HEIGHT = WAVE_TOP + WAVE + 4;
 
@@ -101,6 +104,9 @@ export function Timeline({
 	onAuto,
 	handSpans,
 	zoomStyle,
+	zoomEditing,
+	onOpenZoom,
+	onOpenSubtitles,
 	noZoom,
 	onZoomRange,
 	onPlayFrom,
@@ -156,7 +162,7 @@ export function Timeline({
 	);
 
 	const chips = useMemo(() => makeChips(words, scriptWords, gone), [words, scriptWords, gone]);
-	const zoomOn = zoomStyle.zoom !== "off";
+	const zoomOn = zoomStyle.zoom !== "off" && zoomEditing;
 	const zoomAmount = zoomStyle.zoomAmount;
 	const zoomAt = useMemo(() => zoomTrack(segments, noZoom, zoomStyle), [segments, noZoom, zoomStyle]);
 	// The cut parts of the source, merged (for shading with Show cuts on).
@@ -257,17 +263,6 @@ export function Timeline({
 			ctx.globalAlpha = 1;
 		}
 
-		// Zoom strip: purple as strong as the zoom at that moment, grey where zoom was turned off.
-		if (zoomOn) {
-			for (let px = 0; px < w; px++) {
-				const t = timeAt(left + px);
-				if (!segments.some((s) => t * FPS >= s.trim && t * FPS < s.trim + s.frames)) continue;
-				if (noZoom.some((n) => t >= n.start && t < n.end)) ctx.fillStyle = "rgba(127, 127, 127, 0.4)";
-				else ctx.fillStyle = `rgba(147, 51, 234, ${0.25 + (0.75 * (zoomAt(Math.round(toOutSeconds(t, segments) * FPS)) - 1)) / (zoomAmount - 1)})`;
-				ctx.fillRect(px, ZOOM_TOP, 1, ZOOM_STRIP);
-			}
-		}
-
 		// Waveform: one bar per pixel, the loudest moment under it, mirrored around the middle.
 		const data = peaks?.data;
 		if (data) {
@@ -291,6 +286,17 @@ export function Timeline({
 			ctx.globalAlpha = 0.08;
 			ctx.fillRect(0, WAVE_TOP, w, WAVE);
 			ctx.globalAlpha = 1;
+		}
+
+		// Zoom strip: purple as strong as the zoom at that moment, grey where zoom was turned off.
+		if (zoomOn) {
+			for (let px = 0; px < w; px++) {
+				const t = timeAt(left + px);
+				if (!segments.some((s) => t * FPS >= s.trim && t * FPS < s.trim + s.frames)) continue;
+				if (noZoom.some((n) => t >= n.start && t < n.end)) ctx.fillStyle = "rgba(127, 127, 127, 0.4)";
+				else ctx.fillStyle = `rgba(147, 51, 234, ${0.25 + (0.75 * (zoomAt(Math.round(toOutSeconds(t, segments) * FPS)) - 1)) / (zoomAmount - 1)})`;
+				ctx.fillRect(px, ZOOM_TOP, 1, ZOOM_STRIP);
+			}
 		}
 	}, [scale, showCuts, cutSpans, segments, peaks, timeAt, handSpans, zoomOn, zoomAmount, zoomAt, noZoom]);
 
@@ -352,7 +358,7 @@ export function Timeline({
 	// Pressing on the ruler moves the playhead (drag to scrub). Anywhere else: a click moves the
 	// playhead (or, in a red cut, picks that cut), a drag picks a stretch, and an edge of the picked
 	// stretch can be dragged to fine-tune it. A click on the zoom strip turns zoom off (or back on) for that piece.
-	type Press = { kind: "scrub" | "pick" | "start" | "end" | "cut"; x: number; at: number; moved: boolean; cut?: [number, number]; side?: "start" | "end"; strip?: boolean };
+	type Press = { kind: "scrub" | "pick" | "start" | "end" | "cut"; x: number; at: number; moved: boolean; cut?: [number, number]; side?: "start" | "end"; strip?: boolean; chip?: boolean };
 	const press = useRef<Press | null>(null);
 	const xAt = (clientX: number) => {
 		const el = scrollRef.current;
@@ -384,7 +390,7 @@ export function Timeline({
 		const onRuler = y < RULER + 2;
 		const grab = onRuler || nearEdge(x) ? null : cutEdgeAt(x);
 		const kind = onRuler ? "scrub" : (nearEdge(x) ?? (grab ? "cut" : "pick"));
-		press.current = { kind, x, at: timeAt(x), moved: false, cut: grab?.cut, side: grab?.side, strip: zoomOn && y >= ZOOM_TOP - 1 && y <= ZOOM_TOP + ZOOM_STRIP + 1 };
+		press.current = { kind, x, at: timeAt(x), moved: false, cut: grab?.cut, side: grab?.side, strip: zoomOn && y >= ZOOM_TOP - 1 && y <= ZOOM_TOP + ZOOM_STRIP + 1, chip: y >= CHIPS_TOP && y < CHIPS_TOP + CHIPS };
 		if (kind === "scrub") onSeek(timeAt(x));
 	};
 	const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -422,6 +428,7 @@ export function Timeline({
 		if (p.kind === "scrub") return;
 		const piece = p.strip && p.kind === "pick" ? segments.find((s) => p.at * FPS >= s.trim && p.at * FPS < s.trim + s.frames) : undefined;
 		if (piece) return onZoomRange(piece.trim / FPS, (piece.trim + piece.frames) / FPS, noZoom.some((n) => p.at >= n.start && p.at < n.end));
+		if (p.chip && chips.some((c) => !c.gone && p.at >= c.start && p.at <= c.end)) onOpenSubtitles();
 		const cut = showCuts ? cutSpans.find(([a, b]) => p.at >= a && p.at < b) : undefined;
 		if (cut) setSelection({ start: cut[0], end: cut[1] });
 		else {
@@ -589,7 +596,6 @@ export function Timeline({
 					<span className="text-xs text-foreground/50" title="Drag across the timeline to cut or keep any part. Drag the edge of a red cut to cut a little more or less (to keep the end of a word). Click a red cut to pick it.">
 						{cutSpans.length} cuts
 						{groups.length > 0 && ` · 🔁 ${groups.length} repeated ${groups.length === 1 ? "take" : "takes"}`}
-						<span className="hidden sm:inline"> · drag across to cut · drag a red edge to fine-tune{zoomOn && " · click the purple strip for no zoom there"}</span>
 					</span>
 				)}
 				<div className="ml-auto flex items-center gap-2">
@@ -615,6 +621,19 @@ export function Timeline({
 				</div>
 			</div>
 
+			<div className="relative">
+			<button
+				onClick={onOpenZoom}
+				title="Zoom"
+				aria-label="Zoom"
+				aria-pressed={zoomEditing}
+				className={`absolute left-1 z-[3] flex h-6 w-6 items-center justify-center rounded-full text-xs shadow transition-opacity ${
+					zoomEditing ? "bg-purple-600 text-white" : "bg-background/90 opacity-60 hover:opacity-100"
+				}`}
+				style={{ top: WAVE_TOP + WAVE - 26 }}
+			>
+				🔍
+			</button>
 			<div
 				ref={scrollRef}
 				onScroll={() => {
@@ -700,6 +719,7 @@ export function Timeline({
 						<div className="absolute -left-px top-0 h-full w-0.5 bg-blue-600" />
 					</div>
 				</div>
+			</div>
 			</div>
 
 			{group && openGroup !== null && (

@@ -1,6 +1,6 @@
 # Komoray: บันทึกความคืบหน้า
 
-อัปเดตล่าสุด: **2 พ.ย. 2026 (รอบทำงานยาวอัตโนมัติ)** · ⚠️ **งาน 1–2 พ.ย. อยู่ในเครื่อง ยังไม่ขึ้นเว็บจริง ต้อง deploy Modal + push ก่อน** (ดู "ขั้นต่อไป") · เร็วกว่าแผน ~3 สัปดาห์
+อัปเดตล่าสุด: **2 พ.ย. 2026** · โค้ช push งาน 1–2 พ.ย. ขึ้นเว็บแล้ว (10:17 น.) · ⚠️ หน้าตัดต่อแบบแผงใหม่ยังอยู่ในเครื่อง ต้อง deploy Modal + push อีกรอบ · เร็วกว่าแผน ~3 สัปดาห์
 แผน 67 วัน: [Google Sheet](https://docs.google.com/spreadsheets/d/177tM1wyvNRYY82ykldY7aoKK9YSHDi8JJ1SKtCfR5v4/edit) (1 แถว = 1 วันในปฏิทิน, คอลัมน์ K = สถานะ)
 
 ---
@@ -191,6 +191,14 @@
 - **Scene Swap ด่านแรก (วันที่ 36)**: ตรวจสัญญาจาก GitHub ของแต่ละโมเดล: BiRefNet, BEN2, Cutie = MIT · SAM2, MODNet = Apache · **MatAnyone ห้ามเชิงพาณิชย์ · RVM = GPL เลี่ยง** · ทั้งหมดนี้ดูแค่สัญญาของ**โค้ด** ยังต้องเช็กไฟล์ model weights/ข้อมูลเทรนก่อนขายจริง
   - ลอง BiRefNet กับ 6 เฟรมของคลิป Eng01 บน CPU: ขอบแว่นและผมสั้นคมมาก · เห็นเงาจาง ๆ ของชั้นหนังสือบนพื้นหลังใหม่ ต้องกรอง mask ค่าต่ำทิ้ง · ขอบ mask ขยับระหว่างเฟรม อาจต้องทำให้นิ่งเพิ่ม · ⏳ ยังไม่รู้ต้นทุนจริง (CPU ช้าเกินใช้ ต้องวัดบน GPU) ผมยาว/มือยังไม่ได้ลอง
 
+**2 พ.ย. สาย: หน้าตัดต่อแบบ minimal (แนวคิดโค้ช: "น้อยแต่มากและครบเครื่อง" ซ่อนไว้ กดแล้วค่อยเปิด)** — ⏳ commit ในเครื่อง ยังไม่ขึ้นเว็บจริง
+- เปิดมาไม่มีตัวเลือกเลย: ใต้คลิปเหลือแถบไอคอน `Subtitles` `Zoom` `Banners` `Shape` `Brand` กดอันไหนเปิดอันนั้น (`ControlSection` ใน `SubtitleControls.tsx`, หน้า Brand Kit ยังโชว์ครบ)
+- คลิกแถบคำบรรยายสีเขียว → เปิดแผงตัวอักษร · ไอคอน 🔍 บนแถบ wave → เปิดแผง Zoom + แถบม่วงบน wave (ปิดแผง = แถบหาย คลิกตรงนั้นไม่มีผล) · Zoom เลือกแล้วใช้ทั้งคลิปเป็นค่าเริ่มต้น + ปุ่ม `Zoom the whole video`
+- ค่าตัวอักษรใหม่: `Letter spacing`, `Line spacing` (เฉพาะ Two lines), `Text colour` · ทดสอบ render: ระยะบรรทัด 40/80 → แถวบนขึ้น 40/80 px พอดี
+- ⚠️ ภาษาไทยปิด Letter spacing: libass เว้นระยะสระและวรรณยุกต์ด้วย ทำให้หลุดจากพยัญชนะ (เห็นจากภาพ render จริง)
+- คอลัมน์ขวาอยู่เหนือ Timeline เสมอ (`--player-h`): เปิดแผงแล้ววิดีโอย่อ เดิมแผงจมอยู่หลัง Timeline
+- ⏳ ลองด้วยหน้าทดสอบ ยังไม่ได้ลองกับคลิปจริง · ยังไม่ได้ลองบนมือถือ/iPad
+
 ---
 
 ## ⚠️ ติดอยู่ / เรื่องที่ต้องรู้
@@ -199,7 +207,6 @@
 |---|---|---|
 | 🚀 **Deploy ถูกบล็อก (2 พ.ย.)** | ระบบ Claude Code ไม่ให้ Claude รัน `git push` / `modal deploy` เอง แม้โค้ชบอกอนุญาตทุกอย่าง → โค้ชรันเอง: `python -m modal deploy modal_app/render.py` **ก่อน** แล้วค่อย `git push origin main` | **ทำก่อนลองของใหม่** |
 | 💳 Modal GPU | ใช้ GPU ไม่ได้จนกว่าจะผูกบัตร ("Please add a payment method") · ผูกแล้วได้เครดิต $30/เดือน | ก่อนทำ Scene Swap ต่อ |
-| 🔑 แปลซับวันที่ 28 | ต้องมี Anthropic API key ใน `.dev.vars` + Worker secret | เมื่อพร้อมทำแปลซับ |
 
 | 🖼️ Google consent screen | **ห้ามอัปโหลดโลโก้** ในหน้า Branding (ต้องรอ Google ตรวจหลายวัน) · หน้าเลือกบัญชีจะโชว์ `icjjeinussbapihdjiym.supabase.co` (แก้ได้ด้วย Supabase custom domain แบบเสียเงิน) | ภายหลัง |
 | 📧 เมล hello@ ที่ส่งออกตกสแปม | แบบฟรีเซ็น DKIM เป็น gmail.com · แก้จริง = Google Workspace (~$7/เดือน) | **ก่อนส่งเมลชวน beta** |
@@ -223,21 +230,21 @@
 ## ⏭️ ขั้นต่อไป
 
 
-**1. โค้ช deploy ก่อน (5 นาที):** `python -m modal deploy modal_app/render.py` แล้ว `git push origin main`
-**2. โค้ชลองของใหม่บนเว็บจริง:** โลโก้ · Smooth zoom ทั้งใน preview และคลิปจริง · ปิด zoom เป็นช่วง · My banners · อัปคลิปภาษาอื่นถ้ามี · iPad
+**1. โค้ช deploy หน้าแบบแผงใหม่ (5 นาที):** `python -m modal deploy modal_app/render.py` แล้ว `git push origin main`
+**2. โค้ชลองของใหม่บนเว็บจริง:** แผงใหม่ทั้ง 5 + คลิกแถบเขียว + 🔍 · ระยะตัวอักษร/บรรทัด/สีในคลิปจริง · โลโก้ · Smooth zoom ในคลิปจริง · ปิด zoom เป็นช่วง · My banners · อัปคลิปภาษาอื่นถ้ามี · iPad
 
 **งานถัดไปที่ Claude ทำได้เลย (ไม่ต้องรอโค้ช):**
 - แก้ตาม feedback จากการลองรอบนี้
+- **แปลซับ (วันที่ 28)**: มีกุญแจ Anthropic ใน `.dev.vars` แล้ว (ทดสอบแล้วใช้ได้, เพดาน $20/เดือน) · บนเว็บจริงยังต้องตั้ง `npx wrangler secret put ANTHROPIC_API_KEY`
 - Zoom ตามประโยคสำคัญ (ตอนนี้ Smooth เป็นจังหวะคงที่ แผนเดิมวันที่ 22 อยากให้เลือกจุดเน้น 4–6 จุด ต้องใช้ Claude API)
 
 **งานที่รอโค้ช:**
-1. Anthropic API key → แปลซับ (วันที่ 28) + zoom ตามประโยคสำคัญ + เทคซ้ำที่ยาก
-2. บัตรใน Modal → Scene Swap ต่อ (วันที่ 36–37: วัดต้นทุน GPU, ทดสอบ 10 คลิป)
-3. สมัคร Paddle + ตัดสินใจราคา (วันที่ 29–33) → โควตา (วันที่ 31) รออันนี้
-4. Google Workspace (~45 นาที ก่อนส่งเมลหา creator): สมัคร Business Starter (yoshi@komoray.com, hello@/support@ เป็น alias) → ยืนยันโดเมน (TXT) → MX เป็นของ Google + ปิด Cloudflare Email Routing → DKIM (`google._domainkey`) → SPF เหลือ `include:_spf.google.com` → ลบ "Send mail as" + App password `Komoray mail` → ทดสอบส่งหาภรรยา
-5. ทดสอบคลิปที่เหลือ 6 คลิป + คลิปแนวนอน + .mov จาก iPhone + iPad/iPhone (`&debug=1`)
-6. หาคนพูดภาษาอื่นช่วยดูซับ (เริ่มจาก es, de, pt ก่อน) ก่อนโฆษณาว่ารองรับภาษานั้น
-7. งานที่ข้ามไว้: soft launch / แบบฟอร์ม feedback / ชวน beta / งานตลาด (โค้ชต้องตัดสินใจ: เร็วกว่าแผน 3 สัปดาห์แล้ว แต่ยังไม่มีคนนอกใช้เลย)
+1. บัตรใน Modal → Scene Swap ต่อ (วันที่ 36–37: วัดต้นทุน GPU, ทดสอบ 10 คลิป)
+2. สมัคร Paddle + ตัดสินใจราคา (วันที่ 29–33) → โควตา (วันที่ 31) รออันนี้
+3. Google Workspace (~45 นาที ก่อนส่งเมลหา creator): สมัคร Business Starter (yoshi@komoray.com, hello@/support@ เป็น alias) → ยืนยันโดเมน (TXT) → MX เป็นของ Google + ปิด Cloudflare Email Routing → DKIM (`google._domainkey`) → SPF เหลือ `include:_spf.google.com` → ลบ "Send mail as" + App password `Komoray mail` → ทดสอบส่งหาภรรยา
+4. ทดสอบคลิปที่เหลือ 6 คลิป + คลิปแนวนอน + .mov จาก iPhone + iPad/iPhone (`&debug=1`)
+5. หาคนพูดภาษาอื่นช่วยดูซับ (เริ่มจาก es, de, pt ก่อน) ก่อนโฆษณาว่ารองรับภาษานั้น
+6. งานที่ข้ามไว้: soft launch / แบบฟอร์ม feedback / ชวน beta / งานตลาด (โค้ชต้องตัดสินใจ: เร็วกว่าแผน 3 สัปดาห์แล้ว แต่ยังไม่มีคนนอกใช้เลย)
 
 **งานตลาด (วันละ ~30 นาที, เร่งด่วน):**
 1. โพสต์แรก build in public บน X (โค้ชเล่าเป็นภาษาไทย Claude เกลาเป็นอังกฤษ)

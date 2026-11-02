@@ -183,6 +183,7 @@ export function PlayerFrame({
 			: { ...face, em: ownEm };
 	const lineFace = textFace(line?.text ?? "");
 	const em = lineFace.em;
+	const rowGap = line?.row2 !== undefined ? subtitle.lineSpacing : 0; // only a line split in two rows has a gap
 	const boxed = subtitle.look === "box";
 	// Box: letters on a dark box. Every other look: white letters with a black outline.
 	const letters: CSSProperties = boxed
@@ -215,8 +216,8 @@ export function PlayerFrame({
 		: "Your subtitles";
 
 	return (
-		// As wide as fits, but never taller than ~70% of the screen.
-		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: `calc(70vh * ${W} / ${H})` }}>
+		// As wide as fits, but never taller than --player-h (ScriptView keeps it clear of the timeline), else ~70% of the screen.
+		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: `calc(var(--player-h, 70vh) * ${W} / ${H})` }}>
 			<div
 				ref={boxRef}
 				onClick={onToggle}
@@ -257,13 +258,16 @@ export function PlayerFrame({
 								position: "absolute",
 								left: SIDE_MARGIN,
 								right: SIDE_MARGIN,
-								bottom: H * subtitle.position,
+								// The extra row gap goes half under the last row in a browser: the bottom row stays put, as in the final video.
+								bottom: H * subtitle.position - rowGap / 2,
 								textAlign: "center",
 								fontFamily: lineFace.family,
 								fontWeight: lineFace.weight,
 								fontSize: (subtitle.size / em) * motion.line,
-								lineHeight: em,
-								color: "white",
+								lineHeight: em * (1 + rowGap / subtitle.size),
+								// Thai marks would come apart from their letters (the final video leaves it out too: build_subtitles).
+								letterSpacing: /[฀-๿]/.test(line?.text ?? "") ? 0 : subtitle.letterSpacing,
+								color: subtitle.textColor,
 								opacity: line ? 1 : 0.5,
 								cursor: "ns-resize",
 								pointerEvents: "auto",
@@ -396,7 +400,7 @@ export function PlayerFrame({
 					className="flex-1"
 					aria-label="Position in the final video"
 				/>
-				<span className="tabular-nums">
+				<span className="whitespace-nowrap tabular-nums">
 					{clock(outTime)} / {clock(total)}
 				</span>
 			</div>

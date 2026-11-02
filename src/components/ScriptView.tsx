@@ -11,7 +11,7 @@ import { reportError } from "@/lib/report";
 import { studioSupported } from "@/lib/player/engine";
 import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
 import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
-import { SubtitleControls } from "./SubtitleControls";
+import { type ControlSection, SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
 import { Timeline } from "./Timeline";
 
@@ -174,6 +174,17 @@ type Props = {
 	onTakesApplied?: (count: number, before: number[]) => void;
 };
 
+// What can be opened under the video. Nothing is open at first: the editor stays calm, and every
+// setting is a click away (here, or by clicking its part of the timeline).
+type Panel = ControlSection | "banners";
+const PANELS: { id: Panel; icon: string; name: string }[] = [
+	{ id: "text", icon: "Aa", name: "Subtitles" },
+	{ id: "zoom", icon: "🔍", name: "Zoom" },
+	{ id: "banners", icon: "🏷️", name: "Banners" },
+	{ id: "shape", icon: "📐", name: "Shape" },
+	{ id: "brand", icon: "⭐", name: "Brand" },
+];
+
 // The editor: script on the left, the video on the right (stacked on phones, video first).
 export function ScriptView({
 	videoUrl,
@@ -217,6 +228,12 @@ export function ScriptView({
 	const gone = useMemo(() => new Set(deleted), [deleted]);
 	// Preview = the final video (cuts, 9:16, subtitles), built live in the browser. Original = the raw upload.
 	const [mode, setMode] = useState<"preview" | "original">("preview");
+	const [panel, setPanel] = useState<Panel | null>(null);
+	// From the timeline: the panels live under the preview.
+	const openPanel = (next: Panel) => {
+		setMode("preview");
+		setPanel(next);
+	};
 	const playerRef = useRef<PreviewHandle>(null);
 	// Our own player (smooth on every browser) once the preview copy is ready and the browser can
 	// run it; else the <video> player. ?engine=old in the address forces the old one, to compare.
@@ -536,7 +553,11 @@ export function ScriptView({
 		<div className="flex flex-col gap-4">
 			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,440px)] lg:items-start">
 				{/* Right on big screens (sticky while the script scrolls), on top on phones. */}
-				<div className="flex flex-col gap-3 lg:sticky lg:top-4 lg:order-2">
+				<div
+					className={`flex flex-col gap-3 lg:sticky lg:top-4 lg:order-2 lg:max-h-[calc(100vh-14rem)] lg:overflow-y-auto ${
+						panel ? "lg:[--player-h:max(13rem,calc(50vh-8rem))]" : "lg:[--player-h:max(15rem,calc(100vh-28rem))]"
+					}`}
+				>
 					<div className="flex self-center rounded-lg border border-foreground/20 p-0.5 text-sm">
 						{(["preview", "original"] as const).map((m) => (
 							<button
@@ -551,7 +572,7 @@ export function ScriptView({
 					{mode === "preview" && deciding ? (
 						<div
 							className="mx-auto w-full rounded-lg bg-black"
-							style={{ aspectRatio: `${outputSize(subtitle).width} / ${outputSize(subtitle).height}`, maxWidth: `calc(70vh * ${outputSize(subtitle).width} / ${outputSize(subtitle).height})` }}
+							style={{ aspectRatio: `${outputSize(subtitle).width} / ${outputSize(subtitle).height}`, maxWidth: `calc(var(--player-h, 70vh) * ${outputSize(subtitle).width} / ${outputSize(subtitle).height})` }}
 						/>
 					) : mode === "preview" && useStudio && studio ? (
 						<StudioPlayer
@@ -606,23 +627,56 @@ export function ScriptView({
 						/>
 					)}
 					{mode === "preview" && (
+						<div className="flex justify-center gap-1" role="tablist" aria-label="Settings">
+							{PANELS.map((p) => (
+								<button
+									key={p.id}
+									role="tab"
+									aria-selected={panel === p.id}
+									onClick={() => setPanel(panel === p.id ? null : p.id)}
+									className={`flex min-w-14 flex-col items-center gap-0.5 rounded-lg px-2 py-1 text-xs ${
+										panel === p.id ? "bg-foreground text-background" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+									}`}
+								>
+									<span className="text-sm leading-5">{p.icon}</span>
+									{p.name}
+								</button>
+							))}
+						</div>
+					)}
+					{mode === "preview" && panel && panel !== "banners" && (
 						<SubtitleControls
 							style={subtitle}
 							onChange={onSubtitleChange}
 							thai={thaiClip}
+							section={panel}
 							footer={
-								<button
-									onClick={() => void saveBrand()}
-									disabled={brandSaved === "saving"}
-									className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
-									title="Use this look for every new video"
-								>
-									{brandSaved === "saved" ? "✓ Saved to Brand Kit" : brandSaved === "failed" ? "❌ Could not save, try again" : "⭐ Save as my Brand Kit"}
-								</button>
+								panel === "brand" ? (
+									<button
+										onClick={() => void saveBrand()}
+										disabled={brandSaved === "saving"}
+										className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
+										title="Use this look for every new video"
+									>
+										{brandSaved === "saved" ? "✓ Saved to Brand Kit" : brandSaved === "failed" ? "❌ Could not save, try again" : "⭐ Save as my Brand Kit"}
+									</button>
+								) : panel === "zoom" && subtitle.zoom !== "off" ? (
+									<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/60">
+										<span>
+											{noZoom.length ? `Zoom is off in ${noZoom.length} ${noZoom.length === 1 ? "part" : "parts"}.` : "Zoom is on for the whole video."} Click the purple strip on the
+											timeline to turn it off for a part, or drag across any stretch.
+										</span>
+										{noZoom.length > 0 && (
+											<button onClick={() => onNoZoomChange([])} className="rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
+												Zoom the whole video
+											</button>
+										)}
+									</div>
+								) : undefined
 							}
 						/>
 					)}
-					{mode === "preview" && (
+					{mode === "preview" && panel === "banners" && (
 						<BannerControls
 							banners={banners}
 							onChange={onBannersChange}
@@ -634,13 +688,8 @@ export function ScriptView({
 				</div>
 	
 				<div className="flex min-w-0 flex-col gap-3 lg:order-1">
-					<p className="text-xs text-foreground/60">
-						{mode === "preview"
-							? "The video shows how your final video will look. Changes show up right away, no need to make the video first."
-							: "The video as you uploaded it."}{" "}
-						Click a word to jump there. Double-click a word to fix its spelling. Drag across words to delete them. Click ✂️ to hear a
-						silence that will be cut. On the timeline, drag across any part to cut it or keep it. 🔁 marks a sentence you said more
-						than once: pick the take to keep.
+					<p className="text-xs text-foreground/60" title="On the timeline, drag across any part to cut it or keep it. Click a green sentence for subtitle settings.">
+						Click a word to jump there. Double-click to fix it. Drag across words to delete them.
 					</p>
 					{editing && (
 						<form
@@ -836,6 +885,9 @@ export function ScriptView({
 					onAuto={autoRange}
 					handSpans={handSpans}
 					zoomStyle={subtitle}
+					zoomEditing={mode === "preview" && panel === "zoom"}
+					onOpenZoom={() => (panel === "zoom" ? setPanel(null) : openPanel("zoom"))}
+					onOpenSubtitles={() => openPanel("text")}
 					noZoom={noZoom}
 					onZoomRange={zoomRange}
 					onPlayFrom={(t) => seek(t)}

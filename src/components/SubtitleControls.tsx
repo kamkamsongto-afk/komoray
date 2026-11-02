@@ -5,6 +5,7 @@ import type { OwnFont } from "@/lib/font-info";
 import { type Motion, MOTIONS } from "@/lib/motion";
 import {
 	COLORS,
+	TEXT_COLORS,
 	type Format,
 	FORMATS,
 	FONTS,
@@ -25,11 +26,15 @@ type Props = {
 	onChange: (style: SubtitleStyle) => void;
 	thai: boolean; // a Thai video: English-only fonts can't be picked
 	footer?: ReactNode;
+	section?: ControlSection; // show only this part (the editor's panels); left out: everything (Brand Kit page)
 };
+
+export type ControlSection = "text" | "zoom" | "shape" | "brand";
 
 // How the subtitles look: style, font, brand colour, channel name, size and outline. Used in the
 // editor (for one video) and on the Brand Kit page (for every new video).
-export function SubtitleControls({ style, onChange, thai, footer }: Props) {
+export function SubtitleControls({ style, onChange, thai, footer, section }: Props) {
+	const on = (part: ControlSection) => !section || section === part;
 	// The user's own uploaded font (one per account), if any.
 	const [own, setOwn] = useState<OwnFont | null>(null);
 	const [uploading, setUploading] = useState(false);
@@ -65,7 +70,33 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 		onChange({ ...style, font: "own", ownFont: data.font });
 	}
 
-	const slider = (label: string, key: "size" | "outline") => (
+	const colours = (label: string, key: "color" | "textColor", list: string[], hint?: string) => (
+		<div className="flex items-center gap-3 text-sm text-foreground/70">
+			<span className="w-24 shrink-0" title={hint}>
+				{label}
+			</span>
+			<div className="flex flex-1 flex-wrap items-center gap-1.5">
+				{list.map((c) => (
+					<button
+						key={c}
+						onClick={() => onChange({ ...style, [key]: c })}
+						aria-label={`${label} ${c}`}
+						className={`h-6 w-6 rounded-full border-2 ${style[key] === c ? "border-blue-600" : "border-foreground/20"}`}
+						style={{ background: c }}
+					/>
+				))}
+				<input
+					type="color"
+					value={style[key]}
+					onChange={(e) => onChange({ ...style, [key]: e.target.value.toUpperCase() })}
+					aria-label={`Any ${label.toLowerCase()}`}
+					className="h-6 w-8 cursor-pointer rounded border border-foreground/20 bg-transparent"
+				/>
+			</div>
+		</div>
+	);
+
+	const slider = (label: string, key: "size" | "outline" | "letterSpacing" | "lineSpacing") => (
 		<label className="flex items-center gap-3 text-sm text-foreground/70">
 			<span className="w-24 shrink-0">{label}</span>
 			<input
@@ -83,7 +114,7 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 
 	return (
 		<div className="flex flex-col gap-2 rounded-lg border border-foreground/15 p-3">
-			<label className="flex items-center gap-3 text-sm text-foreground/70">
+			{on("shape") && <label className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Video shape</span>
 				<select
 					value={style.format}
@@ -96,8 +127,9 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 						</option>
 					))}
 				</select>
-			</label>
-			<p className="text-sm font-medium">Subtitles</p>
+			</label>}
+			{on("text") && <>
+			{!section && <p className="text-sm font-medium">Subtitles</p>}
 			<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Subtitle style">
 				{(Object.keys(LOOKS) as Look[]).map((look) => (
 					<button
@@ -181,29 +213,14 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 			</div>
 			{slider("Text size", "size")}
 			{style.look !== "box" && slider("Black outline", "outline")}
-			<div className="flex items-center gap-3 text-sm text-foreground/70">
-				<span className="w-24 shrink-0" title="Used by the Highlight style">
-					Brand colour
-				</span>
-				<div className="flex flex-1 flex-wrap items-center gap-1.5">
-					{COLORS.map((c) => (
-						<button
-							key={c}
-							onClick={() => onChange({ ...style, color: c })}
-							aria-label={`Colour ${c}`}
-							className={`h-6 w-6 rounded-full border-2 ${style.color === c ? "border-foreground" : "border-transparent"}`}
-							style={{ background: c }}
-						/>
-					))}
-					<input
-						type="color"
-						value={style.color}
-						onChange={(e) => onChange({ ...style, color: e.target.value.toUpperCase() })}
-						aria-label="Any colour"
-						className="h-6 w-8 cursor-pointer rounded border border-foreground/20 bg-transparent"
-					/>
-				</div>
-			</div>
+			{!thai && slider("Letter spacing", "letterSpacing")}
+			{style.look === "two" && slider("Line spacing", "lineSpacing")}
+			{colours("Text colour", "textColor", TEXT_COLORS)}
+			{section === "text" && style.look === "highlight" && colours("Highlight", "color", COLORS)}
+			<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>
+			</>}
+			{on("brand") && <>
+			{colours("Brand colour", "color", COLORS, "Used by the Highlight style and banners")}
 			<label className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Channel name</span>
 				<input
@@ -283,6 +300,8 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 					</label>
 				</>
 			)}
+			</>}
+			{on("zoom") && <>
 			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Jump: every other part is a little closer, like a second camera. Smooth: the picture glides slowly in and out.">
 				<span className="w-24 shrink-0">Auto zoom</span>
 				<select
@@ -327,7 +346,7 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 					</div>
 				</div>
 			)}
-			<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>
+			</>}
 			{footer}
 		</div>
 	);

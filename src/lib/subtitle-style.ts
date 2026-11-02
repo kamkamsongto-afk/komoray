@@ -27,6 +27,9 @@ export type SubtitleStyle = {
 	look: Look;
 	font: FontId | "own"; // "own": the font the user uploaded (ownFont)
 	ownFont?: OwnFont;
+	textColor: string; // the letters
+	letterSpacing: number; // px between letters
+	lineSpacing: number; // px added between the rows of the Two lines look
 	color: string;
 	logo: string;
 	logoAt: LogoCorner;
@@ -46,6 +49,9 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	position: 0.31,
 	look: "clean",
 	font: "kanit",
+	textColor: "#FFFFFF",
+	letterSpacing: 0,
+	lineSpacing: 0,
 	color: "#FFE600",
 	logo: "",
 	logoAt: "top-left",
@@ -61,6 +67,7 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 export const MAX_LOGO_LENGTH = 30;
 // Brand colours to pick from in one click (any other colour works too).
 export const COLORS = ["#FFE600", "#22D3EE", "#4ADE80", "#FB7185", "#F97316", "#A78BFA"];
+export const TEXT_COLORS = ["#FFFFFF", "#111111", ...COLORS];
 
 export const LIMITS = {
 	size: { min: 50, max: 180, step: 2 },
@@ -70,6 +77,8 @@ export const LIMITS = {
 	logoOpacity: { min: 0.2, max: 1, step: 0.05 },
 	zoomAmount: { min: 1.04, max: 1.3, step: 0.01 },
 	zoomPeriod: { min: 6, max: 24, step: 1 },
+	letterSpacing: { min: 0, max: 30, step: 1 },
+	lineSpacing: { min: 0, max: 80, step: 2 },
 } as const;
 
 // The Smooth zoom speeds to pick from: seconds to glide in and back out.
@@ -142,6 +151,9 @@ export function readStyle(value: unknown): SubtitleStyle {
 		look: typeof v.look === "string" && v.look in LOOKS ? (v.look as Look) : DEFAULT_STYLE.look,
 		...readFont(v.font, v.ownFont),
 		color: typeof v.color === "string" && /^#[0-9a-f]{6}$/i.test(v.color) ? v.color.toUpperCase() : DEFAULT_STYLE.color,
+		textColor: typeof v.textColor === "string" && /^#[0-9a-f]{6}$/i.test(v.textColor) ? v.textColor.toUpperCase() : DEFAULT_STYLE.textColor,
+		letterSpacing: Math.round(pick("letterSpacing")),
+		lineSpacing: Math.round(pick("lineSpacing")),
 		// Letters, numbers and simple marks only: it is drawn into the video as subtitle text.
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
 		logoAt: typeof v.logoAt === "string" && v.logoAt in LOGO_CORNERS ? (v.logoAt as LogoCorner) : "top-left",
