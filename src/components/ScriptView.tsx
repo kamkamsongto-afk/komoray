@@ -835,7 +835,7 @@ export function ScriptView({
 					onKeep={keepRange}
 					onAuto={autoRange}
 					handSpans={handSpans}
-					zoomMode={subtitle.zoom}
+					zoomStyle={subtitle}
 					noZoom={noZoom}
 					onZoomRange={zoomRange}
 					onPlayFrom={(t) => seek(t)}

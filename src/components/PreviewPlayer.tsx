@@ -274,7 +274,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function Pr
 	}, [playing, pieces, prepareNext, onTime]);
 
 	const line = lines.find((l) => outTime * FPS >= l.from && outTime * FPS < l.to);
-	const zoom = zoomTrack(segments, noZoom ?? [], subtitle.zoom)(Math.round(outTime * FPS));
+	const zoom = zoomTrack(segments, noZoom ?? [], subtitle)(Math.round(outTime * FPS));
 	const toggle = () => (playing ? pause() : play());
 
 	// Dragging the bar: final-video time → source time.

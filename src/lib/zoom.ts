@@ -7,9 +7,10 @@ import { FPS, type Segment } from "./timeline";
 
 type Span = { start: number; end: number };
 
-export const ZOOM = 1.12; // the closest it gets
-export const SMOOTH_PERIOD = 12; // seconds to glide in and back out
 export const SMOOTH_FADE = 0.75; // seconds to glide out before (and back in after) a part with no zoom
+
+// The style's zoom settings: how, how close it gets (zoomAmount) and how many seconds a glide in and back out takes (zoomPeriod).
+export type ZoomStyle = { zoom: string; zoomAmount: number; zoomPeriod: number };
 
 // The noZoom parts as frames of the final video: [from, to), merged where they touch.
 export function noZoomFrames(segments: Segment[], noZoom: Span[]): [number, number][] {
@@ -32,7 +33,8 @@ export function noZoomFrames(segments: Segment[], noZoom: Span[]): [number, numb
 }
 
 // The zoom at a frame of the final video (1 = none).
-export function zoomTrack(segments: Segment[], noZoom: Span[], mode: string): (frame: number) => number {
+export function zoomTrack(segments: Segment[], noZoom: Span[], style: ZoomStyle): (frame: number) => number {
+	const { zoom: mode, zoomAmount: amount, zoomPeriod: period } = style;
 	if (mode !== "cuts" && mode !== "smooth") return () => 1;
 	const off = noZoomFrames(segments, noZoom);
 	if (mode === "cuts") {
@@ -40,16 +42,16 @@ export function zoomTrack(segments: Segment[], noZoom: Span[], mode: string): (f
 			if (off.some(([a, b]) => f >= a && f < b)) return 1;
 			let piece = 0;
 			for (let i = 0; i < segments.length && segments[i].from <= f; i++) piece = i;
-			return piece % 2 === 1 ? ZOOM : 1;
+			return piece % 2 === 1 ? amount : 1;
 		};
 	}
 	const fade = SMOOTH_FADE * FPS;
 	return (f) => {
-		let k = 0.5 - 0.5 * Math.cos((2 * Math.PI * f) / (SMOOTH_PERIOD * FPS));
+		let k = 0.5 - 0.5 * Math.cos((2 * Math.PI * f) / (period * FPS));
 		for (const [a, b] of off) {
 			const x = Math.min(1, Math.max(0, a - f, f - b) / fade);
 			k *= x * x * (3 - 2 * x);
 		}
-		return 1 + (ZOOM - 1) * k;
+		return 1 + (amount - 1) * k;
 	};
 }

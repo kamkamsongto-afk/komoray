@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { BANNER, BANNER_KINDS, BANNER_SCALE, type Banner, type BannerKind, type BannerPlace, cleanBannerText } from "@/lib/banners";
 
 type Props = {
@@ -16,6 +17,27 @@ const round = (n: number) => Math.round(n * 10) / 10;
 // preview is at, then change its words, place and when it shows.
 export function BannerControls({ banners, onChange, now, total, channel }: Props) {
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+
+	// My banners: saved to the account, for any video. Each starts at 0 and ends after as long as it shows.
+	const [templates, setTemplates] = useState<Banner[]>([]);
+	useEffect(() => {
+		void fetch("/api/banner-templates")
+			.then(async (res) => (res.ok ? ((await res.json()) as { templates?: Banner[] }) : {}))
+			.then((data: { templates?: Banner[] }) => setTemplates(data.templates ?? []))
+			.catch(() => {});
+	}, []);
+	function saveTemplates(next: Banner[]) {
+		setTemplates(next);
+		void fetch("/api/banner-templates", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templates: next }) }).catch(() => {});
+	}
+	function saveAsTemplate(b: Banner) {
+		const seconds = round(Math.max(0.5, b.end - b.start));
+		saveTemplates([...templates, { ...b, id: crypto.randomUUID(), start: 0, end: seconds }].slice(-BANNER.maxBanners));
+	}
+	function addTemplate(t: Banner) {
+		const start = round(Math.min(now(), Math.max(0, total - 1)));
+		onChange([...banners, { ...t, id: crypto.randomUUID(), start, end: round(Math.min(total, start + t.end)) }].sort((a, b) => a.start - b.start));
+	}
 
 	function add(kind: BannerKind) {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
@@ -62,6 +84,30 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 					</button>
 				))}
 			</div>
+			{templates.length > 0 && (
+				<div className="flex flex-wrap items-center gap-1.5 text-sm">
+					<span className="text-xs text-foreground/60">My banners</span>
+					{templates.map((t) => (
+						<span key={t.id} className="flex items-center rounded-md border border-foreground/20">
+							<button
+								onClick={() => addTemplate(t)}
+								disabled={banners.length >= BANNER.maxBanners}
+								title="Add it where the video is now"
+								className="max-w-40 truncate rounded-l-md px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-40"
+							>
+								+ {t.text}
+							</button>
+							<button
+								onClick={() => saveTemplates(templates.filter((x) => x.id !== t.id))}
+								aria-label={`Forget ${t.text}`}
+								className="rounded-r-md px-1.5 py-0.5 text-foreground/50 hover:bg-red-500/10 hover:text-red-600"
+							>
+								✕
+							</button>
+						</span>
+					))}
+				</div>
+			)}
 			{banners.length === 0 && (
 				<p className="text-xs text-foreground/60">A price, a call to action or &quot;follow me&quot;, in your brand colour. It is added where the video is now.</p>
 			)}
@@ -76,6 +122,15 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 							aria-label="Banner text"
 							className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-0.5"
 						/>
+						<button
+							onClick={() => saveAsTemplate(b)}
+							disabled={!cleanBannerText(b.text) || templates.some((t) => t.text === cleanBannerText(b.text) && t.sub === b.sub)}
+							title="Save to My banners, to use on any video"
+							aria-label="Save to My banners"
+							className="rounded px-1.5 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:opacity-30"
+						>
+							⭐
+						</button>
 						<button
 							onClick={() => onChange(banners.filter((x) => x.id !== b.id))}
 							aria-label="Remove banner"

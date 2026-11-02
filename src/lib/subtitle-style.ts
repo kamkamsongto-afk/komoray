@@ -34,6 +34,8 @@ export type SubtitleStyle = {
 	logoSize: number;
 	logoOpacity: number;
 	zoom: Zoom;
+	zoomAmount: number; // how close it gets: 1.12 = 12% bigger
+	zoomPeriod: number; // Smooth: seconds to glide in and back out
 	format: Format;
 	motion: Motion; // lines pop in, words bounce (lib/motion.ts)
 };
@@ -50,6 +52,8 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	logoSize: 180,
 	logoOpacity: 1,
 	zoom: "off",
+	zoomAmount: 1.12,
+	zoomPeriod: 12,
 	format: "9:16",
 	motion: "none",
 };
@@ -64,7 +68,16 @@ export const LIMITS = {
 	position: { min: 0.03, max: 0.85, step: 0.01 }, // 0 = bottom edge, 1 = top edge
 	logoSize: { min: 60, max: 480, step: 10 },
 	logoOpacity: { min: 0.2, max: 1, step: 0.05 },
+	zoomAmount: { min: 1.04, max: 1.3, step: 0.01 },
+	zoomPeriod: { min: 6, max: 24, step: 1 },
 } as const;
+
+// The Smooth zoom speeds to pick from: seconds to glide in and back out.
+export const ZOOM_SPEEDS = [
+	{ name: "Slow", period: 18 },
+	{ name: "Normal", period: 12 },
+	{ name: "Fast", period: 7 },
+];
 
 // The five looks. Picking one also sets its size and height on screen (the user can change them after).
 export const LOOKS: Record<Look, { name: string; hint: string; size: number; position: number }> = {
@@ -133,6 +146,8 @@ export function readStyle(value: unknown): SubtitleStyle {
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
 		logoAt: typeof v.logoAt === "string" && v.logoAt in LOGO_CORNERS ? (v.logoAt as LogoCorner) : "top-left",
 		zoom: v.zoom === "cuts" || v.zoom === "smooth" ? v.zoom : "off",
+		zoomAmount: Math.round(pick("zoomAmount") * 100) / 100,
+		zoomPeriod: Math.round(pick("zoomPeriod")),
 		format: typeof v.format === "string" && v.format in FORMATS ? (v.format as Format) : DEFAULT_STYLE.format,
 		motion: typeof v.motion === "string" && v.motion in MOTIONS ? (v.motion as Motion) : DEFAULT_STYLE.motion,
 	};

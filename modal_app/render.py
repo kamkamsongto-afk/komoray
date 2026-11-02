@@ -159,8 +159,8 @@ DEFAULT_STYLE = {
     "zoom": "off",  # Auto zoom: "cuts" = every other kept piece a little closer, "smooth" = a slow glide
     "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
 }
-# Auto zoom: the closest it gets, seconds to glide in and out, seconds to settle around a no-zoom part.
-# Same as src/lib/zoom.ts.
+# Auto zoom: how close it gets, seconds to glide in and out (both picked by the user: zoomAmount and
+# zoomPeriod in src/lib/subtitle-style.ts), seconds to settle around a no-zoom part (src/lib/zoom.ts).
 ZOOM = 1.12
 SMOOTH_PERIOD = 12
 SMOOTH_FADE = 0.75
@@ -545,7 +545,7 @@ def no_zoom_frames(segments: list[tuple[int, int, int]], spans: list[dict] | Non
     return merged
 
 
-def zoom_shots(segments: list[tuple[int, int, int]], off: list[tuple[int, int]], zoom: str) -> list[tuple[int, int, int, int, float]]:
+def zoom_shots(segments: list[tuple[int, int, int]], off: list[tuple[int, int]], zoom: str, amount: float = ZOOM) -> list[tuple[int, int, int, int, float]]:
     """The picture's parts: (piece number, output frame, source frame, frame count, zoom). A jump
     happens at every other cut, and also where a no-zoom part starts or ends inside a piece. Same
     levels as the "cuts" mode of zoomTrack in src/lib/zoom.ts."""
@@ -557,31 +557,31 @@ def zoom_shots(segments: list[tuple[int, int, int]], off: list[tuple[int, int]],
         ordered = sorted(marks)
         for a, b in zip(ordered, ordered[1:]):
             inside = any(x <= start + a and start + b <= y for x, y in off)
-            level = ZOOM if zoom == "cuts" and i % 2 == 1 and not inside else 1.0
+            level = amount if zoom == "cuts" and i % 2 == 1 and not inside else 1.0
             shots.append((i, start + a, trim + a, b - a, level))
     return shots
 
 
-def smooth_zoom_expr(start: int, frames: int, off: list[tuple[int, int]]) -> str:
+def smooth_zoom_expr(start: int, frames: int, off: list[tuple[int, int]], amount: float = ZOOM, period: float = SMOOTH_PERIOD) -> str:
     """The zoom of a piece as an ffmpeg expression of its frame number (`in` counts from 1). Same as
     the "smooth" mode of zoomTrack in src/lib/zoom.ts."""
     frame = f"(in-1+{start})"
     fade = SMOOTH_FADE * FPS
-    k = f"(0.5-0.5*cos(2*PI*{frame}/{SMOOTH_PERIOD * FPS}))"
+    k = f"(0.5-0.5*cos(2*PI*{frame}/{period * FPS}))"
     for a, b in off:
         if a - fade <= start + frames and b + fade >= start:  # only the parts near this piece
             x = f"clip(max(max({a}-{frame},{frame}-{b}),0)/{fade},0,1)"
             k += f"*({x}*{x}*(3-2*{x}))"
-    return f"(1+{ZOOM - 1:.4f}*{k})"
+    return f"(1+{amount - 1:.4f}*{k})"
 
 
-def smooth_filter(aspect: float, focus: tuple[float, float] | None, zoom_expr: str, size: tuple[int, int]) -> str:
+def smooth_filter(aspect: float, focus: tuple[float, float] | None, zoom_expr: str, size: tuple[int, int], amount: float = ZOOM) -> str:
     """ffmpeg: the piece with its zoom changing every frame. Scale and crop only move in whole pixels,
     which shakes a slow zoom, so `perspective` does the zoom instead (it places the picture between
     pixels). It works on a copy as big as the closest zoom, so a sharp source stays sharp, then shrinks."""
     W, H = size
     w0, h0, cx, cy, ox, oy = frame_at_one(aspect, focus, size)
-    bw, bh = round(W * ZOOM / 2) * 2, round(H * ZOOM / 2) * 2
+    bw, bh = round(W * amount / 2) * 2, round(H * amount / 2) * 2
     kx, ky = bw / W, bh / H
     sw, sh = max(bw, round(w0 * kx / 2) * 2), max(bh, round(h0 * ky / 2) * 2)
     px, py = min(max(round(cx * kx), 0), sw - bw), min(max(round(cy * ky), 0), sh - bh)
@@ -620,6 +620,8 @@ def ffmpeg_command(
     size: tuple[int, int] = (WIDTH, HEIGHT),
     logo: dict | None = None,
     no_zoom: list[dict] | None = None,
+    zoom_amount: float = ZOOM,
+    zoom_period: float = SMOOTH_PERIOD,
 ) -> list[str]:
     """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles.
     no_zoom: parts with Auto zoom turned off (source seconds)."""
@@ -631,13 +633,17 @@ def ffmpeg_command(
     parts, video_labels, audio_labels = [], [], []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
-    for k, (i, out_frame, trim, frames, level) in enumerate(zoom_shots(pieces, off, zoom)):
+    for k, (i, out_frame, trim, frames, level) in enumerate(zoom_shots(pieces, off, zoom, zoom_amount)):
         a, b = trim / FPS, (trim + frames) / FPS
         # Framed on its own (face crop, Auto zoom), so parts can differ before they are joined. The face
         # is found per whole piece, so it doesn't move at a no-zoom edge.
         piece_trim, piece_frames = pieces[i][1], pieces[i][2]
         focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)
-        framing = smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off), size) if zoom == "smooth" else piece_filter(aspect, focus, level, size)
+        framing = (
+            smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off, zoom_amount, zoom_period), size, zoom_amount)
+            if zoom == "smooth"
+            else piece_filter(aspect, focus, level, size)
+        )
         parts.append(
             f"[0:v]trim=start={a:.6f}:end={b:.6f},setpts=PTS-STARTPTS,fps={FPS},"
             f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={frames},setpts=PTS-STARTPTS,"
@@ -733,6 +739,8 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     FORMATS.get(style.get("format"), (WIDTH, HEIGHT)),
                     logo,
                     edit.get("noZoom"),
+                    float(style.get("zoomAmount") or ZOOM),
+                    float(style.get("zoomPeriod") or SMOOTH_PERIOD),
                 ),
                 cwd=workdir,
                 capture_output=True,

@@ -4,7 +4,7 @@ import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEff
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
-import { ZOOM, zoomTrack } from "@/lib/zoom";
+import { type ZoomStyle, zoomTrack } from "@/lib/zoom";
 
 type Word = { text: string; start: number; end: number };
 // A word as the script draws it (a fixed run of words is one item, with the new text).
@@ -28,7 +28,7 @@ type Props = {
 	onKeep: (start: number, end: number) => void; // keep it (bring back what was cut there)
 	onAuto: (start: number, end: number) => void; // forget the hand cuts and keeps there (back to the automatic cuts)
 	handSpans: { start: number; end: number }[]; // where cuts were changed by hand (marked on the timeline)
-	zoomMode: string; // Auto zoom: "off" hides the zoom strip
+	zoomStyle: ZoomStyle; // Auto zoom: "off" hides the zoom strip
 	noZoom: { start: number; end: number }[]; // parts with Auto zoom turned off
 	onZoomRange: (start: number, end: number, on: boolean) => void;
 	onPlayFrom: (source: number) => void; // play from here (to hear a cut edge just moved)
@@ -100,7 +100,7 @@ export function Timeline({
 	onKeep,
 	onAuto,
 	handSpans,
-	zoomMode,
+	zoomStyle,
 	noZoom,
 	onZoomRange,
 	onPlayFrom,
@@ -156,8 +156,9 @@ export function Timeline({
 	);
 
 	const chips = useMemo(() => makeChips(words, scriptWords, gone), [words, scriptWords, gone]);
-	const zoomOn = zoomMode !== "off";
-	const zoomAt = useMemo(() => zoomTrack(segments, noZoom, zoomMode), [segments, noZoom, zoomMode]);
+	const zoomOn = zoomStyle.zoom !== "off";
+	const zoomAmount = zoomStyle.zoomAmount;
+	const zoomAt = useMemo(() => zoomTrack(segments, noZoom, zoomStyle), [segments, noZoom, zoomStyle]);
 	// The cut parts of the source, merged (for shading with Show cuts on).
 	const cutSpans = useMemo(() => {
 		const spans: [number, number][] = [];
@@ -262,7 +263,7 @@ export function Timeline({
 				const t = timeAt(left + px);
 				if (!segments.some((s) => t * FPS >= s.trim && t * FPS < s.trim + s.frames)) continue;
 				if (noZoom.some((n) => t >= n.start && t < n.end)) ctx.fillStyle = "rgba(127, 127, 127, 0.4)";
-				else ctx.fillStyle = `rgba(147, 51, 234, ${0.25 + (0.75 * (zoomAt(Math.round(toOutSeconds(t, segments) * FPS)) - 1)) / (ZOOM - 1)})`;
+				else ctx.fillStyle = `rgba(147, 51, 234, ${0.25 + (0.75 * (zoomAt(Math.round(toOutSeconds(t, segments) * FPS)) - 1)) / (zoomAmount - 1)})`;
 				ctx.fillRect(px, ZOOM_TOP, 1, ZOOM_STRIP);
 			}
 		}
@@ -291,7 +292,7 @@ export function Timeline({
 			ctx.fillRect(0, WAVE_TOP, w, WAVE);
 			ctx.globalAlpha = 1;
 		}
-	}, [scale, showCuts, cutSpans, segments, peaks, timeAt, handSpans, zoomOn, zoomAt, noZoom]);
+	}, [scale, showCuts, cutSpans, segments, peaks, timeAt, handSpans, zoomOn, zoomAmount, zoomAt, noZoom]);
 
 	// Zooming keeps the moment under the mouse (or the playhead) where it was.
 	useLayoutEffect(() => {

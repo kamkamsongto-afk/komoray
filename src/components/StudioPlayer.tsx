@@ -107,7 +107,7 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 	// Face crop and Auto zoom are drawn by the engine, frame by frame, so they change exactly at each cut.
 	const focuses = useMemo(() => pieces.map((p) => focusFor(faces ?? null, p.start, p.end)), [pieces, faces]);
 	const size = outputSize(subtitle);
-	const zoomAt = useMemo(() => zoomTrack(segments, noZoom ?? [], subtitle.zoom), [segments, noZoom, subtitle.zoom]);
+	const zoomAt = useMemo(() => zoomTrack(segments, noZoom ?? [], subtitle), [segments, noZoom, subtitle]);
 	useEffect(
 		() => engineRef.current?.setFraming((piece, aspect, out) => framePiece(aspect, focuses[piece] ?? null, zoomAt(Math.round(out * FPS)), size), size.width),
 		[focuses, zoomAt, size, loaded],

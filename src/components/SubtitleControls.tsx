@@ -17,6 +17,7 @@ import {
 	MAX_LOGO_LENGTH,
 	type SubtitleStyle,
 	type Zoom,
+	ZOOM_SPEEDS,
 } from "@/lib/subtitle-style";
 
 type Props = {
@@ -294,6 +295,38 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 					<option value="cuts">Jump at every cut</option>
 				</select>
 			</label>
+			{style.zoom !== "off" && (
+				<label className="flex items-center gap-3 text-sm text-foreground/70" title="How much closer the picture gets">
+					<span className="w-24 shrink-0">Zoom amount</span>
+					<input
+						type="range"
+						min={LIMITS.zoomAmount.min}
+						max={LIMITS.zoomAmount.max}
+						step={LIMITS.zoomAmount.step}
+						value={style.zoomAmount}
+						onChange={(e) => onChange({ ...style, zoomAmount: Number(e.target.value) })}
+						className="flex-1"
+					/>
+					<span className="w-8 text-right tabular-nums">{Math.round((style.zoomAmount - 1) * 100)}%</span>
+				</label>
+			)}
+			{style.zoom === "smooth" && (
+				<div className="flex items-center gap-3 text-sm text-foreground/70">
+					<span className="w-24 shrink-0">Zoom speed</span>
+					<div className="flex gap-1">
+						{ZOOM_SPEEDS.map((s) => (
+							<button
+								key={s.period}
+								type="button"
+								onClick={() => onChange({ ...style, zoomPeriod: s.period })}
+								className={`rounded-md border px-2.5 py-1 ${style.zoomPeriod === s.period ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"}`}
+							>
+								{s.name}
+							</button>
+						))}
+					</div>
+				</div>
+			)}
 			<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>
 			{footer}
 		</div>
