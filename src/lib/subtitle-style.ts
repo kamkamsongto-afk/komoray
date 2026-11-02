@@ -91,6 +91,12 @@ export const FONTS: Record<FontId, { name: string; thai: boolean; height: number
 	bebas: { name: "Bebas Neue", thai: false, height: 1.3 },
 };
 
+// None of FONTS has Russian-style letters, so text with them is drawn in this one instead of a system
+// font picked by chance (too big, words nearly touching). Its letters are drawn as big as Kanit's, so
+// it counts as Kanit's height here; render.py shrinks it to match (CYRILLIC_SCALE).
+export const CYRILLIC_FONT = { name: "Fira Sans", height: FONTS.kanit.height };
+export const hasCyrillic = (text: string) => /[Ѐ-ԯ]/.test(text);
+
 const clamp = (n: number, { min, max }: { min: number; max: number }) => Math.min(max, Math.max(min, n));
 
 // One of our fonts, or the user's own with its name and height; anything else is Kanit.

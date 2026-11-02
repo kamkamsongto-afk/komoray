@@ -1,22 +1,24 @@
 "use client";
 
-import { Anton, Bebas_Neue, Chakra_Petch, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
+import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
 import type { OwnFont } from "@/lib/font-info";
-import { type FontId, fontMetrics, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
+import { CYRILLIC_FONT, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { motionScale } from "@/lib/motion";
 import { FPS, type Line, ZOOM_ORIGIN } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
-const kanit = Kanit({ weight: "500", subsets: ["thai", "latin"] });
-const prompt = Prompt({ weight: "500", subsets: ["thai", "latin"] });
-const mitr = Mitr({ weight: "500", subsets: ["thai", "latin"] });
-const sarabun = Sarabun({ weight: "600", subsets: ["thai", "latin"] });
-const chakra = Chakra_Petch({ weight: "600", subsets: ["thai", "latin"] });
-const poppins = Poppins({ weight: "600", subsets: ["latin"] });
-const anton = Anton({ weight: "400", subsets: ["latin"] });
-const bebas = Bebas_Neue({ weight: "400", subsets: ["latin"] });
+// latin-ext: the letters of Polish, Norwegian and the like. Only downloaded when a page uses them.
+const kanit = Kanit({ weight: "500", subsets: ["thai", "latin", "latin-ext"] });
+const prompt = Prompt({ weight: "500", subsets: ["thai", "latin", "latin-ext"] });
+const mitr = Mitr({ weight: "500", subsets: ["thai", "latin", "latin-ext"] });
+const sarabun = Sarabun({ weight: "600", subsets: ["thai", "latin", "latin-ext"] });
+const chakra = Chakra_Petch({ weight: "600", subsets: ["thai", "latin", "latin-ext"] });
+const poppins = Poppins({ weight: "600", subsets: ["latin", "latin-ext"] });
+const anton = Anton({ weight: "400", subsets: ["latin", "latin-ext"] });
+const bebas = Bebas_Neue({ weight: "400", subsets: ["latin", "latin-ext"] });
+const fira = Fira_Sans({ weight: "500", subsets: ["cyrillic", "latin", "latin-ext"] }); // for Russian and the like (CYRILLIC_FONT)
 const FONT_FACES: Record<FontId, { family: string; weight: number }> = {
 	kanit: { family: kanit.style.fontFamily, weight: 500 },
 	prompt: { family: prompt.style.fontFamily, weight: 500 },
@@ -173,7 +175,14 @@ export function PlayerFrame({
 			? { family: `"${ownFamily(subtitle.ownFont.version)}", ${kanit.style.fontFamily}`, weight: 400 }
 			: (FONT_FACES[subtitle.font as FontId] ?? FONT_FACES.kanit);
 	// Letters as big as the final video draws them (see FONTS[].height), rows as far apart.
-	const em = fontMetrics(subtitle).height;
+	const ownEm = fontMetrics(subtitle).height;
+	// Text in Russian and the like uses a font that has its letters, as the final video does (font_tag in render.py).
+	const textFace = (value: string) =>
+		subtitle.font !== "own" && hasCyrillic(value)
+			? { family: fira.style.fontFamily, weight: 500, em: CYRILLIC_FONT.height }
+			: { ...face, em: ownEm };
+	const lineFace = textFace(line?.text ?? "");
+	const em = lineFace.em;
 	const boxed = subtitle.look === "box";
 	// Box: letters on a dark box. Every other look: white letters with a black outline.
 	const letters: CSSProperties = boxed
@@ -250,8 +259,8 @@ export function PlayerFrame({
 								right: SIDE_MARGIN,
 								bottom: H * subtitle.position,
 								textAlign: "center",
-								fontFamily: face.family,
-								fontWeight: face.weight,
+								fontFamily: lineFace.family,
+								fontWeight: lineFace.weight,
 								fontSize: (subtitle.size / em) * motion.line,
 								lineHeight: em,
 								color: "white",
@@ -269,6 +278,7 @@ export function PlayerFrame({
 						const opacity = bannerOpacity(b, outTime);
 						if (!opacity) return null;
 						const size = b.scale ?? 1;
+						const bannerFace = textFace(`${b.text} ${b.sub}`);
 						const box: CSSProperties = {
 							background: subtitle.color,
 							padding: `${(BANNER.padding / 2) * size}px ${BANNER.padding * size}px`,
@@ -288,10 +298,10 @@ export function PlayerFrame({
 									position: "absolute",
 									...spot,
 									textAlign: "center",
-									fontFamily: face.family,
-									fontWeight: face.weight,
-									fontSize: (BANNER.size / em) * size,
-									lineHeight: em,
+									fontFamily: bannerFace.family,
+									fontWeight: bannerFace.weight,
+									fontSize: (BANNER.size / bannerFace.em) * size,
+									lineHeight: bannerFace.em,
 									color: bannerInk(subtitle.color),
 									opacity,
 								}}
@@ -307,7 +317,7 @@ export function PlayerFrame({
 									{cleanBannerText(b.sub) && (
 										<>
 											<br />
-											<span style={{ ...box, fontSize: (BANNER.subSize / em) * size }}>{cleanBannerText(b.sub)}</span>
+											<span style={{ ...box, fontSize: (BANNER.subSize / bannerFace.em) * size }}>{cleanBannerText(b.sub)}</span>
 										</>
 									)}
 									{movable && (
@@ -342,10 +352,10 @@ export function PlayerFrame({
 								position: "absolute",
 								[subtitle.logoAt.startsWith("bottom") ? "bottom" : "top"]: LOGO.top,
 								[subtitle.logoAt.endsWith("right") ? "right" : "left"]: LOGO.side,
-								fontFamily: face.family,
-								fontWeight: face.weight,
-								fontSize: LOGO.size / em,
-								lineHeight: em,
+								fontFamily: textFace(subtitle.logo).family,
+								fontWeight: textFace(subtitle.logo).weight,
+								fontSize: LOGO.size / textFace(subtitle.logo).em,
+								lineHeight: textFace(subtitle.logo).em,
 								color: "white",
 								WebkitTextStroke: `${LOGO.outline * 2}px black`,
 								paintOrder: "stroke fill",

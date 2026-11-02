@@ -46,6 +46,7 @@ image = (
                 ("poppins", "Poppins-SemiBold.ttf"),
                 ("anton", "Anton-Regular.ttf"),
                 ("bebasneue", "BebasNeue-Regular.ttf"),
+                ("firasans", "FiraSans-Medium.ttf"),
             ]
         ],
         "fc-cache -f",
@@ -76,6 +77,12 @@ FONTS = {
     "anton": "Anton",
     "bebas": "Bebas Neue",
 }
+# None of FONTS has Russian-style letters: text with them uses this one, or libass picks a system font
+# (too big, words nearly touching). Same as CYRILLIC_FONT in src/lib/subtitle-style.ts.
+# libass makes a font's full height the font size: Kanit's is 1.58 ems, this one's 1.2, so this one is
+# asked for smaller to draw letters as big as Kanit's.
+CYRILLIC_FONT = "Fira Sans Medium"
+CYRILLIC_SCALE = 1.2 / 1.58
 BOX_PADDING = 20  # the Box look: space around the letters, px
 LOGO = {"size": 52, "outline": 4, "side": 60, "top": 110}  # the channel name in a corner (LOGO in PlayerFrame.tsx)
 
@@ -100,7 +107,13 @@ def banner_ink(hex_colour: str) -> str:
     return "#111111" if 0.299 * r + 0.587 * g + 0.114 * b > 160 else "#FFFFFF"
 
 
-def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16") -> list[str]:
+def font_tag(text: str, own_font: bool, size: float) -> str:
+    """The ASS tags for text with Russian-style letters at this size (the user's own font is left alone:
+    they picked it)."""
+    return f"\\fn{CYRILLIC_FONT}\\fs{size * CYRILLIC_SCALE:.1f}" if not own_font and re.search("[Ѐ-ԯ]", text) else ""
+
+
+def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16", own_font: bool = False) -> list[str]:
     """One event per banner, faded in and out, in its place, or with its middle where it was dragged
     (x, y: share of the width / height), at its size (scale). Text was checked by the app (readBanners)."""
     events = []
@@ -117,7 +130,9 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         spot = f"\\an5\\pos({js_round(float(x) * width)},{js_round(float(y) * height)})" if x is not None and y is not None else ""
         scale = f"\\fscx{size * 100:g}\\fscy{size * 100:g}" if size != 1 else ""
         sub = ass_text(str(b.get("sub", ""))).strip()
-        body = f"{{{spot}\\fad({fade},{fade})\\xbord{pad_x}\\ybord{pad_y}{scale}}}{text}" + (f"\\N{{\\fs{BANNER['sub_size']}}}{sub}" if sub else "")
+        font = font_tag(text + sub, own_font, BANNER["size"])
+        sub_size = BANNER["sub_size"] * (CYRILLIC_SCALE if font else 1)
+        body = f"{{{spot}{font}\\fad({fade},{fade})\\xbord{pad_x}\\ybord{pad_y}{scale}}}{text}" + (f"\\N{{\\fs{sub_size:g}}}{sub}" if sub else "")
         places = BANNER_TOP.get(shape, BANNER_TOP["9:16"])
         top = js_round(places.get(b.get("place"), places["top"]) * height)
         events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,{top},,{body}")
@@ -375,13 +390,15 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
 
     brand = style.get("color", "#FFE600")
     highlight = ass_colour(brand)
-    events = banner_events(banners or [], video_h, style.get("format", "9:16"))
+    own_font = style["font"] == "own"
+    events = banner_events(banners or [], video_h, style.get("format", "9:16"), own_font)
     # The channel name stays in its corner for the whole video.
     # (A logo picture, if there is one, is put on by FFmpeg instead: logo_filter.)
     logo = "" if style.get("logoUrl") else ass_text(str(style.get("logo") or "")).replace("\n", " ").strip()
     if logo:
         total = sum(frames for _, _, frames in segments) / FPS
-        events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{logo}")
+        logo_font = font_tag(logo, own_font, LOGO["size"])
+        events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{{{logo_font}}}{logo}")
     logo_align = {"top-left": 7, "top-right": 9, "bottom-left": 1, "bottom-right": 3}.get(style.get("logoAt"), 7)
     for i, line in enumerate(lines):
         start = line[0]["start"]
@@ -393,8 +410,10 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         row2 = second_row(parts) if look == "two" else None
         if row2 is not None:
             parts[row2] = "\\N" + parts[row2].lstrip()
+        line_font = font_tag("".join(parts), own_font, size)
+        line_font = f"{{{line_font}}}" if line_font else ""
         if look != "highlight" and motion != "bounce":
-            events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{pop_tags(motion, 0)}{''.join(parts)}")
+            events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue
         # Highlight / Bounce: one event per word, that word yellow (or bouncing) until the next one starts.
         for k in range(len(line)):
@@ -408,7 +427,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             on = (f"\\1c{highlight}" if look == "highlight" else "") + (scale_tags(BOUNCE, 0) if bounce else "")
             off = ("\\1c&H00FFFFFF&" if look == "highlight" else "") + ("\\fscx100\\fscy100" if bounce else "")
             text = "".join(f"{{{on}}}{p}{{{off}}}" if j == k and on else p for j, p in enumerate(parts))
-            events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{pop_tags(motion, since)}{text}")
+            events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, since)}{text}")
 
     # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
     boxed = look == "box"

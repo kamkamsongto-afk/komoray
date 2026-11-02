@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 import { PhoneUpload } from "@/components/PhoneUpload";
+import { browserLanguage, isLanguage, LANGUAGES } from "@/lib/languages";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
 
@@ -29,7 +30,7 @@ export default function UploadPage() {
 		try {
 			saved = localStorage.getItem(LANGUAGE_KEY);
 		} catch {}
-		setLanguageState(saved === "th" || saved === "en" ? saved : navigator.language.toLowerCase().startsWith("th") ? "th" : "en");
+		setLanguageState(isLanguage(saved) ? saved : browserLanguage(navigator.language));
 	}, []);
 	const setLanguage = (value: string) => {
 		setLanguageState(value);
@@ -234,8 +235,11 @@ export default function UploadPage() {
 							disabled={analyzing}
 							className="rounded-lg border border-foreground/20 bg-background px-3 py-2"
 						>
-							<option value="en">English</option>
-							<option value="th">ไทย</option>
+							{LANGUAGES.map((l) => (
+								<option key={l.code} value={l.code}>
+									{l.name}
+								</option>
+							))}
 						</select>
 						<button
 							onClick={() => void findSilences()}

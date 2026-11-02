@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
+import { isLanguage } from "@/lib/languages";
 import { facesFor, mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
@@ -19,6 +20,7 @@ type EditFile = Parameters<typeof mergeThaiEdit>[0] & { wordsJoined?: boolean };
 export async function POST(request: Request) {
 	const { key, language } = (await request.json()) as { key?: string; language?: string };
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
+	if (language !== undefined && !isLanguage(language)) return Response.json({ error: "We don't support that language yet" }, { status: 400 });
 
 	// Deepgram can't reach a computer at home to deliver the result, so say so plainly.
 	if (["localhost", "127.0.0.1"].includes(new URL(request.url).hostname)) {
