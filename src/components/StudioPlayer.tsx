@@ -5,7 +5,8 @@ import { createDebugLog, type DebugLog } from "@/lib/debug-log";
 import { StudioEngine, type StudioMedia } from "@/lib/player/engine";
 import { focusFor, framePiece } from "@/lib/framing";
 import { outputSize } from "@/lib/subtitle-style";
-import { FPS, zoomOf } from "@/lib/timeline";
+import { FPS } from "@/lib/timeline";
+import { zoomTrack } from "@/lib/zoom";
 import { PlayerFrame } from "./PlayerFrame";
 import { type PreviewHandle, type PreviewProps, toPieces } from "./PreviewPlayer";
 
@@ -21,7 +22,7 @@ const SAMPLE_MS = 250; // debug mode: how often the engine's state is written do
 // The final video, played by our own engine (lib/player/engine.ts) on a canvas: smooth cuts on
 // every browser, including Safari on iPhone, iPad and Mac. Same controls and subtitles as PreviewPlayer.
 export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlayer(
-	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, faces },
+	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, faces, noZoom },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -106,9 +107,10 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 	// Face crop and Auto zoom are drawn by the engine, frame by frame, so they change exactly at each cut.
 	const focuses = useMemo(() => pieces.map((p) => focusFor(faces ?? null, p.start, p.end)), [pieces, faces]);
 	const size = outputSize(subtitle);
+	const zoomAt = useMemo(() => zoomTrack(segments, noZoom ?? [], subtitle.zoom), [segments, noZoom, subtitle.zoom]);
 	useEffect(
-		() => engineRef.current?.setFraming((piece, aspect) => framePiece(aspect, focuses[piece] ?? null, zoomOf(piece, subtitle.zoom), size), size.width),
-		[focuses, subtitle.zoom, size, loaded],
+		() => engineRef.current?.setFraming((piece, aspect, out) => framePiece(aspect, focuses[piece] ?? null, zoomAt(Math.round(out * FPS)), size), size.width),
+		[focuses, zoomAt, size, loaded],
 	);
 
 	useImperativeHandle(

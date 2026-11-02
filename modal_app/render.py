@@ -141,10 +141,14 @@ DEFAULT_STYLE = {
     "logoAt": "top-left",  # or top-right, bottom-left, bottom-right
     "logoSize": 180,  # the logo picture's width, px (logoUrl: a link to the picture, sent by the app)
     "logoOpacity": 1,
-    "zoom": "off",  # Auto zoom: "cuts" = every other kept piece a little closer
+    "zoom": "off",  # Auto zoom: "cuts" = every other kept piece a little closer, "smooth" = a slow glide
     "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
 }
-ZOOM = 1.12  # Auto zoom (ZOOM in src/lib/timeline.ts)
+# Auto zoom: the closest it gets, seconds to glide in and out, seconds to settle around a no-zoom part.
+# Same as src/lib/zoom.ts.
+ZOOM = 1.12
+SMOOTH_PERIOD = 12
+SMOOTH_FADE = 0.75
 CUT_FADE = 0.004  # seconds of sound faded in and out at every cut
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
 
@@ -468,11 +472,10 @@ def focus_for(faces: dict | None, start: float, end: float) -> tuple[float, floa
     return median([f[1] for f in pick]), median([f[2] for f in pick])
 
 
-def frame_piece(
-    aspect: float, focus: tuple[float, float] | None, zoom: float, size: tuple[int, int] = (WIDTH, HEIGHT)
-) -> tuple[float, float, float, float]:
-    """Where the whole source picture goes in the final video's frame (x, y, w, h): cropped around
-    the face, zoomed around it. Same as framePiece in src/lib/framing.ts."""
+def frame_at_one(
+    aspect: float, focus: tuple[float, float] | None, size: tuple[int, int]
+) -> tuple[float, float, float, float, float, float]:
+    """The picture before any zoom: its size, the crop's corner, and the point zoom grows around."""
     W, H = size
     w0 = max(W, H * aspect)
     h0 = w0 / aspect
@@ -484,6 +487,15 @@ def frame_piece(
         oy = min(max((fy * h0 - cy) / H, FACE_EDGE), 1 - FACE_EDGE) * H
     else:
         ox, oy = ZOOM_ORIGIN[0] * W, ZOOM_ORIGIN[1] * H
+    return w0, h0, cx, cy, ox, oy
+
+
+def frame_piece(
+    aspect: float, focus: tuple[float, float] | None, zoom: float, size: tuple[int, int] = (WIDTH, HEIGHT)
+) -> tuple[float, float, float, float]:
+    """Where the whole source picture goes in the final video's frame (x, y, w, h): cropped around
+    the face, zoomed around it. Same as framePiece in src/lib/framing.ts."""
+    w0, h0, cx, cy, ox, oy = frame_at_one(aspect, focus, size)
     return -(cx * zoom + ox * (zoom - 1)), -(cy * zoom + oy * (zoom - 1)), w0 * zoom, h0 * zoom
 
 
@@ -494,6 +506,74 @@ def piece_filter(aspect: float, focus: tuple[float, float] | None, zoom: float, 
     sw, sh = max(W, round(w / 2) * 2), max(H, round(h / 2) * 2)
     px, py = min(max(round(-x), 0), sw - W), min(max(round(-y), 0), sh - H)
     return f"scale={sw}:{sh},crop={W}:{H}:{px}:{py}"
+
+
+def no_zoom_frames(segments: list[tuple[int, int, int]], spans: list[dict] | None) -> list[tuple[int, int]]:
+    """Parts with zoom turned off (source seconds) as frames of the final video: [from, to), merged
+    where they touch. Same as noZoomFrames in src/lib/zoom.ts."""
+    ranges = []
+    for start, trim, frames in segments:
+        for n in spans or []:
+            a, b = max(js_round(n["start"] * FPS), trim), min(js_round(n["end"] * FPS), trim + frames)
+            if b > a:
+                ranges.append((start + a - trim, start + b - trim))
+    merged: list[tuple[int, int]] = []
+    for a, b in sorted(ranges):
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def zoom_shots(segments: list[tuple[int, int, int]], off: list[tuple[int, int]], zoom: str) -> list[tuple[int, int, int, int, float]]:
+    """The picture's parts: (piece number, output frame, source frame, frame count, zoom). A jump
+    happens at every other cut, and also where a no-zoom part starts or ends inside a piece. Same
+    levels as the "cuts" mode of zoomTrack in src/lib/zoom.ts."""
+    shots = []
+    for i, (start, trim, frames) in enumerate(segments):
+        marks = {0, frames}
+        if zoom == "cuts":
+            marks |= {min(max(edge - start, 0), frames) for r in off for edge in r}
+        ordered = sorted(marks)
+        for a, b in zip(ordered, ordered[1:]):
+            inside = any(x <= start + a and start + b <= y for x, y in off)
+            level = ZOOM if zoom == "cuts" and i % 2 == 1 and not inside else 1.0
+            shots.append((i, start + a, trim + a, b - a, level))
+    return shots
+
+
+def smooth_zoom_expr(start: int, frames: int, off: list[tuple[int, int]]) -> str:
+    """The zoom of a piece as an ffmpeg expression of its frame number (`in` counts from 1). Same as
+    the "smooth" mode of zoomTrack in src/lib/zoom.ts."""
+    frame = f"(in-1+{start})"
+    fade = SMOOTH_FADE * FPS
+    k = f"(0.5-0.5*cos(2*PI*{frame}/{SMOOTH_PERIOD * FPS}))"
+    for a, b in off:
+        if a - fade <= start + frames and b + fade >= start:  # only the parts near this piece
+            x = f"clip(max(max({a}-{frame},{frame}-{b}),0)/{fade},0,1)"
+            k += f"*({x}*{x}*(3-2*{x}))"
+    return f"(1+{ZOOM - 1:.4f}*{k})"
+
+
+def smooth_filter(aspect: float, focus: tuple[float, float] | None, zoom_expr: str, size: tuple[int, int]) -> str:
+    """ffmpeg: the piece with its zoom changing every frame. Scale and crop only move in whole pixels,
+    which shakes a slow zoom, so `perspective` does the zoom instead (it places the picture between
+    pixels). It works on a copy as big as the closest zoom, so a sharp source stays sharp, then shrinks."""
+    W, H = size
+    w0, h0, cx, cy, ox, oy = frame_at_one(aspect, focus, size)
+    bw, bh = round(W * ZOOM / 2) * 2, round(H * ZOOM / 2) * 2
+    kx, ky = bw / W, bh / H
+    sw, sh = max(bw, round(w0 * kx / 2) * 2), max(bh, round(h0 * ky / 2) * 2)
+    px, py = min(max(round(cx * kx), 0), sw - bw), min(max(round(cy * ky), 0), sh - bh)
+    ox, oy = ox * kx, oy * ky
+    corner = lambda p, o: f"(({p}+{o:.3f}*({zoom_expr}-1))/{zoom_expr})"
+    left, right, top, bottom = corner(0, ox), corner(bw, ox), corner(0, oy), corner(bh, oy)
+    return (
+        f"scale={sw}:{sh},crop={bw}:{bh}:{px}:{py},"
+        f"perspective=x0='{left}':y0='{top}':x1='{right}':y1='{top}':x2='{left}':y2='{bottom}':x3='{right}':y3='{bottom}'"
+        f":interpolation=linear:eval=frame,scale={W}:{H}"
+    )
 
 
 def display_aspect(path: Path) -> float:
@@ -520,32 +600,42 @@ def ffmpeg_command(
     faces: dict | None = None,
     size: tuple[int, int] = (WIDTH, HEIGHT),
     logo: dict | None = None,
+    no_zoom: list[dict] | None = None,
 ) -> list[str]:
-    """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles."""
+    """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles.
+    no_zoom: parts with Auto zoom turned off (source seconds)."""
     aspect = display_aspect(src)
     # The pieces in whole frames of the final video, as the preview has them (StudioPlayer): each piece's
     # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
     pieces = frame_segments(keeps)
-    parts, labels = [], []
-    for i, (_, trim, frames) in enumerate(pieces):
-        a, b, length = trim / FPS, (trim + frames) / FPS, frames / FPS
-        # Each piece is framed on its own (face crop, Auto zoom), so pieces can differ before they are joined.
-        piece_zoom = ZOOM if zoom == "cuts" and i % 2 == 1 else 1.0
-        focus = focus_for(faces, a, b)
+    off = no_zoom_frames(pieces, no_zoom)
+    parts, video_labels, audio_labels = [], [], []
+    # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
+    # picture and sound are joined separately. Both add up to the same whole frames.
+    for k, (i, out_frame, trim, frames, level) in enumerate(zoom_shots(pieces, off, zoom)):
+        a, b = trim / FPS, (trim + frames) / FPS
+        # Framed on its own (face crop, Auto zoom), so parts can differ before they are joined. The face
+        # is found per whole piece, so it doesn't move at a no-zoom edge.
+        piece_trim, piece_frames = pieces[i][1], pieces[i][2]
+        focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)
+        framing = smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off), size) if zoom == "smooth" else piece_filter(aspect, focus, level, size)
         parts.append(
             f"[0:v]trim=start={a:.6f}:end={b:.6f},setpts=PTS-STARTPTS,fps={FPS},"
             f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={frames},setpts=PTS-STARTPTS,"
-            f"{piece_filter(aspect, focus, piece_zoom, size)},setsar=1[v{i}]"
+            f"{framing},setsar=1[v{k}]"
         )
-        labels.append(f"[v{i}]")
-        if audio:
+        video_labels.append(f"[v{k}]")
+    if audio:
+        for i, (_, trim, frames) in enumerate(pieces):
+            a, b, length = trim / FPS, (trim + frames) / FPS, frames / FPS
             # A few ms fade in and out at every cut, so the sound doesn't click (FADE_SAMPLES in the preview).
             parts.append(
                 f"[0:a]atrim=start={a:.6f}:end={b:.6f},asetpts=PTS-STARTPTS,apad=whole_dur={length:.6f},atrim=end={length:.6f},"
                 f"afade=t=in:d={CUT_FADE},afade=t=out:st={max(0.0, length - CUT_FADE):.6f}:d={CUT_FADE}[a{i}]"
             )
-            labels.append(f"[a{i}]")
-    parts.append(f"{''.join(labels)}concat=n={len(pieces)}:v=1:a={1 if audio else 0}[cv]" + ("[ca]" if audio else ""))
+            audio_labels.append(f"[a{i}]")
+        parts.append(f"{''.join(audio_labels)}concat=n={len(audio_labels)}:v=0:a=1[ca]")
+    parts.append(f"{''.join(video_labels)}concat=n={len(video_labels)}:v=1:a=0[cv]")
     base = "[cv]"
     if logo:
         # Same place as the preview (PlayerFrame): LOGO side / top px from its corner, size px wide.
@@ -569,6 +659,8 @@ def ffmpeg_command(
     if audio:
         cmd += ["-map", "[ca]", "-c:a", "aac", "-b:a", "160k"]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
+    # The last fps filter can add a frame at the very end: exactly as many frames as the pieces have.
+    cmd += ["-frames:v", str(sum(frames for _, _, frames in pieces))]
     cmd += ["-movflags", "+faststart", str(out)]
     return cmd
 
@@ -621,6 +713,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     edit.get("faces"),
                     FORMATS.get(style.get("format"), (WIDTH, HEIGHT)),
                     logo,
+                    edit.get("noZoom"),
                 ),
                 cwd=workdir,
                 capture_output=True,

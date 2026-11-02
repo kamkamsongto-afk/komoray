@@ -13,10 +13,11 @@ import { readStyle } from "@/lib/subtitle-style";
 //   banners  price tags, calls to action, "follow me" (lib/banners.ts)
 //   manual   parts cut by hand on the timeline (source seconds)
 //   keep     silences kept by hand on the timeline
-//   pace     tight / natural / relaxed: finds the silences again (answers with the new cuts)
+//   noZoom   parts with Auto zoom turned off on the timeline
+//   pace    tight / natural / relaxed: finds the silences again (answers with the new cuts)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, takesApplied, style, banners, pace, manual, keep } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, takesApplied, style, banners, pace, manual, keep, noZoom } = (await request.json()) as {
 		key?: string;
 		pace?: unknown;
 		deleted?: unknown;
@@ -27,6 +28,7 @@ export async function PUT(request: Request) {
 		banners?: unknown;
 		manual?: unknown;
 		keep?: unknown;
+		noZoom?: unknown;
 	};
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
@@ -44,6 +46,7 @@ export async function PUT(request: Request) {
 		banners?: Banner[];
 		manual?: { start: number; end: number }[];
 		keep?: { start: number; end: number }[];
+		noZoom?: { start: number; end: number }[];
 	}>(editKey);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
@@ -62,6 +65,7 @@ export async function PUT(request: Request) {
 	for (const [name, value] of [
 		["manual", manual],
 		["keep", keep],
+		["noZoom", noZoom],
 	] as const) {
 		if (value === undefined) continue;
 		const checked = readSpans(value, edit.duration);

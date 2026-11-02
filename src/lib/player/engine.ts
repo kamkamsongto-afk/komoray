@@ -49,7 +49,7 @@ export class StudioEngine {
 	private ready: Ready[] = [];
 	private shownFrame: VideoFrame | null = null;
 	private shownOut = 0; // final-video time of shownFrame
-	private framing: (piece: number, aspect: number) => Rect = (_, aspect) => framePiece(aspect, null, 1);
+	private framing: (piece: number, aspect: number, out: number) => Rect = (_, aspect) => framePiece(aspect, null, 1);
 	private outWidth = WIDTH;
 	private sizeLogged = false;
 	private pumping = false;
@@ -436,8 +436,9 @@ export class StudioEngine {
 	}
 
 	// Where each piece's picture goes in the final video's frame, outWidth px wide (face crop, Auto
-	// zoom: lib/framing.ts), by piece number and the picture's width / height. Redraws the picture.
-	setFraming(framing: (piece: number, aspect: number) => Rect, outWidth: number) {
+	// zoom: lib/framing.ts), by piece number, the picture's width / height and the final video's
+	// seconds. Redraws the picture.
+	setFraming(framing: (piece: number, aspect: number, out: number) => Rect, outWidth: number) {
 		this.framing = framing;
 		this.outWidth = outWidth;
 		if (this.shownFrame) this.paint(this.shownFrame, this.shownOut);
@@ -469,7 +470,7 @@ export class StudioEngine {
 		const cw = this.canvas.width;
 		const ch = this.canvas.height;
 		const piece = this.pieces.findLastIndex((p) => p.out <= out + EPS);
-		const rect = this.framing(Math.max(0, piece), fw / fh);
+		const rect = this.framing(Math.max(0, piece), fw / fh, out);
 		const k = cw / this.outWidth;
 		if (!this.sizeLogged) {
 			this.sizeLogged = true;

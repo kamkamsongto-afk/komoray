@@ -26,6 +26,7 @@ type Analysis = {
 	banners?: Banner[];
 	manual?: Cut[]; // cut by hand on the timeline
 	keep?: Cut[]; // silences kept by hand on the timeline
+	noZoom?: Cut[]; // parts with Auto zoom turned off on the timeline
 	pace?: Pace;
 	faces?: Faces | null; // where the speaker's face is (found by Modal after the preview copy)
 	facesPending?: boolean;
@@ -215,6 +216,7 @@ export default function EditPage() {
 			banners?: Banner[];
 			manual?: Cut[];
 			keep?: Cut[];
+			noZoom?: Cut[];
 		}) => {
 			if (!key) return;
 			setSaveError("");
@@ -249,9 +251,9 @@ export default function EditPage() {
 		[key],
 	);
 
-	// Undo / Redo for script and timeline edits (deleted and fixed words, hand cuts): what they were
-	// before each change.
-	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[] };
+	// Undo / Redo for script and timeline edits (deleted and fixed words, hand cuts, zoom parts): what
+	// they were before each change.
+	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[]; noZoom: Cut[] };
 	const analysisRef = useRef(analysis);
 	useEffect(() => {
 		analysisRef.current = analysis;
@@ -260,7 +262,7 @@ export default function EditPage() {
 	const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
 	const snapshot = (): Snapshot => {
 		const a = analysisRef.current;
-		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [] };
+		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [], noZoom: a?.noZoom ?? [] };
 	};
 	const remember = useCallback(() => {
 		const h = history.current;
@@ -325,6 +327,15 @@ export default function EditPage() {
 			remember();
 			setAnalysis((a) => (a ? { ...a, ...change } : a));
 			save(change);
+		},
+		[save, remember],
+	);
+
+	const changeNoZoom = useCallback(
+		(noZoom: Cut[]) => {
+			remember();
+			setAnalysis((a) => (a ? { ...a, noZoom } : a));
+			save({ noZoom });
 		},
 		[save, remember],
 	);
@@ -443,6 +454,7 @@ export default function EditPage() {
 			banners: analysis?.banners ?? [],
 			manual: analysis?.manual ?? [],
 			keep: analysis?.keep ?? [],
+			noZoom: analysis?.noZoom ?? [],
 		});
 		setRender({ status: "processing" });
 		try {
@@ -644,6 +656,8 @@ export default function EditPage() {
 				manual={analysis.manual ?? []}
 				keep={analysis.keep ?? []}
 				onTimelineChange={changeTimeline}
+				noZoom={analysis.noZoom ?? []}
+				onNoZoomChange={changeNoZoom}
 				fixes={fixes}
 				onFixesChange={changeFixes}
 				dictionary={dictionary}

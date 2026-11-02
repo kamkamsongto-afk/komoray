@@ -5,7 +5,8 @@ import { createDebugLog, type DebugLog, videoState } from "@/lib/debug-log";
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
 import type { SubtitleStyle } from "@/lib/subtitle-style";
-import { FPS, type Line, type Segment, zoomOf } from "@/lib/timeline";
+import { FPS, type Line, type Segment } from "@/lib/timeline";
+import { zoomTrack } from "@/lib/zoom";
 import { PlayerFrame } from "./PlayerFrame";
 
 export type PreviewHandle = { seek: (sourceSeconds: number) => void; play: () => void; pause: () => void };
@@ -21,6 +22,7 @@ export type PreviewProps = {
 	banners?: Banner[];
 	onBannersChange?: (banners: Banner[]) => void; // a banner dragged or resized on the video
 	faces?: Faces | null; // where the speaker's face is (lib/framing.ts); only the canvas player uses it
+	noZoom?: { start: number; end: number }[]; // parts with Auto zoom turned off (lib/zoom.ts)
 };
 
 // Kept pieces in seconds: play source [start, end) at output time `out`.
@@ -43,7 +45,7 @@ const isSafari = () => /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chrom
 // Safari takes a moment to start a video, which showed as a freeze and a black flash at each cut.
 // Only on Safari: Chrome starts instantly, and decoding two videos at once made it drop frames.
 export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function PreviewPlayer(
-	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, banners, onBannersChange },
+	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, banners, onBannersChange, noZoom },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -272,7 +274,7 @@ export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function Pr
 	}, [playing, pieces, prepareNext, onTime]);
 
 	const line = lines.find((l) => outTime * FPS >= l.from && outTime * FPS < l.to);
-	const zoom = zoomOf(Math.max(0, pieces.findLastIndex((p) => p.out <= outTime + 1e-3)), subtitle.zoom);
+	const zoom = zoomTrack(segments, noZoom ?? [], subtitle.zoom)(Math.round(outTime * FPS));
 	const toggle = () => (playing ? pause() : play());
 
 	// Dragging the bar: final-video time → source time.

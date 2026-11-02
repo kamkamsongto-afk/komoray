@@ -156,6 +156,8 @@ type Props = {
 	manual: Cut[];
 	keep: Cut[];
 	onTimelineChange: (change: { deleted: number[]; manual: Cut[]; keep: Cut[] }) => void;
+	noZoom: Cut[]; // parts with Auto zoom turned off (lib/zoom.ts)
+	onNoZoomChange: (noZoom: Cut[]) => void;
 	fixes: Fix[];
 	onFixesChange: (fixes: Fix[]) => void;
 	// Personal dictionary: apply it once (then onDictionaryApplied), and learn from every fix made here.
@@ -184,6 +186,8 @@ export function ScriptView({
 	manual,
 	keep,
 	onTimelineChange,
+	noZoom,
+	onNoZoomChange,
 	fixes,
 	onFixesChange,
 	dictionary,
@@ -409,6 +413,12 @@ export function ScriptView({
 	};
 	const handSpans = useMemo(() => mergeSpans([...manual, ...keep]), [manual, keep]);
 
+	// Turn Auto zoom on or off for a stretch of the source.
+	const zoomRange = (a: number, b: number, on: boolean) => {
+		const span = { start: a, end: b };
+		onNoZoomChange(on ? subtractSpans(noZoom, [span]) : mergeSpans([...noZoom, span]));
+	};
+
 	// First time the video is opened: cut every earlier try, keep the last one (the user's own
 	// deletions and restores stay as they are on takes they already touched).
 	const takesRef = useRef(false);
@@ -557,6 +567,7 @@ export function ScriptView({
 							banners={banners}
 							onBannersChange={onBannersChange}
 							faces={faces}
+							noZoom={noZoom}
 							onFail={(error) => {
 								reportError("studio player", error.message);
 								setStudioFailed(true);
@@ -575,6 +586,7 @@ export function ScriptView({
 							onPlayingChange={setPlaying}
 							banners={banners}
 							onBannersChange={onBannersChange}
+							noZoom={noZoom}
 						/>
 					) : (
 						<video
@@ -823,6 +835,9 @@ export function ScriptView({
 					onKeep={keepRange}
 					onAuto={autoRange}
 					handSpans={handSpans}
+					zoomMode={subtitle.zoom}
+					noZoom={noZoom}
+					onZoomRange={zoomRange}
 					onPlayFrom={(t) => seek(t)}
 					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}
 				/>

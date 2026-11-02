@@ -282,7 +282,7 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 					</label>
 				</>
 			)}
-			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Every other part is shown a little closer, so cuts look like a second camera">
+			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Jump: every other part is a little closer, like a second camera. Smooth: the picture glides slowly in and out.">
 				<span className="w-24 shrink-0">Auto zoom</span>
 				<select
 					value={style.zoom}
@@ -290,7 +290,8 @@ export function SubtitleControls({ style, onChange, thai, footer }: Props) {
 					className="flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
 				>
 					<option value="off">Off</option>
-					<option value="cuts">Zoom in and out at every cut</option>
+					<option value="smooth">Smooth (slow glide)</option>
+					<option value="cuts">Jump at every cut</option>
 				</select>
 			</label>
 			<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>

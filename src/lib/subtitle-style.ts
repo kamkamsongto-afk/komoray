@@ -7,7 +7,7 @@ import { type Motion, MOTIONS } from "./motion";
 
 export type LogoCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 export const LOGO_CORNERS: Record<LogoCorner, string> = { "top-left": "Top left", "top-right": "Top right", "bottom-left": "Bottom left", "bottom-right": "Bottom right" };
-export type Zoom = "off" | "cuts"; // Auto zoom: "cuts" = every other kept piece a little closer (zoomOf in timeline.ts)
+export type Zoom = "off" | "cuts" | "smooth"; // Auto zoom: a jump at every other cut, or a slow glide (lib/zoom.ts)
 // The final video's shape. Same as FORMATS in render.py.
 export type Format = "9:16" | "1:1" | "16:9";
 // position: where subtitles go when this shape is picked (wide videos keep them near the bottom).
@@ -126,7 +126,7 @@ export function readStyle(value: unknown): SubtitleStyle {
 		// Letters, numbers and simple marks only: it is drawn into the video as subtitle text.
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
 		logoAt: typeof v.logoAt === "string" && v.logoAt in LOGO_CORNERS ? (v.logoAt as LogoCorner) : "top-left",
-		zoom: v.zoom === "cuts" ? "cuts" : "off",
+		zoom: v.zoom === "cuts" || v.zoom === "smooth" ? v.zoom : "off",
 		format: typeof v.format === "string" && v.format in FORMATS ? (v.format as Format) : DEFAULT_STYLE.format,
 		motion: typeof v.motion === "string" && v.motion in MOTIONS ? (v.motion as Motion) : DEFAULT_STYLE.motion,
 	};
