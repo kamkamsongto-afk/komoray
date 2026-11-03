@@ -9,6 +9,7 @@ import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
 import { type Pace, PACES, PADDING } from "@/lib/silences";
 import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpans, type WordFix } from "@/lib/edit";
+import { TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
@@ -46,6 +47,7 @@ const PROXY_POLL_MS = 10000;
 const STYLE_SAVE_DELAY_MS = 600; // dragging a slider changes the style many times a second
 const UNDO_STEPS = 100;
 const SAVE_TRIES = 3;
+const TRANSLATE_TRIES = 3; // tries for one batch of lines; each batch that works starts the count again
 const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
 const NOTIFY_PREF = "komoray.desktopNotify"; // remembers the checkbox in this browser
 
@@ -112,6 +114,7 @@ export default function EditPage() {
 	const [subtitle, setSubtitle] = useState<SubtitleStyle>(readStyle(null));
 	const [loadError, setLoadError] = useState("");
 	const [saveError, setSaveError] = useState("");
+	const [translating, setTranslating] = useState<string | null>(null); // what the Translate menu shows while it works
 	const [render, setRender] = useState<RenderState>({ status: "none" });
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
@@ -503,12 +506,44 @@ export default function EditPage() {
 	function downloadSrt() {
 		if (!analysis) return;
 		const segments = keepSegments(analysis.duration, allCuts(analysis));
-		const srt = toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look, subtitle.size));
+		saveSrt(toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look, subtitle.size)), "");
+	}
+
+	function saveSrt(srt: string, suffix: string) {
 		const link = document.createElement("a");
 		link.href = URL.createObjectURL(new Blob([srt], { type: "application/x-subrip;charset=utf-8" }));
-		link.download = filename.replace(/\.[^.]+$/, "") + ".srt";
+		link.download = filename.replace(/\.[^.]+$/, "") + suffix + ".srt";
 		link.click();
 		URL.revokeObjectURL(link.href);
+	}
+
+	// Translated subtitles as a file. Each call does one batch (api/translate), so keep asking until none are left.
+	async function translateSrt(language: string) {
+		setSaveError("");
+		setTranslating("Translating…");
+		try {
+			for (let tries = 0; tries < TRANSLATE_TRIES; ) {
+				const res = await fetch("/api/translate", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ key, language }),
+				});
+				const data = (await res.json().catch(() => ({}))) as { total?: number; remaining?: number; srt?: string; error?: string };
+				if (!res.ok) {
+					if (++tries === TRANSLATE_TRIES) throw new Error(data.error ?? `Translation failed (${res.status})`);
+					continue;
+				}
+				tries = 0;
+				if (data.srt !== undefined) return saveSrt(data.srt, `.${language}`);
+				setTranslating(`Translating… ${data.total! - data.remaining!} of ${data.total} lines`);
+			}
+		} catch (e) {
+			const error = e instanceof Error ? e.message : String(e);
+			setSaveError(`${error}. Lines already translated are kept, so please try again.`);
+			reportError("translate", error, { key });
+		} finally {
+			setTranslating(null);
+		}
 	}
 
 	return (
@@ -571,6 +606,22 @@ export default function EditPage() {
 					<button onClick={downloadSrt} className="text-xs text-foreground/60 underline hover:text-foreground">
 						⬇️ Subtitles (.srt)
 					</button>
+					<select
+						value=""
+						onChange={(e) => void translateSrt(e.target.value)}
+						disabled={translating !== null}
+						aria-label="Translate subtitles"
+						className="max-w-56 rounded-md border border-foreground/20 bg-background px-1.5 py-0.5 text-xs text-foreground/60 disabled:opacity-60"
+					>
+						<option value="" disabled>
+							{translating ?? "🌐 Translate subtitles (.srt)…"}
+						</option>
+						{TRANSLATIONS.map((l) => (
+							<option key={l.code} value={l.code}>
+								{l.name}
+							</option>
+						))}
+					</select>
 					<label className="flex items-center gap-2 text-xs text-foreground/60">
 						<input type="checkbox" checked={desktopNotify} onChange={(e) => void toggleDesktopNotify(e.target.checked)} />
 						🔔 Notify me on my desktop

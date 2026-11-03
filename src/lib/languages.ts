@@ -25,6 +25,46 @@ export const LANGUAGES = [
 
 export const isLanguage = (code: unknown): code is string => LANGUAGES.some((l) => l.code === code);
 
+// The languages subtitles can be translated into, for .srt files (lib/translate.ts). Wider than the spoken
+// list: nothing here needs Deepgram, line breaks or our fonts. `english` is what Claude is asked for.
+export const TRANSLATIONS = [
+	{ code: "en", name: "English", english: "English" },
+	{ code: "th", name: "ไทย", english: "Thai" },
+	{ code: "es", name: "Español", english: "Spanish" },
+	{ code: "fr", name: "Français", english: "French" },
+	{ code: "de", name: "Deutsch", english: "German" },
+	{ code: "pt", name: "Português", english: "Portuguese" },
+	{ code: "it", name: "Italiano", english: "Italian" },
+	{ code: "nl", name: "Nederlands", english: "Dutch" },
+	{ code: "pl", name: "Polski", english: "Polish" },
+	{ code: "id", name: "Bahasa Indonesia", english: "Indonesian" },
+	{ code: "ms", name: "Bahasa Melayu", english: "Malay" },
+	{ code: "tl", name: "Filipino", english: "Filipino" },
+	{ code: "vi", name: "Tiếng Việt", english: "Vietnamese" },
+	{ code: "ru", name: "Русский", english: "Russian" },
+	{ code: "uk", name: "Українська", english: "Ukrainian" },
+	{ code: "bg", name: "Български", english: "Bulgarian" },
+	{ code: "fi", name: "Suomi", english: "Finnish" },
+	{ code: "no", name: "Norsk", english: "Norwegian" },
+	{ code: "sv", name: "Svenska", english: "Swedish" },
+	{ code: "da", name: "Dansk", english: "Danish" },
+	{ code: "ca", name: "Català", english: "Catalan" },
+	{ code: "cs", name: "Čeština", english: "Czech" },
+	{ code: "hu", name: "Magyar", english: "Hungarian" },
+	{ code: "ro", name: "Română", english: "Romanian" },
+	{ code: "el", name: "Ελληνικά", english: "Greek" },
+	{ code: "tr", name: "Türkçe", english: "Turkish" },
+	{ code: "hi", name: "हिन्दी", english: "Hindi" },
+	{ code: "ja", name: "日本語", english: "Japanese" },
+	{ code: "ko", name: "한국어", english: "Korean" },
+	{ code: "zh-Hans", name: "简体中文", english: "Simplified Chinese" },
+	{ code: "zh-Hant", name: "繁體中文", english: "Traditional Chinese" },
+	{ code: "ar", name: "العربية", english: "Arabic" },
+	{ code: "he", name: "עברית", english: "Hebrew" },
+] as const;
+
+export const translationName = (code: string) => TRANSLATIONS.find((l) => l.code === code)?.english;
+
 // The browser's language if we have it ("pt-BR" is "pt", "nb" is Norwegian), else English.
 export function browserLanguage(tag: string) {
 	const code = tag.toLowerCase().split("-")[0];

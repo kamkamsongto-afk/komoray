@@ -7,7 +7,7 @@ const CONTACT = "hello@komoray.com";
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" updated="October 31, 2026">
+		<LegalPage title="Privacy Policy" updated="November 3, 2026">
 			<p>
 				Komoray is an AI studio for talking-head creators. You upload a video, we cut the silences, add subtitles and give you
 				back a finished video. This page explains what we collect to do that, who helps us, and how long we keep it.
@@ -73,6 +73,10 @@ export default function PrivacyPage() {
 					video at a time.
 				</li>
 				<li>
+					<strong>Anthropic</strong> translates your subtitles with its AI model Claude, only when you ask for a translation. It
+					gets the subtitle text, never your video or audio, and does not train on it.
+				</li>
+				<li>
 					<strong>Supabase</strong> handles sign-in and stores your account details.
 				</li>
 				<li>
@@ -83,7 +87,7 @@ export default function PrivacyPage() {
 
 			<h2>How long we keep it</h2>
 			<ul>
-				<li>During the beta, uploaded videos, their smaller copies, transcripts and finished videos are deleted automatically after 14 days.</li>
+				<li>During the beta, uploaded videos, their smaller copies, transcripts, translations and finished videos are deleted automatically after 14 days.</li>
 				<li>Error reports and troubleshooting recordings are deleted after 90 days.</li>
 				<li>
 					Your words stay with your account, so they keep working on your next videos. You can see, download and remove them at any
