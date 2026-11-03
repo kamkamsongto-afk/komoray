@@ -49,7 +49,7 @@ export default function PhonePage() {
 				<p className="text-foreground/70">Scan the QR code on your computer&apos;s upload page to send a video from this phone.</p>
 			) : status === "done" ? (
 				<div className="flex flex-col gap-2 rounded-2xl border border-green-600/40 bg-green-600/5 p-6">
-					<p className="text-lg font-medium">✅ Sent!</p>
+					<p className="text-lg font-medium">Sent!</p>
 					<p className="text-foreground/70">Your video is on your computer now. You can put your phone away.</p>
 				</div>
 			) : (
@@ -60,7 +60,7 @@ export default function PhonePage() {
 							status === "uploading" ? "opacity-50" : "cursor-pointer active:bg-foreground/5"
 						}`}
 					>
-						<span className="text-lg font-medium">🎬 Choose a video</span>
+						<span className="text-lg font-medium">Choose a video</span>
 						<input
 							type="file"
 							accept="video/mp4,video/quicktime"
@@ -83,7 +83,7 @@ export default function PhonePage() {
 							</div>
 							<p className="text-sm break-all text-foreground/70">
 								{status === "uploading" && `Sending ${message}… ${progress}% · keep this page open`}
-								{status === "error" && `❌ ${message}`}
+								{status === "error" && message}
 							</p>
 						</div>
 					)}

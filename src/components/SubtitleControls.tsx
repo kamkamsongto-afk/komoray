@@ -5,6 +5,7 @@ import type { OwnFont } from "@/lib/font-info";
 import { type Motion, MOTIONS } from "@/lib/motion";
 import {
 	COLORS,
+	EDGE_COLORS,
 	TEXT_COLORS,
 	type Format,
 	FORMATS,
@@ -70,7 +71,7 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 		onChange({ ...style, font: "own", ownFont: data.font });
 	}
 
-	const colours = (label: string, key: "color" | "textColor", list: string[], hint?: string) => (
+	const colours = (label: string, key: "color" | "textColor" | "outlineColor" | "boxColor", list: string[], hint?: string) => (
 		<div className="flex items-center gap-3 text-sm text-foreground/70">
 			<span className="w-24 shrink-0" title={hint}>
 				{label}
@@ -113,7 +114,7 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 	);
 
 	return (
-		<div className="flex flex-col gap-2 rounded-lg border border-foreground/15 p-3">
+		<div className={`flex flex-col gap-2 p-3 ${section ? "" : "rounded-lg border border-foreground/15"}`}>
 			{on("shape") && <label className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Video shape</span>
 				<select
@@ -154,6 +155,7 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 					</button>
 				))}
 			</div>
+			<p className="text-xs text-foreground/60">{LOOKS[style.look].hint}</p>
 			<div className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Motion</span>
 				<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Subtitle motion">
@@ -173,6 +175,7 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 					))}
 				</div>
 			</div>
+			<p className="text-xs text-foreground/60">{MOTIONS[style.motion].hint}</p>
 			<label className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Font</span>
 				<select
@@ -209,18 +212,19 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 						}}
 					/>
 				</label>
-				{fontError && <span className="text-red-600">❌ {fontError}</span>}
+				{fontError && <span className="text-red-600">{fontError}</span>}
 			</div>
 			{slider("Text size", "size")}
-			{style.look !== "box" && slider("Black outline", "outline")}
-			{!thai && slider("Letter spacing", "letterSpacing")}
+			{style.look !== "box" && slider("Outline", "outline")}
+			{slider("Letter spacing", "letterSpacing")}
 			{style.look === "two" && slider("Line spacing", "lineSpacing")}
-			{colours("Text colour", "textColor", TEXT_COLORS)}
+			{colours("Text color", "textColor", TEXT_COLORS)}
+			{style.look === "box" ? colours("Box color", "boxColor", EDGE_COLORS) : colours("Outline color", "outlineColor", EDGE_COLORS)}
 			{section === "text" && style.look === "highlight" && colours("Highlight", "color", COLORS)}
 			<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>
 			</>}
 			{on("brand") && <>
-			{colours("Brand colour", "color", COLORS, "Used by the Highlight style and banners")}
+			{colours("Brand color", "color", COLORS, "Used by the Highlight style and banners")}
 			<label className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Channel name</span>
 				<input
@@ -267,7 +271,7 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 						</button>
 					)}
 					{!style.logoImage && <span className="text-foreground/50">PNG with a see-through background looks best. Shown instead of the name.</span>}
-					{logoError && <span className="text-red-600">❌ {logoError}</span>}
+					{logoError && <span className="text-red-600">{logoError}</span>}
 				</div>
 			</div>
 			{style.logoImage && (
@@ -302,16 +306,18 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 			)}
 			</>}
 			{on("zoom") && <>
-			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Jump: every other part is a little closer, like a second camera. Smooth: the picture glides slowly in and out.">
+			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Zoom in or out moves one way across the whole video. Back and forth glides in and out. Jump: every other part is a little closer, like a second camera.">
 				<span className="w-24 shrink-0">Auto zoom</span>
 				<select
 					value={style.zoom}
 					onChange={(e) => onChange({ ...style, zoom: e.target.value as Zoom })}
 					className="flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
 				>
-					<option value="off">Off</option>
-					<option value="smooth">Smooth (slow glide)</option>
+					<option value="in">Zoom in across the whole video</option>
+					<option value="out">Zoom out across the whole video</option>
+					<option value="smooth">Back and forth (slow glide)</option>
 					<option value="cuts">Jump at every cut</option>
+					<option value="off">Off</option>
 				</select>
 			</label>
 			{style.zoom !== "off" && (

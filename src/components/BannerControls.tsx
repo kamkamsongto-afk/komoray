@@ -1,5 +1,6 @@
 "use client";
 
+import { Star, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { BANNER, BANNER_KINDS, BANNER_SCALE, type Banner, type BannerKind, type BannerPlace, cleanBannerText } from "@/lib/banners";
 
@@ -102,14 +103,14 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 								aria-label={`Forget ${t.text}`}
 								className="rounded-r-md px-1.5 py-0.5 text-foreground/50 hover:bg-red-500/10 hover:text-red-600"
 							>
-								✕
+								<X className="h-3 w-3 shrink-0" aria-hidden />
 							</button>
 						</span>
 					))}
 				</div>
 			)}
 			{banners.length === 0 && (
-				<p className="text-xs text-foreground/60">A price, a call to action or &quot;follow me&quot;, in your brand colour. It is added where the video is now.</p>
+				<p className="text-xs text-foreground/60">A price, a call to action or &quot;follow me&quot;, in your brand color. It is added where the video is now.</p>
 			)}
 			{banners.map((b) => (
 				<div key={b.id} className="flex flex-col gap-1.5 rounded-md bg-foreground/5 p-2 text-sm">
@@ -129,14 +130,14 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 							aria-label="Save to My banners"
 							className="rounded px-1.5 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:opacity-30"
 						>
-							⭐
+							<Star className="h-3.5 w-3.5 shrink-0" aria-hidden />
 						</button>
 						<button
 							onClick={() => onChange(banners.filter((x) => x.id !== b.id))}
 							aria-label="Remove banner"
 							className="rounded px-1.5 text-foreground/50 hover:bg-red-500/10 hover:text-red-600"
 						>
-							✕
+							<X className="h-3 w-3 shrink-0" aria-hidden />
 						</button>
 					</div>
 					{b.kind === "price" && (

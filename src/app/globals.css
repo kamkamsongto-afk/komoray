@@ -3,6 +3,7 @@
 :root {
 	--background: #ffffff;
 	--foreground: #171717;
+	color-scheme: light;
 }
 
 @theme inline {
@@ -12,11 +13,19 @@
 	--font-mono: var(--font-geist-mono);
 }
 
+/* Dark follows the computer until someone picks (ThemeToggle sets data-theme). */
 @media (prefers-color-scheme: dark) {
-	:root {
+	:root:not([data-theme="light"]) {
 		--background: #0a0a0a;
 		--foreground: #ededed;
+		color-scheme: dark;
 	}
+}
+
+:root[data-theme="dark"] {
+	--background: #0a0a0a;
+	--foreground: #ededed;
+	color-scheme: dark;
 }
 
 body {

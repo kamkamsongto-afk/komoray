@@ -37,6 +37,7 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 	const [busy, setBusy] = useState(false);
 	const [outTime, setOutTime] = useState(0);
 	const [debugCount, setDebugCount] = useState<number | null>(null);
+	const [speed, setSpeed] = useState(1);
 	// Keep the latest callbacks without restarting the engine when they change.
 	const piecesRef = useRef(pieces);
 	const onTimeRef = useRef(onTime);
@@ -153,6 +154,11 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 			onScrub={(out) => engineRef.current?.seek(out)}
 			debugCount={debugCount}
 			busy={!loaded || busy}
+			speed={speed}
+			onSpeedChange={(next) => {
+				setSpeed(next);
+				engineRef.current?.setRate(next);
+			}}
 		>
 			<canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 		</PlayerFrame>

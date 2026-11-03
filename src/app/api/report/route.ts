@@ -3,9 +3,13 @@ import { currentUser } from "@/lib/supabase/server";
 
 // The upload page sends errors that only the browser sees (e.g. an upload dropping halfway),
 // so they show up on the admin page next to the server-side ones.
+// The phone page reports without signing in, so anyone may call this: only our own pages (Origin), only small reports.
 const clip = (value: unknown, max: number) => String(value ?? "").slice(0, max);
+const MAX_BYTES = 8 * 1024;
 
 export async function POST(request: Request) {
+	if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "Not allowed" }, { status: 403 });
+	if (Number(request.headers.get("content-length")) > MAX_BYTES) return Response.json({ error: "Too big" }, { status: 413 });
 	const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 	const at = new Date().toISOString();
 	const { user } = await currentUser().catch(() => ({ user: null }));

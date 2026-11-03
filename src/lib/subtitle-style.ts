@@ -7,7 +7,7 @@ import { type Motion, MOTIONS } from "./motion";
 
 export type LogoCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 export const LOGO_CORNERS: Record<LogoCorner, string> = { "top-left": "Top left", "top-right": "Top right", "bottom-left": "Bottom left", "bottom-right": "Bottom right" };
-export type Zoom = "off" | "cuts" | "smooth"; // Auto zoom: a jump at every other cut, or a slow glide (lib/zoom.ts)
+export type Zoom = "off" | "in" | "out" | "smooth" | "cuts"; // Auto zoom (lib/zoom.ts): closer or further across the whole video, a slow glide in and out, or a jump at every other cut
 // The final video's shape. Same as FORMATS in render.py.
 export type Format = "9:16" | "1:1" | "16:9";
 // position: where subtitles go when this shape is picked (wide videos keep them near the bottom).
@@ -28,6 +28,8 @@ export type SubtitleStyle = {
 	font: FontId | "own"; // "own": the font the user uploaded (ownFont)
 	ownFont?: OwnFont;
 	textColor: string; // the letters
+	outlineColor: string; // the border around the letters
+	boxColor: string; // the Box look's box
 	letterSpacing: number; // px between letters
 	lineSpacing: number; // px added between the rows of the Two lines look
 	color: string;
@@ -50,6 +52,8 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	look: "clean",
 	font: "kanit",
 	textColor: "#FFFFFF",
+	outlineColor: "#000000",
+	boxColor: "#000000",
 	letterSpacing: 0,
 	lineSpacing: 0,
 	color: "#FFE600",
@@ -57,7 +61,7 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	logoAt: "top-left",
 	logoSize: 180,
 	logoOpacity: 1,
-	zoom: "off",
+	zoom: "in",
 	zoomAmount: 1.12,
 	zoomPeriod: 12,
 	format: "9:16",
@@ -68,6 +72,7 @@ export const MAX_LOGO_LENGTH = 30;
 // Brand colours to pick from in one click (any other colour works too).
 export const COLORS = ["#FFE600", "#22D3EE", "#4ADE80", "#FB7185", "#F97316", "#A78BFA"];
 export const TEXT_COLORS = ["#FFFFFF", "#111111", ...COLORS];
+export const EDGE_COLORS = ["#000000", "#FFFFFF", ...COLORS]; // the outline and the Box look's box
 
 export const LIMITS = {
 	size: { min: 50, max: 180, step: 2 },
@@ -90,10 +95,10 @@ export const ZOOM_SPEEDS = [
 
 // The five looks. Picking one also sets its size and height on screen (the user can change them after).
 export const LOOKS: Record<Look, { name: string; hint: string; size: number; position: number }> = {
-	clean: { name: "Clean", hint: "White letters, black outline", size: 100, position: 0.31 },
-	box: { name: "Box", hint: "White letters on a dark box", size: 90, position: 0.31 },
-	highlight: { name: "Highlight", hint: "The word being said turns yellow", size: 100, position: 0.31 },
-	big: { name: "Big", hint: "A few big words in the middle", size: 150, position: 0.45 },
+	clean: { name: "Clean", hint: "A few words at a time, in the lower part of the video", size: 100, position: 0.31 },
+	box: { name: "Box", hint: "Letters on a colored box, easy to read on any picture", size: 90, position: 0.31 },
+	highlight: { name: "Highlight", hint: "The word being said changes colour", size: 100, position: 0.31 },
+	big: { name: "Big", hint: "Half as big again, fewer words at a time, in the middle of the video", size: 150, position: 0.45 },
 	two: { name: "Two lines", hint: "More words at once, in two rows", size: 90, position: 0.22 },
 };
 
@@ -152,12 +157,14 @@ export function readStyle(value: unknown): SubtitleStyle {
 		...readFont(v.font, v.ownFont),
 		color: typeof v.color === "string" && /^#[0-9a-f]{6}$/i.test(v.color) ? v.color.toUpperCase() : DEFAULT_STYLE.color,
 		textColor: typeof v.textColor === "string" && /^#[0-9a-f]{6}$/i.test(v.textColor) ? v.textColor.toUpperCase() : DEFAULT_STYLE.textColor,
+		outlineColor: typeof v.outlineColor === "string" && /^#[0-9a-f]{6}$/i.test(v.outlineColor) ? v.outlineColor.toUpperCase() : DEFAULT_STYLE.outlineColor,
+		boxColor: typeof v.boxColor === "string" && /^#[0-9a-f]{6}$/i.test(v.boxColor) ? v.boxColor.toUpperCase() : DEFAULT_STYLE.boxColor,
 		letterSpacing: Math.round(pick("letterSpacing")),
 		lineSpacing: Math.round(pick("lineSpacing")),
 		// Letters, numbers and simple marks only: it is drawn into the video as subtitle text.
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
 		logoAt: typeof v.logoAt === "string" && v.logoAt in LOGO_CORNERS ? (v.logoAt as LogoCorner) : "top-left",
-		zoom: v.zoom === "cuts" || v.zoom === "smooth" ? v.zoom : "off",
+		zoom: v.zoom === "off" || v.zoom === "in" || v.zoom === "out" || v.zoom === "cuts" || v.zoom === "smooth" ? v.zoom : DEFAULT_STYLE.zoom,
 		zoomAmount: Math.round(pick("zoomAmount") * 100) / 100,
 		zoomPeriod: Math.round(pick("zoomPeriod")),
 		format: typeof v.format === "string" && v.format in FORMATS ? (v.format as Format) : DEFAULT_STYLE.format,

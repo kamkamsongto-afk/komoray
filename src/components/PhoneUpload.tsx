@@ -64,9 +64,9 @@ export function PhoneUpload({ onArrived, disabled }: { onArrived: (key: string, 
 					disabled={disabled}
 					className="rounded-lg border border-foreground/20 px-4 py-2 text-sm hover:bg-foreground/5 disabled:opacity-50"
 				>
-					📱 Upload from your phone
+					Upload from your phone
 				</button>
-				{error && <p className="text-sm text-red-500">❌ {error}</p>}
+				{error && <p className="text-sm text-red-500">{error}</p>}
 			</div>
 		);
 	}
@@ -86,10 +86,10 @@ export function PhoneUpload({ onArrived, disabled }: { onArrived: (key: string, 
 					<img src={link.qr} alt="QR code to upload from your phone" width={240} height={240} className="rounded-lg bg-white p-2" />
 					<p className="text-sm text-foreground/70">
 						{state === "uploading"
-							? "📲 Your phone is sending the video… this page continues by itself."
+							? "Your phone is sending the video… this page continues by itself."
 							: "Scan with your phone's camera, then pick a video. No need to sign in on the phone. The code works for 15 minutes."}
 					</p>
-					{state === "error" && <p className="text-sm text-red-500">❌ {error}</p>}
+					{state === "error" && <p className="text-sm text-red-500">{error}</p>}
 					<button onClick={() => setLink(null)} className="text-sm text-foreground/60 underline hover:text-foreground">
 						Cancel
 					</button>

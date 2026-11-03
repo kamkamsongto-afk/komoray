@@ -7,6 +7,7 @@
 // throwing away the frames before the cut), so nothing waits on the browser.
 import { type ByteSource, RangeSource } from "./bytes";
 import { type Frame, readVideoTrack, type VideoTrack } from "./mp4";
+import { stretch } from "./stretch";
 import { framePiece, type Rect } from "../framing";
 import { WIDTH } from "../timeline";
 
@@ -64,6 +65,7 @@ export class StudioEngine {
 	private running = false; // the clock is actually going (not waiting for data)
 	private startCtx = 0;
 	private startOut = 0;
+	private rate = 1; // playback speed, while editing only: 1.5 = one and a half times as fast
 	private frame = 0;
 	private destroyed = false;
 
@@ -110,7 +112,7 @@ export class StudioEngine {
 	now() {
 		if (!this.running || !this.ctx) return this.position;
 		const latency = (this.ctx as AudioContext & { outputLatency?: number }).outputLatency || this.ctx.baseLatency || 0;
-		return Math.max(this.startOut, this.startOut + this.ctx.currentTime - this.startCtx - latency);
+		return Math.max(this.startOut, this.startOut + (this.ctx.currentTime - this.startCtx - latency) * this.rate);
 	}
 
 	// ---- controls ----
@@ -141,6 +143,14 @@ export class StudioEngine {
 
 	seek(out: number) {
 		this.jump(Math.min(Math.max(0, out), this.total));
+	}
+
+	// A new speed: stop the clock where it is (at the old speed); the loop starts it again by itself.
+	setRate(rate: number) {
+		if (rate === this.rate) return;
+		this.stopClock();
+		this.rate = rate;
+		this.emitState();
 	}
 
 	// Words deleted or restored: keep the same moment of the source, on the new cut list.
@@ -329,7 +339,7 @@ export class StudioEngine {
 		const generation = this.generation;
 		const ctx = this.ctx;
 		try {
-			const horizon = Math.min(this.now() + AUDIO_AHEAD, this.total);
+			const horizon = Math.min(this.now() + AUDIO_AHEAD * this.rate, this.total);
 			while (this.queuedUntil < horizon - EPS && generation === this.generation && this.running) {
 				const out = this.queuedUntil;
 				const p = this.pieces.find((x) => out < x.out + x.end - x.start - EPS);
@@ -343,21 +353,23 @@ export class StudioEngine {
 				const raw = await this.audio.read(a0 * 2, (a1 - a0) * 2);
 				if (generation !== this.generation || !this.running) break;
 				const samples = new Int16Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + (raw.byteLength & ~1)));
-				const buffer = ctx.createBuffer(1, Math.max(1, samples.length), AUDIO_RATE);
+				const sound = stretch(Float32Array.from(samples, (s) => s / 32768), this.rate);
+				const buffer = ctx.createBuffer(1, Math.max(1, sound.length), AUDIO_RATE);
 				const data = buffer.getChannelData(0);
-				for (let i = 0; i < samples.length; i++) data[i] = samples[i] / 32768;
+				data.set(sound);
 				// Fade in at the start of a piece and out at its end, so the cut doesn't click.
-				// (Also when starting in the middle of a piece.)
-				if (Math.abs(out - p.out) < EPS || Math.abs(out - this.startOut) < EPS) {
+				// (Also when starting in the middle of a piece, and at every slice when sped up: slices no longer meet exactly.)
+				const sped = this.rate !== 1;
+				if (sped || Math.abs(out - p.out) < EPS || Math.abs(out - this.startOut) < EPS) {
 					for (let i = 0; i < Math.min(FADE_SAMPLES, data.length); i++) data[i] *= i / FADE_SAMPLES;
 				}
-				if (Math.abs(sliceEnd - pieceEnd) < EPS) {
+				if (sped || Math.abs(sliceEnd - pieceEnd) < EPS) {
 					for (let i = 0; i < Math.min(FADE_SAMPLES, data.length); i++) data[data.length - 1 - i] *= i / FADE_SAMPLES;
 				}
 				const source = ctx.createBufferSource();
 				source.buffer = buffer;
 				source.connect(ctx.destination);
-				const when = this.startCtx + (out - this.startOut);
+				const when = this.startCtx + (out - this.startOut) / this.rate;
 				const late = ctx.currentTime - when;
 				if (late >= buffer.duration) continue;
 				if (late > 0) this.events.log("audioLate", { at: round(out), ms: Math.round(late * 1000) });
@@ -410,7 +422,7 @@ export class StudioEngine {
 				this.stopClock();
 				this.events.log("end");
 				this.emitState();
-			} else if (!this.ready.length && (this.feed || this.pending.length) && out - this.lastShownOut > 0.15) {
+			} else if (!this.ready.length && (this.feed || this.pending.length) && out - this.lastShownOut > 0.15 * this.rate) {
 				// The picture can't keep up (slow network): stop the clock and wait for it.
 				this.events.log("stall", { at: round(out), pending: this.pending.length, queue: this.decoder?.decodeQueueSize });
 				this.stopClock();

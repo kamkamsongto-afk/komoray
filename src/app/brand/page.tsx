@@ -118,8 +118,8 @@ export default function BrandPage() {
 							>
 								Back to the default look
 							</button>
-							{status === "saved" && <span className="text-sm text-green-600">✓ Saved. Your next videos start with this look.</span>}
-							{status === "failed" && <span className="text-sm text-red-600">❌ Could not save. Please try again.</span>}
+							{status === "saved" && <span className="text-sm text-green-600">Saved. Your next videos start with this look.</span>}
+							{status === "failed" && <span className="text-sm text-red-600">Could not save. Please try again.</span>}
 						</div>
 						<p className="text-xs text-foreground/60">
 							English-only fonts (Poppins, Anton, Bebas Neue) are skipped for Thai videos, which use Kanit instead.

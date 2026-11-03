@@ -1,9 +1,11 @@
 // How close the picture is at every frame of the final video (Auto zoom).
+//   "in"      the picture gets slowly closer from the first frame to the last
+//   "out"     the picture starts close and slowly comes back
 //   "cuts"    every other kept piece a little closer: a jump at the cut, like a second camera
 //   "smooth"  the picture glides slowly in and back out, across the cuts
 // noZoom: parts the user turned zoom off for (source seconds, so they survive new cuts).
 // Same sums as no_zoom_frames, zoom_shots and smooth_zoom_expr in render.py: change one, change the other.
-import { FPS, type Segment } from "./timeline";
+import { FPS, type Segment, totalFrames } from "./timeline";
 
 type Span = { start: number; end: number };
 
@@ -35,7 +37,7 @@ export function noZoomFrames(segments: Segment[], noZoom: Span[]): [number, numb
 // The zoom at a frame of the final video (1 = none).
 export function zoomTrack(segments: Segment[], noZoom: Span[], style: ZoomStyle): (frame: number) => number {
 	const { zoom: mode, zoomAmount: amount, zoomPeriod: period } = style;
-	if (mode !== "cuts" && mode !== "smooth") return () => 1;
+	if (mode === "off") return () => 1;
 	const off = noZoomFrames(segments, noZoom);
 	if (mode === "cuts") {
 		return (f) => {
@@ -46,8 +48,9 @@ export function zoomTrack(segments: Segment[], noZoom: Span[], style: ZoomStyle)
 		};
 	}
 	const fade = SMOOTH_FADE * FPS;
+	const total = Math.max(1, totalFrames(segments));
 	return (f) => {
-		let k = 0.5 - 0.5 * Math.cos((2 * Math.PI * f) / (period * FPS));
+		let k = mode === "in" ? f / total : mode === "out" ? 1 - f / total : 0.5 - 0.5 * Math.cos((2 * Math.PI * f) / (period * FPS));
 		for (const [a, b] of off) {
 			const x = Math.min(1, Math.max(0, a - f, f - b) / fade);
 			k *= x * x * (3 - 2 * x);

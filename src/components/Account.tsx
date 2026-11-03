@@ -3,6 +3,7 @@
 import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 // undefined = still checking, null = signed out.
@@ -46,7 +47,7 @@ export function SignInCard({ title = "Sign in to continue" }: { title?: string }
 				</svg>
 				{busy ? "Opening Google…" : "Sign in with Google"}
 			</button>
-			{failed && <p className="text-sm text-red-600">❌ Sign-in didn&apos;t finish. Please try again.</p>}
+			{failed && <p className="text-sm text-red-600">Sign-in didn&apos;t finish. Please try again.</p>}
 		</div>
 	);
 }
@@ -70,6 +71,7 @@ export function AccountBar({ user }: { user: User }) {
 				</Link>
 			</div>
 			<div className="flex items-center gap-3">
+				<ThemeToggle />
 				<span className="max-w-[12rem] truncate">{user.email}</span>
 				<button
 					onClick={async () => {

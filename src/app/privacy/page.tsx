@@ -24,6 +24,10 @@ export default function PrivacyPage() {
 			<h2>What we collect</h2>
 			<ul>
 				<li>
+					<strong>Early access list:</strong> if you join it on our home page, we keep your email address to invite you, and for nothing else.
+					Ask us any time to take it off.
+				</li>
+				<li>
 					<strong>Your account:</strong> when you sign in with Google, we receive your name, email address and profile picture.
 					We never see your Google password.
 				</li>
@@ -41,7 +45,7 @@ export default function PrivacyPage() {
 					train anything.
 				</li>
 				<li>
-					<strong>Your Brand Kit:</strong> the subtitle look you save (style, font, colour), the channel name you type and the font
+					<strong>Your Brand Kit:</strong> the subtitle look you save (style, font, color), the channel name you type and the font
 					file you upload, if any, so your next videos start with it. Only your videos use your font.
 				</li>
 				<li>
@@ -88,6 +92,7 @@ export default function PrivacyPage() {
 			<h2>How long we keep it</h2>
 			<ul>
 				<li>During the beta, uploaded videos, their smaller copies, transcripts, translations and finished videos are deleted automatically after 14 days.</li>
+				<li>You can delete a video and everything made from it at any time on the My projects page.</li>
 				<li>Error reports and troubleshooting recordings are deleted after 90 days.</li>
 				<li>
 					Your words stay with your account, so they keep working on your next videos. You can see, download and remove them at any

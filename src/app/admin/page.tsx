@@ -44,6 +44,16 @@ export default function AdminPage() {
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [onlyProblems, setOnlyProblems] = useState(false);
+	const [waitlist, setWaitlist] = useState<{ email: string; at: string }[]>([]);
+
+	function downloadWaitlist() {
+		const csv = ["email,joined", ...waitlist.map((p) => `"${p.email.replace(/"/g, '""')}",${p.at}`)].join("\n");
+		const link = document.createElement("a");
+		link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+		link.download = "komoray-waitlist.csv";
+		link.click();
+		URL.revokeObjectURL(link.href);
+	}
 
 	async function load() {
 		setLoading(true);
@@ -54,6 +64,8 @@ export default function AdminPage() {
 			if (!res.ok || !data.jobs) throw new Error(data.error ?? "Could not load");
 			setJobs(data.jobs);
 			setReports(data.reports ?? []);
+			const list = (await (await fetch("/api/waitlist")).json().catch(() => ({}))) as { people?: { email: string; at: string }[] };
+			setWaitlist(list.people ?? []);
 		} catch (err) {
 			setJobs(null);
 			setError(err instanceof Error ? err.message : "Could not load");
@@ -78,7 +90,7 @@ export default function AdminPage() {
 				{user === null ? (
 					<SignInCard title="Sign in as admin" />
 				) : (
-					<p className="text-sm text-foreground/70">{loading ? "Loading…" : error && `❌ ${error}`}</p>
+					<p className="text-sm text-foreground/70">{loading ? "Loading…" : error && error}</p>
 				)}
 			</main>
 		);
@@ -101,7 +113,12 @@ export default function AdminPage() {
 
 			<p className="text-sm text-foreground/70">
 				{jobs.length} videos · <span className={problemCount ? "text-red-600" : ""}>{problemCount} with problems</span> · {reports.length} browser
-				reports
+				reports · {waitlist.length} on the early access list{" "}
+				{waitlist.length > 0 && (
+					<button onClick={downloadWaitlist} className="underline">
+						Download (CSV)
+					</button>
+				)}
 			</p>
 
 			<section className="flex flex-col gap-3">
@@ -136,7 +153,7 @@ export default function AdminPage() {
 			<section className="flex flex-col gap-3">
 				<h2 className="text-lg font-semibold">Browser reports</h2>
 				<p className="text-sm text-foreground/60">Errors people saw on their screen, e.g. an upload that dropped halfway.</p>
-				{reports.length === 0 && <p className="text-sm text-foreground/60">None yet. 🎉</p>}
+				{reports.length === 0 && <p className="text-sm text-foreground/60">None yet.</p>}
 				{reports.map((r, i) => (
 					<div key={i} className="flex flex-col gap-1 rounded-xl border border-foreground/15 p-4 text-sm">
 						<div className="flex flex-wrap justify-between gap-2">

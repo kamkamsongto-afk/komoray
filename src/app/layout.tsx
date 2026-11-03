@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
 	title: "Komoray — AI Studio for Talking Heads",
-	description: "Komoray is an AI Studio for talking head creators. Coming soon.",
+	description: "You shoot. Komoray makes you shine. The AI studio for talking-head creators: your raw take in, a clean cut with your script, subtitles and brand out.",
 };
 
 export default function RootLayout({
@@ -23,8 +23,10 @@ export default function RootLayout({
 	children: React.ReactNode;
 }>) {
 	return (
-		<html lang="en">
+		// The script below sets data-theme before the first paint, so the page never flashes the wrong colour.
+		<html lang="en" suppressHydrationWarning>
 			<head>
+				<script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem("komoray.theme");if(t)document.documentElement.dataset.theme=t}catch(e){}` }} />
 				<link rel="icon" href="/favicon.svg" type="image/svg+xml"></link>
 			</head>
 			<body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>{children}</body>

@@ -76,9 +76,10 @@ export async function GET() {
 		}),
 	);
 
-	// logs/debug/ holds the preview's flight recordings (?debug=1), not error reports.
+	// Reports sit right in logs/. Folders under it hold other things (the preview's flight recordings, test
+	// videos), which must not be downloaded here: a big one is more than a request is allowed to read.
 	const recentLogs = logs
-		.filter((log) => !log.key.startsWith("logs/debug/"))
+		.filter((log) => /^logs\/[^/]+\.json$/.test(log.key))
 		.sort((a, b) => b.key.localeCompare(a.key))
 		.slice(0, SHOW_REPORTS);
 	const reports = (await Promise.all(recentLogs.map((log) => getJson<Record<string, unknown>>(log.key).catch(() => null)))).filter(Boolean);

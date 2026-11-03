@@ -29,11 +29,20 @@ export async function signedUrl(
 	seconds: number,
 	contentType?: string,
 	downloadName?: string,
+	size?: number, // PUT from a browser: the link only accepts a file of exactly this size and contentType
 ) {
 	const { client, objectUrl } = r2();
 	const url = objectUrl(key);
 	url.searchParams.set("X-Amz-Expires", String(seconds));
 	if (downloadName) url.searchParams.set("response-content-disposition", `attachment; filename="${downloadName}"`);
+	if (size !== undefined) {
+		const locked = await client.sign(url.toString(), {
+			method,
+			headers: { "Content-Type": contentType ?? "application/octet-stream", "Content-Length": String(size) },
+			aws: { signQuery: true, allHeaders: true }, // left out by default: then any file could go up
+		});
+		return locked.url;
+	}
 	const headers = contentType ? { "Content-Type": contentType } : undefined;
 	const signed = await client.sign(new Request(url, { method, headers }), { aws: { signQuery: true } });
 	return signed.url;

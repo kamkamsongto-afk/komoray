@@ -1,9 +1,11 @@
 "use client";
 
+import { Download, Redo2, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
@@ -487,7 +489,7 @@ export default function EditPage() {
 	if (loadError) {
 		return (
 			<main className="font-sans mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-4">
-				<p>❌ {loadError}</p>
+				<p>{loadError}</p>
 				<Link href="/projects" className="text-blue-600 underline">
 					Back to My projects
 				</Link>
@@ -506,7 +508,7 @@ export default function EditPage() {
 	function downloadSrt() {
 		if (!analysis) return;
 		const segments = keepSegments(analysis.duration, allCuts(analysis));
-		saveSrt(toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look, subtitle.size)), "");
+		saveSrt(toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look, subtitle.size, subtitle.letterSpacing)), "");
 	}
 
 	function saveSrt(srt: string, suffix: string) {
@@ -550,32 +552,38 @@ export default function EditPage() {
 		<main className="font-sans mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 sm:px-6">
 			<header className="flex flex-wrap items-center justify-between gap-3 border-b border-foreground/10 pb-3">
 				<div className="flex min-w-0 flex-col">
-					<Link href="/projects" className="text-xs text-foreground/60 hover:text-foreground">
-						← My projects
-					</Link>
+					<div className="flex items-center gap-2">
+						<Link href="/projects" className="text-xs text-foreground/60 hover:text-foreground">
+							← My projects
+						</Link>
+						<ThemeToggle />
+					</div>
 					<h1 className="truncate text-lg font-semibold">{filename}</h1>
 					<p className="text-xs text-foreground/60">
-						{clock(analysis.duration)} → {clock(finalSeconds)} · ✂️ {analysis.cuts.length} silences ({silentSeconds.toFixed(1)}s)
-						{deleted.length > 0 && ` · 🗑️ ${deleted.length} words deleted`}
-						{fixes.length > 0 && ` · ✏️ ${fixes.length} fixed`}
-						{(analysis.manual?.length ?? 0) > 0 && ` · ✂️ ${analysis.manual!.length} cut by hand`}
+						{clock(analysis.duration)} → {clock(finalSeconds)} · {analysis.cuts.length} silences ({silentSeconds.toFixed(1)}s)
+						{deleted.length > 0 && ` · ${deleted.length} words deleted`}
+						{fixes.length > 0 && ` · ${fixes.length} fixed`}
+						{(analysis.manual?.length ?? 0) > 0 && ` · ${analysis.manual!.length} cut by hand`}
 					</p>
+					<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
 					<div className="flex items-center gap-1 text-xs">
 						<button
 							onClick={() => restore("past")}
 							disabled={!historySize.past}
 							title="Undo (Ctrl+Z)"
-							className="rounded border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-30"
+							className="inline-flex items-center gap-1 rounded border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-30"
 						>
-							↶ Undo
+							<Undo2 className="h-3 w-3 shrink-0" aria-hidden />
+							Undo
 						</button>
 						<button
 							onClick={() => restore("future")}
 							disabled={!historySize.future}
 							title="Redo (Ctrl+Shift+Z)"
-							className="rounded border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-30"
+							className="inline-flex items-center gap-1 rounded border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-30"
 						>
-							↷ Redo
+							<Redo2 className="h-3 w-3 shrink-0" aria-hidden />
+							Redo
 						</button>
 					</div>
 					<label className="flex items-center gap-2 text-xs text-foreground/60" title="How short a pause has to be to stay in the video">
@@ -594,6 +602,10 @@ export default function EditPage() {
 						</select>
 						{paceBusy && <span>Finding silences…</span>}
 					</label>
+					<Link href={`/upload?key=${encodeURIComponent(key)}&again=1`} className="text-xs text-foreground/50 underline hover:text-foreground" title="Listen to this video again in another language">
+						Wrong language?
+					</Link>
+					</div>
 				</div>
 				<div className="flex flex-col items-end gap-1">
 					<button
@@ -603,8 +615,10 @@ export default function EditPage() {
 					>
 						{render.status === "processing" ? "Making your video…" : render.status === "done" ? "Make video again" : "Make video"}
 					</button>
-					<button onClick={downloadSrt} className="text-xs text-foreground/60 underline hover:text-foreground">
-						⬇️ Subtitles (.srt)
+					<div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+					<button onClick={downloadSrt} className="inline-flex items-center gap-1 text-xs text-foreground/60 underline hover:text-foreground">
+						<Download className="h-3 w-3 shrink-0" aria-hidden />
+						Subtitles (.srt)
 					</button>
 					<select
 						value=""
@@ -614,7 +628,7 @@ export default function EditPage() {
 						className="max-w-56 rounded-md border border-foreground/20 bg-background px-1.5 py-0.5 text-xs text-foreground/60 disabled:opacity-60"
 					>
 						<option value="" disabled>
-							{translating ?? "🌐 Translate subtitles (.srt)…"}
+							{translating ?? "Translate subtitles (.srt)…"}
 						</option>
 						{TRANSLATIONS.map((l) => (
 							<option key={l.code} value={l.code}>
@@ -622,9 +636,10 @@ export default function EditPage() {
 							</option>
 						))}
 					</select>
+					</div>
 					<label className="flex items-center gap-2 text-xs text-foreground/60">
 						<input type="checkbox" checked={desktopNotify} onChange={(e) => void toggleDesktopNotify(e.target.checked)} />
-						🔔 Notify me on my desktop
+						Notify me on my desktop
 					</label>
 				</div>
 			</header>
@@ -634,11 +649,11 @@ export default function EditPage() {
 					Your browser is blocking notifications. Click the icon left of the address bar → Notifications → Allow, then tick the box again.
 				</p>
 			)}
-			{saveError && <p className="text-sm text-red-500">❌ {saveError}</p>}
+			{saveError && <p className="text-sm text-red-500">{saveError}</p>}
 			{dictionaryFixed && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
 					<span>
-						✨ Your dictionary fixed {dictionaryFixed.count} {dictionaryFixed.count === 1 ? "word" : "words"} (underlined in green).
+						Your dictionary fixed {dictionaryFixed.count} {dictionaryFixed.count === 1 ? "word" : "words"} (underlined in green).
 					</span>
 					<button
 						onClick={() => {
@@ -650,15 +665,15 @@ export default function EditPage() {
 						Undo
 					</button>
 					<button onClick={() => setDictionaryFixed(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
-						✕
+						<X className="h-3 w-3 shrink-0" aria-hidden />
 					</button>
 				</div>
 			)}
 			{takesCut && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
 					<span>
-						🔁 You said {takesCut.count === 1 ? "a sentence" : `${takesCut.count} sentences`} more than once, so we kept your last take and cut the
-						others. Click 🔁 on the timeline to pick a different take.
+						You said {takesCut.count === 1 ? "a sentence" : `${takesCut.count} sentences`} more than once, so we kept your last take and cut the
+						others. Click the repeat mark on the timeline to pick a different take.
 					</span>
 					<button
 						onClick={() => {
@@ -670,7 +685,7 @@ export default function EditPage() {
 						Undo
 					</button>
 					<button onClick={() => setTakesCut(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
-						✕
+						<X className="h-3 w-3 shrink-0" aria-hidden />
 					</button>
 				</div>
 			)}
@@ -678,19 +693,19 @@ export default function EditPage() {
 				<div className="flex flex-col gap-2">
 					<div className="h-2 w-full animate-pulse rounded-full bg-blue-600/60" />
 					<p className="text-sm text-foreground/70">
-						🎬 Making your video… usually 1–3 minutes. Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
+						Making your video… usually 1–3 minutes. Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
 					</p>
 				</div>
 			)}
-			{render.status === "failed" && <p className="text-sm text-red-500">❌ {render.error}</p>}
+			{render.status === "failed" && <p className="text-sm text-red-500">{render.error}</p>}
 			{render.status === "done" && render.videoUrl && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
-					<span>✅ Your video is ready!</span>
+					<span>Your video is ready!</span>
 					<a href={render.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline">
 						▶ Watch
 					</a>
 					<a href={render.downloadUrl} className="rounded-lg border border-foreground/20 px-3 py-1.5 font-medium hover:bg-foreground/5">
-						⬇️ Download video
+						Download video
 					</a>
 					<span className="text-xs text-foreground/50">Changed something after this? Press Make video again.</span>
 				</div>

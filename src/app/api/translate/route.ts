@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
 	const style = readStyle(edit.style);
-	const lines = subtitleLines(fixedWords(edit.words, edit.fixes), keepSegments(edit.duration, allCuts(edit)), style.look, style.size);
+	const lines = subtitleLines(fixedWords(edit.words, edit.fixes), keepSegments(edit.duration, allCuts(edit)), style.look, style.size, style.letterSpacing);
 	const texts = lines.map((l) => l.text.trim());
 
 	const savedKey = siblingKey(key, `translation-${language}.json`);

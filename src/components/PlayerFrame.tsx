@@ -1,5 +1,6 @@
 "use client";
 
+import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
@@ -55,13 +56,13 @@ const LOGO = { size: 52, outline: 4, side: 60, top: 110 };
 
 // A black outline with round corners, like the final video's (a text stroke gives sharp spikes at
 // thick sizes): copies of the letters shifted in a circle, plus the soft shadow under them.
-function roundOutline(width: number) {
+function roundOutline(width: number, colour: string) {
 	const shadows: string[] = [];
 	for (const r of width > 2 ? [width, width / 2] : width ? [width] : []) {
 		const steps = Math.max(8, Math.ceil((2 * Math.PI * r) / 3));
 		for (let i = 0; i < steps; i++) {
 			const a = (2 * Math.PI * i) / steps;
-			shadows.push(`${(r * Math.cos(a)).toFixed(1)}px ${(r * Math.sin(a)).toFixed(1)}px 0 black`);
+			shadows.push(`${(r * Math.cos(a)).toFixed(1)}px ${(r * Math.sin(a)).toFixed(1)}px 0 ${colour}`);
 		}
 	}
 	shadows.push("2px 2px 0 rgba(0,0,0,0.4)");
@@ -69,6 +70,7 @@ function roundOutline(width: number) {
 }
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const SPEEDS = [1, 1.25, 1.5, 2]; // for skimming while fixing words; the final video is not affected
 
 type Props = {
 	children: ReactNode; // the picture: <video> elements or a <canvas>, filling the 9:16 box
@@ -86,6 +88,8 @@ type Props = {
 	zoom?: number; // Auto zoom for pictures that don't zoom themselves (the <video> player)
 	banners?: Banner[];
 	onBannersChange?: (banners: Banner[]) => void; // dragged or resized on the video (while paused)
+	speed?: number;
+	onSpeedChange?: (speed: number) => void; // left out: this player can't change speed
 };
 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
@@ -107,6 +111,8 @@ export function PlayerFrame({
 	zoom = 1,
 	banners = [],
 	onBannersChange,
+	speed = 1,
+	onSpeedChange,
 }: Props) {
 	const boxRef = useRef<HTMLDivElement>(null);
 
@@ -185,27 +191,32 @@ export function PlayerFrame({
 	const em = lineFace.em;
 	const rowGap = line?.row2 !== undefined ? subtitle.lineSpacing : 0; // only a line split in two rows has a gap
 	const boxed = subtitle.look === "box";
-	// Box: letters on a dark box. Every other look: white letters with a black outline.
+	// Box: letters on a box (3/4 solid, as in render.py). Every other look: letters with an outline.
 	const letters: CSSProperties = boxed
-		? { background: "rgba(0,0,0,0.75)", padding: `${BOX_PADDING / 2}px ${BOX_PADDING}px`, boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }
-		: { textShadow: roundOutline(subtitle.outline) };
+		? { background: `${subtitle.boxColor}BF`, padding: `${BOX_PADDING / 2}px ${BOX_PADDING}px`, boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }
+		: { textShadow: roundOutline(subtitle.outline, subtitle.outlineColor) };
 	// Highlight: the word being said is in the brand colour until the next one starts.
 	const frame = outTime * FPS;
 	const now = line ? line.parts.findLastIndex((p) => p.from <= frame) : -1;
 	const said = subtitle.look === "highlight" ? now : -1;
-	// Motion (lib/motion.ts): the line pops in, the word being said bounces. Drawn bigger (not
-	// stretched) so the words around it make room, as they do in the final video.
+	// Motion (lib/motion.ts): the line pops in, a word jumps out. Drawn bigger (not stretched) so the
+	// words around it make room, as they do in the final video.
 	const motion = line
-		? motionScale(subtitle.motion, FPS, frame - line.from, now, now >= 0 ? line.parts[now].from - line.from : 0, now >= 0 ? frame - line.parts[now].from : 0)
-		: { line: 1, word: 1 };
+		? motionScale(
+				subtitle.motion,
+				FPS,
+				frame - line.from,
+				line.parts.map((p) => p.from - line.from),
+			)
+		: { line: 1, word: 1, bounced: -1 };
 	const text = line
 		? line.parts.map((p, k) => (
 				<span key={k}>
 					{k === line.row2 && <br />}
 					<span
 						style={
-							k === said || (k === now && motion.word !== 1)
-								? { color: k === said ? subtitle.color : undefined, fontSize: k === now && motion.word !== 1 ? `${motion.word}em` : undefined }
+							k === said || k === motion.bounced
+								? { color: k === said ? subtitle.color : undefined, fontSize: k === motion.bounced ? `${motion.word}em` : undefined }
 								: undefined
 						}
 					>
@@ -265,8 +276,7 @@ export function PlayerFrame({
 								fontWeight: lineFace.weight,
 								fontSize: (subtitle.size / em) * motion.line,
 								lineHeight: em * (1 + rowGap / subtitle.size),
-								// Thai marks would come apart from their letters (the final video leaves it out too: build_subtitles).
-								letterSpacing: /[฀-๿]/.test(line?.text ?? "") ? 0 : subtitle.letterSpacing,
+								letterSpacing: subtitle.letterSpacing,
 								color: subtitle.textColor,
 								opacity: line ? 1 : 0.5,
 								cursor: "ns-resize",
@@ -382,13 +392,15 @@ export function PlayerFrame({
 				) : (
 					!playing &&
 					!bare && (
-						<span className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center text-5xl text-white/90 drop-shadow">▶</span>
+						<span className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center text-white/90 drop-shadow">
+							<Play className="h-12 w-12 fill-current" aria-hidden />
+						</span>
 					)
 				)}
 			</div>
 			<div className={`flex items-center gap-2 text-xs text-foreground/70 ${bare ? "hidden" : ""}`}>
-				<button onClick={onToggle} className="w-8 rounded border border-foreground/20 py-0.5" aria-label={playing ? "Pause" : "Play"}>
-					{playing ? "❚❚" : "▶"}
+				<button onClick={onToggle} className="flex w-8 justify-center rounded border border-foreground/20 py-1 hover:bg-foreground/5" aria-label={playing ? "Pause" : "Play"}>
+					{playing ? <Pause className="h-3 w-3 fill-current" aria-hidden /> : <Play className="h-3 w-3 fill-current" aria-hidden />}
 				</button>
 				<input
 					type="range"
@@ -403,6 +415,21 @@ export function PlayerFrame({
 				<span className="whitespace-nowrap tabular-nums">
 					{clock(outTime)} / {clock(total)}
 				</span>
+				{onSpeedChange && (
+					<select
+						value={speed}
+						onChange={(e) => onSpeedChange(Number(e.target.value))}
+						aria-label="Preview speed"
+						title="Preview speed. The final video is not affected."
+						className="rounded border border-foreground/20 bg-background py-0.5 text-foreground"
+					>
+						{SPEEDS.map((s) => (
+							<option key={s} value={s}>
+								{s}x
+							</option>
+						))}
+					</select>
+				)}
 			</div>
 		</div>
 	);

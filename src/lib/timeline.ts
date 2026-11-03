@@ -24,6 +24,7 @@ const LINE_LIMITS = {
 const THAI_NO_START = new Set(["นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"]);
 const THAI_STARTS = new Set(["แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"]);
 const START_BONUS = 8; // frames: a phrase start or a polite ending is worth a pause this long
+const THAI_LETTER_EM = 0.44; // how wide a Thai letter is, in text sizes: to work out what letter spacing costs
 const THAI_PAUSE = 0.15; // a pause this long inside a Thai line gets a space
 const LINE_BREAK_GAP = 0.5;
 
@@ -142,10 +143,11 @@ function joinThai(words: { text: string; start: number; end: number }[]) {
 }
 
 // Short subtitle lines on the output timeline, grouped the same way as the final video.
-export function subtitleLines(words: Word[], segments: Segment[], look = "clean", size = 100): Line[] {
+export function subtitleLines(words: Word[], segments: Segment[], look = "clean", size = 100, spacing = 0): Line[] {
 	const thai = words.some((w) => isThai(w.text));
 	const limits = look === "big" || look === "two" ? LINE_LIMITS[look] : LINE_LIMITS.normal;
-	const maxLetters = Math.floor(limits.thaiLetters * Math.min(1, limits.size / size));
+	// The line's width in letters at the limit's size, shared out among bigger or more spaced-out letters.
+	const maxLetters = Math.floor((limits.thaiLetters * limits.size * THAI_LETTER_EM) / (Math.max(size, limits.size) * THAI_LETTER_EM + spacing) + 1e-9);
 	const perLine = thai ? limits.thaiWords : limits.words;
 	const maxFrames = (thai ? limits.thaiSeconds : limits.seconds) * FPS;
 	const gapFrames = LINE_BREAK_GAP * FPS;

@@ -152,6 +152,8 @@ DEFAULT_STYLE = {
     "outline": 10,  # black border around the white letters, px
     "position": 0.31,  # 0 = bottom edge, 0.5 = middle of the screen
     "textColor": "#FFFFFF",  # the letters
+    "outlineColor": "#000000",  # the border around the letters
+    "boxColor": "#000000",  # the Box look's box
     "letterSpacing": 0,  # px between letters
     "lineSpacing": 0,  # px added between the rows of the Two lines look
     "color": "#FFE600",  # brand colour: the Highlight look's word
@@ -159,7 +161,7 @@ DEFAULT_STYLE = {
     "logoAt": "top-left",  # or top-right, bottom-left, bottom-right
     "logoSize": 180,  # the logo picture's width, px (logoUrl: a link to the picture, sent by the app)
     "logoOpacity": 1,
-    "zoom": "off",  # Auto zoom: "cuts" = every other kept piece a little closer, "smooth" = a slow glide
+    "zoom": "off",  # Auto zoom: "in" / "out" = one way across the whole video, "smooth" = a slow glide in and out, "cuts" = every other kept piece a little closer
     "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
 }
 # Auto zoom: how close it gets, seconds to glide in and out (both picked by the user: zoomAmount and
@@ -243,6 +245,7 @@ def thai_letters(text: str) -> int:
 THAI_NO_START = {"นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"}
 THAI_STARTS = {"แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"}
 START_BONUS = 8  # frames: a phrase start or a polite ending is worth a pause this long
+THAI_LETTER_EM = 0.44  # how wide a Thai letter is, in text sizes: to work out what letter spacing costs (timeline.ts)
 
 
 def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float, max_letters: int, gap_frames: float) -> list[list[dict]]:
@@ -322,8 +325,21 @@ def second_row(texts: list[str]) -> int | None:
 
 # Motion: (milliseconds after the start, size in %), straight lines between. Same as src/lib/motion.ts.
 POP = [(0, 70), (90, 110), (170, 100)]
-BOUNCE = [(0, 100), (80, 125), (200, 100)]
+BOUNCE = [(0, 100), (110, 150), (280, 100)]
 POP_END = POP[-1][0]
+BOUNCE_END = BOUNCE[-1][0]
+BOUNCE_GAP = 450  # ms: at most one word jumps in this time, else short words make the line shiver
+
+
+def bouncing_words(froms: list[float]) -> list[int]:
+    """Which words of a line jump, from when each is said (ms after the line starts). The first word
+    rides the pop. Same as bouncingWords in src/lib/motion.ts."""
+    out, last = [], 0.0
+    for k, ms in enumerate(froms):
+        if k > 0 and ms >= POP_END and ms - last >= BOUNCE_GAP:
+            out.append(k)
+            last = ms
+    return out
 
 
 def scale_at(keys: list[tuple[int, int]], ms: float) -> float:
@@ -350,6 +366,14 @@ def scale_tags(keys: list[tuple[int, int]], offset: float) -> str:
 def pop_tags(motion: str, since: float) -> str:
     """The line popping in, for an event `since` ms after the line started ("" once it is done)."""
     return f"{{{scale_tags(POP, since)}}}" if motion in ("pop", "bounce") and since < POP_END else ""
+
+
+def spaced_marks(text: str, spacing: int) -> str:
+    """Letter spacing for Thai: libass adds the space after every mark and vowel on top too, which pulls
+    them off their letter. So the space goes after the last mark, and none before it."""
+    if not spacing:
+        return text
+    return re.sub(f"(.)({THAI_MARKS.pattern}+)", lambda m: f"{{\\fsp0}}{m[1]}{m[2][:-1]}{{\\fsp{spacing}}}{m[2][-1]}", text)
 
 
 def ass_text(text: str) -> str:
@@ -388,7 +412,9 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
 
     # Group words into short lines.
     gap_frames = LINE_BREAK_GAP * FPS
-    max_letters = math.floor(limits["thai_letters"] * min(1, limits["size"] / size))
+    # The line's width in letters at the limit's size, shared out among bigger or more spaced-out letters.
+    spacing = int(style.get("letterSpacing") or 0)
+    max_letters = math.floor(limits["thai_letters"] * limits["size"] * THAI_LETTER_EM / (max(size, limits["size"]) * THAI_LETTER_EM + spacing) + 1e-9)
     lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames)
 
     brand = style.get("color", "#FFE600")
@@ -409,7 +435,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         end = line[-1]["end"]
         if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < gap_frames:
             end = lines[i + 1][0]["start"]
-        parts = [ass_text(p) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
+        parts = [spaced_marks(ass_text(p), spacing) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
         row2 = second_row(parts) if look == "two" else None
         line_font = font_tag("".join(parts), own_font, size)
         if row2 is not None:
@@ -422,25 +448,29 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         if look != "highlight" and motion != "bounce":
             events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue
-        # Highlight / Bounce: one event per word, that word yellow (or bouncing) until the next one starts.
+        # Highlight / Bounce: one event per word, that word in the brand colour until the next one starts.
+        # A word's jump carries on across the events until it has finished.
+        froms = [(w["start"] - start) / FPS * 1000 for w in line]
+        jumps = bouncing_words(froms) if motion == "bounce" else []
         for k in range(len(line)):
             a = start if k == 0 else line[k]["start"]
             b = line[k + 1]["start"] if k + 1 < len(line) else end
             if b <= a:
                 continue
             since = (a - start) / FPS * 1000  # ms since the line started
-            # A word bounces once the line has finished popping in (the first word rides the pop).
-            bounce = motion == "bounce" and k > 0 and since >= POP_END
-            on = (f"\\1c{highlight}" if look == "highlight" else "") + (scale_tags(BOUNCE, 0) if bounce else "")
-            off = (f"\\1c{ass_colour(style.get('textColor', '#FFFFFF'))}" if look == "highlight" else "") + ("\\fscx100\\fscy100" if bounce else "")
-            text = "".join(f"{{{on}}}{p}{{{off}}}" if j == k and on else p for j, p in enumerate(parts))
+            jumping = next((j for j in reversed(jumps) if froms[j] <= since and since - froms[j] < BOUNCE_END), None)
+            text = ""
+            for j, p in enumerate(parts):
+                coloured = look == "highlight" and j == k
+                on = (f"\\1c{highlight}" if coloured else "") + (scale_tags(BOUNCE, since - froms[j]) if j == jumping else "")
+                off = (f"\\1c{ass_colour(style.get('textColor', '#FFFFFF'))}" if coloured else "") + ("\\fscx100\\fscy100" if j == jumping else "")
+                text += f"{{{on}}}{p}{{{off}}}" if on else p
             events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, since)}{text}")
 
     # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
-    # Letter spacing stays off for Thai below: libass spaces every mark too, which pulls them off their letters.
     boxed = look == "box"
     border_style, border, shadow = (3, BOX_PADDING, 0) if boxed else (1, outline, 2)
-    outline_colour = "&H40000000" if boxed else "&H00000000"
+    outline_colour = f"&H40{ass_colour(style.get('boxColor', '#000000'))[4:-1]}" if boxed else ass_colour(style.get("outlineColor", "#000000"))[:-1]
 
     return "\n".join(
         [
@@ -456,7 +486,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
             f"Style: Default,{font},{size},{ass_colour(style.get('textColor', '#FFFFFF'))[:-1]},&H00FFFFFF,{outline_colour},&H64000000,"
             # Bold stays off: the weight comes from the font name (e.g. "Kanit Medium").
-            f"0,0,0,0,100,100,{0 if thai else int(style.get('letterSpacing') or 0)},0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
+            f"0,0,0,0,100,100,{int(style.get('letterSpacing') or 0)},0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
             f"Style: Banner,{font},{BANNER['size']},{ass_colour(banner_ink(brand))[:-1]},&H00FFFFFF,{ass_colour(brand)[:-1]},&H00000000,"
             f"0,0,0,0,100,100,0,0,3,{BANNER['padding']},0,8,80,80,0,1",
             f"Style: Logo,{font},{LOGO['size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
@@ -570,12 +600,12 @@ def zoom_shots(segments: list[tuple[int, int, int]], off: list[tuple[int, int]],
     return shots
 
 
-def smooth_zoom_expr(start: int, frames: int, off: list[tuple[int, int]], amount: float = ZOOM, period: float = SMOOTH_PERIOD) -> str:
+def smooth_zoom_expr(start: int, frames: int, off: list[tuple[int, int]], amount: float = ZOOM, period: float = SMOOTH_PERIOD, mode: str = "smooth", total: int = 1) -> str:
     """The zoom of a piece as an ffmpeg expression of its frame number (`in` counts from 1). Same as
-    the "smooth" mode of zoomTrack in src/lib/zoom.ts."""
+    the "smooth", "in" and "out" modes of zoomTrack in src/lib/zoom.ts. total: frames in the final video."""
     frame = f"(in-1+{start})"
     fade = SMOOTH_FADE * FPS
-    k = f"(0.5-0.5*cos(2*PI*{frame}/{period * FPS}))"
+    k = {"in": f"({frame}/{total})", "out": f"(1-{frame}/{total})"}.get(mode, f"(0.5-0.5*cos(2*PI*{frame}/{period * FPS}))")
     for a, b in off:
         if a - fade <= start + frames and b + fade >= start:  # only the parts near this piece
             x = f"clip(max(max({a}-{frame},{frame}-{b}),0)/{fade},0,1)"
@@ -638,6 +668,7 @@ def ffmpeg_command(
     # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
     pieces = frame_segments(keeps)
     off = no_zoom_frames(pieces, no_zoom)
+    total = max(1, sum(frames for _, _, frames in pieces))
     parts, video_labels, audio_labels = [], [], []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
@@ -648,8 +679,8 @@ def ffmpeg_command(
         piece_trim, piece_frames = pieces[i][1], pieces[i][2]
         focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)
         framing = (
-            smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off, zoom_amount, zoom_period), size, zoom_amount)
-            if zoom == "smooth"
+            smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off, zoom_amount, zoom_period, zoom, total), size, zoom_amount)
+            if zoom in ("smooth", "in", "out")
             else piece_filter(aspect, focus, level, size)
         )
         parts.append(

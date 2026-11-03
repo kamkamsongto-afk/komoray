@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Crop, Film, type LucideIcon, Palette, Pencil, Scissors, Search, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
@@ -177,13 +178,16 @@ type Props = {
 // What can be opened under the video. Nothing is open at first: the editor stays calm, and every
 // setting is a click away (here, or by clicking its part of the timeline).
 type Panel = ControlSection | "banners";
-const PANELS: { id: Panel; icon: string; name: string }[] = [
-	{ id: "text", icon: "Aa", name: "Subtitles" },
-	{ id: "zoom", icon: "🔍", name: "Zoom" },
-	{ id: "banners", icon: "🏷️", name: "Banners" },
-	{ id: "shape", icon: "📐", name: "Shape" },
-	{ id: "brand", icon: "⭐", name: "Brand" },
+const PANELS: { id: Panel; icon: LucideIcon; name: string }[] = [
+	{ id: "text", icon: Type, name: "Subtitles" },
+	{ id: "zoom", icon: ZoomIn, name: "Zoom" },
+	{ id: "banners", icon: Tag, name: "Banners" },
+	{ id: "shape", icon: Crop, name: "Shape" },
+	{ id: "brand", icon: Palette, name: "Brand" },
 ];
+
+const PREVIEW_PREF = "komoray.previewWidth"; // remembers how wide the video's side is, in this browser
+const PREVIEW_WIDTH = { start: 400, min: 280, screen: 0.6 }; // px; at most this part of the screen
 
 // The editor: script on the left, the video on the right (stacked on phones, video first).
 export function ScriptView({
@@ -248,7 +252,7 @@ export function ScriptView({
 		[duration, words, cuts, deleted, manual, keep],
 	);
 	const lines = useMemo(
-		() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look, subtitle.size),
+		() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look, subtitle.size, subtitle.letterSpacing),
 		[words, fixes, segments, subtitle.look, subtitle.size],
 	);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
@@ -549,26 +553,48 @@ export function ScriptView({
 	}
 	useEffect(() => setBrandSaved((s) => (s === "saved" ? null : s)), [subtitle]);
 
+	// Drag the bar between the script and the video to give either one more room.
+	const [previewWidth, setPreviewWidth] = useState(PREVIEW_WIDTH.start);
+	useEffect(() => {
+		try {
+			const saved = Number(localStorage.getItem(PREVIEW_PREF));
+			if (saved) setPreviewWidth(saved);
+		} catch {
+			// no browser storage here: start at the usual width
+		}
+	}, []);
+	function resizePreview(width: number) {
+		const next = Math.round(Math.min(window.innerWidth * PREVIEW_WIDTH.screen, Math.max(PREVIEW_WIDTH.min, width)));
+		setPreviewWidth(next);
+		try {
+			localStorage.setItem(PREVIEW_PREF, String(next));
+		} catch {
+			// not remembered this time
+		}
+	}
+	function startResize(e: ReactPointerEvent<HTMLElement>) {
+		e.preventDefault();
+		const from = { x: e.clientX, width: previewWidth };
+		const move = (ev: PointerEvent) => resizePreview(from.width + from.x - ev.clientX);
+		const stop = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", stop);
+			window.removeEventListener("pointercancel", stop);
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", stop);
+		window.addEventListener("pointercancel", stop);
+	}
+
 	return (
 		<div className="flex flex-col gap-4">
-			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,440px)] lg:items-start">
+			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_12px_var(--preview-w)] lg:items-start lg:gap-x-1" style={{ "--preview-w": `${previewWidth}px` } as CSSProperties}>
 				{/* Right on big screens (sticky while the script scrolls), on top on phones. */}
 				<div
-					className={`flex flex-col gap-3 lg:sticky lg:top-4 lg:order-2 lg:max-h-[calc(100vh-14rem)] lg:overflow-y-auto ${
-						panel ? "lg:[--player-h:max(13rem,calc(50vh-8rem))]" : "lg:[--player-h:max(15rem,calc(100vh-28rem))]"
-					}`}
+					className="flex flex-col gap-3 lg:sticky lg:top-4 lg:z-30 lg:order-3 lg:[--player-h:max(15rem,calc(100vh-11.5rem))]"
 				>
-					<div className="flex self-center rounded-lg border border-foreground/20 p-0.5 text-sm">
-						{(["preview", "original"] as const).map((m) => (
-							<button
-								key={m}
-								onClick={() => setMode(m)}
-								className={`rounded-md px-3 py-1 ${mode === m ? "bg-foreground text-background" : "text-foreground/70 hover:text-foreground"}`}
-							>
-								{m === "preview" ? "Preview (final video)" : "Original"}
-							</button>
-						))}
-					</div>
+					<div className="flex flex-col gap-2 lg:flex-row lg:items-start">
+					<div className="min-w-0 flex-1">
 					{mode === "preview" && deciding ? (
 						<div
 							className="mx-auto w-full rounded-lg bg-black"
@@ -626,25 +652,48 @@ export function ScriptView({
 							className="max-h-[65vh] w-full rounded-lg bg-black"
 						/>
 					)}
-					{mode === "preview" && (
-						<div className="flex justify-center gap-1" role="tablist" aria-label="Settings">
-							{PANELS.map((p) => (
+					</div>
+					{/* Beside the video on big screens, so the tools never take height from it. */}
+					<div className="flex shrink-0 flex-wrap justify-center gap-1 lg:flex-col" role="tablist" aria-label="Settings">
+						{mode === "preview" &&
+							PANELS.map((p) => (
 								<button
 									key={p.id}
 									role="tab"
 									aria-selected={panel === p.id}
+									title={p.name}
 									onClick={() => setPanel(panel === p.id ? null : p.id)}
-									className={`flex min-w-14 flex-col items-center gap-0.5 rounded-lg px-2 py-1 text-xs ${
+									className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-3 ${
 										panel === p.id ? "bg-foreground text-background" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
 									}`}
 								>
-									<span className="text-sm leading-5">{p.icon}</span>
+									<p.icon className="h-[18px] w-[18px]" aria-hidden />
 									{p.name}
 								</button>
 							))}
-						</div>
-					)}
-					{mode === "preview" && panel && panel !== "banners" && (
+						<button
+							onClick={() => setMode(mode === "preview" ? "original" : "preview")}
+							aria-pressed={mode === "original"}
+							title={mode === "preview" ? "See the original video, before any cuts" : "Back to the final video"}
+							className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-3 ${
+								mode === "original" ? "bg-foreground text-background" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+							}`}
+						>
+							<Film className="h-[18px] w-[18px]" aria-hidden />
+							Original
+						</button>
+					</div>
+					</div>
+					{/* Floats over the script on big screens: the video keeps its size while you watch the change. */}
+					{mode === "preview" && panel && (
+						<div className="flex flex-col gap-2 rounded-lg border border-foreground/15 bg-background shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:max-h-[calc(100vh-10rem)] lg:w-[26rem] lg:overflow-y-auto">
+							<div className="flex items-center justify-between px-3 pt-2 text-sm font-medium">
+								{PANELS.find((p) => p.id === panel)?.name}
+								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
+									<X className="h-4 w-4" aria-hidden />
+								</button>
+							</div>
+					{panel !== "banners" && (
 						<SubtitleControls
 							style={subtitle}
 							onChange={onSubtitleChange}
@@ -658,7 +707,7 @@ export function ScriptView({
 										className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
 										title="Use this look for every new video"
 									>
-										{brandSaved === "saved" ? "✓ Saved to Brand Kit" : brandSaved === "failed" ? "❌ Could not save, try again" : "⭐ Save as my Brand Kit"}
+										{brandSaved === "saved" ? "Saved to Brand Kit" : brandSaved === "failed" ? "Could not save, try again" : "Save as my Brand Kit"}
 									</button>
 								) : panel === "zoom" && subtitle.zoom !== "off" ? (
 									<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/60">
@@ -676,7 +725,7 @@ export function ScriptView({
 							}
 						/>
 					)}
-					{mode === "preview" && panel === "banners" && (
+					{panel === "banners" && (
 						<BannerControls
 							banners={banners}
 							onChange={onBannersChange}
@@ -685,8 +734,27 @@ export function ScriptView({
 							channel={subtitle.logo}
 						/>
 					)}
+						</div>
+					)}
 				</div>
 	
+				<div
+					role="separator"
+					aria-orientation="vertical"
+					aria-label="Drag to change the size of the video"
+					aria-valuenow={previewWidth}
+					tabIndex={0}
+					title="Drag to make the video bigger or smaller"
+					onPointerDown={startResize}
+					onKeyDown={(e) => {
+						if (e.key === "ArrowLeft") resizePreview(previewWidth + 24);
+						if (e.key === "ArrowRight") resizePreview(previewWidth - 24);
+					}}
+					className="group hidden cursor-col-resize touch-none justify-center self-stretch lg:order-2 lg:flex"
+				>
+					<span className="my-2 w-1 rounded-full bg-foreground/10 transition-colors group-hover:bg-blue-600 group-focus-visible:bg-blue-600" />
+				</div>
+
 				<div className="flex min-w-0 flex-col gap-3 lg:order-1">
 					<p className="text-xs text-foreground/60" title="On the timeline, drag across any part to cut it or keep it. Click a green sentence for subtitle settings.">
 						Click a word to jump there. Double-click to fix it. Drag across words to delete them.
@@ -733,7 +801,7 @@ export function ScriptView({
 									title={`Back to "${editing.original}"`}
 									className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
 								>
-									↩️ Original
+									Original
 								</button>
 							)}
 							<span className="w-full text-xs text-foreground/60">
@@ -790,9 +858,10 @@ export function ScriptView({
 							<button
 								onMouseDown={(e) => e.preventDefault()}
 								onClick={() => setFinding({ find: "", replace: "" })}
-								className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+								className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
 							>
-								🔍 Find &amp; replace
+								<Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+								Find &amp; replace
 							</button>
 						)}
 						{/* onMouseDown preventDefault: keep the highlighted words selected while clicking the button */}
@@ -800,41 +869,45 @@ export function ScriptView({
 							<button
 								onMouseDown={(e) => e.preventDefault()}
 								onClick={() => startEdit(Math.min(...selected), Math.max(...selected))}
-								className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+								className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
 							>
-								✏️ Fix text
+								<Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
+								Fix text
 							</button>
 						)}
 						{anyKept && (
 							<button
 								onMouseDown={(e) => e.preventDefault()}
 								onClick={() => apply(true)}
-								className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
+								className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
 							>
-								🗑️ Delete
+								<Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+								Delete
 							</button>
 						)}
 						{anyGone && (
 							<button
 								onMouseDown={(e) => e.preventDefault()}
 								onClick={() => apply(false)}
-								className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
+								className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/20 px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
 							>
-								↩️ Restore
+								<Undo2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+								Restore
 							</button>
 						)}
 						{!selected.length && deleted.length > 0 && (
 							<button
 								onClick={() => onChange([])}
-								className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
+								className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
 							>
-								↩️ Restore all deleted words
+								<Undo2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+								Restore all deleted words
 							</button>
 						)}
 					</div>
 					<div
 						ref={boxRef}
-						className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-22rem)] lg:text-lg lg:leading-9"
+						className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-26.5rem)] lg:text-lg lg:leading-9"
 					>
 						{items.map((item, i) => {
 							if (item.kind === "break") return <span key={i} className="block h-3" />;
@@ -844,9 +917,10 @@ export function ScriptView({
 										key={i}
 										onClick={() => seek(item.at, true)}
 										title="Silence that will be cut"
-										className="mx-1 rounded bg-red-500/15 px-1.5 align-middle text-xs leading-5 text-red-600 hover:bg-red-500/25"
+										className="mx-1 inline-flex items-center gap-1 rounded bg-red-500/15 px-1.5 align-middle text-xs leading-5 text-red-600 hover:bg-red-500/25"
 									>
-										✂️ {item.seconds.toFixed(1)}s
+										<Scissors className="h-3 w-3 shrink-0" aria-hidden />
+										{item.seconds.toFixed(1)}s
 									</button>
 								);
 							}
@@ -863,8 +937,6 @@ export function ScriptView({
 							);
 						})}
 					</div>
-				</div>
-			</div>
 			{/* Pinned to the bottom of the screen on big screens, like a video editor's timeline. */}
 			<div className="z-20 lg:sticky lg:bottom-2">
 				<Timeline
@@ -893,6 +965,8 @@ export function ScriptView({
 					onPlayFrom={(t) => seek(t)}
 					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}
 				/>
+			</div>
+				</div>
 			</div>
 		</div>
 	);

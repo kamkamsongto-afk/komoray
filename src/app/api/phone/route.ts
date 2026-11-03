@@ -2,6 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { hmac, verifyCallback } from "@/lib/callback";
 import { exists, getJson, putObject, signedUrl } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
+import { uploadLimitReached } from "@/lib/upload-limit";
 
 // Upload from a phone without signing in there. The computer (signed in) makes a link with a
 // QR code; the phone can put one video into one new folder with it, for 15 minutes; then the
@@ -42,8 +43,10 @@ export async function POST(request: Request) {
 	const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 
 	if (body.action === "create") {
-		const { user } = await currentUser();
+		const { supabase, user } = await currentUser();
 		if (!user) return Response.json({ error: "Please sign in first" }, { status: 401 });
+		const limit = await uploadLimitReached(supabase, user);
+		if (limit) return Response.json({ error: limit }, { status: 429 });
 		const id = crypto.randomUUID();
 		const expires = Date.now() + LINK_MINUTES * 60 * 1000;
 		const handoff: Handoff = { userId: user.id, expires, status: "waiting" };
@@ -64,12 +67,12 @@ export async function POST(request: Request) {
 			const contentType = String(body.contentType ?? "");
 			const size = Number(body.size);
 			if (!ALLOWED_TYPES.includes(contentType)) return Response.json({ error: "Only .mp4 and .mov videos are allowed" }, { status: 400 });
-			if (!size || size > MAX_SIZE) return Response.json({ error: "File must be 500 MB or smaller" }, { status: 400 });
+			if (!Number.isInteger(size) || size <= 0 || size > MAX_SIZE) return Response.json({ error: "File must be 500 MB or smaller" }, { status: 400 });
 			const filename = String(body.filename ?? "video");
 			const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "video";
 			const key = `uploads/${id}/${safeName}`;
 			await putObject(handoffKey(id), JSON.stringify({ ...handoff, status: "uploading", key, filename, size }), "application/json");
-			return Response.json({ uploadUrl: await signedUrl(key, "PUT", UPLOAD_LINK_SECONDS, contentType) });
+			return Response.json({ uploadUrl: await signedUrl(key, "PUT", UPLOAD_LINK_SECONDS, contentType, undefined, size) });
 		}
 
 		if (!handoff.key || !(await exists(handoff.key))) return Response.json({ error: "The video did not arrive. Please try again." }, { status: 400 });

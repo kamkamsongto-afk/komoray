@@ -41,6 +41,7 @@ export default function UploadPage() {
 	const [analyzing, setAnalyzing] = useState(false);
 	const [analysisError, setAnalysisError] = useState("");
 	const [dragging, setDragging] = useState(false);
+	const [again, setAgain] = useState(false); // from the editor: listen to this video again, in another language
 
 	// Opened from My projects (/upload?key=…): pick up where that video left off.
 	useEffect(() => {
@@ -54,9 +55,12 @@ export default function UploadPage() {
 				setMessage("This project was not found. Videos are deleted after 14 days during the beta.");
 				return;
 			}
-			if (data.status === "done") return openEditor(saved);
+			const listenAgain = new URLSearchParams(window.location.search).has("again");
+			if (data.status === "done" && !listenAgain) return openEditor(saved);
+			setAgain(listenAgain && data.status === "done");
 			setKey(saved);
 			setStatus("done");
+			setProgress(100);
 			setMessage(saved.split("/").pop() ?? saved);
 			if (data.status === "failed") setAnalysisError(data.error ?? "Analysis failed");
 			if (data.status === "processing") void findSilences(saved, false);
@@ -191,7 +195,7 @@ export default function UploadPage() {
 				}`}
 			>
 				{/* pointer-events-none: hovering the text must not count as leaving the drop zone */}
-				<span className="pointer-events-none text-lg font-medium">{dragging ? "Release to upload ⬇️" : "Drop your video here 🎬"}</span>
+				<span className="pointer-events-none text-lg font-medium">{dragging ? "Release to upload" : "Drop your video here"}</span>
 				<span className="pointer-events-none text-sm text-foreground/60">or click to choose a file</span>
 				<input
 					type="file"
@@ -218,8 +222,8 @@ export default function UploadPage() {
 					</div>
 					<p className="text-sm break-all text-foreground/70">
 						{status === "uploading" && `Uploading ${message}… ${progress}%`}
-						{status === "done" && `✅ Uploaded! Saved as ${message}`}
-						{status === "error" && `❌ ${message}`}
+						{status === "done" && `Uploaded! Saved as ${message}`}
+						{status === "error" && message}
 					</p>
 				</div>
 			)}
@@ -246,17 +250,19 @@ export default function UploadPage() {
 							disabled={analyzing}
 							className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 						>
-							{analyzing ? "Listening…" : "Find silences"}
+							{analyzing ? "Listening…" : again ? "Listen again" : "Find silences"}
 						</button>
 					</div>
 
+					{again && !analyzing && <p className="text-sm text-foreground/70">This writes the script again and starts over: your fixes, cuts and subtitle settings on this video will be replaced.</p>}
+
 					{analyzing && (
 						<p className="text-sm text-foreground/70">
-							👂 Listening to your video… longer videos can take a few minutes. The editor opens by itself when it&apos;s done.
+							Listening to your video… longer videos can take a few minutes. The editor opens by itself when it&apos;s done.
 						</p>
 					)}
 
-					{analysisError && <p className="text-sm text-red-500">❌ {analysisError}</p>}
+					{analysisError && <p className="text-sm text-red-500">{analysisError}</p>}
 
 				</div>
 			)}

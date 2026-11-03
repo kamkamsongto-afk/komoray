@@ -68,7 +68,7 @@ export default function WordsPage() {
 				</p>
 			</div>
 
-			{error && <p className="text-sm text-red-600">❌ {error}</p>}
+			{error && <p className="text-sm text-red-600">{error}</p>}
 			{!words && !error && <p className="text-sm text-foreground/60">Loading…</p>}
 			{words && words.length === 0 && (
 				<p className="text-foreground/70">No words yet. Double-click a word in a script to fix it, and it shows up here.</p>
@@ -85,7 +85,7 @@ export default function WordsPage() {
 							className="min-w-40 flex-1 rounded-md border border-foreground/20 bg-background px-3 py-1.5"
 						/>
 						<button onClick={download} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
-							⬇️ Download (CSV)
+							Download (CSV)
 						</button>
 					</div>
 					<ul className="flex flex-col divide-y divide-foreground/10 rounded-xl border border-foreground/15">

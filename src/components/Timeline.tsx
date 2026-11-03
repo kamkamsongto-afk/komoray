@@ -1,5 +1,6 @@
 "use client";
 
+import { Ban, Pause, Play, Repeat2, RotateCcw, Scissors, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
@@ -518,7 +519,7 @@ export function Timeline({
 					aria-label={playing ? "Pause" : "Play"}
 					title="Play / Pause (Space)"
 				>
-					{playing ? "❚❚" : "▶"}
+					{playing ? <Pause className="h-3.5 w-3.5 fill-current" aria-hidden /> : <Play className="h-3.5 w-3.5 fill-current" aria-hidden />}
 				</button>
 				<span className="tabular-nums text-foreground/80">
 					<span ref={timeTextRef}>0:00.0</span>
@@ -537,19 +538,21 @@ export function Timeline({
 						{picked.kept && (
 							<button
 								onClick={cutPicked}
-								className="rounded-md bg-red-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-red-700"
+								className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-red-700"
 								title="Cut this part out of the video (Delete)"
 							>
-								✂️ Cut
+								<Scissors className="h-3 w-3 shrink-0" aria-hidden />
+								Cut
 							</button>
 						)}
 						{picked.cut && (
 							<button
 								onClick={keepPicked}
-								className="rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
+								className="inline-flex items-center gap-1 rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
 								title="Put this part back in the video"
 							>
-								↩️ Keep
+								<Undo2 className="h-3 w-3 shrink-0" aria-hidden />
+								Keep
 							</button>
 						)}
 						{picked.hand && (
@@ -558,10 +561,11 @@ export function Timeline({
 									onAuto(selection.start, selection.end);
 									setSelection(null);
 								}}
-								className="rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
+								className="inline-flex items-center gap-1 rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
 								title="Undo the hand changes here and go back to the automatic cuts"
 							>
-								↺ Auto
+								<RotateCcw className="h-3 w-3 shrink-0" aria-hidden />
+								Auto
 							</button>
 						)}
 						{zoomOn && picked.kept && !picked.zoomOffAll && (
@@ -570,10 +574,11 @@ export function Timeline({
 									onZoomRange(selection.start, selection.end, false);
 									setSelection(null);
 								}}
-								className="rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
+								className="inline-flex items-center gap-1 rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
 								title="No Auto zoom in this part"
 							>
-								🚫 No zoom
+								<Ban className="h-3 w-3 shrink-0" aria-hidden />
+								No zoom
 							</button>
 						)}
 						{zoomOn && picked.zoomOff && (
@@ -582,20 +587,21 @@ export function Timeline({
 									onZoomRange(selection.start, selection.end, true);
 									setSelection(null);
 								}}
-								className="rounded-md bg-purple-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-purple-700"
+								className="inline-flex items-center gap-1 rounded-md bg-purple-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-purple-700"
 								title="Auto zoom again in this part"
 							>
-								🔍 Zoom
+								<ZoomIn className="h-3 w-3 shrink-0" aria-hidden />
+								Zoom
 							</button>
 						)}
 						<button onClick={() => setSelection(null)} className="px-1 text-foreground/50 hover:text-foreground" aria-label="Clear the selection" title="Esc">
-							✕
+							<X className="h-3 w-3 shrink-0" aria-hidden />
 						</button>
 					</span>
 				) : (
 					<span className="text-xs text-foreground/50" title="Drag across the timeline to cut or keep any part. Drag the edge of a red cut to cut a little more or less (to keep the end of a word). Click a red cut to pick it.">
 						{cutSpans.length} cuts
-						{groups.length > 0 && ` · 🔁 ${groups.length} repeated ${groups.length === 1 ? "take" : "takes"}`}
+						{groups.length > 0 && ` · ${groups.length} repeated ${groups.length === 1 ? "take" : "takes"}`}
 					</span>
 				)}
 				<div className="ml-auto flex items-center gap-2">
@@ -632,7 +638,7 @@ export function Timeline({
 				}`}
 				style={{ top: WAVE_TOP + WAVE - 26 }}
 			>
-				🔍
+				<ZoomIn className="h-3 w-3 shrink-0" aria-hidden />
 			</button>
 			<div
 				ref={scrollRef}
@@ -686,7 +692,7 @@ export function Timeline({
 								}`}
 								style={{ left: Math.max(10, x), top: 1 }}
 							>
-								🔁
+								<Repeat2 className="h-3 w-3 shrink-0" aria-hidden />
 							</button>
 						);
 					})}
@@ -728,9 +734,9 @@ export function Timeline({
 					style={{ left: Math.max(8, Math.min(viewWidth - 300, xOf(words[group.takes[0].from].start) - scrollLeft)) }}
 				>
 					<div className="mb-2 flex items-center gap-2">
-						<p className="flex-1 text-sm font-medium">🔁 Said {group.takes.length} times. Which take do you keep?</p>
+						<p className="flex-1 text-sm font-medium">Said {group.takes.length} times. Which take do you keep?</p>
 						<button onClick={() => setOpenGroup(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
-							✕
+							<X className="h-3 w-3 shrink-0" aria-hidden />
 						</button>
 					</div>
 					<ul className="flex flex-col gap-1">
@@ -750,7 +756,7 @@ export function Timeline({
 										{textOf(t.from, t.to)}
 									</span>
 									{kept ? (
-										<span className="shrink-0 text-xs font-medium text-emerald-700 dark:text-emerald-400">✓ Keeping</span>
+										<span className="shrink-0 text-xs font-medium text-emerald-700 dark:text-emerald-400">Keeping</span>
 									) : (
 										<button
 											onClick={() => onPickTake(group, k)}
