@@ -1,6 +1,6 @@
 # Komoray: บันทึกความคืบหน้า
 
-อัปเดตล่าสุด: **2 พ.ย. 2026 (ปิดงาน)** · งานทั้งหมดขึ้นเว็บแล้ว (deploy 10:43 น.) · ⚠️ **ค้าง: Error 1102 (ดู "ติดอยู่")** · เร็วกว่าแผน ~3 สัปดาห์
+อัปเดตล่าสุด: **3 พ.ย. 2026 (ปิดงาน)** · งานทั้งหมดขึ้นเว็บแล้ว (`7c45f01`) · ⏳ **รอโค้ชลองของใหม่บนเว็บจริง โดยเฉพาะอัปโหลด** · โค้ดเร็วกว่าแผน ~2 สัปดาห์ แต่ยังไม่มีคนนอกใช้
 แผน 67 วัน: [Google Sheet](https://docs.google.com/spreadsheets/d/177tM1wyvNRYY82ykldY7aoKK9YSHDi8JJ1SKtCfR5v4/edit) (1 แถว = 1 วันในปฏิทิน, คอลัมน์ K = สถานะ)
 
 ---
@@ -23,12 +23,13 @@
 ## ระบบที่ใช้ (tech stack)
 
 - **Next.js 16.4 + Tailwind 4 + TypeScript** · โปรเจกต์อยู่ที่ `D:\Platform Project\komoray`
-- **Cloudflare Workers ผ่าน OpenNext** (`@opennextjs/cloudflare`) เลือกแทน vinext เพราะ vinext ยังเป็น beta
+- **Cloudflare Workers ผ่าน OpenNext** (`@opennextjs/cloudflare`) เลือกแทน vinext เพราะ vinext ยังเป็น beta · **แพ็กเกจ Workers Paid** ตั้งแต่ 3 พ.ย. (~$5/เดือน, บิลรอบ 26–25, Budget alert $10)
 - **Workers Builds**: push ขึ้น `main` แล้ว Cloudflare build + deploy เองอัตโนมัติ
   - Build: `npx opennextjs-cloudflare build` · Deploy: `npx opennextjs-cloudflare deploy` · Preview: `npx opennextjs-cloudflare upload`
 - **Cloudflare R2**: ตู้ `komoray-uploads` (CORS อนุญาต localhost:3000, komoray.com, www, workers.dev · headers แค่ `Content-Type` **ไม่มี Range** → ตัวเล่นใหม่อ่านไฟล์ผ่าน `/api/media` บนเว็บเราแทน)
 - **Deepgram** (model `nova-3`) ถอดเสียงพร้อมเวลารายคำ · เปิดให้เลือก 16 ภาษา (`src/lib/languages.ts`) · **ถอดเสียงอย่างเดียว ไม่แปล** (แปลซับคือวันที่ 28 ต้องใช้ Claude API)
-- **Modal** ตัดคลิปด้วย FFmpeg (แอป `komoray-render`)
+- **Modal** ตัดคลิปด้วย FFmpeg (แอป `komoray-render`) · วัดความกว้างตัวอักษรด้วย `uharfbuzz` เพื่อวาดกล่องโค้งมน
+- **Claude API** (`src/lib/translate.ts`, โมเดล `claude-sonnet-5-5`) แปลซับ · เปลี่ยนโมเดลแก้บรรทัดเดียว · ตั้ง fallback อัตโนมัติถ้าโมเดลปฏิเสธ · Worker secret `ANTHROPIC_API_KEY` ตั้งแล้ว
 - **Supabase** (โปรเจกต์ `komoray`, Free, ฐานข้อมูลอยู่ us-west-2) สำหรับ login · Google provider เปิดแล้ว · URL `https://icjjeinussbapihdjiym.supabase.co`
   - ตาราง `projects` (1 แถว = 1 คลิป, `id` = โฟลเดอร์ใน R2) + Row Level Security: เห็น/เพิ่ม/ลบได้เฉพาะของตัวเอง · SQL อยู่ที่ `supabase/migrations/`
   - ตาราง `word_fixes` (คัมภีร์คำส่วนตัว, 31 ต.ค., `002_word_fixes.sql`): `heard` (คำที่สคริปต์เขียน แบบตัวเล็ก ไม่มีวรรคตอนท้าย) → `fixed`, `uses` · RLS เฉพาะเจ้าของ (ทดสอบแล้ว ผู้ใช้อื่นมองไม่เห็น/ลบไม่ได้) · ลบบัญชีแล้วคำหายด้วย (cascade)
@@ -36,19 +37,25 @@
   - URL Configuration: Site URL `https://komoray.com` · Redirect URLs komoray.com/**, www.komoray.com/**, localhost:3000/**
 - **Google Cloud** โปรเจกต์ `komoray` → Google Auth Platform: แอป Komoray (External, **Published** 30 ต.ค., ไม่มีโลโก้), OAuth client `Komoray web` (redirect ไป Supabase callback)
 - **DNS** อยู่ที่ Cloudflare (โดเมนซื้อที่ Namecheap)
-- **อีเมล** `hello@komoray.com` → Cloudflare Email Routing ส่งต่อเข้า kamkamsongto@gmail.com (30 ต.ค.) · ส่งออกผ่าน Gmail "Send mail as" (App password `Komoray mail`) · DNS: SPF `include:_spf.mx.cloudflare.net include:_spf.google.com`, DMARC `_dmarc` p=none · Gmail filter "Never send to Spam" สำหรับ komoray.com · ⚠️ เมลที่ส่งออกยังตกสแปม (ไม่มี DKIM ของ komoray.com) → จะย้ายไป Google Workspace
+- **อีเมล** `hello@komoray.com` → Cloudflare Email Routing ส่งต่อเข้า kamkamsongto@gmail.com (30 ต.ค.) · ส่งออกผ่าน Gmail "Send mail as" (App password `Komoray mail`) · DNS: SPF `include:_spf.mx.cloudflare.net include:_spf.google.com`, DMARC `_dmarc` p=none · Gmail filter "Never send to Spam" สำหรับ komoray.com · **ส่งออกผ่าน Brevo** (Gmail "Send mail as" → `smtp-relay.brevo.com:587`) ยืนยันโดเมนแล้ว 3 พ.ย. (Brevo code, DKIM `brevo1/2._domainkey`, ลิงก์ `email.komoray.com` + `r.email` + `img.email`, เมฆเทาทั้งหมด) · ทดสอบแล้ว DKIM + SPF ผ่าน เมลเข้ากล่องปกติ · รับเข้ายังผ่าน Cloudflare Email Routing
 
 ### กุญแจและความลับ
 - ในเครื่อง: ไฟล์ `.dev.vars` (อยู่ใน `.gitignore` ไม่ขึ้น GitHub)
 - ใน `.dev.vars` มี: R2, Deepgram, `RENDER_TOKEN`, `SUPABASE_DB_PASSWORD`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- บนเว็บจริง: Worker secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DEEPGRAM_API_KEY`, `RENDER_TOKEN` (ตั้งด้วย `npx wrangler secret`, wrangler login แล้ว)
+- บนเว็บจริง: Worker secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `DEEPGRAM_API_KEY`, `RENDER_TOKEN`, `ANTHROPIC_API_KEY` (ตั้งด้วย `npx wrangler secret`, wrangler login แล้ว)
 - กุญแจ R2 ปัจจุบัน = token `komoray-upload-v2` (เปลี่ยน 29 ต.ค., ลบดอกเก่าแล้ว)
 - ค่าที่ไม่ลับ (`R2_ACCOUNT_ID`, `R2_BUCKET`, `RENDER_URL`) อยู่ใน `wrangler.jsonc` → `vars` · Supabase URL + publishable key (สาธารณะ) อยู่ในโค้ด `src/lib/supabase/config.ts` เพื่อไม่ต้องตั้งค่าตอน build
 
 ### แผนที่ไฟล์
 | ไฟล์ | หน้าที่ |
 |---|---|
-| `src/app/page.tsx` | หน้าแรก Coming soon + ลิงก์ Privacy · Terms |
+| `src/app/page.tsx` + `src/components/WaitlistForm.tsx` + `src/app/api/waitlist/route.ts` | หน้าแรกจริง: สโลแกน ขั้นตอน ฟีเจอร์ + ช่อง `Get early access` เก็บที่ R2 `waitlist/<hash>.json` · ไม่มีปุ่ม Sign in (ส่งลิงก์ให้ beta เอง) |
+| `src/app/feedback/page.tsx` + `src/components/FeedbackForm.tsx` + `src/app/api/feedback/route.ts` | ความเห็น beta 3 คำถาม + ข้อความ เก็บที่ R2 `feedback/` ดูใน /admin |
+| `src/components/VideoReady.tsx` | หน้าเสร็จงานหลัง Make video: ดู ดาวน์โหลด คลิปใหม่ และถามความเห็นครั้งแรก |
+| `src/components/ThemeToggle.tsx` + `.surface-inverse` ใน `globals.css` | สวิตช์ Theme มุมขวาบนทุกหน้า (`layout.tsx`) · แผงตั้งค่าใช้สีตรงข้าม Theme |
+| `src/lib/translate.ts` + `src/app/api/translate/route.ts` | แปลซับ 33 ภาษาเป็น .srt ทีละ 40 บรรทัด จำคำแปลใน `translation-<ภาษา>.json` |
+| `src/lib/upload-limit.ts` | เพดาน 20 อัปโหลด/24 ชม./บัญชี ยกเว้น admin กันค่าใช้จ่ายจนกว่าจะมีโควตาจริง |
+| `src/lib/player/stretch.ts` | เร่งเสียง preview 1.25–2x โดยเสียงไม่แหลม |
 | `src/app/upload/page.tsx` | ต้องล็อกอินก่อน · อัปโหลด (หรือ 📱 Upload from your phone) → เลือกภาษา (จำครั้งก่อน/ตามภาษาเบราว์เซอร์) → Find silences → เสร็จแล้วพาไป `/edit` เอง · จำงานไว้ใน URL `?key=` |
 | `src/app/phone/page.tsx` + `src/app/api/phone/route.ts` + `src/components/PhoneUpload.tsx` | อัปโหลดจากมือถือด้วย QR: คอมออกลิงก์ลายเซ็น 15 นาที → มือถืออัปไฟล์เดียวเข้าโฟลเดอร์ที่เตรียมไว้ (ไม่ต้องล็อกอิน) → คอม claim เป็นโปรเจกต์ตัวเอง · สถานะใน `uploads/<id>/phone.json` |
 | `src/app/brand/page.tsx` + `src/app/api/brand/route.ts` | **Brand Kit**: ตั้งสไตล์ซับ/ฟอนต์/สี/ชื่อช่อง/Auto zoom ครั้งเดียว · เก็บที่ R2 `brand/<user id>.json` · คลิปที่ยังไม่มี style ใช้ค่านี้ตอนเปิดครั้งแรก |
@@ -56,14 +63,14 @@
 | `src/app/edit/page.tsx` | **หน้าตัดต่อเต็มจอ** `/edit?key=…`: แถบบน (ความยาวเดิม→หลังตัด, Make video, ดาวน์โหลด, แจ้งเตือน) + ScriptView · บันทึกการแก้ลง edit.json ทันที (ซับรอ 0.6 วิหลังเลื่อนเสร็จ) · ยังไม่มีสคริปต์ → ส่งกลับ /upload |
 | `src/app/privacy/page.tsx`, `src/app/terms/page.tsx` | นโยบายความเป็นส่วนตัว / ข้อตกลง (ติดต่อ hello@komoray.com) · ใช้ `src/components/LegalPage.tsx` |
 | `src/app/admin/page.tsx` + `src/app/api/admin/jobs/route.ts` | หน้า admin: ทุกคลิป + สถานะ (done/working/failed/stuck) + error · เข้าได้เฉพาะล็อกอินด้วย `ADMIN_EMAIL` (kamkamsongto@gmail.com) |
-| `src/app/projects/page.tsx` | My projects: คลิปของตัวเอง เรียงใหม่→เก่า + อีกกี่วันถูกลบ · กดแล้วไป `/edit?key=…` |
+| `src/app/projects/page.tsx` + `src/app/api/projects/route.ts` | My projects: สลับรายชื่อ/Thumbnail + ถังขยะ (ถามยืนยัน แล้วลบไฟล์ทั้งโฟลเดอร์และแถวในตาราง) · กดแล้วไป `/edit?key=…` |
 | `src/app/auth/callback/route.ts` | Google ส่งกลับมาที่นี่หลังล็อกอิน → แลกเป็น session cookie |
 | `src/components/Account.tsx` | `useUser`, ปุ่ม Sign in with Google, แถบบน (New video · My projects · My words · Sign out) |
 | `src/components/ScriptView.tsx` | ตัวตัดต่อ: ซ้าย = ข้อความ (ต่อชิ้นคำไทยด้วย `Intl.Segmenter`, ✂️ ช่วงเงียบ, ลากคลุมคำ → Delete/Restore/✏️ Fix text, **ดับเบิลคลิกคำ → แก้คำ** + Fix all, 🔍 Find & replace, คลิกคำ → กระโดด, ไฮไลต์คำที่พูด, คำเป็น `WordSpan` memo กันสคริปต์ยาวค้าง) · ใช้คัมภีร์คำครั้งแรกที่เปิดคลิป · ขวา = เลือกตัวเล่น (StudioPlayer ถ้ามี proxy + เบราว์เซอร์รองรับ, ไม่งั้น PreviewPlayer) / Original + แถบปรับซับ |
-| `src/components/PlayerFrame.tsx` | กรอบที่ตัวเล่นทั้งสองใช้ร่วมกัน: 9:16, ซับ Kanit (ลากขึ้นลง), ลายน้ำ, ปุ่ม Play, แถบเวลา, ป้าย Recording, วงกลมหมุนตอนโหลด |
+| `src/components/PlayerFrame.tsx` | กรอบที่ตัวเล่นทั้งสองใช้ร่วมกัน: 9:16, ซับ Kanit (ลากขึ้นลง), ลายน้ำ, ปุ่ม Play, แถบเวลา, ความเร็ว 1–2x (เฉพาะ StudioPlayer), ป้าย Recording, วงกลมหมุนตอนโหลด |
 | `src/components/StudioPlayer.tsx` + `src/lib/player/` | **ตัวเล่นของเราเอง (ตัวหลัก, 31 ต.ค.)**: `mp4.ts` อ่านตารางเฟรมของ proxy.mp4 เอง · `bytes.ts` โหลดทีละ 1 MB (Range, จำ ~48 MB) · `engine.ts` WebCodecs แกะภาพวาดลง canvas + Web Audio เล่น `proxy-audio.pcm` เป็นนาฬิกา (ตัดตรง sample, เฟด 3 ms) · error/ไม่รองรับ → กลับไปใช้ PreviewPlayer เอง · `?engine=old` บังคับใช้ตัวเก่า |
 | `src/components/PreviewPlayer.tsx` | ตัวเล่นสำรอง: `<video>` 2 ตัวสลับกันที่จุดตัด · Safari เล่นล่วงหน้า 0.5 วิ (ยังสะดุดบน iPad/Mac เพราะ Safari สั่ง play/seek ช้า) |
-| `src/lib/zoom.ts` | **Auto zoom ทีละเฟรม**: `zoomTrack` ใช้ทั้ง preview และแถบบน Timeline · `noZoom` = ช่วงที่ปิด zoom (วินาทีของคลิปต้นฉบับ อยู่รอดแม้ตัดใหม่) · ลอกกับ `no_zoom_frames`, `zoom_shots`, `smooth_zoom_expr` ใน `render.py` |
+| `src/lib/zoom.ts` | **Auto zoom ทีละเฟรม**: `zoomTrack` ใช้ทั้ง preview และแถบบน Timeline · `in`/`out` ค่อย ๆ ซูมตาม `zoomPeriod` ค้างไว้ แล้วเริ่มใหม่ที่จุดตัดถัดไป (`zoomRamps`) · `noZoom` = ช่วงที่ปิด zoom (วินาทีของคลิปต้นฉบับ อยู่รอดแม้ตัดใหม่) · ลอกกับ `no_zoom_frames`, `zoom_shots`, `zoom_ramps`, `smooth_zoom_expr` ใน `render.py` |
 | `src/lib/languages.ts` | ภาษาที่เลือกได้ + เกณฑ์ที่ใช้คัด (อ่านก่อนเพิ่มภาษา) |
 | `src/app/api/banner-templates/route.ts` | My banners: ป้ายที่บันทึกไว้ใช้ซ้ำทุกคลิป เก็บที่ R2 `brand/<user id>-banners.json` |
 | `src/lib/timeline.ts` | คิดไทม์ไลน์คลิปจริง + แบ่งบรรทัดซับ **ลอกกติกาจาก `render.py`** (แก้ที่หนึ่งต้องแก้อีกที่ ไม่งั้นตัวอย่างไม่ตรงคลิปจริง) · `joinThai` = `join_thai` เว้นวรรคตรงรอยไทย/ตัวเลข/อังกฤษ, หลังคำลงท้าย, ตรงที่หยุดพูด |
@@ -71,7 +78,7 @@
 | `src/lib/edit.ts` | คำที่ลบ → ช่วงตัด (`wordCuts`, `allCuts`) · คำที่แก้ (`Fix`, `fixedWords`, `setFix`, `readFixes`) · `normText` (กติกาเทียบคำ) · `WordFix` |
 | `src/lib/subtitle-style.ts` | ค่าซับ: size/outline/position + **look** (clean/box/highlight/big/two) + **font** (8 ตัว หรือ own) + color + logo/logoAt + **zoom** (off/cuts) · `FONTS[].height` = ความสูงฟอนต์ (libass คิดขนาดจากค่านี้ ตัวอย่างต้องหารด้วยค่านี้ ไม่งั้นตัวใหญ่กว่าคลิปจริง ~1.5 เท่า) · `readStyle` ตรวจทุกช่อง |
 | `src/components/SubtitleControls.tsx` + `BannerControls.tsx` | แผงตั้งค่าซับ (ใช้ทั้งหน้าตัดต่อและ Brand Kit, อัปโหลดฟอนต์ได้) · แผงป้าย Price / Call to action / Follow |
-| `src/lib/banners.ts` | ป้าย: ชนิด ข้อความ เวลา (วินาทีของคลิปจริง) ตำแหน่ง · ตัดอีโมจิ (ฟอนต์ในคลิปจริงไม่มี) · เฟด 0.25 วิ · `readBanners` |
+| `src/lib/banners.ts` | ป้าย: ชนิด ข้อความ เวลา (วินาทีของคลิปจริง) ตำแหน่ง สีพื้น สีตัวอักษร ความมน ความทึบ animation 6 แบบ (`bannerMotion`, ลอกกับ `BANNER_ANIMS` ใน `render.py`) · ตัดอีโมจิ · `readBanners` · ไม่มี `+ Follow` แล้ว คลิปเก่ายังแสดง · ลากเวลาบนแถบรวมใน Timeline |
 | `src/lib/takes.ts` | **ตรวจเทคซ้ำ** (ไม่ใช้ AI): ประโยคที่เริ่มด้วยคำเดิม ≥ 3 คำภายใน 25 วิ = เทคแรกเสีย · ข้ามคำเติม (um, เอ่อ) · ไม่ตัดเข้าต้นเทคที่เก็บ |
 | `src/app/api/edit/route.ts` | PUT: บันทึก `deleted`, `fixes`, `dictionaryApplied`, `style`, `banners` ลง edit.json (ส่งอย่างไหนก็ได้) |
 | `src/app/api/dictionary/route.ts` + `src/app/words/page.tsx` | คัมภีร์คำ: GET/POST (นับ uses)/DELETE · หน้า **My words** ค้นหา ลบ ดาวน์โหลด CSV |
@@ -90,9 +97,9 @@
 | `src/lib/silences.ts` | กติกาช่วงเงียบ: ช่องว่าง > 0.4 วิ, เว้นระยะรอบคำ 0.1 วิ · `trimStretchedWords`: คำยาวได้ไม่เกิน 0.2 + 0.05×ตัวอักษร วิ (Deepgram ชอบลากหางคำท้ายประโยค) |
 | `modal_app/render.py` | งานบน Modal (FFmpeg): `render` ตัดคลิปจริง · `proxy` ทำไฟล์ตัวอย่าง (540p, ภาพเต็มทุก 0.5 วิ, ไม่มี B-frame) + `proxy-audio.pcm` (mono 16-bit 24 kHz) · deploy: `python -m modal deploy modal_app/render.py` · ทดสอบ: `python -m modal run modal_app/render.py --job job.json` (ไม่มี `edit` = proxy) · endpoint: `https://kamkamsongto--komoray-render-start.us-east.modal.run` (`kind: "proxy"`) |
 
-`edit.json` = `{ source, duration, rules, cuts: [{start, end, reason}], words: [{text, start, end}], deleted?: [ลำดับคำที่ลบ], fixes?: [{from, to, text}], dictionaryApplied?: true, style?: {size, outline, position, look, font, ownFont?, color, logo, logoAt, zoom, zoomAmount, zoomPeriod}, noZoom?: [{start, end}], banners?: [{id, kind, text, sub, start, end, place}], wordsJoined?: true }`
+`edit.json` = `{ source, duration, rules, cuts: [{start, end, reason}], words: [{text, start, end}], deleted?: [ลำดับคำที่ลบ], fixes?: [{from, to, text}], dictionaryApplied?: true, style?: {size, outline, position, look, font, ownFont?, color, textColor, outlineColor, boxColor, boxRadius, boxOpacity, letterSpacing, lineSpacing, motion, logo, logoAt, zoom, zoomAmount, zoomPeriod}, noZoom?: [{start, end}], banners?: [{id, kind, text, sub, start, end, place, x?, y?, scale?, color?, ink?, radius?, opacity?, anim?}], wordsJoined?: true }`
 
-ไฟล์ในโฟลเดอร์คลิป (R2 `uploads/<id>/`): ต้นฉบับ · `analyze.json` · `edit.json` · `proxy.json` · `proxy-audio.pcm` · `proxy.mp4` (มีทั้งสองไฟล์ = proxy เสร็จ; proxy.mp4 ที่ไม่มี pcm = รุ่นเก่า สร้างใหม่เองตอนเปิด /edit) · `render.json` · `final.mp4` · `*-error.json`
+ไฟล์ในโฟลเดอร์คลิป (R2 `uploads/<id>/`): ต้นฉบับ · `analyze.json` · `edit.json` · `translation-<ภาษา>.json` · `proxy.json` · `proxy-audio.pcm` · `proxy.mp4` (มีทั้งสองไฟล์ = proxy เสร็จ; proxy.mp4 ที่ไม่มี pcm = รุ่นเก่า สร้างใหม่เองตอนเปิด /edit) · `render.json` · `final.mp4` · `*-error.json`
 
 ---
 
@@ -199,31 +206,43 @@
 - คอลัมน์ขวาอยู่เหนือ Timeline เสมอ (`--player-h`): เปิดแผงแล้ววิดีโอย่อ เดิมแผงจมอยู่หลัง Timeline
 - ⏳ ลองด้วยหน้าทดสอบ ยังไม่ได้ลองกับคลิปจริง · ยังไม่ได้ลองบนมือถือ/iPad
 
+**3 พ.ย. (วันเดียว หลายรอบ)** — ขึ้นเว็บแล้วทั้งหมด (`2ad495c`, `e4177d5`, `c983853`, `7c45f01`)
+- **Error 1102 รู้สาเหตุแล้ว**: Observability ขึ้น `exceededCpu` ราว 70 ครั้งช่วงบ่าย 2 วันที่ 2 พ.ย. (แพ็กเกจ Free ให้ CPU ~10 ms ต่อคำขอ) → อัปเกรด **Workers Paid** · อาจมีส่วนจากหน้า admin ที่ดาวน์โหลดไฟล์ 116 MB ใน `logs/test/` ทุกครั้งที่เปิด (แก้แล้ว ยังไม่ยืนยันว่าเกี่ยว)
+- **แปลซับ (วันที่ 28 ส่วนแรก)**: 33 ภาษา ดาวน์โหลด .srt · ทดสอบ Opus / Sonnet / Haiku: Haiku 5.5 ส่งกลับบรรทัดไม่ครบ 3 จาก 4 รอบ · Opus กับ Sonnet ครบ 12/12 · Sonnet ราคาครึ่งหนึ่ง (~$0.05 ต่อ 250 บรรทัด ส่งรอบละ 40) จึงเลือก Sonnet 5.5 · ⏳ ยังไม่ได้ฝังลงคลิป
+- **ตามลิสต์โค้ชรอบแรก**: My projects รายชื่อ/Thumbnail + ลบ · Letter spacing ใช้กับไทยได้ (space อยู่หลังสระ/วรรณยุกต์ตัวสุดท้าย สระไม่หลุด) · สีกล่องและขอบ · Preview เร่ง 1–2x (วัดจริง 1.00x, 1.51x, 2.00x) · ย้ายเครื่องมือไปข้างคลิป + Timeline ใต้สคริปต์ + ลากแถบย่อขยาย + แผงลอยไม่ทำให้คลิปหด · อิโมจิเป็นไอคอน (เหลือชื่อแท็บ ✅/❌ และแจ้งเตือนเดสก์ท็อป) · กลางวัน/กลางคืน
+- **ความปลอดภัย**: ลิงก์อัปโหลดล็อกขนาดและชนิดไฟล์ (ทดสอบกับ R2 จริง) · `/api/report` และ waitlist รับเฉพาะ Origin เว็บเรา + จำกัดขนาด · header พื้นฐาน · เพดาน 20 อัปโหลด/วัน · ซ่อม ESLint (`npm run lint`, error 0)
+- **อื่น ๆ**: หน้าแรกจริง + waitlist · `Wrong language?` ถอดเสียงใหม่ · ซับไทยที่เว้นระยะตัดบรรทัดเร็วขึ้น ตรงกับคลิปจริง 24/24 กรณี · สะกดแบบอเมริกัน
+- **ตามลิสต์โค้ชรอบสอง**: Zoom in/out เดิมกระจาย 12% ทั้งคลิปจนมองไม่เห็น เปลี่ยนเป็นค่อย ๆ ซูมแล้วเริ่มใหม่ที่จุดตัด (preview กับคลิปจริงตรงกัน) · Bounce เด้งจากคำแรก เว้น 0.35 วิ · Box มี `Corners` + `Box opacity` (วาดเองด้วย ASS เพราะ libass ไม่มีมุมมน) กล่องขยายตามคำที่เด้ง · Big ขนาด 170 · Banner สี/มุม/ความทึบ/animation 6 แบบ + แถบรวมบน Timeline แทนช่องกรอกตัวเลข · ปุ่ม `Split` + ลูกศร 4 ปุ่มบนเส้นเสียง + เคอร์เซอร์ลูกศรบนแถบตัวเลข · Timeline ติดจอล่างบนมือถือ · สวิตช์ Theme มุมขวาบน + แผงสีตรงข้าม
+- **หน้าเสร็จงาน + แบบฟอร์ม feedback**: เปิดเองหลัง Make video · คำตอบขึ้นใน /admin
+- **อีเมล**: ยืนยันโดเมนใน Brevo, DKIM + SPF ผ่าน, เมลเข้ากล่องปกติ · mail-tester 5.2 เพราะเมลทดสอบไม่มีหัวข้อ/สั้น และโดเมนใหม่ ยังไม่ได้ทดสอบซ้ำด้วยเมลจริง
+- ⏳ ทดสอบแบบจำลอง login ในเบราว์เซอร์ + render จริงบน Modal แล้ว · ยังไม่ได้ลองกับบัญชีจริง: อัปโหลดหลังล็อกลิงก์, ลบคลิปจริง, บันทึก waitlist/feedback จริง, แปลซับบนเว็บจริง, มือถือจริงด้วยนิ้ว, เสียงตอนเร่ง
+
 ---
 
 ## ⚠️ ติดอยู่ / เรื่องที่ต้องรู้
 
 | เรื่อง | รายละเอียด | ต้องทำเมื่อไหร่ |
 |---|---|---|
-| 🔴 **Error 1102 (2 พ.ย.)** | โค้ชเจอ แต่ยังไม่รู้ว่าหน้าไหน/ทำอะไรอยู่ · 1102 = Worker ใช้ CPU หรือหน่วยความจำเกินกำหนด · ผมทดสอบแบบไม่ login 9 เส้นทาง ไม่เจอ · ดักฟัง `wrangler tail` ~5 นาทีตอนโค้ชใช้เว็บ: 46 คำขอ สำเร็จทั้งหมด จับ 1102 ไม่ได้ · CPU สูงสุด: `/projects` 471 ms, `/edit` 393, `/brand` 373, `/upload` 369, `/api/thumb` 333, `/api/media` 243, `PUT /api/edit` 164 · บันทึก 1 พ.ย. มี "ได้หน้า HTML แทนข้อมูล" ตอนบันทึกงาน อาจเป็นเรื่องเดียวกัน · สันนิษฐาน (ยังไม่ยืนยัน): เกินโควตา CPU ของแพ็กเกจฟรี | **ก่อนชวน beta:** โค้ชเช็กแพ็กเกจใน `Workers & Pages` (Free/Paid) + บอกว่าเจอตอนทำอะไร · ถ้า Free น่าจะแก้ด้วย Workers Paid ~$5/เดือน · ถ้า Paid แล้วยังเจอ ต้องดูโค้ด |
+| 🟡 **Error 1102: เช็กหลังอัปเกรด** | อัปเกรด Workers Paid แล้ว 3 พ.ย. · ยังไม่ได้ดูว่า `exceededCpu` เป็น 0 หลังใช้งานจริง | โค้ชใช้เว็บสักวัน แล้วดู `Workers & Pages` → `komoray` → `Observability` · `Group By` = `$workers.outcome` |
+| 🧪 **ของใหม่ยังไม่ผ่านบัญชีจริง** | อัปโหลดจากคอม/มือถือ, ลบคลิป, แปลซับ, waitlist, feedback, มือถือด้วยนิ้ว | **ก่อนชวน beta โดยเฉพาะอัปโหลด** · เช็กลิสต์อยู่ใน "ขั้นต่อไป" |
+| 📧 **เมลเข้า hello@ อาจตกหล่น** | 3 พ.ย. Gmail ตอบเมลจาก Google ที่ Cloudflare ส่งต่อด้วย `421 4.7.28` (จำกัดชั่วคราว ไม่ใช่การตั้งค่าเรา) · เมลทดสอบจากคนอื่นผ่าน · ระหว่าง beta ให้ดู `Email Routing` → `Activity log` เป็นระยะ | ย้ายไป Google Workspace เมื่อมีคนตอบกลับสม่ำเสมอ (Brevo ใช้ต่อได้ ไม่ซ้ำกัน) |
+| 🖼️ **รูปโปรไฟล์เมล hello@** | ✅ ใช้ได้แล้ว 3 พ.ย.: `hello@komoray.com` เป็น `Alternate emails` ของบัญชี `komoray.studio@gmail.com` ซึ่งใส่โลโก้ไว้ · บัญชีนี้มีหน้าที่เก็บรูปเท่านั้น ส่งเมลยังใช้ Gmail หลักเลือก `From` เป็น hello@ · **ห้ามลบบัญชีนี้หรือเอา hello@ ออก** | ล็อกอินบัญชีนี้เป็นระยะ และเปิดยืนยัน 2 ชั้น + แก้ `Recovery email` ที่ขึ้น `Verification needed` |
+| 🗃️ **ไฟล์ทดสอบเก่าใน R2** | `logs/test/` 12 ไฟล์ ~155 MB เป็นไฟล์ทดสอบของ Claude 31 ต.ค. ไม่ได้ถูกเจาะ · ลบเองภายใน 90 วัน | ลบได้เมื่อโค้ชบอก |
 | 🚀 **Deploy ต้องให้โค้ชรันเอง (2 พ.ย.)** | ระบบ Claude Code ไม่ให้ Claude รัน `git push` / `modal deploy` เอง แม้โค้ชบอกอนุญาตทุกอย่าง → `python -m modal deploy modal_app/render.py` **ก่อน** แล้วค่อย `git push origin main` (Modal ต้องทำเฉพาะเมื่อแก้ `render.py`) | ทุกครั้งที่จะขึ้นเว็บ |
-| 🗃️ ไฟล์แปลกใน `logs/` | ตอนอ่านบันทึก error เจอไฟล์ใน R2 `logs/` ที่เนื้อในเป็น mp4/ฟอนต์ 13 ไฟล์ (29–31 ต.ค.) ยังไม่ได้ดูว่ามาจากไหน · ลบเองหลัง 90 วัน | ตรวจว่า `/api/report` รับอะไรได้บ้าง |
 | 💳 Modal GPU | ใช้ GPU ไม่ได้จนกว่าจะผูกบัตร ("Please add a payment method") · ผูกแล้วได้เครดิต $30/เดือน | ก่อนทำ Scene Swap ต่อ |
 
 | 🖼️ Google consent screen | **ห้ามอัปโหลดโลโก้** ในหน้า Branding (ต้องรอ Google ตรวจหลายวัน) · หน้าเลือกบัญชีจะโชว์ `icjjeinussbapihdjiym.supabase.co` (แก้ได้ด้วย Supabase custom domain แบบเสียเงิน) | ภายหลัง |
-| 📧 เมล hello@ ที่ส่งออกตกสแปม | แบบฟรีเซ็น DKIM เป็น gmail.com · แก้จริง = Google Workspace (~$7/เดือน) | **ก่อนส่งเมลชวน beta** |
 | 🇹🇭 Deepgram ภาษาไทย | ตกตัวอักษรบางตัว (เช่น "จุดเด่คือ", "โค้", บางครั้ง "ผูหญิง" ไม่มีไม้โท) · แก้ได้ด้วยดับเบิลคลิกคำ + คัมภีร์จำไว้ · ชิ้นคำประกอบเป็นคำจริงแล้ว (31 ต.ค. เย็น) | ทดสอบกับคลิปไทยจริง |
 | 🎬 ตัวเล่นใหม่ | ✅ ลื่นบน iPad + Chrome (โค้ชทดสอบ 31 ต.ค.) · ภาพบีบบน iPad แก้แล้ว รอโค้ชดูอีกรอบ · iPhone / Mac Safari ยังไม่ได้ลอง | รอบทดสอบถัดไป |
 | 🗃️ บันทึก debug เก่า | 2 ชุดแรกจาก iPad อยู่ที่ `debug/` (ก่อนย้ายไป `logs/debug/`) ไม่มีกฎลบเอง · เล็กมาก | ลบเมื่อว่าง |
 | 🗂️ คลิปก่อนมี login | 10 คลิปทดสอบไม่มีเจ้าของในตาราง projects → เปิดจาก /upload ไม่ได้ ดูได้ใน admin · หมดอายุเองตามกฎ 14 วัน | ไม่ต้องทำอะไร |
 | 💸 Deepgram opt out อาจแพงขึ้น | ยังไม่รู้ตัวเลขจริง · เช็กใน Deepgram Console → Usage หลังมีคลิปใหม่ | ครั้งถัดไปที่ทดสอบ |
-| 🌐 ไม่มีปุ่มจากหน้าแรกไป /upload | มี login แล้ว (30 ต.ค.) · ยังตั้งใจส่งลิงก์ให้เฉพาะคน beta · R2 ลบไฟล์ใน `uploads/` เองหลัง 14 วัน | ใส่ปุ่มตอน soft launch |
+| 🌐 ไม่มีปุ่มจากหน้าแรกไป /upload | หน้าแรกจริงขึ้นแล้ว แต่ตั้งใจไม่มีปุ่ม Sign in · ส่งลิงก์ `/upload` ให้เฉพาะคน beta · R2 ลบไฟล์ใน `uploads/` เองหลัง 14 วัน | ใส่ปุ่มตอน soft launch |
 | 🇹🇭 คลิปไทยเจอช่วงเงียบน้อย | มีช่วง 28.99–43.49 วิ (14.5 วิ) ในคลิปโค้ช รอโค้ชฟังว่าเงียบจริงไหม | รอคำตอบจากโค้ช |
-| 🧹 ESLint พังมากับเทมเพลต | error "Converting circular structure to JSON" ไม่กระทบเว็บ | ทำเมื่อว่าง |
 | 🖼️ Banner บน X | ใช้ภาพคนที่ AI สร้าง + ตัวเลขยอดไลก์ อาจทำให้เข้าใจผิดว่าเป็นลูกค้าจริง | แนะนำลบตัวเลข / เปลี่ยนเป็นภาพจริงภายหลัง |
 | 📣 งานตลาด / launch / ติดต่อ creator | โค้ชสั่ง**ข้ามไปก่อน** (29 ต.ค.) · 0 โพสต์ · ยังไม่มี beta · soft launch จึงยังไม่เกิด | รอโค้ชตัดสินใจวันใหม่ |
 | 💻 บทเรียน | เวลาทดสอบด้วย `next dev` เบื้องหลัง ต้องปิด process ให้หมด ไม่งั้น `npm run dev` ของโค้ชจะเปิดไม่ได้ · ทดสอบหน้าตาได้ด้วย Chrome headless + สคริปต์ CDP (ทำหน้า dev ชั่วคราวที่ไม่ต้อง login แล้วลบทิ้ง) | ทุกครั้งที่ทดสอบ |
-| 🔁 คลิปที่หาช่วงเงียบแล้ว | ตอนนี้กด Find silences ใหม่จากหน้า /edit ไม่ได้ (หน้า upload ส่งไป /edit เลย) | ถ้าต้องการค่อยเพิ่มปุ่ม |
+| 🎞️ ตัวเล่นสำรอง | `PreviewPlayer` (เบราว์เซอร์ไม่มี WebCodecs) ไม่มีปุ่มเร่งความเร็ว เพราะสลับ video 2 ตัวตามจังหวะ | ถ้ามีคนเจอ |
 | 🏠 Find silences บน localhost | Deepgram ส่งผล callback มาที่เครื่องในบ้านไม่ได้ จะค้างที่ Listening · ทดสอบบน komoray.com หรือจำลอง callback ด้วยลายเซ็น HMAC | ทุกครั้งที่ทดสอบในเครื่อง |
 | 📦 ขนาดไฟล์ 500 MB | คลิป 4K ของมืออาชีพเกินแน่นอน · โค้ชเลือก**ยังไม่ขยาย**ตอนนี้ · ของจริงควรจำกัดตามความยาวคลิป/แพ็กเกจ + อัปโหลดแบบแบ่งชิ้น (multipart) | หลังมี login |
 
@@ -231,30 +250,31 @@
 
 ## ⏭️ ขั้นต่อไป
 
+**แนวทาง (Claude แนะนำ 3 พ.ย.):** หยุดเพิ่มฟีเจอร์ใหญ่ไว้ก่อน แล้วชวน beta 5–10 คนในสัปดาห์นี้ เพราะยังไม่มีคนนอกใช้เลย
 
-**1. หา Error 1102 ก่อน:** โค้ชเช็กแพ็กเกจ Cloudflare + บอกว่าเจอตอนไหน → Claude เปิด `wrangler tail` ดักตอนเกิด (กรองเอาเฉพาะ path, query มีลิงก์ลับ)
-**2. โค้ชลองของใหม่บนเว็บจริง:** แผงใหม่ทั้ง 5 + คลิกแถบเขียว + 🔍 · ระยะตัวอักษร/บรรทัด/สีในคลิปจริง · โลโก้ · Smooth zoom ในคลิปจริง · ปิด zoom เป็นช่วง · My banners · อัปคลิปภาษาอื่นถ้ามี · iPad
+**1. โค้ชลองบนเว็บจริงก่อน (ตามลำดับ):** อัปโหลดจากคอม → อัปโหลดจากมือถือ (QR) → แปลซับ → Make video ด้วย Box + Corners + Bounce + Letter spacing → หน้าเสร็จงาน + ส่ง feedback → `/admin` → ลบคลิป → Preview 2x ฟังเสียง → ลากแถบย่อขยาย → Zoom in → Banner + ลากบน Timeline → Split บนมือถือด้วยนิ้ว → สวิตช์ Theme
 
-**งานถัดไปที่ Claude ทำได้เลย (ไม่ต้องรอโค้ช):**
-- แก้ตาม feedback จากการลองรอบนี้
-- **แปลซับ (วันที่ 28)**: มีกุญแจ Anthropic ใน `.dev.vars` แล้ว (ทดสอบแล้วใช้ได้, เพดาน $20/เดือน) · บนเว็บจริงยังต้องตั้ง `npx wrangler secret put ANTHROPIC_API_KEY`
-- Zoom ตามประโยคสำคัญ (ตอนนี้ Smooth เป็นจังหวะคงที่ แผนเดิมวันที่ 22 อยากให้เลือกจุดเน้น 4–6 จุด ต้องใช้ Claude API)
+**2. ชวน beta:** เลือกครีเอเตอร์ 5–10 คน เขียนข้อความชวน (Claude ช่วยร่าง) ส่งจาก hello@ ทีละคน ทดสอบเมลจริงซ้ำก่อน (มีหัวข้อ เนื้อหาเต็ม) ส่งเข้า Gmail อีกบัญชี + Outlook
+
+**งานที่ Claude ทำได้เลย:**
+- แก้ตามผลทดสอบข้อ 1
+- ฝังซับแปลลงคลิป (ปิดวันที่ 28) ทำเมื่อ beta ขอ: ต้องเช็กฟอนต์แต่ละภาษา
+- ทดสอบคลิปที่ค้าง 6 คลิป + แนวนอน + .mov (ต้องให้โค้ชอัปคลิปและดูผล)
 
 **งานที่รอโค้ช:**
-1. บัตรใน Modal → Scene Swap ต่อ (วันที่ 36–37: วัดต้นทุน GPU, ทดสอบ 10 คลิป)
-2. สมัคร Paddle + ตัดสินใจราคา (วันที่ 29–33) → โควตา (วันที่ 31) รออันนี้
-3. Google Workspace (~45 นาที ก่อนส่งเมลหา creator): สมัคร Business Starter (yoshi@komoray.com, hello@/support@ เป็น alias) → ยืนยันโดเมน (TXT) → MX เป็นของ Google + ปิด Cloudflare Email Routing → DKIM (`google._domainkey`) → SPF เหลือ `include:_spf.google.com` → ลบ "Send mail as" + App password `Komoray mail` → ทดสอบส่งหาภรรยา
-4. ทดสอบคลิปที่เหลือ 6 คลิป + คลิปแนวนอน + .mov จาก iPhone + iPad/iPhone (`&debug=1`)
-5. หาคนพูดภาษาอื่นช่วยดูซับ (เริ่มจาก es, de, pt ก่อน) ก่อนโฆษณาว่ารองรับภาษานั้น
-6. งานที่ข้ามไว้: soft launch / แบบฟอร์ม feedback / ชวน beta / งานตลาด (โค้ชต้องตัดสินใจ: เร็วกว่าแผน 3 สัปดาห์แล้ว แต่ยังไม่มีคนนอกใช้เลย)
+1. สมัคร Paddle + ตัดสินใจราคา (วันที่ 29–33) ต้องถามว่ารับผู้ขายจากไทยไหม → โควตาจริง (วันที่ 31)
+2. ผูกบัตร Modal → Scene Swap ต่อ (วันที่ 36–52)
+3. Google Workspace (~45 นาที, ~$7/เดือน) เมื่อมีคนตอบกลับสม่ำเสมอ: MX เป็นของ Google + ปิด Cloudflare Email Routing + DKIM Google + เพิ่ม Google ใน SPF · **ไม่ต้องยกเลิก Brevo**
+4. หาคนพูดภาษาอื่นช่วยดูซับ/คำแปล (เริ่มจาก es, de, pt) ก่อนโฆษณาว่ารองรับ
+5. ตัดสินใจ: อ่านข้อความหน้าแรก · เพดาน 20 คลิป/วันเหมาะไหม · ลบ `logs/test/` ไหม · Brand ID และปรับสี
+6. ก่อน public launch 15 ธ.ค.: นักกฎหมายดู Privacy/Terms · landing page จริงพร้อมคลิป before/after + ราคา + FAQ
 
 **งานตลาด (วันละ ~30 นาที, เร่งด่วน):**
 1. โพสต์แรก build in public บน X (โค้ชเล่าเป็นภาษาไทย Claude เกลาเป็นอังกฤษ)
 2. รายชื่อครีเอเตอร์ talking head มืออาชีพ 50 คน
 3. DM ชวน beta 10 คน (คอมเมนต์คุยก่อนแล้วค่อย DM)
-4. หน้า waitlist บน komoray.com
 
-**ทำได้เมื่อว่าง:** ESLint
+**ไอเดียต่อ:** Chrome Remote Desktop ถ้าอยากรันคำสั่งจากมือถือ · ขอบรอบตัวอักษรใน Box (โค้ชบอกยังไม่เอา 3 พ.ย.) · Zoom ตามประโยคสำคัญด้วย Claude
 
 **ไอเดียที่โค้ชให้ทดไว้ (31 ต.ค., ยังไม่ทำ):**
 - **คัมภีร์คำกลางของแต่ละภาษา** (เช่น ผูหญิง → ผู้หญิง) ใช้กับทุกคนที่พูดภาษานั้น + คัมภีร์ส่วนตัวทับอีกชั้น · Claude แนะนำ: ทีมเราเป็นคนคัดคำเข้าคัมภีร์กลางเอง (ไม่ดึงคำของผู้ใช้ไปใช้อัตโนมัติ เพราะสัญญาไว้ในหน้า Privacy ว่าคำของผู้ใช้เป็นของเขาคนเดียว) · ถ้าจะนับว่าคำไหนถูกแก้บ่อยในหลายบัญชี ต้องแก้หน้า Privacy และขอความยินยอมก่อน
@@ -273,7 +293,10 @@
 - **คลิปเสร็จแจ้งเตือนบนจออย่างเดียว ไม่ส่งอีเมล** (28 ต.ค.)
 - **การเก็บไฟล์** (แก้ 30 ต.ค.): beta ลบทุกอย่างหลัง 14 วัน · ระยะยาว: **เก็บตลอด จำกัดพื้นที่ตามแพ็กเกจ ผู้ใช้ลบเอง** (แทนแผนเดิม Free 7 / Pro 30 / Business 90 วัน) · บัญชีที่ไม่ใช้เกิน 12 เดือนเตือนก่อน 30 วันแล้วลบ · edit.json เก็บตลอด · ต้องแก้หน้า privacy + อีเมลแจ้งผู้ใช้เมื่อเปลี่ยน
 - **ไม่ขายข้อมูล ไม่เอาคลิปไปเทรน AI** (30 ต.ค.) · Deepgram ใช้ `mip_opt_out=true` · ร่าง privacy/terms ใช้ได้ช่วง beta แต่ก่อน public launch ให้นักกฎหมายดู (ลูกค้าอเมริกา + PDPA ไทย)
-- **อีเมล** (30 ต.ค.): เริ่มฟรีด้วย Cloudflare Email Routing + Gmail Send mail as · ย้ายไป Google Workspace เมื่อมีลูกค้าจ่ายเงินหรือมีทีม
+- **อีเมล** (แก้ 3 พ.ย.): รับผ่าน Cloudflare Email Routing · ส่งผ่าน Gmail "Send mail as" + Brevo ฟรี (DKIM ของ komoray.com) · ย้ายกล่องเมลไป Google Workspace เมื่อมีคนตอบกลับสม่ำเสมอ ลูกค้าจ่ายเงิน หรือมีทีม · Brevo ใช้ต่อกับเมลจำนวนมาก
+- **แปลซับใช้ Claude Sonnet 5.5** (3 พ.ย.): ไม่ใช้ Deepgram เพราะถอดเสียงอย่างเดียว · Haiku ส่งบรรทัดไม่ครบ · แยกโมเดลรายภาษาได้ถ้ามีหลักฐานว่าคุ้ม
+- **Banner ทุกอย่างบนแถบเดียวบน Timeline** (3 พ.ย.): ฉากหลังและกราฟิกในอนาคตใส่แถบนี้ ไม่เพิ่มเส้นจนตาลาย
+- **รูปโปรไฟล์เมลใช้บัญชี `komoray.studio@gmail.com`** (3 พ.ย.): ฟรี ยังไม่ทำ BIMI (โลโก้แบรนด์แบบทางการ มักมีค่าใบรับรองรายปี)
 - **สูตรตัดหางคำ** (29 ต.ค.): แก้ที่สูตรของเรา ไม่ได้แก้ที่ Deepgram · ค่า 0.2 + 0.05×ตัวอักษร
 - ไอเดียช่วงเงียบที่ตั้งใจเว้น (29 ต.ค.): ระดับความกระชับ Tight/Natural/Relaxed + ย่อช่วงเงียบแทนตัดทิ้ง + กดคืนจุดตัดใน Script view
 - **คัมภีร์คำส่วนตัวที่โตเอง** (30 ต.ค.): จุดขายหลัก + ทำให้ลูกค้าไม่ย้ายไปเจ้าอื่น (Gling แก้คำผิดซ้ำ ๆ ไม่ได้ + ไทยเว้นวรรคมั่ว) · เก็บในฐานข้อมูลผูกกับบัญชี ไม่ผูกกับเบราว์เซอร์ เพื่อใช้ต่อในแอป PC/Mac ในอนาคต · ไม่เอาไปเทรน AI กลาง (เป็นของผู้ใช้คนนั้นเท่านั้น)
