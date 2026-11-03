@@ -28,6 +28,9 @@ export default function PrivacyPage() {
 					Ask us any time to take it off.
 				</li>
 				<li>
+					<strong>Feedback:</strong> if you send us feedback, we keep your answers with your email address, to improve Komoray and to reply. Ask us any time to remove them.
+				</li>
+				<li>
 					<strong>Your account:</strong> when you sign in with Google, we receive your name, email address and profile picture.
 					We never see your Google password.
 				</li>

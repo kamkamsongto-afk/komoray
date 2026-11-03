@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
+import { VideoReady } from "@/components/VideoReady";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
@@ -117,6 +118,8 @@ export default function EditPage() {
 	const [saveError, setSaveError] = useState("");
 	const [translating, setTranslating] = useState<string | null>(null); // what the Translate menu shows while it works
 	const [render, setRender] = useState<RenderState>({ status: "none" });
+	const [showReady, setShowReady] = useState(false); // the finished-video window: opens by itself when a render finishes
+	const closeReady = useCallback(() => setShowReady(false), []);
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
 	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
@@ -194,6 +197,7 @@ export default function EditPage() {
 			const data = (await res.json()) as RenderState;
 			if (data.status === "done" || data.status === "failed") {
 				setRender(data);
+				if (data.status === "done") setShowReady(true);
 				announce(data, audioRef.current, desktopNotify);
 			}
 		}, POLL_MS);
@@ -697,15 +701,17 @@ export default function EditPage() {
 			{render.status === "done" && render.videoUrl && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
 					<span>Your video is ready!</span>
-					<a href={render.videoUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline">
-						▶ Watch
-					</a>
+					<button onClick={() => setShowReady(true)} className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700">
+						Watch
+					</button>
 					<a href={render.downloadUrl} className="rounded-lg border border-foreground/20 px-3 py-1.5 font-medium hover:bg-foreground/5">
 						Download video
 					</a>
 					<span className="text-xs text-foreground/50">Changed something after this? Press Make video again.</span>
 				</div>
 			)}
+
+			{showReady && render.status === "done" && render.videoUrl && <VideoReady videoUrl={render.videoUrl} downloadUrl={render.downloadUrl} videoKey={key} onClose={closeReady} />}
 
 			<ScriptView
 				videoUrl={analysis.videoUrl}

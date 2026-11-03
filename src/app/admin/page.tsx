@@ -45,6 +45,7 @@ export default function AdminPage() {
 	const [loading, setLoading] = useState(false);
 	const [onlyProblems, setOnlyProblems] = useState(false);
 	const [waitlist, setWaitlist] = useState<{ email: string; at: string }[]>([]);
+	const [feedback, setFeedback] = useState<{ email: string; at: string; easy: number | null; result: number | null; pay: string | null; note: string }[]>([]);
 
 	function downloadWaitlist() {
 		const csv = ["email,joined", ...waitlist.map((p) => `"${p.email.replace(/"/g, '""')}",${p.at}`)].join("\n");
@@ -66,6 +67,8 @@ export default function AdminPage() {
 			setReports(data.reports ?? []);
 			const list = (await (await fetch("/api/waitlist")).json().catch(() => ({}))) as { people?: { email: string; at: string }[] };
 			setWaitlist(list.people ?? []);
+			const heard = (await (await fetch("/api/feedback")).json().catch(() => ({}))) as { answers?: typeof feedback };
+			setFeedback(heard.answers ?? []);
 		} catch (err) {
 			setJobs(null);
 			setError(err instanceof Error ? err.message : "Could not load");
@@ -120,6 +123,23 @@ export default function AdminPage() {
 					</button>
 				)}
 			</p>
+
+			<section className="flex flex-col gap-3">
+				<h2 className="text-lg font-semibold">Feedback ({feedback.length})</h2>
+				{feedback.length === 0 && <p className="text-sm text-foreground/60">None yet.</p>}
+				{feedback.map((f) => (
+					<div key={f.at + f.email} className="flex flex-col gap-1 rounded-xl border border-foreground/15 p-4 text-sm">
+						<div className="flex flex-wrap justify-between gap-2">
+							<span className="font-medium">{f.email}</span>
+							<span className="text-xs text-foreground/60">{when(f.at)}</span>
+						</div>
+						<span className="text-foreground/70">
+							Easy: {f.easy ?? "-"} · Happy: {f.result ?? "-"} · Would pay: {f.pay ?? "-"}
+						</span>
+						{f.note && <span className="break-words whitespace-pre-wrap">{f.note}</span>}
+					</div>
+				))}
+			</section>
 
 			<section className="flex flex-col gap-3">
 				<h2 className="text-lg font-semibold">Videos</h2>
