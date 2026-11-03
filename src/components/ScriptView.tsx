@@ -233,6 +233,7 @@ export function ScriptView({
 	// Preview = the final video (cuts, 9:16, subtitles), built live in the browser. Original = the raw upload.
 	const [mode, setMode] = useState<"preview" | "original">("preview");
 	const [panel, setPanel] = useState<Panel | null>(null);
+	const [focusBanner, setFocusBanner] = useState<string | null>(null);
 	// From the timeline: the panels live under the preview.
 	const openPanel = (next: Panel) => {
 		setMode("preview");
@@ -591,7 +592,7 @@ export function ScriptView({
 			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_12px_var(--preview-w)] lg:items-start lg:gap-x-1" style={{ "--preview-w": `${previewWidth}px` } as CSSProperties}>
 				{/* Right on big screens (sticky while the script scrolls), on top on phones. */}
 				<div
-					className="flex flex-col gap-3 lg:sticky lg:top-4 lg:z-30 lg:order-3 lg:[--player-h:max(15rem,calc(100vh-11.5rem))]"
+					className="flex flex-col gap-3 [--player-h:42vh] lg:sticky lg:top-4 lg:z-30 lg:order-3 lg:[--player-h:max(15rem,calc(100vh-14rem))]"
 				>
 					<div className="flex flex-col gap-2 lg:flex-row lg:items-start">
 					<div className="min-w-0 flex-1">
@@ -686,7 +687,7 @@ export function ScriptView({
 					</div>
 					{/* Floats over the script on big screens: the video keeps its size while you watch the change. */}
 					{mode === "preview" && panel && (
-						<div className="flex flex-col gap-2 rounded-lg border border-foreground/15 bg-background shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:max-h-[calc(100vh-10rem)] lg:w-[26rem] lg:overflow-y-auto">
+						<div className="flex flex-col gap-2 surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:max-h-[calc(100vh-26rem)] lg:w-[26rem] lg:overflow-y-auto">
 							<div className="flex items-center justify-between px-3 pt-2 text-sm font-medium">
 								{PANELS.find((p) => p.id === panel)?.name}
 								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
@@ -731,7 +732,8 @@ export function ScriptView({
 							onChange={onBannersChange}
 							now={() => toOutSeconds(timeRef.current, segments)}
 							total={totalFrames(segments) / FPS}
-							channel={subtitle.logo}
+							brand={subtitle.color}
+							focus={focusBanner}
 						/>
 					)}
 						</div>
@@ -907,7 +909,7 @@ export function ScriptView({
 					</div>
 					<div
 						ref={boxRef}
-						className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-26.5rem)] lg:text-lg lg:leading-9"
+						className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-29rem)] lg:text-lg lg:leading-9"
 					>
 						{items.map((item, i) => {
 							if (item.kind === "break") return <span key={i} className="block h-3" />;
@@ -938,7 +940,7 @@ export function ScriptView({
 						})}
 					</div>
 			{/* Pinned to the bottom of the screen on big screens, like a video editor's timeline. */}
-			<div className="z-20 lg:sticky lg:bottom-2">
+			<div className="sticky bottom-0 z-20 lg:bottom-2">
 				<Timeline
 					duration={duration}
 					words={words}
@@ -960,6 +962,12 @@ export function ScriptView({
 					zoomEditing={mode === "preview" && panel === "zoom"}
 					onOpenZoom={() => (panel === "zoom" ? setPanel(null) : openPanel("zoom"))}
 					onOpenSubtitles={() => openPanel("text")}
+					banners={banners}
+					onBannersChange={onBannersChange}
+					onOpenBanners={(id) => {
+						setFocusBanner(id);
+						openPanel("banners");
+					}}
 					noZoom={noZoom}
 					onZoomRange={zoomRange}
 					onPlayFrom={(t) => seek(t)}

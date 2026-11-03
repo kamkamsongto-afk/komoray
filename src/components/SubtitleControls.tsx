@@ -97,7 +97,7 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 		</div>
 	);
 
-	const slider = (label: string, key: "size" | "outline" | "letterSpacing" | "lineSpacing") => (
+	const slider = (label: string, key: "size" | "outline" | "letterSpacing" | "lineSpacing" | "boxRadius" | "boxOpacity", show: (n: number) => string | number = (n) => n) => (
 		<label className="flex items-center gap-3 text-sm text-foreground/70">
 			<span className="w-24 shrink-0">{label}</span>
 			<input
@@ -109,7 +109,7 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 				onChange={(e) => onChange({ ...style, [key]: Number(e.target.value) })}
 				className="flex-1"
 			/>
-			<span className="w-8 text-right tabular-nums">{style[key]}</span>
+			<span className="w-10 text-right tabular-nums">{show(style[key])}</span>
 		</label>
 	);
 
@@ -220,6 +220,8 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 			{style.look === "two" && slider("Line spacing", "lineSpacing")}
 			{colours("Text color", "textColor", TEXT_COLORS)}
 			{style.look === "box" ? colours("Box color", "boxColor", EDGE_COLORS) : colours("Outline color", "outlineColor", EDGE_COLORS)}
+			{style.look === "box" && slider("Corners", "boxRadius")}
+			{style.look === "box" && slider("Box opacity", "boxOpacity", (n) => `${Math.round(n * 100)}%`)}
 			{section === "text" && style.look === "highlight" && colours("Highlight", "color", COLORS)}
 			<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>
 			</>}
@@ -306,15 +308,15 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 			)}
 			</>}
 			{on("zoom") && <>
-			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Zoom in or out moves one way across the whole video. Back and forth glides in and out. Jump: every other part is a little closer, like a second camera.">
+			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Zoom in or out glides one way, then starts again at a cut, so it never goes back and forth. Back and forth glides in and out. Jump: every other part is a little closer, like a second camera.">
 				<span className="w-24 shrink-0">Auto zoom</span>
 				<select
 					value={style.zoom}
 					onChange={(e) => onChange({ ...style, zoom: e.target.value as Zoom })}
 					className="flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
 				>
-					<option value="in">Zoom in across the whole video</option>
-					<option value="out">Zoom out across the whole video</option>
+					<option value="in">Zoom in (glide closer, start again at a cut)</option>
+					<option value="out">Zoom out (glide back, start again at a cut)</option>
 					<option value="smooth">Back and forth (slow glide)</option>
 					<option value="cuts">Jump at every cut</option>
 					<option value="off">Off</option>
@@ -335,7 +337,7 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 					<span className="w-8 text-right tabular-nums">{Math.round((style.zoomAmount - 1) * 100)}%</span>
 				</label>
 			)}
-			{style.zoom === "smooth" && (
+			{style.zoom !== "off" && style.zoom !== "cuts" && (
 				<div className="flex items-center gap-3 text-sm text-foreground/70">
 					<span className="w-24 shrink-0">Zoom speed</span>
 					<div className="flex gap-1">

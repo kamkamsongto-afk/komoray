@@ -6,7 +6,7 @@ export type Motion = "none" | "pop" | "bounce";
 export const MOTIONS: Record<Motion, { name: string; hint: string }> = {
 	none: { name: "Still", hint: "Subtitles don't move" },
 	pop: { name: "Pop", hint: "Each line pops in once, then stays still" },
-	bounce: { name: "Bounce", hint: "Each line pops in, and words jump out big as they are said" },
+	bounce: { name: "Bounce", hint: "Words jump out big as they are said, from the first word on" },
 };
 
 // (milliseconds after the start, size in %), straight lines between them.
@@ -22,16 +22,16 @@ export const BOUNCE: Keys = [
 	[280, 100],
 ];
 const BOUNCE_END = BOUNCE[BOUNCE.length - 1][0];
-const BOUNCE_GAP = 450; // ms: at most one word jumps in this time, else short words make the line shiver
+const BOUNCE_GAP = 350; // ms: at most one word jumps in this time, else short words make the line shiver
 const POP_END = POP[POP.length - 1][0];
 
-// Which words of a line jump, from when each is said (ms after the line starts). The first word rides
-// the pop. Same as bouncing_words in render.py.
+// Which words of a line jump, from when each is said (ms after the line starts): the first one, then the
+// next one said at least BOUNCE_GAP later. Same as bouncing_words in render.py.
 export function bouncingWords(froms: number[]) {
 	const out: number[] = [];
-	let last = 0;
+	let last = -Infinity;
 	froms.forEach((ms, k) => {
-		if (k > 0 && ms >= POP_END && ms - last >= BOUNCE_GAP) {
+		if (ms - last >= BOUNCE_GAP) {
 			out.push(k);
 			last = ms;
 		}
@@ -54,7 +54,7 @@ export function scaleAt(keys: Keys, ms: number) {
 export function motionScale(motion: Motion | undefined, fps: number, sinceLine: number, froms: number[]) {
 	if (!motion || motion === "none") return { line: 1, word: 1, bounced: -1 };
 	const ms = (frames: number) => (frames / fps) * 1000;
-	const popping = ms(sinceLine) < POP_END;
+	const popping = motion === "pop" && ms(sinceLine) < POP_END;
 	const line = popping ? scaleAt(POP, ms(sinceLine)) / 100 : 1;
 	if (motion !== "bounce") return { line, word: 1, bounced: -1 };
 	// A jump carries on after the next word starts: it only ends when it has finished.

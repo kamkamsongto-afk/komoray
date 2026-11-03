@@ -1,7 +1,8 @@
 "use client";
 
-import { Ban, Pause, Play, Repeat2, RotateCcw, Scissors, Undo2, X, ZoomIn } from "lucide-react";
+import { Ban, ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { Banner } from "@/lib/banners";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
@@ -36,6 +37,9 @@ type Props = {
 	noZoom: { start: number; end: number }[]; // parts with Auto zoom turned off
 	onZoomRange: (start: number, end: number, on: boolean) => void;
 	onPlayFrom: (source: number) => void; // play from here (to hear a cut edge just moved)
+	banners: Banner[];
+	onBannersChange: (banners: Banner[]) => void; // dragged along the timeline
+	onOpenBanners: (id: string) => void; // a banner's strip clicked
 };
 
 // Heights, px: time ruler, sentence chips, waveform (the zoom strip lies on top of it while it shows).
@@ -47,6 +51,7 @@ const ZOOM_TOP = WAVE_TOP;
 const ZOOM_STRIP = 12;
 const WAVE = 58;
 const HEIGHT = WAVE_TOP + WAVE + 4;
+const LANE_ROW = 20; // one row of things shown over the video (banners, later graphics): all in this one lane, stacked only where they overlap
 
 const CHIP_GAP = 0.7; // a pause this long (seconds) starts a new chip
 const CHIP_MAX = 12; // a chip never covers more seconds than this
@@ -111,6 +116,9 @@ export function Timeline({
 	noZoom,
 	onZoomRange,
 	onPlayFrom,
+	banners,
+	onBannersChange,
+	onOpenBanners,
 }: Props) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -126,6 +134,9 @@ export function Timeline({
 	// A cut's edge being dragged (Show cuts on): which cut, which side, and where it is now.
 	const [edge, setEdge] = useState<{ cut: [number, number]; side: "start" | "end"; to: number } | null>(null);
 	const anchor = useRef<{ time: number; at: number } | null>(null); // keep this moment under this x after zooming
+	// Split: the first press marks this spot, the second picks from here to where the video is then.
+	const [mark, setMark] = useState<number | null>(null);
+	const [overWave, setOverWave] = useState(false);
 
 	useEffect(() => {
 		try {
@@ -161,6 +172,84 @@ export function Timeline({
 		},
 		[showCuts, segments, scale, duration],
 	);
+
+	// Seconds of the final video → the source (banners are timed on the final video).
+	const toSource = useCallback(
+		(out: number) => {
+			const f = out * FPS;
+			const s = segments.find((seg) => f < seg.from + seg.frames) ?? segments[segments.length - 1];
+			return s ? (s.trim + Math.min(s.frames, Math.max(0, f - s.from))) / FPS : 0;
+		},
+		[segments],
+	);
+	// Banners in rows: each goes in the first row with room, so a row only starts where two overlap.
+	const lane = useMemo(() => {
+		const ends: number[] = [];
+		return [...banners]
+			.sort((a, b) => a.start - b.start)
+			.map((b) => {
+				let row = ends.findIndex((end) => end <= b.start);
+				if (row === -1) row = ends.length;
+				ends[row] = b.end;
+				return { banner: b, row };
+			});
+	}, [banners]);
+	const laneRows = lane.length ? Math.max(...lane.map((l) => l.row)) + 1 : 0;
+	const laneHeight = laneRows * LANE_ROW + (laneRows ? 2 : 0);
+	const startBannerDrag = (e: PointerEvent<HTMLElement>, b: Banner, resize: boolean) => {
+		e.stopPropagation();
+		e.preventDefault();
+		const outAt = (clientX: number) => toOutSeconds(timeAt(xAt(clientX)), segments);
+		const grab = outAt(e.clientX) - b.start;
+		const seconds = b.end - b.start;
+		const startX = e.clientX;
+		let moved = false;
+		const tenths = (n: number) => Math.round(n * 10) / 10;
+		const move = (ev: globalThis.PointerEvent) => {
+			if (!moved && Math.abs(ev.clientX - startX) < DRAG_PX) return;
+			moved = true;
+			const at = outAt(ev.clientX);
+			const patch = resize ? { end: tenths(Math.min(total, Math.max(b.start + 0.3, at))) } : { start: tenths(Math.min(total - seconds, Math.max(0, at - grab))), end: tenths(Math.min(total - seconds, Math.max(0, at - grab)) + seconds) };
+			onBannersChange(banners.map((x) => (x.id === b.id ? { ...x, ...patch } : x)));
+		};
+		const stop = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", stop);
+			window.removeEventListener("pointercancel", stop);
+			if (moved) return;
+			onOpenBanners(b.id);
+			onSeek(toSource(b.start));
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", stop);
+		window.addEventListener("pointercancel", stop);
+	};
+	// The arrows over the waveform: to the start, a kept piece back, a kept piece on, to the end.
+	const pieceStarts = useMemo(() => segments.map((s) => s.trim / FPS), [segments]);
+	const lastSegment = segments[segments.length - 1];
+	const goTo = {
+		start: () => onSeek(pieceStarts[0] ?? 0),
+		back: () => {
+			const t = timeRef.current ?? 0;
+			onSeek(pieceStarts.findLast((p) => p < t - 0.3) ?? pieceStarts[0] ?? 0);
+		},
+		next: () => {
+			const t = timeRef.current ?? 0;
+			const next = pieceStarts.find((p) => p > t + 0.01);
+			if (next !== undefined) onSeek(next);
+		},
+		end: () => lastSegment && onSeek(Math.max(0, (lastSegment.trim + lastSegment.frames) / FPS - 0.05)),
+	};
+	const split = () => {
+		const t = timeRef.current ?? 0;
+		if (mark === null) {
+			setSelection(null);
+			setMark(t);
+		} else if (Math.abs(t - mark) >= MIN_PICK) {
+			setSelection({ start: Math.min(t, mark), end: Math.max(t, mark) });
+			setMark(null);
+		}
+	};
 
 	const chips = useMemo(() => makeChips(words, scriptWords, gone), [words, scriptWords, gone]);
 	const zoomOn = zoomStyle.zoom !== "off" && zoomEditing;
@@ -398,7 +487,9 @@ export function Timeline({
 		const p = press.current;
 		const x = xAt(e.clientX);
 		if (!p) {
-			e.currentTarget.style.cursor = nearEdge(x) || cutEdgeAt(x) ? "ew-resize" : "";
+			const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
+			e.currentTarget.style.cursor = y < RULER + 2 ? "default" : nearEdge(x) || cutEdgeAt(x) ? "ew-resize" : "";
+			setOverWave(y >= WAVE_TOP && y <= WAVE_TOP + WAVE);
 			return;
 		}
 		if (!p.moved && Math.abs(x - p.x) < DRAG_PX) return;
@@ -532,6 +623,22 @@ export function Timeline({
 					</span>
 					Show cuts
 				</label>
+				<button
+					onClick={split}
+					title={mark === null ? "Mark this spot. Then move to where the part ends and press again, to cut or keep what's between." : "Pick everything from the mark to here"}
+					className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium ${mark === null ? "border border-foreground/25 hover:bg-foreground/5" : "bg-amber-500 text-black hover:bg-amber-400"}`}
+				>
+					<Scissors className="h-3 w-3 shrink-0" aria-hidden />
+					{mark === null ? "Split" : "Split here"}
+				</button>
+				{mark !== null && (
+					<span className="flex items-center gap-1 text-xs text-foreground/60">
+						Now move to where the part ends
+						<button onClick={() => setMark(null)} className="text-foreground/50 hover:text-foreground" aria-label="Cancel split" title="Cancel">
+							<X className="h-3 w-3 shrink-0" aria-hidden />
+						</button>
+					</span>
+				)}
 				{selection && picked ? (
 					<span className="flex items-center gap-1.5">
 						<span className="text-xs tabular-nums text-foreground/60">{picked.seconds.toFixed(1)}s picked</span>
@@ -616,7 +723,7 @@ export function Timeline({
 						value={toSlider(scale)}
 						onChange={(e) => zoomTo(fromSlider(Number(e.target.value)))}
 						aria-label="Zoom"
-						className="w-28 accent-blue-600"
+						className="hidden w-28 accent-blue-600 sm:block"
 					/>
 					<button onClick={() => zoomTo(scale * 1.5)} className="rounded px-1.5 text-lg leading-none text-foreground/70 hover:text-foreground" aria-label="Zoom in">
 						+
@@ -628,6 +735,26 @@ export function Timeline({
 			</div>
 
 			<div className="relative">
+			{/* Over the waveform while the mouse is there; always on a phone, which has no mouse. */}
+			<div
+				onPointerEnter={() => setOverWave(true)}
+				onPointerLeave={() => setOverWave(false)}
+				className={`absolute left-1/2 z-[3] -translate-x-1/2 items-center gap-0.5 rounded-full border border-foreground/15 bg-background/95 px-1 py-0.5 shadow max-sm:flex [@media(hover:none)]:flex ${overWave ? "flex" : "hidden"}`}
+				style={{ top: WAVE_TOP + WAVE / 2 - 15 }}
+			>
+				{(
+					[
+						[SkipBack, "To the start", goTo.start],
+						[ChevronLeft, "Back one part", goTo.back],
+						[ChevronRight, "On one part", goTo.next],
+						[SkipForward, "To the end", goTo.end],
+					] as const
+				).map(([Icon, name, go]) => (
+					<button key={name} onClick={go} aria-label={name} title={name} className="flex h-6 w-6 items-center justify-center rounded-full text-foreground/70 hover:bg-foreground/10 hover:text-foreground">
+						<Icon className="h-3.5 w-3.5" aria-hidden />
+					</button>
+				))}
+			</div>
 			<button
 				onClick={onOpenZoom}
 				title="Zoom"
@@ -650,6 +777,7 @@ export function Timeline({
 				onPointerMove={onPointerMove}
 				onPointerUp={onPointerUp}
 				onPointerCancel={onPointerUp}
+				onPointerLeave={() => setOverWave(false)}
 				onDoubleClick={(e) => {
 					// Double-click a sentence to pick it.
 					const t = timeAt(xAt(e.clientX));
@@ -657,9 +785,9 @@ export function Timeline({
 					if (chip) setSelection({ start: chip.start, end: chip.end });
 				}}
 				className="relative cursor-text overflow-x-auto overflow-y-hidden text-foreground select-none"
-				style={{ height: HEIGHT + 12, touchAction: "pan-x" }}
+				style={{ height: HEIGHT + laneHeight + 12, touchAction: "pan-x" }}
 			>
-				<div className="relative" style={{ width, height: HEIGHT }}>
+				<div className="relative" style={{ width, height: HEIGHT + laneHeight }}>
 					<canvas ref={canvasRef} className="sticky left-0 block" style={{ height: HEIGHT }} />
 					{chips.map((c, i) => {
 						if (c.gone && !showCuts) return null;
@@ -679,6 +807,23 @@ export function Timeline({
 							</div>
 						);
 					})}
+					{lane.map(({ banner: b, row }) => {
+						const x0 = xOf(toSource(b.start));
+						const x1 = Math.max(x0 + 24, xOf(toSource(b.end)));
+						return (
+							<div key={b.id} className="absolute z-[1] flex" style={{ left: x0, width: x1 - x0 - 1, top: HEIGHT + row * LANE_ROW, height: LANE_ROW - 2 }}>
+								<button
+									onPointerDown={(e) => startBannerDrag(e, b, false)}
+									title={`${b.text}: drag to change when it shows, click to edit`}
+									className="min-w-0 flex-1 cursor-grab touch-none truncate rounded-l bg-fuchsia-500/30 px-1.5 text-left text-[11px] leading-[18px] text-foreground hover:bg-fuchsia-500/45"
+								>
+									{b.text}
+								</button>
+								<button onPointerDown={(e) => startBannerDrag(e, b, true)} aria-label={`How long ${b.text} shows`} title="Drag to change how long it shows" className="w-2 shrink-0 cursor-ew-resize touch-none rounded-r bg-fuchsia-500/70" />
+							</div>
+						);
+					})}
+					{mark !== null && <div className="pointer-events-none absolute top-0 z-[1] w-0.5 bg-amber-500" style={{ left: xOf(mark), height: HEIGHT }} />}
 					{groups.map((g, i) => {
 						const kept = g.takes.find(isKept) ?? g.takes[g.takes.length - 1];
 						const x = xOf(words[kept.from].start);

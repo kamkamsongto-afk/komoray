@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ScriptView } from "@/components/ScriptView";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
 import type { Faces } from "@/lib/framing";
@@ -552,12 +551,9 @@ export default function EditPage() {
 		<main className="font-sans mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 sm:px-6">
 			<header className="flex flex-wrap items-center justify-between gap-3 border-b border-foreground/10 pb-3">
 				<div className="flex min-w-0 flex-col">
-					<div className="flex items-center gap-2">
-						<Link href="/projects" className="text-xs text-foreground/60 hover:text-foreground">
-							← My projects
-						</Link>
-						<ThemeToggle />
-					</div>
+					<Link href="/projects" className="text-xs text-foreground/60 hover:text-foreground">
+						← My projects
+					</Link>
 					<h1 className="truncate text-lg font-semibold">{filename}</h1>
 					<p className="text-xs text-foreground/60">
 						{clock(analysis.duration)} → {clock(finalSeconds)} · {analysis.cuts.length} silences ({silentSeconds.toFixed(1)}s)

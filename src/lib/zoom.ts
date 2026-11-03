@@ -1,15 +1,25 @@
 // How close the picture is at every frame of the final video (Auto zoom).
-//   "in"      the picture gets slowly closer from the first frame to the last
-//   "out"     the picture starts close and slowly comes back
+//   "in"      the picture glides closer, stays there, and starts again at the next cut after that
+//   "out"     the same the other way: starts close and glides back
 //   "cuts"    every other kept piece a little closer: a jump at the cut, like a second camera
 //   "smooth"  the picture glides slowly in and back out, across the cuts
 // noZoom: parts the user turned zoom off for (source seconds, so they survive new cuts).
 // Same sums as no_zoom_frames, zoom_shots and smooth_zoom_expr in render.py: change one, change the other.
-import { FPS, type Segment, totalFrames } from "./timeline";
+import { FPS, type Segment } from "./timeline";
 
 type Span = { start: number; end: number };
 
 export const SMOOTH_FADE = 0.75; // seconds to glide out before (and back in after) a part with no zoom
+
+// "in" and "out": the frame each kept piece's glide started on. A new glide starts at the first cut after the
+// last one finished, so the jump back is hidden by a cut. Same as zoom_ramps in render.py.
+export function zoomRamps(segments: Segment[], period: number) {
+	let ramp = 0;
+	return segments.map((s) => {
+		if (s.from - ramp >= period * FPS) ramp = s.from;
+		return ramp;
+	});
+}
 
 // The style's zoom settings: how, how close it gets (zoomAmount) and how many seconds a glide in and back out takes (zoomPeriod).
 export type ZoomStyle = { zoom: string; zoomAmount: number; zoomPeriod: number };
@@ -48,9 +58,14 @@ export function zoomTrack(segments: Segment[], noZoom: Span[], style: ZoomStyle)
 		};
 	}
 	const fade = SMOOTH_FADE * FPS;
-	const total = Math.max(1, totalFrames(segments));
+	const ramps = zoomRamps(segments, period);
+	const glide = (f: number) => {
+		let piece = 0;
+		for (let i = 0; i < segments.length && segments[i].from <= f; i++) piece = i;
+		return Math.min(1, (f - (ramps[piece] ?? 0)) / (period * FPS));
+	};
 	return (f) => {
-		let k = mode === "in" ? f / total : mode === "out" ? 1 - f / total : 0.5 - 0.5 * Math.cos((2 * Math.PI * f) / (period * FPS));
+		let k = mode === "in" ? glide(f) : mode === "out" ? 1 - glide(f) : 0.5 - 0.5 * Math.cos((2 * Math.PI * f) / (period * FPS));
 		for (const [a, b] of off) {
 			const x = Math.min(1, Math.max(0, a - f, f - b) / fade);
 			k *= x * x * (3 - 2 * x);

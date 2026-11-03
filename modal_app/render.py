@@ -51,7 +51,7 @@ image = (
         ],
         "fc-cache -f",
     )
-    .pip_install("fastapi[standard]", "opencv-python-headless==4.10.0.84", "numpy<2.3")
+    .pip_install("fastapi[standard]", "opencv-python-headless==4.10.0.84", "numpy<2.3", "uharfbuzz==0.51.1")
 )
 
 WIDTH, HEIGHT, FPS = 1080, 1920, 30
@@ -84,12 +84,35 @@ FONTS = {
 CYRILLIC_FONT = "Fira Sans Medium"
 CYRILLIC_SCALE = 1.2 / 1.58
 BOX_PADDING = 20  # the Box look: space around the letters, px
+# To measure text for rounded boxes: each font's file, and its full height in ems (FONTS in subtitle-style.ts).
+FONT_FOLDER = "/usr/share/fonts/truetype/google/"
+FONT_FILES = {
+    "kanit": ("Kanit-Medium.ttf", 1.58),
+    "prompt": ("Prompt-Medium.ttf", 1.512),
+    "mitr": ("Mitr-Medium.ttf", 1.57),
+    "sarabun": ("Sarabun-SemiBold.ttf", 1.853),
+    "chakra": ("ChakraPetch-SemiBold.ttf", 1.814),
+    "poppins": ("Poppins-SemiBold.ttf", 1.762),
+    "anton": ("Anton-Regular.ttf", 1.733),
+    "bebas": ("BebasNeue-Regular.ttf", 1.3),
+}
 LOGO = {"size": 52, "outline": 4, "side": 60, "top": 110}  # the channel name in a corner (LOGO in PlayerFrame.tsx)
 
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
 BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
 BANNER_SCALE = (0.5, 2.5)  # smallest and biggest size (BANNER_SCALE in banners.ts)
+# How a banner arrives (BANNER_ANIMS in banners.ts): size keyframes (ms, %), fades in, starts this far off (px).
+BANNER_ANIMS = {
+    "fade": {"fade_in": True},
+    "pop": {"fade_in": False, "keys": [(0, 60), (140, 112), (260, 100)]},
+    "bounce": {"fade_in": False, "keys": [(0, 30), (180, 118), (300, 92), (420, 104), (520, 100)]},
+    "slideUp": {"fade_in": True, "slide": (0, 160)},
+    "slideSide": {"fade_in": True, "slide": (-300, 0)},
+    "pulse": {"fade_in": True},
+}
+SLIDE_MS = 320
+PULSE_MS = 450
 # Where each banner place starts, share of the video's height, per shape (BANNER_TOP in banners.ts).
 BANNER_TOP = {
     "9:16": {"top": 0.135, "middle": 0.448, "bottom": 0.78},
@@ -113,11 +136,75 @@ def font_tag(text: str, own_font: bool, size: float) -> str:
     return f"\\fn{CYRILLIC_FONT}\\fs{size * CYRILLIC_SCALE:.1f}" if not own_font and re.search("[Ѐ-ԯ]", text) else ""
 
 
-def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16", own_font: bool = False) -> list[str]:
-    """One event per banner, faded in and out, in its place, or with its middle where it was dragged
-    (x, y: share of the width / height), at its size (scale). Text was checked by the app (readBanners)."""
-    events = []
+_shapers: dict = {}
+
+
+def text_width(text: str, style: dict, size: float, spacing: int = 0) -> float:
+    """How wide libass draws this text, px, to draw a box around it: libass makes a font's full height the
+    font size, and Thai needs real shaping to know its width."""
+    import uharfbuzz as hb
+
+    if style.get("font") == "own" and style.get("_ownFontPath"):
+        path, height = style["_ownFontPath"], float((style.get("ownFont") or {}).get("height") or 1.58)
+    elif style.get("font") != "own" and re.search("[Ѐ-ԯ]", text):
+        path, height = FONT_FOLDER + "FiraSans-Medium.ttf", 1.58  # asked for smaller, drawn as big as Kanit's (CYRILLIC_SCALE)
+    else:
+        name, height = FONT_FILES.get(style.get("font"), FONT_FILES["kanit"])
+        path = FONT_FOLDER + name
+    if path not in _shapers:
+        face = hb.Face(hb.Blob.from_file_path(path))
+        _shapers[path] = (hb.Font(face), face.upem)
+    font, upem = _shapers[path]
+    buffer = hb.Buffer()
+    buffer.add_str(text)
+    buffer.guess_segment_properties()
+    hb.shape(font, buffer)
+    advance = sum(p.x_advance for p in buffer.glyph_positions)
+    clusters = len({g.cluster for g in buffer.glyph_infos})
+    return advance / upem * size / height + spacing * clusters
+
+
+def rounded_box(w: float, h: float, radius: float) -> str:
+    """A box with round corners, as an ASS drawing starting at its top left."""
+    w, h = round(w), round(h)
+    r = round(min(radius, w / 2, h / 2))
+    k = round(r * 0.45)
+    return (
+        f"m {r} 0 l {w - r} 0 b {w - k} 0 {w} {k} {w} {r} l {w} {h - r} b {w} {h - k} {w - k} {h} {w - r} {h} "
+        f"l {r} {h} b {k} {h} 0 {h - k} 0 {h - r} l 0 {r} b 0 {k} {k} 0 {r} 0"
+    )
+
+
+def alpha_of(opacity: float) -> str:
+    """How solid (0..1) as an ASS alpha, where 00 is solid."""
+    return f"&H{round((1 - min(1.0, max(0.0, opacity))) * 255):02X}&"
+
+
+def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float) -> str:
+    """The tags that make a banner's part arrive at (x, y). factor: its size, 1 = normal."""
+    spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
     fade = int(BANNER["fade"] * 1000)
+    slide = spec.get("slide")
+    tags = f"\\move({x + slide[0]:.0f},{y + slide[1]:.0f},{x:.0f},{y:.0f},0,{SLIDE_MS})" if slide else f"\\pos({x:.0f},{y:.0f})"
+    tags += f"\\fad({fade if spec['fade_in'] else 0},{fade})"
+    keys = spec.get("keys")
+    if anim == "pulse":
+        keys, at = [(0, 100)], 0
+        while at < seconds * 1000:
+            keys += [(at + PULSE_MS // 2, 108), (at + PULSE_MS, 100)]
+            at += PULSE_MS
+    if keys:
+        return tags + scale_tags([(t, round(s * factor, 1)) for t, s in keys], 0)
+    return tags + (f"\\fscx{factor * 100:g}\\fscy{factor * 100:g}" if factor != 1 else "")
+
+
+def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16", own_font: bool = False, style: dict | None = None) -> list[str]:
+    """Each banner's rows, as a box and its letters: in its place, or with its middle where it was dragged
+    (x, y: share of the width / height), at its size (scale), arriving as picked (anim). Everything was
+    checked by the app (readBanners)."""
+    style = style or {}
+    brand = style.get("color", "#FFE600")
+    events = []
     width = FORMATS.get(shape, (WIDTH, HEIGHT))[0]
     for b in banners:
         start, end = float(b.get("start", 0)), float(b.get("end", 0))
@@ -125,17 +212,30 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         if end <= start or not text:
             continue
         size = min(BANNER_SCALE[1], max(BANNER_SCALE[0], float(b.get("scale") or 1)))
-        pad_x, pad_y = js_round(BANNER["padding"] * size), js_round(BANNER["padding"] / 2 * size)
-        x, y = b.get("x"), b.get("y")
-        spot = f"\\an5\\pos({js_round(float(x) * width)},{js_round(float(y) * height)})" if x is not None and y is not None else ""
-        scale = f"\\fscx{size * 100:g}\\fscy{size * 100:g}" if size != 1 else ""
+        pad_x, pad_y = BANNER["padding"] * size, BANNER["padding"] / 2 * size
         sub = ass_text(str(b.get("sub", ""))).strip()
-        font = font_tag(text + sub, own_font, BANNER["size"])
-        sub_size = BANNER["sub_size"] * (CYRILLIC_SCALE if font else 1)
-        body = f"{{{spot}{font}\\fad({fade},{fade})\\xbord{pad_x}\\ybord{pad_y}{scale}}}{text}" + (f"\\N{{\\fs{sub_size:g}}}{sub}" if sub else "")
+        background = b.get("color") or brand
+        ink = ass_colour(b.get("ink") or banner_ink(background))
+        fill = f"\\1c{ass_colour(background)}\\1a{alpha_of(float(b.get('opacity') or 1))}"
+        radius = float(b.get("radius") or 0) * size
+        rows = [(text, BANNER["size"])] + ([(sub, BANNER["sub_size"])] if sub else [])
+        heights = [row_size * size + 2 * pad_y for _, row_size in rows]
         places = BANNER_TOP.get(shape, BANNER_TOP["9:16"])
-        top = js_round(places.get(b.get("place"), places["top"]) * height)
-        events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,{top},,{body}")
+        x, y = b.get("x"), b.get("y")
+        if x is not None and y is not None:
+            centre, top = float(x) * width, float(y) * height - sum(heights) / 2
+        else:
+            # A place is where the first row's letters start; the box reaches a little above them.
+            centre, top = width / 2, places.get(b.get("place"), places["top"]) * height - pad_y
+        anim, seconds = b.get("anim") or "fade", end - start
+        for (row_text, row_size), row_height in zip(rows, heights):
+            middle = top + row_height / 2
+            top += row_height
+            box = rounded_box(text_width(row_text, style, row_size * size) + 2 * pad_x, row_height, radius)
+            font = font_tag(row_text, own_font, row_size)
+            fs = "" if font else f"\\fs{row_size}"
+            events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: 3,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{font or fs}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
     return events
 
 
@@ -328,15 +428,15 @@ POP = [(0, 70), (90, 110), (170, 100)]
 BOUNCE = [(0, 100), (110, 150), (280, 100)]
 POP_END = POP[-1][0]
 BOUNCE_END = BOUNCE[-1][0]
-BOUNCE_GAP = 450  # ms: at most one word jumps in this time, else short words make the line shiver
+BOUNCE_GAP = 350  # ms: at most one word jumps in this time, else short words make the line shiver
 
 
 def bouncing_words(froms: list[float]) -> list[int]:
-    """Which words of a line jump, from when each is said (ms after the line starts). The first word
-    rides the pop. Same as bouncingWords in src/lib/motion.ts."""
-    out, last = [], 0.0
+    """Which words of a line jump, from when each is said (ms after the line starts): the first one, then
+    the next one said at least BOUNCE_GAP later. Same as bouncingWords in src/lib/motion.ts."""
+    out, last = [], -math.inf
     for k, ms in enumerate(froms):
-        if k > 0 and ms >= POP_END and ms - last >= BOUNCE_GAP:
+        if ms - last >= BOUNCE_GAP:
             out.append(k)
             last = ms
     return out
@@ -363,9 +463,22 @@ def scale_tags(keys: list[tuple[int, int]], offset: float) -> str:
     return tags
 
 
+def box_jump_tags(since: float, word: float, width: float, size: float, height: float) -> str:
+    """A drawn Box growing with the word jumping inside it, `since` ms into the jump: it stays the same
+    box, only as much wider and taller as that word gets."""
+    grow = lambda s: f"\\fscx{100 + (s - 100) * word / width:.1f}\\fscy{100 + (s - 100) * size / height:.1f}"
+    now = scale_at(BOUNCE, since)
+    tags, prev = grow(now), since
+    for ms, s in BOUNCE:
+        if ms > since:
+            tags += f"\\t({js_round(prev - since)},{js_round(ms - since)},{grow(s)})"
+            prev = ms
+    return tags
+
+
 def pop_tags(motion: str, since: float) -> str:
     """The line popping in, for an event `since` ms after the line started ("" once it is done)."""
-    return f"{{{scale_tags(POP, since)}}}" if motion in ("pop", "bounce") and since < POP_END else ""
+    return f"{{{scale_tags(POP, since)}}}" if motion == "pop" and since < POP_END else ""
 
 
 def spaced_marks(text: str, spacing: int) -> str:
@@ -420,7 +533,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     brand = style.get("color", "#FFE600")
     highlight = ass_colour(brand)
     own_font = style["font"] == "own"
-    events = banner_events(banners or [], video_h, style.get("format", "9:16"), own_font)
+    events = banner_events(banners or [], video_h, style.get("format", "9:16"), own_font, style)
     # The channel name stays in its corner for the whole video.
     # (A logo picture, if there is one, is put on by FFmpeg instead: logo_filter.)
     logo = "" if style.get("logoUrl") else ass_text(str(style.get("logo") or "")).replace("\n", " ").strip()
@@ -429,14 +542,19 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         logo_font = font_tag(logo, own_font, LOGO["size"])
         events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{{{logo_font}}}{logo}")
     logo_align = {"top-left": 7, "top-right": 9, "bottom-left": 1, "bottom-right": 3}.get(style.get("logoAt"), 7)
+    # Round corners: libass's own box is always square, so the box is drawn under the letters instead.
+    draw_box = look == "box" and float(style.get("boxRadius") or 0) > 0
+    box_fill = f"\\1c{ass_colour(style.get('boxColor', '#000000'))}\\1a{alpha_of(float(style.get('boxOpacity', 0.75)))}"
+    text_layer = 1 if draw_box else 0
     for i, line in enumerate(lines):
         start = line[0]["start"]
         # Hold each line until the next one starts (if close), so subtitles don't flicker.
         end = line[-1]["end"]
         if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < gap_frames:
             end = lines[i + 1][0]["start"]
-        parts = [spaced_marks(ass_text(p), spacing) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
-        row2 = second_row(parts) if look == "two" else None
+        plain = [ass_text(p) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
+        parts = [spaced_marks(p, spacing) for p in plain]
+        row2 = second_row(plain) if look == "two" else None
         line_font = font_tag("".join(parts), own_font, size)
         if row2 is not None:
             # ASS has no line spacing: an empty row as tall as the gap goes between the two rows.
@@ -444,9 +562,29 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             back = size * CYRILLIC_SCALE if line_font else size
             spacer = f"\\N{{\\fs{gap}}}\\h\\N{{\\fs{back:g}}}" if gap > 0 else "\\N"
             parts[row2] = spacer + parts[row2].lstrip()
+        if draw_box:
+            line_font += "\\bord0\\shad0"
+            rows = ["".join(plain)] if row2 is None else ["".join(plain[:row2]).strip(), "".join(plain[row2:]).strip()]
+            gap = int(style.get("lineSpacing") or 0)
+            bottom = video_h - margin_v
+            box_rows = []
+            for r, row in enumerate(rows):
+                row_bottom = bottom - (size + gap) * (len(rows) - 1 - r)
+                # Two rows meet with no space, so a see-through box doesn't get darker where they overlap.
+                above = BOX_PADDING if r == 0 else gap
+                below = BOX_PADDING if r == len(rows) - 1 else 0
+                row_height = size + above + below
+                middle = row_bottom - size + (below - above + size) / 2
+                box_width = text_width(row, style, size, spacing) + 2 * BOX_PADDING
+                box = rounded_box(box_width, row_height, float(style.get("boxRadius") or 0))
+                head = f"{{\\an5\\pos({video_w / 2:.0f},{middle:.0f})\\bord0\\shad0{box_fill}"
+                # Bounce: drawn word by word below, to grow with each jump.
+                box_rows.append((r, head, box, box_width, row_height))
+                if motion != "bounce":
+                    events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{head}\\p1}}{pop_tags(motion, 0)}{box}{{\\p0}}")
         line_font = f"{{{line_font}}}" if line_font else ""
         if look != "highlight" and motion != "bounce":
-            events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
+            events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue
         # Highlight / Bounce: one event per word, that word in the brand colour until the next one starts.
         # A word's jump carries on across the events until it has finished.
@@ -459,18 +597,23 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 continue
             since = (a - start) / FPS * 1000  # ms since the line started
             jumping = next((j for j in reversed(jumps) if froms[j] <= since and since - froms[j] < BOUNCE_END), None)
+            if draw_box and motion == "bounce":
+                for r, head, box, box_width, row_height in box_rows:
+                    in_row = jumping is not None and (row2 is None or (jumping >= row2) == (r == 1))
+                    grow = box_jump_tags(since - froms[jumping], text_width(plain[jumping].strip(), style, size, spacing), box_width, size, row_height) if in_row else ""
+                    events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{head}{grow}\\p1}}{box}{{\\p0}}")
             text = ""
             for j, p in enumerate(parts):
                 coloured = look == "highlight" and j == k
                 on = (f"\\1c{highlight}" if coloured else "") + (scale_tags(BOUNCE, since - froms[j]) if j == jumping else "")
                 off = (f"\\1c{ass_colour(style.get('textColor', '#FFFFFF'))}" if coloured else "") + ("\\fscx100\\fscy100" if j == jumping else "")
                 text += f"{{{on}}}{p}{{{off}}}" if on else p
-            events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, since)}{text}")
+            events.append(f"Dialogue: {text_layer},{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, since)}{text}")
 
     # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
     boxed = look == "box"
     border_style, border, shadow = (3, BOX_PADDING, 0) if boxed else (1, outline, 2)
-    outline_colour = f"&H40{ass_colour(style.get('boxColor', '#000000'))[4:-1]}" if boxed else ass_colour(style.get("outlineColor", "#000000"))[:-1]
+    outline_colour = f"{alpha_of(float(style.get('boxOpacity', 0.75)))[:-1]}{ass_colour(style.get('boxColor', '#000000'))[4:-1]}" if boxed else ass_colour(style.get("outlineColor", "#000000"))[:-1]
 
     return "\n".join(
         [
@@ -600,12 +743,24 @@ def zoom_shots(segments: list[tuple[int, int, int]], off: list[tuple[int, int]],
     return shots
 
 
-def smooth_zoom_expr(start: int, frames: int, off: list[tuple[int, int]], amount: float = ZOOM, period: float = SMOOTH_PERIOD, mode: str = "smooth", total: int = 1) -> str:
+def zoom_ramps(segments: list[tuple[int, int, int]], period: float) -> list[int]:
+    """Zoom in and out: the frame each kept piece's glide started on. A new glide starts at the first cut
+    after the last one finished, so the jump back is hidden by a cut. Same as zoomRamps in src/lib/zoom.ts."""
+    ramp, ramps = 0, []
+    for start, _, _ in segments:
+        if start - ramp >= period * FPS:
+            ramp = start
+        ramps.append(ramp)
+    return ramps
+
+
+def smooth_zoom_expr(start: int, frames: int, off: list[tuple[int, int]], amount: float = ZOOM, period: float = SMOOTH_PERIOD, mode: str = "smooth", ramp: int = 0) -> str:
     """The zoom of a piece as an ffmpeg expression of its frame number (`in` counts from 1). Same as
-    the "smooth", "in" and "out" modes of zoomTrack in src/lib/zoom.ts. total: frames in the final video."""
+    the "smooth", "in" and "out" modes of zoomTrack in src/lib/zoom.ts. ramp: where this piece's glide started."""
     frame = f"(in-1+{start})"
     fade = SMOOTH_FADE * FPS
-    k = {"in": f"({frame}/{total})", "out": f"(1-{frame}/{total})"}.get(mode, f"(0.5-0.5*cos(2*PI*{frame}/{period * FPS}))")
+    glide = f"min(1,({frame}-{ramp})/{period * FPS})"
+    k = {"in": f"({glide})", "out": f"(1-{glide})"}.get(mode, f"(0.5-0.5*cos(2*PI*{frame}/{period * FPS}))")
     for a, b in off:
         if a - fade <= start + frames and b + fade >= start:  # only the parts near this piece
             x = f"clip(max(max({a}-{frame},{frame}-{b}),0)/{fade},0,1)"
@@ -668,7 +823,7 @@ def ffmpeg_command(
     # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
     pieces = frame_segments(keeps)
     off = no_zoom_frames(pieces, no_zoom)
-    total = max(1, sum(frames for _, _, frames in pieces))
+    ramps = zoom_ramps(pieces, zoom_period)
     parts, video_labels, audio_labels = [], [], []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
@@ -679,7 +834,7 @@ def ffmpeg_command(
         piece_trim, piece_frames = pieces[i][1], pieces[i][2]
         focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)
         framing = (
-            smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off, zoom_amount, zoom_period, zoom, total), size, zoom_amount)
+            smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off, zoom_amount, zoom_period, zoom, ramps[i]), size, zoom_amount)
             if zoom in ("smooth", "in", "out")
             else piece_filter(aspect, focus, level, size)
         )
@@ -749,7 +904,6 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             keeps = keep_segments(edit["duration"], edit.get("cuts", []))
             if not keeps:
                 raise RuntimeError("nothing left after cutting")
-            subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners")), encoding="utf-8")
 
             # The user's own font: libass also looks in this folder.
             fonts_dir = None
@@ -757,6 +911,8 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 (workdir / "fonts").mkdir()
                 urllib.request.urlretrieve(style["fontUrl"], workdir / "fonts" / "own.ttf")
                 fonts_dir = "fonts"
+                style["_ownFontPath"] = str(workdir / "fonts" / "own.ttf")
+            subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners")), encoding="utf-8")
 
             # The user's logo picture, if this look shows it.
             logo = None

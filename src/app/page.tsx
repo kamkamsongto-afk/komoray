@@ -1,6 +1,5 @@
 import { Captions, Lock, type LucideIcon, Palette, Scissors, TextCursorInput, WandSparkles, ZoomIn } from "lucide-react";
 import Link from "next/link";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { WaitlistForm } from "@/components/WaitlistForm";
 
 const STEPS: [string, string][] = [
@@ -24,7 +23,6 @@ export default function Home() {
 		<main className="font-sans mx-auto flex min-h-screen max-w-5xl flex-col gap-20 px-5 py-6 sm:px-8">
 			<header className="flex items-center justify-between">
 				<span className="text-lg font-bold tracking-tight">Komoray</span>
-				<ThemeToggle />
 			</header>
 
 			<section className="flex flex-col items-center gap-6 text-center">

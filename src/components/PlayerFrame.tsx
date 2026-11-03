@@ -3,7 +3,7 @@
 import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerOpacity, cleanBannerText } from "@/lib/banners";
+import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerMotion, cleanBannerText } from "@/lib/banners";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { motionScale } from "@/lib/motion";
@@ -70,6 +70,7 @@ function roundOutline(width: number, colour: string) {
 }
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const solid = (opacity: number) => Math.round(opacity * 255).toString(16).padStart(2, "0"); // as the end of a #RRGGBBAA colour
 const SPEEDS = [1, 1.25, 1.5, 2]; // for skimming while fixing words; the final video is not affected
 
 type Props = {
@@ -191,9 +192,9 @@ export function PlayerFrame({
 	const em = lineFace.em;
 	const rowGap = line?.row2 !== undefined ? subtitle.lineSpacing : 0; // only a line split in two rows has a gap
 	const boxed = subtitle.look === "box";
-	// Box: letters on a box (3/4 solid, as in render.py). Every other look: letters with an outline.
+	// Box: letters on a box. Every other look: letters with an outline.
 	const letters: CSSProperties = boxed
-		? { background: `${subtitle.boxColor}BF`, padding: `${BOX_PADDING / 2}px ${BOX_PADDING}px`, boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }
+		? { background: `${subtitle.boxColor}${solid(subtitle.boxOpacity)}`, borderRadius: subtitle.boxRadius, padding: `${BOX_PADDING / 2}px ${BOX_PADDING}px`, boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }
 		: { textShadow: roundOutline(subtitle.outline, subtitle.outlineColor) };
 	// Highlight: the word being said is in the brand colour until the next one starts.
 	const frame = outTime * FPS;
@@ -289,12 +290,14 @@ export function PlayerFrame({
 						</div>
 					)}
 					{banners.map((b) => {
-						const opacity = bannerOpacity(b, outTime);
+						const move = bannerMotion(b, outTime);
+						const opacity = move.opacity;
 						if (!opacity) return null;
 						const size = b.scale ?? 1;
 						const bannerFace = textFace(`${b.text} ${b.sub}`);
 						const box: CSSProperties = {
-							background: subtitle.color,
+							background: `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,
+							borderRadius: (b.radius ?? 0) * size,
 							padding: `${(BANNER.padding / 2) * size}px ${BANNER.padding * size}px`,
 							boxDecorationBreak: "clone",
 							WebkitBoxDecorationBreak: "clone",
@@ -316,7 +319,7 @@ export function PlayerFrame({
 									fontWeight: bannerFace.weight,
 									fontSize: (BANNER.size / bannerFace.em) * size,
 									lineHeight: bannerFace.em,
-									color: bannerInk(subtitle.color),
+									color: b.ink ?? bannerInk(b.color ?? subtitle.color),
 									opacity,
 								}}
 							>
@@ -324,7 +327,10 @@ export function PlayerFrame({
 									className="relative inline-block"
 									onClick={(e) => movable && e.stopPropagation()}
 									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
-									style={movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : undefined}
+									style={{
+										transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
+										...(movable && { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 }),
+									}}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									<span style={box}>{cleanBannerText(b.text)}</span>

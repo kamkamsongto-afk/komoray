@@ -30,6 +30,8 @@ export type SubtitleStyle = {
 	textColor: string; // the letters
 	outlineColor: string; // the border around the letters
 	boxColor: string; // the Box look's box
+	boxRadius: number; // how round its corners are, px
+	boxOpacity: number; // how solid it is, 0.05..1
 	letterSpacing: number; // px between letters
 	lineSpacing: number; // px added between the rows of the Two lines look
 	color: string;
@@ -54,6 +56,8 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	textColor: "#FFFFFF",
 	outlineColor: "#000000",
 	boxColor: "#000000",
+	boxRadius: 0,
+	boxOpacity: 0.75,
 	letterSpacing: 0,
 	lineSpacing: 0,
 	color: "#FFE600",
@@ -84,6 +88,8 @@ export const LIMITS = {
 	zoomPeriod: { min: 6, max: 24, step: 1 },
 	letterSpacing: { min: 0, max: 30, step: 1 },
 	lineSpacing: { min: 0, max: 80, step: 2 },
+	boxRadius: { min: 0, max: 60, step: 2 },
+	boxOpacity: { min: 0.05, max: 1, step: 0.05 },
 } as const;
 
 // The Smooth zoom speeds to pick from: seconds to glide in and back out.
@@ -98,7 +104,7 @@ export const LOOKS: Record<Look, { name: string; hint: string; size: number; pos
 	clean: { name: "Clean", hint: "A few words at a time, in the lower part of the video", size: 100, position: 0.31 },
 	box: { name: "Box", hint: "Letters on a colored box, easy to read on any picture", size: 90, position: 0.31 },
 	highlight: { name: "Highlight", hint: "The word being said changes colour", size: 100, position: 0.31 },
-	big: { name: "Big", hint: "Half as big again, fewer words at a time, in the middle of the video", size: 150, position: 0.45 },
+	big: { name: "Big", hint: "Extra large, one or two words at a time, in the middle of the video", size: 170, position: 0.45 },
 	two: { name: "Two lines", hint: "More words at once, in two rows", size: 90, position: 0.22 },
 };
 
@@ -161,6 +167,8 @@ export function readStyle(value: unknown): SubtitleStyle {
 		boxColor: typeof v.boxColor === "string" && /^#[0-9a-f]{6}$/i.test(v.boxColor) ? v.boxColor.toUpperCase() : DEFAULT_STYLE.boxColor,
 		letterSpacing: Math.round(pick("letterSpacing")),
 		lineSpacing: Math.round(pick("lineSpacing")),
+		boxRadius: Math.round(pick("boxRadius")),
+		boxOpacity: Math.round(pick("boxOpacity") * 100) / 100,
 		// Letters, numbers and simple marks only: it is drawn into the video as subtitle text.
 		logo: typeof v.logo === "string" ? v.logo.replace(/[\\{}\n\r]/g, "").trim().slice(0, MAX_LOGO_LENGTH) : DEFAULT_STYLE.logo,
 		logoAt: typeof v.logoAt === "string" && v.logoAt in LOGO_CORNERS ? (v.logoAt as LogoCorner) : "top-left",

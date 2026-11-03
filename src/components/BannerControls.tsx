@@ -1,22 +1,30 @@
 "use client";
 
-import { Star, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Star, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { BANNER, BANNER_KINDS, BANNER_SCALE, type Banner, type BannerKind, type BannerPlace, cleanBannerText } from "@/lib/banners";
+import { BANNER, BANNER_ANIMS, BANNER_KINDS, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText } from "@/lib/banners";
+import { EDGE_COLORS } from "@/lib/subtitle-style";
 
 type Props = {
 	banners: Banner[];
 	onChange: (banners: Banner[]) => void;
 	now: () => number; // where the preview is, in seconds of the final video
 	total: number; // length of the final video, seconds
-	channel: string; // the Brand Kit's channel name, for the Follow banner
+	brand: string; // the Brand Kit's colour: a banner's background until one is picked
+	focus: string | null; // the banner just clicked on the timeline: open it here
 };
+
+// The two kinds to add. Follow still shows on videos that already have one: it was the same as a call to action.
+const ADD_KINDS: BannerKind[] = ["price", "cta"];
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
 // The editor's Banners box: add a price tag, a call to action or "follow me" at the spot the
 // preview is at, then change its words, place and when it shows.
-export function BannerControls({ banners, onChange, now, total, channel }: Props) {
+export function BannerControls({ banners, onChange, now, total, brand, focus }: Props) {
+	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
+	const [open, setOpen] = useState<string | null>(focus);
+	useEffect(() => setOpen(focus), [focus]);
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
 	// My banners: saved to the account, for any video. Each starts at 0 and ends after as long as it shows.
@@ -37,44 +45,48 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 	}
 	function addTemplate(t: Banner) {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
-		onChange([...banners, { ...t, id: crypto.randomUUID(), start, end: round(Math.min(total, start + t.end)) }].sort((a, b) => a.start - b.start));
+		const id = crypto.randomUUID();
+		setOpen(id);
+		onChange([...banners, { ...t, id, start, end: round(Math.min(total, start + t.end)) }].sort((a, b) => a.start - b.start));
 	}
 
 	function add(kind: BannerKind) {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const preset = BANNER_KINDS[kind];
-		const text = kind === "follow" && channel ? cleanBannerText(`Follow ${channel}`) : preset.text;
-		const banner: Banner = { id: crypto.randomUUID(), kind, text, sub: preset.sub, start, end: round(Math.min(total, start + BANNER.seconds)), place: "top" };
+		const banner: Banner = { id: crypto.randomUUID(), kind, text: preset.text, sub: preset.sub, start, end: round(Math.min(total, start + BANNER.seconds)), place: "top" };
+		setOpen(banner.id);
 		onChange([...banners, banner].sort((a, b) => a.start - b.start));
 	}
 
-	const time = (b: Banner, key: "start" | "end") => (
-		<span className="flex items-center gap-1">
-			<input
-				type="number"
-				min={0}
-				max={total}
-				step={0.1}
-				value={b[key]}
-				onChange={(e) => update(b.id, { [key]: Math.max(0, Number(e.target.value) || 0) })}
-				aria-label={key === "start" ? "Shows from (seconds)" : "Shows until (seconds)"}
-				className="w-16 rounded-md border border-foreground/20 bg-background px-1.5 py-0.5 tabular-nums"
-			/>
-			<button
-				onClick={() => update(b.id, { [key]: round(now()) })}
-				title="Where the video is now"
-				className="rounded border border-foreground/20 px-1.5 py-0.5 text-xs hover:bg-foreground/5"
-			>
-				Now
-			</button>
-		</span>
+	const swatches = (b: Banner, label: string, key: "color" | "ink", value: string) => (
+		<div className="flex items-center gap-2 text-xs text-foreground/70">
+			<span className="w-16 shrink-0">{label}</span>
+			<div className="flex flex-wrap items-center gap-1">
+				{EDGE_COLORS.map((c) => (
+					<button
+						key={c}
+						onClick={() => update(b.id, { [key]: c })}
+						aria-label={`${label} ${c}`}
+						className={`h-5 w-5 rounded-full border-2 ${value === c ? "border-blue-600" : "border-foreground/20"}`}
+						style={{ background: c }}
+					/>
+				))}
+				<input type="color" value={value} onChange={(e) => update(b.id, { [key]: e.target.value.toUpperCase() })} aria-label={`Any ${label.toLowerCase()}`} className="h-5 w-7 cursor-pointer rounded border border-foreground/20 bg-transparent" />
+			</div>
+		</div>
+	);
+	const range = (b: Banner, label: string, value: number, min: number, max: number, step: number, show: string, set: (n: number) => void) => (
+		<label className="flex items-center gap-2 text-xs text-foreground/70">
+			<span className="w-16 shrink-0">{label}</span>
+			<input type="range" min={min} max={max} step={step} value={value} onChange={(e) => set(Number(e.target.value))} className="min-w-0 flex-1 accent-blue-600" />
+			<span className="w-10 tabular-nums">{show}</span>
+		</label>
 	);
 
 	return (
-		<div className="flex flex-col gap-2 rounded-lg border border-foreground/15 p-3">
+		<div className="flex flex-col gap-2 p-3 pt-1">
 			<div className="flex flex-wrap items-center gap-1.5">
-				<p className="mr-auto text-sm font-medium">Banners</p>
-				{(Object.keys(BANNER_KINDS) as BannerKind[]).map((kind) => (
+				{ADD_KINDS.map((kind) => (
 					<button
 						key={kind}
 						onClick={() => add(kind)}
@@ -110,12 +122,20 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 				</div>
 			)}
 			{banners.length === 0 && (
-				<p className="text-xs text-foreground/60">A price, a call to action or &quot;follow me&quot;, in your brand color. It is added where the video is now.</p>
+				<p className="text-xs text-foreground/60">A price or a call to action. It is added where the video is now, and shows on the timeline: drag it there to change when it appears.</p>
 			)}
 			{banners.map((b) => (
 				<div key={b.id} className="flex flex-col gap-1.5 rounded-md bg-foreground/5 p-2 text-sm">
 					<div className="flex items-center gap-2">
-						<span className="w-20 shrink-0 text-xs text-foreground/60">{BANNER_KINDS[b.kind].name}</span>
+						<button
+							onClick={() => setOpen(open === b.id ? null : b.id)}
+							aria-expanded={open === b.id}
+							title={open === b.id ? "Hide its settings" : "Show its settings"}
+							className="flex w-16 shrink-0 items-center gap-0.5 text-left text-xs text-foreground/60 hover:text-foreground"
+						>
+							{open === b.id ? <ChevronDown className="h-3 w-3 shrink-0" aria-hidden /> : <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />}
+							{b.kind === "cta" ? "CTA" : BANNER_KINDS[b.kind].name}
+						</button>
 						<input
 							value={b.text}
 							maxLength={BANNER.maxText}
@@ -140,20 +160,30 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 							<X className="h-3 w-3 shrink-0" aria-hidden />
 						</button>
 					</div>
-					{b.kind === "price" && (
+					{open === b.id && b.kind === "price" && (
 						<input
 							value={b.sub}
 							maxLength={BANNER.maxText}
 							onChange={(e) => update(b.id, { sub: e.target.value })}
 							placeholder="Small line under it (optional)"
 							aria-label="Small line"
-							className="ml-[5.5rem] rounded-md border border-foreground/20 bg-background px-2 py-0.5"
+							className="rounded-md border border-foreground/20 bg-background px-2 py-0.5"
 						/>
 					)}
-					<div className="ml-[5.5rem] flex flex-wrap items-center gap-2 text-xs text-foreground/70">
-						{time(b, "start")}
-						<span>to</span>
-						{time(b, "end")}
+					{open === b.id && <>
+					<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/70">
+						<select
+							value={b.anim ?? "fade"}
+							onChange={(e) => update(b.id, { anim: e.target.value as BannerAnim })}
+							aria-label="How it arrives"
+							className="rounded-md border border-foreground/20 bg-background px-1 py-0.5"
+						>
+							{(Object.keys(BANNER_ANIMS) as BannerAnim[]).map((a) => (
+								<option key={a} value={a}>
+									{BANNER_ANIMS[a].name}
+								</option>
+							))}
+						</select>
 						<select
 							value={b.x !== undefined ? "dragged" : b.place}
 							onChange={(e) => e.target.value !== "dragged" && update(b.id, { place: e.target.value as BannerPlace, x: undefined, y: undefined })}
@@ -166,23 +196,16 @@ export function BannerControls({ banners, onChange, now, total, channel }: Props
 							<option value="bottom">Bottom</option>
 						</select>
 					</div>
-					<label className="ml-[5.5rem] flex items-center gap-2 text-xs text-foreground/70">
-						Size
-						<input
-							type="range"
-							min={BANNER_SCALE.min}
-							max={BANNER_SCALE.max}
-							step={0.05}
-							value={b.scale ?? 1}
-							onChange={(e) => update(b.id, { scale: Number(e.target.value) })}
-							className="min-w-0 flex-1 accent-blue-600"
-						/>
-						<span className="w-10 tabular-nums">{Math.round((b.scale ?? 1) * 100)}%</span>
-					</label>
+					{swatches(b, "Background", "color", b.color ?? brand)}
+					{swatches(b, "Text", "ink", b.ink ?? bannerInk(b.color ?? brand))}
+					{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
+					{range(b, "Corners", b.radius ?? 0, BANNER_RADIUS.min, BANNER_RADIUS.max, 2, String(b.radius ?? 0), (n) => update(b.id, { radius: n }))}
+					{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
+					</>}
 				</div>
 			))}
 			{banners.length > 0 && <p className="text-xs text-foreground/60">
-					Times are seconds of the final video. Pause the video on a banner to drag it anywhere, or drag its round corner to resize it.
+					Drag a banner along the timeline to change when it shows, or its right end to change how long. Pause the video on a banner to drag it anywhere on the picture.
 					Emoji can&apos;t be shown in banners.
 				</p>}
 		</div>
