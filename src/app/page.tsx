@@ -36,9 +36,10 @@ export default function Home() {
 				</nav>
 				<section className="k-hero">
 					<div className="k-scene" aria-hidden>
-						<div className="k-rays" />
 						<div className="k-bloom" />
-						<div className="k-shade" />
+						<div className="k-cloud k-cloud-a" />
+						<div className="k-cloud k-cloud-b" />
+						<div className="k-cloud k-cloud-c" />
 						<div className="k-stage">
 							<div className="k-phone k-float k-float-a">
 								<Photo name="city" priority />
