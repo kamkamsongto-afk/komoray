@@ -1,74 +1,201 @@
-import { Captions, Lock, type LucideIcon, Palette, Scissors, TextCursorInput, WandSparkles, ZoomIn } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
+import { HelloWord, LooksCard, PaceCard, ScriptDemo, ShapeCard, WordsDemo } from "@/components/LandingDemos";
 import { WaitlistForm } from "@/components/WaitlistForm";
+import "./landing.css";
 
-const STEPS: [string, string][] = [
-	["Upload your take", "Straight from your computer, or send it from your phone with a QR code."],
-	["Get your first cut", "Silences and the takes you said again are gone, and your script is written, with subtitles."],
-	["Polish and export", "Change a word in the script and the video follows. Then make the final video."],
+const SUBTITLES = ["Your raw take goes in.", "The silences leave.", "Your script stays.", "You make the final call."];
+const ROOMS = ["home", "city", "mountain", "kitchen", "country"];
+const STEPS: [string, string, string][] = [
+	["01", "Shoot", "Upload from your computer, or send it from your phone with a QR code."],
+	["02", "Review", "Silences and repeated takes are marked. Your script and subtitles are ready. Undo anything."],
+	["03", "Make video", "Preview it, press Make video, and download the file. You make the final call."],
 ];
+
+function Photo({ name, priority }: { name: string; priority?: boolean }) {
+	return <Image src={`/landing/${name}.webp`} alt="" width={448} height={896} unoptimized priority={priority} />;
+}
 
 // Only what the product really does today: no numbers until they are measured with real creators.
-const FEATURES: [LucideIcon, string, string][] = [
-	[Scissors, "Cuts that keep your rhythm", "Removes dead air and repeated takes. Pick how tight the pace feels, and keep any part with one drag."],
-	[TextCursorInput, "Edit by editing words", "Delete a sentence in your script and it leaves the video: picture, sound and subtitles together."],
-	[WandSparkles, "It learns your words", "Fix a name or a brand once. Your personal dictionary fixes it for you in every video after that."],
-	[Captions, "Subtitles in your style", "Five looks, your own font and colors, and what you see in the preview is what you get in the video."],
-	[ZoomIn, "A second camera feel", "Slow zooms or jump cuts, framed around your face. Choose where they happen."],
-	[Palette, "Your brand on every video", "Save your look once with a Brand Kit: logo, colors, banners. Every new video starts with it."],
-];
-
 export default function Home() {
 	return (
-		<main className="font-sans mx-auto flex min-h-screen max-w-5xl flex-col gap-20 px-5 py-6 sm:px-8">
-			<header className="flex items-center justify-between">
-				<span className="text-lg font-bold tracking-tight">Komoray</span>
-			</header>
+		<main className="k-root">
+			<div className="k-top" id="top">
+				<nav className="k-nav" aria-label="Main">
+					<a className="k-logo" href="#top">
+						Komoray
+					</a>
+					<div className="k-navlinks">
+						<a href="#script">Script</a>
+						<a href="#words">My words</a>
+						<a href="#studio">Studio</a>
+						<a className="k-pill" href="#access">
+							Get early access
+						</a>
+					</div>
+				</nav>
+				<section className="k-hero">
+					<div className="k-scene" aria-hidden>
+						<div className="k-rays" />
+						<div className="k-bloom" />
+						<div className="k-shade" />
+						<div className="k-stage">
+							<div className="k-phone k-float k-float-a">
+								<Photo name="city" priority />
+							</div>
+							<div className="k-phone k-float k-float-b">
+								<Photo name="home" priority />
+								<div className="k-subs">
+									{SUBTITLES.map((line) => (
+										<div key={line} className="k-subline">
+											<span>{line}</span>
+										</div>
+									))}
+								</div>
+							</div>
+							<div className="k-phone k-float k-float-c">
+								<Photo name="country" priority />
+							</div>
+						</div>
+					</div>
+					<div className="k-mono k-note">Illustrative images, not customers</div>
+					<div className="k-herotext">
+						<h1 className="k-herohead">You shoot. Komoray makes you shine.</h1>
+						<p className="k-herolead">The AI studio for people who talk to camera. Your raw take goes in. A clean first cut, script and subtitles come out, ready for your final call.</p>
+						<a className="k-herocta" href="#access">
+							Get early access
+							<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+								<path d="M5 2l5 5-5 5" />
+							</svg>
+						</a>
+					</div>
+				</section>
+			</div>
 
-			<section className="flex flex-col items-center gap-6 text-center">
-				<p className="rounded-full border border-foreground/15 px-4 py-1 text-xs tracking-widest text-foreground/60 uppercase">AI studio for talking-head creators · Private beta</p>
-				<h1 className="max-w-3xl text-4xl font-bold tracking-tight text-balance sm:text-6xl">You shoot. Komoray makes you shine.</h1>
-				<p className="max-w-2xl text-lg text-foreground/70 text-balance">Your raw take goes in. A clean cut with your script, your subtitles and your brand comes out, ready for you to fine-tune.</p>
-				<WaitlistForm />
+			<section className="k-sec k-light" id="script">
+				<div className="k-wrap">
+					<p className="k-mono k-eyebrow">Try it. Tap any word.</p>
+					<h2 className="k-h2">
+						Change the words.
+						<br />
+						The video follows.
+					</h2>
+					<ScriptDemo />
+				</div>
 			</section>
 
-			<section className="flex flex-col gap-6">
-				<h2 className="text-center text-2xl font-semibold tracking-tight">Three steps from take to finished video</h2>
-				<ol className="grid gap-4 sm:grid-cols-3">
-					{STEPS.map(([title, text], i) => (
-						<li key={title} className="flex flex-col gap-2 rounded-2xl border border-foreground/15 p-5">
-							<span className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background">{i + 1}</span>
-							<h3 className="font-semibold">{title}</h3>
-							<p className="text-sm text-foreground/70">{text}</p>
-						</li>
-					))}
-				</ol>
+			<section className="k-sec">
+				<div className="k-wrap">
+					<p className="k-mono k-eyebrow">Wherever you film</p>
+					<h2 className="k-h2">
+						Your face. Your room.
+						<br />
+						Your voice.
+					</h2>
+					<div className="k-rooms">
+						{ROOMS.map((name) => (
+							<div key={name} className="k-room">
+								<Photo name={name} />
+							</div>
+						))}
+					</div>
+					<p className="k-mono k-small">Illustrative images, not customers.</p>
+				</div>
 			</section>
 
-			<section className="flex flex-col gap-6">
-				<h2 className="text-center text-2xl font-semibold tracking-tight">Built for creators who already publish</h2>
-				<ul className="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
-					{FEATURES.map(([Icon, title, text]) => (
-						<li key={title} className="flex flex-col gap-1.5">
-							<Icon className="h-5 w-5 text-blue-600" aria-hidden />
-							<h3 className="font-semibold">{title}</h3>
-							<p className="text-sm text-foreground/70">{text}</p>
-						</li>
-					))}
-				</ul>
+			<section className="k-sec" id="words" style={{ paddingTop: 0 }}>
+				<div className="k-wrap k-words">
+					<div>
+						<p className="k-mono k-eyebrow">My words</p>
+						<h2 className="k-h2">Fix it once.</h2>
+						<p className="k-lead2">Names, brands, the words only you use. Correct one, and Komoray remembers it for your next video. Your words stay yours.</p>
+					</div>
+					<WordsDemo />
+				</div>
 			</section>
 
-			<section className="flex flex-col items-center gap-3 rounded-2xl bg-foreground/5 p-8 text-center">
-				<Lock className="h-5 w-5 text-foreground/60" aria-hidden />
-				<h2 className="text-xl font-semibold tracking-tight">Your videos stay yours</h2>
-				<p className="max-w-xl text-sm text-foreground/70">We never sell your data, and we never use your videos to train AI models.</p>
+			<section className="k-sec" id="studio" style={{ paddingTop: 0 }}>
+				<div className="k-wrap">
+					<p className="k-mono k-eyebrow">The studio</p>
+					<h2 className="k-h2">
+						Made for people
+						<br />
+						who talk to camera.
+					</h2>
+					<div className="k-grid">
+						<LooksCard />
+						<PaceCard />
+						<ShapeCard />
+						<article className="k-card">
+							<div className="k-vis k-zoom">
+								<div className="k-frame">
+									<Photo name="kitchen" />
+								</div>
+							</div>
+							<h3>A second camera feel</h3>
+							<p>Slow zooms or jump cuts, framed around your face.</p>
+						</article>
+						<article className="k-card">
+							<div className="k-vis">
+								<div className="k-frame">
+									<Photo name="city" />
+									<div className="k-bannerpop">Link in bio</div>
+								</div>
+							</div>
+							<h3>Banners with motion</h3>
+							<p>Price, call to action or follow, in your brand.</p>
+						</article>
+						<article className="k-card">
+							<div className="k-vis">
+								<HelloWord />
+							</div>
+							<h3>Subtitles in 33 languages</h3>
+							<p>Translate your subtitles and download them as .srt.</p>
+						</article>
+					</div>
+				</div>
 			</section>
 
-			<footer className="mt-auto flex flex-wrap justify-center gap-4 pb-2 text-sm text-foreground/50">
-				<Link href="/privacy">Privacy</Link>
-				<Link href="/terms">Terms</Link>
-				<a href="mailto:hello@komoray.com">hello@komoray.com</a>
-			</footer>
+			<section className="k-sec k-light">
+				<div className="k-wrap">
+					<h2 className="k-h2">
+						From raw take
+						<br />
+						to your final call.
+					</h2>
+					<div className="k-steps">
+						{STEPS.map(([number, title, text]) => (
+							<div key={title} className="k-step">
+								<div className="k-mono">{number}</div>
+								<h3>{title}</h3>
+								<p>{text}</p>
+							</div>
+						))}
+					</div>
+				</div>
+			</section>
+
+			<section className="k-final" id="access">
+				<div className="k-wrap">
+					<h2 className="k-h1">
+						Your next take
+						<br />
+						is <span className="k-lime">waiting.</span>
+					</h2>
+					<div className="k-finalform">
+						<p className="k-promise">Private beta. Your videos stay yours. We never sell your data, and we never use your videos to train AI models.</p>
+						<WaitlistForm />
+					</div>
+					<footer className="k-foot">
+						<div>
+							<Link href="/privacy">Privacy</Link>
+							<Link href="/terms">Terms</Link>
+							<a href="mailto:hello@komoray.com">hello@komoray.com</a>
+						</div>
+						<div style={{ display: "flex", alignItems: "center" }}>Built in public from Thailand</div>
+					</footer>
+				</div>
+			</section>
 		</main>
 	);
 }
