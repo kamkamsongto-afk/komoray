@@ -20,10 +20,10 @@ export function WaitlistForm() {
 		setError(data?.error ?? "That didn't go through. Please try again.");
 	}
 
-	if (state === "done") return <p className="rounded-xl border border-foreground/15 px-5 py-3 font-medium">You&apos;re on the list. We&apos;ll email you when your spot opens.</p>;
+	if (state === "done") return <p className="k-done">You&apos;re on the list. We&apos;ll email you when your spot opens.</p>;
 	return (
-		<form onSubmit={submit} className="flex w-full max-w-md flex-col gap-2">
-			<div className="flex flex-col gap-2 sm:flex-row">
+		<form onSubmit={submit} className="k-form">
+			<div className="k-formrow">
 				<input
 					type="email"
 					required
@@ -32,20 +32,16 @@ export function WaitlistForm() {
 					placeholder="you@yourchannel.com"
 					aria-label="Your email"
 					autoComplete="email"
-					className="min-w-0 flex-1 rounded-lg border border-foreground/20 bg-background px-4 py-2.5"
+					className="k-input"
 				/>
 				<input type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden value={website} onChange={(e) => setWebsite(e.target.value)} className="absolute -left-[9999px] h-0 w-0 opacity-0" />
-				<button type="submit" disabled={state === "sending"} className="rounded-lg bg-blue-600 px-5 py-2.5 font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+				<button type="submit" disabled={state === "sending"} className="k-cta">
 					{state === "sending" ? "Joining…" : "Get early access"}
 				</button>
 			</div>
-			{error && <p className="text-sm text-red-600">{error}</p>}
-			<p className="text-xs text-foreground/50">
-				We only use your email to invite you. See our{" "}
-				<a href="/privacy" className="underline">
-					Privacy Policy
-				</a>
-				.
+			{error && <p className="k-formerror">{error}</p>}
+			<p className="k-formnote">
+				We only use your email to invite you. See our <a href="/privacy">Privacy Policy</a>.
 			</p>
 		</form>
 	);
