@@ -17,14 +17,17 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 .k-navlinks a.k-pill:hover { background: #B9F36A; color: #101114; }
 
 .k-hero { position: relative; min-height: 720px; margin: 0 12px; border-radius: 18px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; isolation: isolate; color: #F4F3EF; }
-.k-scene { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: linear-gradient(180deg, #2f86de 0, #62aee9 42%, #a9d6f2 76%, #c9e4f4 100%); }
-.k-bloom { position: absolute; right: 2%; top: -18%; width: 34%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, rgba(255,250,232,.95) 0, rgba(255,246,214,.5) 26%, rgba(255,246,214,.14) 48%, transparent 70%); animation: k-bloom 11s ease-in-out infinite alternate; will-change: transform, opacity; }
-@keyframes k-bloom { from { transform: scale(.96); opacity: .85; } to { transform: scale(1.06); opacity: 1; } }
-.k-cloud { position: absolute; border-radius: 50%; filter: blur(16px); opacity: .92; background: radial-gradient(38% 52% at 28% 58%, #fff 0, rgba(255,255,255,.75) 55%, transparent 100%), radial-gradient(34% 62% at 52% 44%, #fff 0, rgba(255,255,255,.8) 55%, transparent 100%), radial-gradient(34% 48% at 74% 62%, #fff 0, rgba(255,255,255,.7) 55%, transparent 100%); will-change: transform; animation: k-drift 70s ease-in-out infinite alternate; }
-.k-cloud-a { left: -6%; top: 6%; width: 46%; height: 30%; }
-.k-cloud-b { left: 40%; top: 18%; width: 36%; height: 22%; opacity: .7; animation-duration: 95s; animation-direction: alternate-reverse; }
-.k-cloud-c { left: -4%; bottom: -14%; width: 112%; height: 30%; opacity: .6; animation-duration: 120s; }
-@keyframes k-drift { from { transform: translateX(-4%); } to { transform: translateX(6%); } }
+/* A day in two minutes: the sun crosses the sky and the light warms at both ends. It opens in full daylight. */
+.k-scene { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: linear-gradient(180deg, #0a3f8f 0, #1763bd 46%, #4f9fe0 80%, #9fcdeb 100%); }
+.k-sunpath { position: absolute; inset: 0; will-change: transform; animation: k-sunpath 120s linear -45s infinite; }
+@keyframes k-sunpath { 0% { transform: translate(-6%, 92%); } 12% { transform: translate(10%, 52%); } 25% { transform: translate(28%, 24%); } 50% { transform: translate(58%, 6%); } 75% { transform: translate(84%, 26%); } 88% { transform: translate(96%, 54%); } 100% { transform: translate(106%, 92%); } }
+.k-sun { position: absolute; left: 0; top: 0; width: clamp(420px, 46vw, 680px); aspect-ratio: 1; border-radius: 50%; transform: translate(-50%, -50%); background: radial-gradient(circle, #fffdf2 0, rgba(255,248,214,.95) 7%, rgba(255,236,170,.55) 20%, rgba(255,226,150,.2) 42%, transparent 70%); }
+.k-sunrays { position: absolute; left: 0; top: 0; width: clamp(900px, 110vw, 1700px); aspect-ratio: 1; border-radius: 50%; transform: translate(-50%, -50%); background: repeating-conic-gradient(rgba(255,244,205,.2) 0 5deg, transparent 5deg 14deg, rgba(255,244,205,.09) 14deg 18deg, transparent 18deg 31deg); filter: blur(14px); -webkit-mask-image: radial-gradient(circle, #000 12%, transparent 68%); mask-image: radial-gradient(circle, #000 12%, transparent 68%); }
+.k-clouds { position: absolute; left: 0; top: 16%; width: 200%; height: 100%; background: url("/landing/clouds.webp") repeat-x 0 0 / 50% 100%; -webkit-mask-image: linear-gradient(180deg, transparent, #000 18%); mask-image: linear-gradient(180deg, transparent, #000 18%); will-change: transform; animation: k-clouds 300s linear infinite; }
+.k-clouds-far { top: -18%; height: 62%; opacity: .5; -webkit-mask-image: linear-gradient(180deg, #000 50%, transparent); mask-image: linear-gradient(180deg, #000 50%, transparent); animation-duration: 520s; }
+@keyframes k-clouds { to { transform: translateX(-50%); } }
+.k-dusk { position: absolute; inset: 0; background: linear-gradient(180deg, #15204d 0, #6d3f78 46%, #d9663f 78%, #f4a95c 100%); will-change: opacity; animation: k-dusk 120s linear -45s infinite; }
+@keyframes k-dusk { 0%, 100% { opacity: .92; } 13%, 87% { opacity: .55; } 28%, 72% { opacity: 0; } }
 
 /* Three phones that float slowly. Only transform and opacity move, so the browser keeps them smooth. */
 .k-stage { position: absolute; right: 4%; top: 50%; display: flex; align-items: center; transform: translateY(-50%); }
@@ -182,9 +185,8 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 	.k-navlinks a:not(.k-pill) { display: none; }
 	.k-top { padding-bottom: 8px; }
 	.k-hero { min-height: 780px; margin: 0 8px; border-radius: 14px; }
-	.k-bloom { right: -10%; top: -6%; width: 70%; }
-	.k-cloud-a { width: 90%; height: 20%; }
-	.k-cloud-b { left: 30%; top: 30%; width: 80%; height: 14%; }
+	.k-clouds { width: 400%; background-size: 50% 100%; top: 8%; height: 70%; }
+	.k-clouds-far { top: -10%; height: 40%; }
 	.k-stage { right: 50%; top: 56px; transform: translateX(50%); }
 	.k-float-a, .k-float-c { width: 126px; }
 	.k-float-a { margin-right: -30px; }
@@ -209,5 +211,7 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 @media (prefers-reduced-motion: reduce) {
 	.k-root *, .k-root *::after { animation: none !important; transition: none !important; }
 	.k-subline:first-child { opacity: 1; }
+	.k-sunpath { transform: translate(58%, 6%); }
+	.k-dusk { opacity: 0; }
 	.k-bannerpop { transform: none; opacity: 1; }
 }
