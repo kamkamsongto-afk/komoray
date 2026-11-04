@@ -17,12 +17,14 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 .k-navlinks a.k-pill:hover { background: #B9F36A; color: #101114; }
 
 .k-hero { position: relative; min-height: 720px; margin: 0 12px; border-radius: 18px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; isolation: isolate; color: #F4F3EF; }
-.k-scene { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: #101114; }
-.k-bloom { position: absolute; left: 36%; top: -52%; width: 84%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, rgba(244,243,239,.92) 0, rgba(244,243,239,.62) 24%, rgba(244,243,239,.26) 44%, transparent 70%); animation: k-bloom 11s ease-in-out infinite alternate; will-change: transform, opacity; }
-@keyframes k-bloom { from { transform: scale(.96); opacity: .78; } to { transform: scale(1.06); opacity: 1; } }
-.k-rays { position: absolute; left: 10%; top: -96%; width: 130%; aspect-ratio: 1; border-radius: 50%; background: repeating-conic-gradient(rgba(244,243,239,.14) 0 6deg, transparent 6deg 17deg, rgba(185,243,106,.08) 17deg 21deg, transparent 21deg 34deg); filter: blur(18px); animation: k-spin 120s linear infinite; will-change: transform; }
-@keyframes k-spin { to { transform: rotate(360deg); } }
-.k-shade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(16,17,20,.9) 0, rgba(16,17,20,.6) 36%, rgba(16,17,20,0) 62%); }
+.k-scene { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: linear-gradient(180deg, #2f86de 0, #62aee9 42%, #a9d6f2 76%, #c9e4f4 100%); }
+.k-bloom { position: absolute; right: 2%; top: -18%; width: 34%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, rgba(255,250,232,.95) 0, rgba(255,246,214,.5) 26%, rgba(255,246,214,.14) 48%, transparent 70%); animation: k-bloom 11s ease-in-out infinite alternate; will-change: transform, opacity; }
+@keyframes k-bloom { from { transform: scale(.96); opacity: .85; } to { transform: scale(1.06); opacity: 1; } }
+.k-cloud { position: absolute; border-radius: 50%; filter: blur(16px); opacity: .92; background: radial-gradient(38% 52% at 28% 58%, #fff 0, rgba(255,255,255,.75) 55%, transparent 100%), radial-gradient(34% 62% at 52% 44%, #fff 0, rgba(255,255,255,.8) 55%, transparent 100%), radial-gradient(34% 48% at 74% 62%, #fff 0, rgba(255,255,255,.7) 55%, transparent 100%); will-change: transform; animation: k-drift 70s ease-in-out infinite alternate; }
+.k-cloud-a { left: -6%; top: 6%; width: 46%; height: 30%; }
+.k-cloud-b { left: 40%; top: 18%; width: 36%; height: 22%; opacity: .7; animation-duration: 95s; animation-direction: alternate-reverse; }
+.k-cloud-c { left: -4%; bottom: -14%; width: 112%; height: 30%; opacity: .6; animation-duration: 120s; }
+@keyframes k-drift { from { transform: translateX(-4%); } to { transform: translateX(6%); } }
 
 /* Three phones that float slowly. Only transform and opacity move, so the browser keeps them smooth. */
 .k-stage { position: absolute; right: 4%; top: 50%; display: flex; align-items: center; transform: translateY(-50%); }
@@ -43,9 +45,9 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 .k-subline:nth-child(4) { animation-delay: 12s; }
 @keyframes k-subline { 0% { opacity: 0; transform: translateY(8px); } 4%, 21% { opacity: 1; transform: translateY(0); } 25%, 100% { opacity: 0; transform: translateY(-8px); } }
 
-.k-herotext { position: relative; max-width: 700px; padding: 0 44px 44px; }
-.k-herohead { margin: 0; font-size: clamp(46px, 5.2vw, 80px); line-height: 1.02; letter-spacing: -.04em; font-weight: 500; }
-.k-herolead { margin: 18px 0 26px; max-width: 560px; font-size: 18px; font-weight: 500; line-height: 1.42; }
+.k-herotext { position: relative; width: min(46%, 620px); margin: 0 0 28px 28px; padding: 30px 32px 32px; border-radius: 18px; background: rgba(16,17,20,.66); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.k-herohead { margin: 0; font-size: clamp(40px, 4.4vw, 68px); line-height: 1.02; letter-spacing: -.04em; font-weight: 500; }
+.k-herolead { margin: 16px 0 24px; font-size: 17px; font-weight: 500; line-height: 1.42; }
 .k-herocta { display: inline-flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 18px; border-radius: 10px; background: #F4F3EF; color: #101114; font-size: 15px; font-weight: 600; transition: background .25s ease; }
 .k-herocta:hover { background: #B9F36A; }
 .k-herocta svg { width: 14px; height: 14px; transition: transform .25s ease; }
@@ -180,9 +182,9 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 	.k-navlinks a:not(.k-pill) { display: none; }
 	.k-top { padding-bottom: 8px; }
 	.k-hero { min-height: 780px; margin: 0 8px; border-radius: 14px; }
-	.k-bloom { left: 0; top: -16%; width: 100%; }
-	.k-rays { left: -50%; top: -36%; width: 200%; }
-	.k-shade { background: linear-gradient(0deg, rgba(16,17,20,.96) 0, rgba(16,17,20,.82) 38%, rgba(16,17,20,0) 58%); }
+	.k-bloom { right: -10%; top: -6%; width: 70%; }
+	.k-cloud-a { width: 90%; height: 20%; }
+	.k-cloud-b { left: 30%; top: 30%; width: 80%; height: 14%; }
 	.k-stage { right: 50%; top: 56px; transform: translateX(50%); }
 	.k-float-a, .k-float-c { width: 126px; }
 	.k-float-a { margin-right: -30px; }
@@ -192,9 +194,9 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 	.k-subline { font-size: 14px; }
 	.k-phone { border-radius: 24px; padding: 4px; }
 	.k-phone img { border-radius: 20px; }
-	.k-herotext { padding: 0 20px 24px; }
+	.k-herotext { width: auto; margin: 0 10px 10px; padding: 20px; }
 	.k-herolead { margin: 12px 0 18px; font-size: 16px; }
-	.k-note { top: auto; right: auto; left: 20px; bottom: 8px; padding: 0; background: none; font-size: 10px; }
+	.k-note { top: 10px; right: 10px; font-size: 10px; }
 	.k-sec { padding-block: 80px; }
 	.k-demo, .k-grid, .k-steps, .k-rooms { margin-top: 40px; }
 	.k-grid, .k-steps { grid-template-columns: minmax(0,1fr); }
