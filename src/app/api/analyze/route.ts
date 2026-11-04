@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { ownsVideo } from "@/lib/supabase/server";
+import { refundListen, startListening } from "@/lib/access";
+import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
 import { isLanguage } from "@/lib/languages";
 import { facesFor, mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
@@ -27,10 +28,15 @@ export async function POST(request: Request) {
 		return Response.json({ error: "Find silences only works on komoray.com, not on localhost." }, { status: 400 });
 	}
 
+	const { user } = await currentUser();
+	const listen = await startListening(key, user?.email);
+	if ("error" in listen) return Response.json({ error: listen.error }, { status: listen.status });
+
 	const env = getCloudflareContext().env as unknown as AnalyzeEnv;
 	try {
 		await Promise.all([deleteObject(siblingKey(key, "edit.json")), deleteObject(siblingKey(key, "analyze-error.json"))]);
-		await putObject(siblingKey(key, "analyze.json"), JSON.stringify({ startedAt: new Date().toISOString() }), "application/json");
+		// usageKey: lets the callback give the minutes back if the job fails.
+		await putObject(siblingKey(key, "analyze.json"), JSON.stringify({ startedAt: new Date().toISOString(), usageKey: listen.usageKey }), "application/json");
 
 		const callbackUrl = await signedCallbackUrl(new URL("/api/analyze/callback", request.url).toString(), key, env.RENDER_TOKEN);
 		// Deepgram downloads the video itself through a temporary read-only link.
@@ -44,6 +50,7 @@ export async function POST(request: Request) {
 		return Response.json({ status: "processing" });
 	} catch (err) {
 		const error = err instanceof Error ? err.message : "Analysis failed";
+		if (listen.usageKey) await refundListen(key, listen.usageKey).catch(() => {});
 		// Saved so the admin page shows it too, not just the user's screen.
 		await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error, at: new Date().toISOString() }), "application/json").catch(() => {});
 		return Response.json({ error }, { status: 502 });

@@ -1,9 +1,10 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { allCuts, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
 import { translationName } from "@/lib/languages";
-import { getJson, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
+import { accessFor, NO_INVITE } from "@/lib/access";
+import { getJson, listObjects, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { readStyle } from "@/lib/subtitle-style";
-import { ownsVideo } from "@/lib/supabase/server";
+import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 import { translateLines } from "@/lib/translate";
 
@@ -12,10 +13,14 @@ import { translateLines } from "@/lib/translate";
 // what's done is kept in translation-<language>.json, so a small edit only pays for the lines it changed.
 const BATCH = 40;
 const CONTEXT_LINES = 5;
+const LANGUAGES_PER_VIDEO = 5; // each one pays for the whole script again
 
 export async function POST(request: Request) {
 	const { key, language } = (await request.json()) as { key?: string; language?: string };
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
+	const { user } = await currentUser();
+	const access = await accessFor(user?.email);
+	if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
 	const languageName = language ? translationName(language) : undefined;
 	if (!languageName) return Response.json({ error: "Unknown language" }, { status: 400 });
 
@@ -37,7 +42,13 @@ export async function POST(request: Request) {
 	const texts = lines.map((l) => l.text.trim());
 
 	const savedKey = siblingKey(key, `translation-${language}.json`);
-	const saved = new Map(Object.entries((await getJson<Record<string, string>>(savedKey)) ?? {}));
+	if (!access.unlimited) {
+		const started = (await listObjects(siblingKey(key, "translation-"))).map((file) => file.key);
+		if (started.length >= LANGUAGES_PER_VIDEO && !started.includes(savedKey)) {
+			return Response.json({ error: `During the beta, each video can be translated into ${LANGUAGES_PER_VIDEO} languages.` }, { status: 429 });
+		}
+	}
+	const saved =new Map(Object.entries((await getJson<Record<string, string>>(savedKey)) ?? {}));
 	const missing = [...new Set(texts)].filter((t) => !saved.has(t));
 
 	if (missing.length) {

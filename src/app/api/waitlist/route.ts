@@ -1,17 +1,14 @@
-import { exists, getJson, listObjects, putObject } from "@/lib/r2";
+import { hashEmail, sameOrigin } from "@/lib/access";
+import { deleteObject, exists, getJson, listObjects, putObject } from "@/lib/r2";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
 
 // People waiting for access, one file each at waitlist/<hash of the email>.json (signing up twice changes nothing).
 //   POST { email, website }  from the home page. website is a field people never see: only bots fill it in.
 //   GET                      for the admin: { people: [{ email, at }] }
+//   DELETE ?email=…          for the admin: take someone off the list
 const MAX_BODY = 1024;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const SHOW = 1000;
-
-async function hash(text: string) {
-	const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
-	return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 export async function POST(request: Request) {
 	if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "Not allowed" }, { status: 403 });
@@ -20,7 +17,7 @@ export async function POST(request: Request) {
 	if (body.website) return Response.json({ ok: true }); // a bot: looks fine to it, nothing is saved
 	const email = String(body.email ?? "").trim().toLowerCase();
 	if (email.length > 254 || !EMAIL.test(email)) return Response.json({ error: "Please enter a valid email address" }, { status: 400 });
-	const key = `waitlist/${await hash(email)}.json`;
+	const key = `waitlist/${await hashEmail(email)}.json`;
 	if (!(await exists(key))) await putObject(key, JSON.stringify({ email, at: new Date().toISOString() }), "application/json");
 	return Response.json({ ok: true });
 }
@@ -32,4 +29,14 @@ export async function GET() {
 	const files = (await listObjects("waitlist/")).sort((a, b) => b.lastModified.localeCompare(a.lastModified)).slice(0, SHOW);
 	const people = await Promise.all(files.map((file) => getJson<{ email: string; at: string }>(file.key).catch(() => null)));
 	return Response.json({ people: people.filter(Boolean) });
+}
+
+export async function DELETE(request: Request) {
+	const { user } = await currentUser();
+	if (!user || !isAdmin(user.email)) return Response.json({ error: "This page is for the Komoray team only" }, { status: 403 });
+	if (!sameOrigin(request)) return Response.json({ error: "Not allowed" }, { status: 403 });
+	const email = new URL(request.url).searchParams.get("email");
+	if (!email) return Response.json({ error: "Which email?" }, { status: 400 });
+	await deleteObject(`waitlist/${await hashEmail(email)}.json`);
+	return Response.json({ ok: true });
 }
