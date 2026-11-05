@@ -67,7 +67,7 @@ git log --oneline -15         # เพิ่งมีใครแก้อะไ
 | `zoom.ts` | `no_zoom_frames`, `zoom_shots`, `smooth_zoom_expr`, `zoom_ramps` |
 | `framing.ts` | `frame_piece` |
 | `banners.ts` | `banner_events`, `banner_motion`, `banner_ink`, `BANNER`, `BANNER_ANIMS`, `BANNER_TOP` |
-| `motion.ts` | `POP`, `BOUNCE`, `pop_tags`, `bouncing_words` |
+| `motion.ts` | `POP`, `BOUNCE`, `BOUNCE_WORD_GAP`, `pop_tags`, `word_places`, `bounce_events` |
 | `subtitle-style.ts` | `DEFAULT_STYLE`, `FONTS`, `FORMATS` |
 
 comment บางจุดในฝั่งเว็บอ้างชื่อเก่าที่ไม่มีใน `render.py` แล้ว เช่น `build_banners`, `MOTION`, `LOOKS` ให้ค้นจากชื่อจริงในตารางนี้
