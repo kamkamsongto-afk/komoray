@@ -9,7 +9,8 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 /* Top: menu on warm white, a big rounded banner under it */
 .k-top { background: #F4F3EF; padding-bottom: 12px; }
 .k-nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 20px; color: #101114; }
-.k-logo { font-size: 22px; font-weight: 600; letter-spacing: -.035em; }
+.k-logo { display: block; flex: none; }
+.k-logo img { display: block; width: auto; height: 34px; }
 .k-navlinks { display: flex; align-items: center; gap: 30px; font-size: 14px; font-weight: 500; }
 .k-navlinks a { opacity: .72; transition: opacity .25s ease; }
 .k-navlinks a:hover { opacity: 1; }
@@ -184,6 +185,7 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 @media (max-width: 680px) {
 	.k-wrap { padding-inline: 16px; }
 	.k-nav { padding: 10px 14px; }
+	.k-logo img { height: 28px; }
 	.k-navlinks a:not(.k-pill) { display: none; }
 	.k-top { padding-bottom: 8px; }
 	.k-hero { min-height: 780px; margin: 0 8px; border-radius: 14px; }

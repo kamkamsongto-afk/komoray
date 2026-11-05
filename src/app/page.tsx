@@ -23,7 +23,7 @@ export default function Home() {
 			<div className="k-top" id="top">
 				<nav className="k-nav" aria-label="Main">
 					<a className="k-logo" href="#top">
-						Komoray
+						<Image src="/logo.svg" alt="Komoray" width={322} height={70} unoptimized priority />
 					</a>
 					<div className="k-navlinks">
 						<a href="#script">Script</a>
