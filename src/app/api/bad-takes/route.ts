@@ -2,7 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, NO_INVITE } from "@/lib/access";
 import { askForTakes, type BadTake, CHUNK_WORDS, keepTakes, scriptFingerprint } from "@/lib/bad-takes";
 import { deleteObject, getJson, listObjects, putIfAbsent, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
-import { currentUser, ownsVideo } from "@/lib/supabase/server";
+import { currentUser, isAdmin, ownsVideo } from "@/lib/supabase/server";
 
 // Suggestions for what to cut, kept next to the video, so a script is only paid for once:
 //   bad-takes.json                     how far we read and what we found, for one exact script
@@ -19,6 +19,8 @@ export async function POST(request: Request) {
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const { user } = await currentUser();
 	if (!(await accessFor(user?.email)).allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
+	// Owner only until its suggestions have been listened to on real clips. To open it to everyone, remove this line and aiTakes in edit/page.tsx.
+	if (!isAdmin(user?.email)) return Response.json({ error: "Not available yet" }, { status: 403 });
 
 	const edit = await getJson<{ words: { text: string; start: number; end: number }[] }>(siblingKey(key, "edit.json"));
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });

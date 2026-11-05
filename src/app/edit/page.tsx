@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { BadTakes } from "@/components/BadTakes";
+import { ADMIN_EMAIL } from "@/lib/supabase/config";
 import type { BadTake } from "@/lib/bad-takes";
 import { ScriptView } from "@/components/ScriptView";
 import { VideoReady } from "@/components/VideoReady";
@@ -126,7 +127,10 @@ export default function EditPage() {
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
 	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
 	const [takesFound, setTakesFound] = useState<{ count: number; withoutTakes: number[] } | null>(null);
-	const [badTakes, setBadTakes] = useState<{ status: "checking" | "done" | "failed"; takes: BadTake[] }>({ status: "checking", takes: [] });
+	const [badTakesFound, setBadTakes] = useState<{ status: "checking" | "done" | "failed"; takes: BadTake[] }>({ status: "checking", takes: [] });
+	// Owner only for now (see /api/bad-takes). Everyone else gets what "failed" shows: the plain rule's notice, and no AI.
+	const aiTakes = user?.email?.toLowerCase() === ADMIN_EMAIL;
+	const badTakes = aiTakes ? badTakesFound : { status: "failed" as const, takes: [] as BadTake[] };
 	const [listen, setListen] = useState<{ seconds: number; original: boolean; ask: number } | null>(null);
 	const [desktopNotify, setDesktopNotify] = useState(false);
 	const [notifyBlocked, setNotifyBlocked] = useState(false);
@@ -384,7 +388,7 @@ export default function EditPage() {
 	const hasScript = Boolean(analysis?.words?.length);
 	const keptRef = useRef(new Set<number>()); // kept here, while an answer already on its way may still list them
 	useEffect(() => {
-		if (!key || !hasScript) return;
+		if (!key || !hasScript || !aiTakes) return;
 		let stopped = false;
 		void (async () => {
 			for (;;) {
@@ -402,7 +406,7 @@ export default function EditPage() {
 		return () => {
 			stopped = true;
 		};
-	}, [key, hasScript]);
+	}, [key, hasScript, aiTakes]);
 	const keepBadTake = (take: BadTake) => {
 		keptRef.current.add(take.from);
 		setBadTakes((b) => ({ ...b, takes: b.takes.filter((t) => t.from !== take.from) }));
