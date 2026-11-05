@@ -139,14 +139,15 @@ def font_tag(text: str, own_font: bool, size: float) -> str:
 _shapers: dict = {}
 
 
-def text_width(text: str, style: dict, size: float, spacing: int = 0) -> float:
+def text_width(text: str, style: dict, size: float, spacing: int = 0, cyrillic: bool = False) -> float:
     """How wide libass draws this text, px, to draw a box around it: libass makes a font's full height the
-    font size, and Thai needs real shaping to know its width."""
+    font size, and Thai needs real shaping to know its width. cyrillic: part of a line drawn in the Russian
+    font (font_tag picks one font for a whole line)."""
     import uharfbuzz as hb
 
     if style.get("font") == "own" and style.get("_ownFontPath"):
         path, height = style["_ownFontPath"], float((style.get("ownFont") or {}).get("height") or 1.58)
-    elif style.get("font") != "own" and re.search("[Ѐ-ԯ]", text):
+    elif style.get("font") != "own" and (cyrillic or re.search("[Ѐ-ԯ]", text)):
         path, height = FONT_FOLDER + "FiraSans-Medium.ttf", 1.58  # asked for smaller, drawn as big as Kanit's (CYRILLIC_SCALE)
     else:
         name, height = FONT_FILES.get(style.get("font"), FONT_FILES["kanit"])
@@ -453,12 +454,12 @@ def scale_tags(keys: list[tuple[int, int]], offset: float) -> str:
     return tags
 
 
-def word_places(plain: list[str], row2: int | None, style: dict, size: float, spacing: int, video_w: int, bottom: float, row_step: float, row_height: float) -> list[tuple[float, float]]:
+def word_places(plain: list[str], row2: int | None, style: dict, size: float, spacing: int, video_w: int, bottom: float, row_step: float, row_height: float, cyrillic: bool = False) -> list[tuple[float, float]]:
     """Where the middle of each word of a bouncing line goes, so the line looks the same as when libass lays
     it out by itself: centred, rows going up from `bottom`. A line too wide for the video continues on a
     new row, as it does in the browser."""
-    widths = [text_width(p.strip(), style, size, spacing) for p in plain]
-    spaces = [max(0.0, text_width(p, style, size, spacing) - w) + size * BOUNCE_WORD_GAP for p, w in zip(plain, widths)]
+    widths = [text_width(p.strip(), style, size, spacing, cyrillic) for p in plain]
+    spaces = [max(0.0, text_width(p, style, size, spacing, cyrillic) - w) + size * BOUNCE_WORD_GAP for p, w in zip(plain, widths)]
     room = video_w - 2 * SIDE_MARGIN
     rows, row, used = [], [], 0.0
     for k in range(len(plain)):
@@ -586,7 +587,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         parts = [spaced_marks(p, spacing) for p in plain]
         row2 = second_row(plain) if look == "two" else None
         line_font = font_tag("".join(parts), own_font, size)
-        letters_height = size * CYRILLIC_SCALE if line_font else size  # libass makes a font's full height its size
+        cyrillic_line = bool(line_font)
+        letters_height = size * CYRILLIC_SCALE if cyrillic_line else size  # libass makes a font's full height its size
         if row2 is not None:
             # ASS has no line spacing: an empty row as tall as the gap goes between the two rows.
             gap = int(style.get("lineSpacing") or 0)
@@ -605,7 +607,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 below = BOX_PADDING if r == len(rows) - 1 else 0
                 row_height = size + above + below
                 middle = row_bottom - size + (below - above + size) / 2
-                box_width = text_width(row, style, size, spacing) + 2 * BOX_PADDING
+                box_width = text_width(row, style, size, spacing, cyrillic_line) + 2 * BOX_PADDING
                 if motion == "bounce":  # the room kept between its words (word_places)
                     row_words = len(plain) if row2 is None else row2 if r == 0 else len(plain) - row2
                     box_width += (row_words - 1) * size * BOUNCE_WORD_GAP
@@ -614,7 +616,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{head}\\p1}}{pop_tags(motion, 0)}{box}{{\\p0}}")
         if motion == "bounce":
             row_step = size + int(style.get("lineSpacing") or 0)
-            places = word_places(plain, row2, style, size, spacing, video_w, video_h - margin_v, row_step, letters_height)
+            places = word_places(plain, row2, style, size, spacing, video_w, video_h - margin_v, row_step, letters_height, cyrillic_line)
             words = [spaced_marks(p.strip(), spacing) for p in plain]
             events += bounce_events(line, start, end, words, places, line_font, text_layer, highlight if look == "highlight" else None)
             continue
