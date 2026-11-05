@@ -1,5 +1,6 @@
 import { accessFor, NO_INVITE } from "@/lib/access";
-import { signedUrl } from "@/lib/r2";
+import { OWNER_FILE } from "@/lib/admin-activity";
+import { putObject, signedUrl } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
 import { uploadLimitReached } from "@/lib/upload-limit";
 
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
 	// Remember whose video this is, so only they can see it and work on it.
 	const { error } = await supabase.from("projects").insert({ id, video_key: key, filename: filename ?? safeName, size });
 	if (error) return Response.json({ error: "Could not save your project" }, { status: 500 });
+	await putObject(`uploads/${id}/${OWNER_FILE}`, JSON.stringify({ email: user.email?.toLowerCase() }), "application/json").catch(() => {}); // for the Activity tab, never worth failing an upload
 
 	const uploadUrl = await signedUrl(key, "PUT", URL_LIFETIME_SECONDS, contentType, undefined, size);
 	return Response.json({ uploadUrl, key });
