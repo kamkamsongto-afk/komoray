@@ -139,14 +139,15 @@ def font_tag(text: str, own_font: bool, size: float) -> str:
 _shapers: dict = {}
 
 
-def text_width(text: str, style: dict, size: float, spacing: int = 0) -> float:
+def text_width(text: str, style: dict, size: float, spacing: int = 0, cyrillic: bool = False) -> float:
     """How wide libass draws this text, px, to draw a box around it: libass makes a font's full height the
-    font size, and Thai needs real shaping to know its width."""
+    font size, and Thai needs real shaping to know its width. cyrillic: part of a line drawn in the Russian
+    font (font_tag picks one font for a whole line)."""
     import uharfbuzz as hb
 
     if style.get("font") == "own" and style.get("_ownFontPath"):
         path, height = style["_ownFontPath"], float((style.get("ownFont") or {}).get("height") or 1.58)
-    elif style.get("font") != "own" and re.search("[Ѐ-ԯ]", text):
+    elif style.get("font") != "own" and (cyrillic or re.search("[Ѐ-ԯ]", text)):
         path, height = FONT_FOLDER + "FiraSans-Medium.ttf", 1.58  # asked for smaller, drawn as big as Kanit's (CYRILLIC_SCALE)
     else:
         name, height = FONT_FILES.get(style.get("font"), FONT_FILES["kanit"])
@@ -425,21 +426,11 @@ def second_row(texts: list[str]) -> int | None:
 
 # Motion: (milliseconds after the start, size in %), straight lines between. Same as src/lib/motion.ts.
 POP = [(0, 70), (90, 110), (170, 100)]
-BOUNCE = [(0, 100), (110, 150), (280, 100)]
+BOUNCE = [(0, 100), (60, 125), (120, 150), (200, 145), (300, 110), (370, 97), (440, 100)]
 POP_END = POP[-1][0]
 BOUNCE_END = BOUNCE[-1][0]
-BOUNCE_GAP = 350  # ms: at most one word jumps in this time, else short words make the line shiver
-
-
-def bouncing_words(froms: list[float]) -> list[int]:
-    """Which words of a line jump, from when each is said (ms after the line starts): the first one, then
-    the next one said at least BOUNCE_GAP later. Same as bouncingWords in src/lib/motion.ts."""
-    out, last = [], -math.inf
-    for k, ms in enumerate(froms):
-        if ms - last >= BOUNCE_GAP:
-            out.append(k)
-            last = ms
-    return out
+BOUNCE_WORD_GAP = 0.14  # of the text size: room kept between words, so two big words don't cover each other
+SIDE_MARGIN = 80  # px kept clear at each side of a subtitle line (MarginL/R, SIDE_MARGIN in PlayerFrame.tsx)
 
 
 def scale_at(keys: list[tuple[int, int]], ms: float) -> float:
@@ -463,17 +454,56 @@ def scale_tags(keys: list[tuple[int, int]], offset: float) -> str:
     return tags
 
 
-def box_jump_tags(since: float, word: float, width: float, size: float, height: float) -> str:
-    """A drawn Box growing with the word jumping inside it, `since` ms into the jump: it stays the same
-    box, only as much wider and taller as that word gets."""
-    grow = lambda s: f"\\fscx{100 + (s - 100) * word / width:.1f}\\fscy{100 + (s - 100) * size / height:.1f}"
-    now = scale_at(BOUNCE, since)
-    tags, prev = grow(now), since
-    for ms, s in BOUNCE:
-        if ms > since:
-            tags += f"\\t({js_round(prev - since)},{js_round(ms - since)},{grow(s)})"
-            prev = ms
-    return tags
+def word_places(plain: list[str], row2: int | None, style: dict, size: float, spacing: int, video_w: int, bottom: float, row_step: float, row_height: float, cyrillic: bool = False) -> list[tuple[float, float]]:
+    """Where the middle of each word of a bouncing line goes, so the line looks the same as when libass lays
+    it out by itself: centred, rows going up from `bottom`. A line too wide for the video continues on a
+    new row, as it does in the browser."""
+    widths = [text_width(p.strip(), style, size, spacing, cyrillic) for p in plain]
+    spaces = [max(0.0, text_width(p, style, size, spacing, cyrillic) - w) + size * BOUNCE_WORD_GAP for p, w in zip(plain, widths)]
+    room = video_w - 2 * SIDE_MARGIN
+    rows, row, used = [], [], 0.0
+    for k in range(len(plain)):
+        add = widths[k] + (spaces[k] if row else 0)
+        if row and (k == row2 or used + add > room):
+            rows.append(row)
+            row, used, add = [], 0.0, widths[k]
+        row.append(k)
+        used += add
+    rows.append(row)
+    places: list[tuple[float, float]] = [(0.0, 0.0)] * len(plain)
+    for r, row in enumerate(rows):
+        total = sum(widths[k] + (spaces[k] if k != row[0] else 0) for k in row)
+        x = (video_w - total) / 2
+        y = bottom - row_step * (len(rows) - 1 - r) - row_height / 2
+        for k in row:
+            if k != row[0]:
+                x += spaces[k]
+            places[k] = (x + widths[k] / 2, y)
+            x += widths[k]
+    return places
+
+
+def bounce_events(line: list[dict], start: float, end: float, words: list[str], places: list[tuple[float, float]], line_font: str, layer: int, highlight: str | None) -> list[str]:
+    """Bounce: every word is its own subtitle at a fixed place and jumps around its own middle when it is
+    said. It never pushes the other words: \\fscx inside a line does, which made the whole line shake like a
+    seizure. The word in mid-jump is drawn on top. Same as motionScale and PlayerFrame.tsx."""
+    events = []
+    for k, text in enumerate(words):
+        said = max(start, line[k]["start"])
+        jump_end = said + BOUNCE_END / 1000 * FPS
+        colour_end = line[k + 1]["start"] if k + 1 < len(line) else end
+        cuts = sorted({start, said, min(jump_end, end), end} | ({min(colour_end, end)} if highlight else set()))
+        x, y = places[k]
+        for a, b in zip(cuts, cuts[1:]):
+            since = (a - said) / FPS * 1000
+            jumping = 0 <= since < BOUNCE_END
+            tags = f"\\an5\\pos({x:.1f},{y:.1f}){line_font}"
+            if highlight and said <= a < colour_end:
+                tags += f"\\1c{highlight}"
+            if jumping:
+                tags += scale_tags(BOUNCE, since)
+            events.append(f"Dialogue: {layer + 1 if jumping else layer},{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{{{tags}}}{text}")
+    return events
 
 
 def pop_tags(motion: str, since: float) -> str:
@@ -543,7 +573,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{{{logo_font}}}{logo}")
     logo_align = {"top-left": 7, "top-right": 9, "bottom-left": 1, "bottom-right": 3}.get(style.get("logoAt"), 7)
     # Round corners: libass's own box is always square, so the box is drawn under the letters instead.
-    draw_box = look == "box" and float(style.get("boxRadius") or 0) > 0
+    # Bounce too: each word is its own subtitle, but the line has one box.
+    draw_box = look == "box" and (float(style.get("boxRadius") or 0) > 0 or motion == "bounce")
     box_fill = f"\\1c{ass_colour(style.get('boxColor', '#000000'))}\\1a{alpha_of(float(style.get('boxOpacity', 0.75)))}"
     text_layer = 1 if draw_box else 0
     for i, line in enumerate(lines):
@@ -556,6 +587,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         parts = [spaced_marks(p, spacing) for p in plain]
         row2 = second_row(plain) if look == "two" else None
         line_font = font_tag("".join(parts), own_font, size)
+        cyrillic_line = bool(line_font)
+        letters_height = size * CYRILLIC_SCALE if cyrillic_line else size  # libass makes a font's full height its size
         if row2 is not None:
             # ASS has no line spacing: an empty row as tall as the gap goes between the two rows.
             gap = int(style.get("lineSpacing") or 0)
@@ -567,7 +600,6 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             rows = ["".join(plain)] if row2 is None else ["".join(plain[:row2]).strip(), "".join(plain[row2:]).strip()]
             gap = int(style.get("lineSpacing") or 0)
             bottom = video_h - margin_v
-            box_rows = []
             for r, row in enumerate(rows):
                 row_bottom = bottom - (size + gap) * (len(rows) - 1 - r)
                 # Two rows meet with no space, so a see-through box doesn't get darker where they overlap.
@@ -575,38 +607,35 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 below = BOX_PADDING if r == len(rows) - 1 else 0
                 row_height = size + above + below
                 middle = row_bottom - size + (below - above + size) / 2
-                box_width = text_width(row, style, size, spacing) + 2 * BOX_PADDING
+                box_width = text_width(row, style, size, spacing, cyrillic_line) + 2 * BOX_PADDING
+                if motion == "bounce":  # the room kept between its words (word_places)
+                    row_words = len(plain) if row2 is None else row2 if r == 0 else len(plain) - row2
+                    box_width += (row_words - 1) * size * BOUNCE_WORD_GAP
                 box = rounded_box(box_width, row_height, float(style.get("boxRadius") or 0))
                 head = f"{{\\an5\\pos({video_w / 2:.0f},{middle:.0f})\\bord0\\shad0{box_fill}"
-                # Bounce: drawn word by word below, to grow with each jump.
-                box_rows.append((r, head, box, box_width, row_height))
-                if motion != "bounce":
-                    events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{head}\\p1}}{pop_tags(motion, 0)}{box}{{\\p0}}")
+                events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{head}\\p1}}{pop_tags(motion, 0)}{box}{{\\p0}}")
+        if motion == "bounce":
+            row_step = size + int(style.get("lineSpacing") or 0)
+            places = word_places(plain, row2, style, size, spacing, video_w, video_h - margin_v, row_step, letters_height, cyrillic_line)
+            words = [spaced_marks(p.strip(), spacing) for p in plain]
+            events += bounce_events(line, start, end, words, places, line_font, text_layer, highlight if look == "highlight" else None)
+            continue
         line_font = f"{{{line_font}}}" if line_font else ""
-        if look != "highlight" and motion != "bounce":
+        if look != "highlight":
             events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue
-        # Highlight / Bounce: one event per word, that word in the brand colour until the next one starts.
-        # A word's jump carries on across the events until it has finished.
-        froms = [(w["start"] - start) / FPS * 1000 for w in line]
-        jumps = bouncing_words(froms) if motion == "bounce" else []
+        # Highlight: one event per word, that word in the brand colour until the next one starts.
         for k in range(len(line)):
             a = start if k == 0 else line[k]["start"]
             b = line[k + 1]["start"] if k + 1 < len(line) else end
             if b <= a:
                 continue
             since = (a - start) / FPS * 1000  # ms since the line started
-            jumping = next((j for j in reversed(jumps) if froms[j] <= since and since - froms[j] < BOUNCE_END), None)
-            if draw_box and motion == "bounce":
-                for r, head, box, box_width, row_height in box_rows:
-                    in_row = jumping is not None and (row2 is None or (jumping >= row2) == (r == 1))
-                    grow = box_jump_tags(since - froms[jumping], text_width(plain[jumping].strip(), style, size, spacing), box_width, size, row_height) if in_row else ""
-                    events.append(f"Dialogue: 0,{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{head}{grow}\\p1}}{box}{{\\p0}}")
             text = ""
             for j, p in enumerate(parts):
-                coloured = look == "highlight" and j == k
-                on = (f"\\1c{highlight}" if coloured else "") + (scale_tags(BOUNCE, since - froms[j]) if j == jumping else "")
-                off = (f"\\1c{ass_colour(style.get('textColor', '#FFFFFF'))}" if coloured else "") + ("\\fscx100\\fscy100" if j == jumping else "")
+                coloured = j == k
+                on = f"\\1c{highlight}" if coloured else ""
+                off = f"\\1c{ass_colour(style.get('textColor', '#FFFFFF'))}" if coloured else ""
                 text += f"{{{on}}}{p}{{{off}}}" if on else p
             events.append(f"Dialogue: {text_layer},{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, since)}{text}")
 
