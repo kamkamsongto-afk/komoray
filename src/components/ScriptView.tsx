@@ -534,6 +534,13 @@ export function ScriptView({
 		void video.play();
 	}
 
+	// A fixed word can stand for several: it is marked if any of them is.
+	const markedWord = (item: WordItem) => {
+		const marked = suggested ?? retakeWords;
+		for (let i = item.index; i <= item.last; i++) if (marked.has(i)) return true;
+		return false;
+	};
+
 	// The list of suggested cuts asks to hear one.
 	useEffect(() => {
 		if (!listen) return;
@@ -944,7 +951,7 @@ export function ScriptView({
 									item={item}
 									gone={gone.has(item.index)}
 									active={item.index <= current && current <= item.last}
-									retake={(suggested ?? retakeWords).has(item.index)}
+									retake={markedWord(item)}
 									heardAs={item.fixed ? originalText(item.index, item.last) : null}
 									actions={wordActions}
 								/>

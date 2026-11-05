@@ -382,6 +382,7 @@ export default function EditPage() {
 
 	// Ask the AI for bad takes once the script is here, one part at a time. It is saved, so it is only paid for once.
 	const hasScript = Boolean(analysis?.words?.length);
+	const keptRef = useRef(new Set<number>()); // kept here, while an answer already on its way may still list them
 	useEffect(() => {
 		if (!key || !hasScript) return;
 		let stopped = false;
@@ -389,11 +390,13 @@ export default function EditPage() {
 			for (;;) {
 				const res = await fetch("/api/bad-takes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) }).catch(() => null);
 				if (stopped) return;
-				const data = res?.ok ? ((await res.json()) as { takes: BadTake[]; remaining: number }) : null;
+				const data = res?.ok ? ((await res.json()) as { takes: BadTake[]; remaining: number; busy?: boolean }) : null;
 				if (stopped) return;
 				if (!data) return setBadTakes((b) => ({ ...b, status: "failed" }));
-				setBadTakes({ status: data.remaining ? "checking" : "done", takes: data.takes });
+				setBadTakes({ status: data.remaining ? "checking" : "done", takes: data.takes.filter((t) => !keptRef.current.has(t.from)) });
 				if (!data.remaining) return;
+				// Another tab is reading this part: wait for it instead of paying again.
+				if (data.busy) await new Promise((resolve) => setTimeout(resolve, 3000));
 			}
 		})();
 		return () => {
@@ -401,6 +404,7 @@ export default function EditPage() {
 		};
 	}, [key, hasScript]);
 	const keepBadTake = (take: BadTake) => {
+		keptRef.current.add(take.from);
 		setBadTakes((b) => ({ ...b, takes: b.takes.filter((t) => t.from !== take.from) }));
 		void fetch("/api/bad-takes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, keep: take.from }) }).catch(() => {});
 	};

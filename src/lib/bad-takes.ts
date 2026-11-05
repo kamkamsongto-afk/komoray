@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 const MODEL = "claude-opus-5-5";
 const REQUEST_MS = 90_000; // Cloudflare gives up on a silent request after 100 seconds
 export const CHUNK_WORDS = 1500; // about 8 minutes of speech, answered well inside REQUEST_MS
-export const OVERLAP_WORDS = 40; // so a take across two chunks is still seen whole
+export const OVERLAP_WORDS = 200; // so a take across two chunks is seen whole: longer than any bad take worth suggesting (over a minute of speech)
 
 export type BadTake = { from: number; to: number; kind: "repeat" | "false_start" | "self_correction" | "flub"; sure: "high" | "medium"; why: string };
 type Word = { text: string; start: number; end: number };
@@ -44,6 +44,14 @@ const SCHEMA = {
 	required: ["takes"],
 	additionalProperties: false,
 };
+
+// Identifies one exact script, so an answer is never used for different words.
+export async function scriptFingerprint(words: Word[]) {
+	const text = words.map((w) => `${w.text}|${w.start}`).join("
+");
+	const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+	return [...bytes].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export function transcriptOf(words: Word[], from: number, to: number) {
 	const lines: string[] = [];
