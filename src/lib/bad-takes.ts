@@ -47,8 +47,7 @@ const SCHEMA = {
 
 // Identifies one exact script, so an answer is never used for different words.
 export async function scriptFingerprint(words: Word[]) {
-	const text = words.map((w) => `${w.text}|${w.start}`).join("
-");
+	const text = words.map((w) => `${w.text}|${w.start}`).join("\n");
 	const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
 	return [...bytes].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
