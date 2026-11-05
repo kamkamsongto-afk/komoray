@@ -31,12 +31,29 @@ export function BetaWelcome({ access }: { access: AccessStatus }) {
 	const [open, setOpen] = useState(() => !read(local, HIDE_KEY) && !read(session, SEEN_KEY));
 	const [hide, setHide] = useState(() => read(local, HIDE_KEY));
 	const button = useRef<HTMLButtonElement>(null);
+	const dialog = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		if (open) button.current?.focus();
+	}, [open]);
 
 	useEffect(() => {
 		if (!open) return;
-		button.current?.focus();
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key === "Escape") close();
+			if (e.key !== "Tab" || !dialog.current) return;
+			// Tab stays inside the note: the page behind it can't be used while it is open.
+			const stops = [...dialog.current.querySelectorAll<HTMLElement>("a[href], button, input")];
+			const first = stops[0];
+			const last = stops[stops.length - 1];
+			const here = document.activeElement;
+			if (e.shiftKey && (here === first || !dialog.current.contains(here))) {
+				e.preventDefault();
+				last?.focus();
+			} else if (!e.shiftKey && (here === last || !dialog.current.contains(here))) {
+				e.preventDefault();
+				first?.focus();
+			}
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
@@ -64,12 +81,13 @@ export function BetaWelcome({ access }: { access: AccessStatus }) {
 		[`${access.limit} minutes a month`, `Counted from your original video's length. You have ${access.left} left, renewing on ${access.resets}.`],
 		[`Up to ${access.perVideo} minutes per video`, "MP4 or MOV, up to 500 MB."],
 		["Videos are deleted after 14 days", "Download what you want to keep."],
-		["If Find silences fails, your minutes come back", "Deleting a video doesn't give its minutes back."],
+		["If Find silences fails on a new video, your minutes come back", "Deleting a video doesn't give its minutes back."],
 	];
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center sm:p-4" role="presentation">
 			<div
+				ref={dialog}
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby="beta-welcome-title"
