@@ -32,7 +32,7 @@ export function ActivityTable({ rows, shown, total }: { rows: ActivityRow[]; sho
 				{shown < total && ` Counting the newest ${shown} of ${total} videos.`}
 			</p>
 			<div className="overflow-x-auto rounded-xl border border-foreground/15">
-				<table className="w-full min-w-[820px] text-left text-sm">
+				<table className="w-full min-w-[1040px] text-left text-sm">
 					<thead className="text-xs text-foreground/60">
 						<tr className="border-b border-foreground/15">
 							<th scope="col" className="p-2.5 font-medium">Person</th>
@@ -49,7 +49,7 @@ export function ActivityTable({ rows, shown, total }: { rows: ActivityRow[]; sho
 					<tbody className="divide-y divide-foreground/10">
 						{rows.map((row) => (
 							<tr key={row.email ?? "unknown"}>
-								<th scope="row" className="max-w-56 p-2.5 font-medium break-all">{row.email ?? <span className="font-normal text-foreground/60">Older videos, owner not recorded</span>}</th>
+								<th scope="row" className="w-60 min-w-60 p-2.5 font-medium [overflow-wrap:anywhere]">{row.email ?? <span className="font-normal text-foreground/60">Older videos, owner not recorded</span>}</th>
 								<td className="p-2.5 whitespace-nowrap">{stage(row)}</td>
 								<td className="p-2.5 text-right">{row.used ?? ""}</td>
 								<td className="p-2.5 text-right">{row.videos}</td>

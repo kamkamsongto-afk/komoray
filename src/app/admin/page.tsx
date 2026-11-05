@@ -170,7 +170,7 @@ export default function AdminPage() {
 	];
 
 	return (
-		<main className="font-sans mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-8">
+		<main className={`font-sans mx-auto flex flex-col gap-6 p-4 sm:p-8 ${tab === "activity" ? "max-w-6xl" : "max-w-4xl"}`}>
 			<div className="flex flex-wrap items-center justify-between gap-3">
 				<h1 className="text-2xl font-bold">Komoray admin</h1>
 				<button onClick={() => load()} disabled={loading} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm disabled:opacity-50">
