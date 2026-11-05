@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { refundListen, startListening } from "@/lib/access";
+import { refundListen, settleDeadListen, startListening } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
 import { isLanguage } from "@/lib/languages";
@@ -91,6 +91,7 @@ export async function GET(request: Request) {
 
 	const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));
 	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Analysis failed" });
+	if (await settleDeadListen(key)) return Response.json({ status: "failed", error: "This took too long and stopped. Your minutes are back. Please try again." });
 
 	const started = await exists(siblingKey(key, "analyze.json"));
 	return Response.json({ status: started ? "processing" : "none" });
