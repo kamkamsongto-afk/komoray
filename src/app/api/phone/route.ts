@@ -1,4 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { accessFor, canUseStudio, NO_INVITE } from "@/lib/access";
 import { hmac, verifyCallback } from "@/lib/callback";
 import { exists, getJson, putObject, signedUrl } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
@@ -45,6 +46,9 @@ export async function POST(request: Request) {
 	if (body.action === "create") {
 		const { supabase, user } = await currentUser();
 		if (!user) return Response.json({ error: "Please sign in first" }, { status: 401 });
+		const access = await accessFor(user.email);
+		if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
+		if (!access.left) return Response.json({ error: `You've used your ${access.limit} minutes this month. They renew on ${access.resets}.` }, { status: 429 });
 		const limit = await uploadLimitReached(supabase, user);
 		if (limit) return Response.json({ error: limit }, { status: 429 });
 		const id = crypto.randomUUID();
@@ -83,6 +87,7 @@ export async function POST(request: Request) {
 	if (body.action === "claim") {
 		const { supabase, user } = await currentUser();
 		if (!user) return Response.json({ error: "Please sign in first" }, { status: 401 });
+		if (!(await canUseStudio(user.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
 		const id = String(body.id ?? "");
 		if (!/^[0-9a-f-]{36}$/.test(id)) return Response.json({ error: "Unknown link" }, { status: 404 });
 		const handoff = await getJson<Handoff>(handoffKey(id));

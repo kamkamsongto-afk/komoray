@@ -62,6 +62,21 @@ export async function putObject(key: string, body: string | Uint8Array<ArrayBuff
 	if (!res.ok) throw new Error(`R2 write failed (${res.status})`);
 }
 
+// Write only if the file isn't there yet. Two requests at once can't both win. false = it was already there.
+export async function putIfAbsent(key: string, body: string, contentType: string) {
+	const { client, objectUrl } = r2();
+	const bytes = new TextEncoder().encode(body);
+	const signed = await client.sign(objectUrl(key), {
+		method: "PUT",
+		body: bytes,
+		headers: { "Content-Type": contentType, "If-None-Match": "*" },
+	});
+	const res = await fetch(signed.url, { method: "PUT", headers: signed.headers, body: bytes });
+	if (res.status === 412) return false;
+	if (!res.ok) throw new Error(`R2 write failed (${res.status})`);
+	return true;
+}
+
 export async function getJson<T>(key: string): Promise<T | null> {
 	const { client, objectUrl } = r2();
 	const res = await client.fetch(objectUrl(key));

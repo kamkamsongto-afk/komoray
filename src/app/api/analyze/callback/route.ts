@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { refundListen } from "@/lib/access";
 import { verifyCallback } from "@/lib/callback";
-import { putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
+import { getJson, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import {
 	findSilences,
 	MIN_SILENCE,
@@ -44,6 +45,9 @@ export async function POST(request: Request) {
 	} catch (err) {
 		const error = err instanceof Error ? err.message : "Analysis failed";
 		await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error, at: new Date().toISOString() }), "application/json");
+		// A failed job takes no minutes.
+		const started = await getJson<{ usageKey?: string }>(siblingKey(key, "analyze.json")).catch(() => null);
+		if (started?.usageKey) await refundListen(key, started.usageKey).catch(() => {});
 	}
 	// Always 200 so Deepgram doesn't keep retrying a result we already handled.
 	return Response.json({ ok: true });

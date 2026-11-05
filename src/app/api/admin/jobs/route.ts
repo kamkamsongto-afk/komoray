@@ -7,18 +7,7 @@ const SHOW_JOBS = 100;
 const SHOW_REPORTS = 100;
 const STUCK_MS = 30 * 60 * 1000; // a step still "working" after 30 minutes has silently died
 const LINK_SECONDS = 3600;
-const JOB_FILES = [
-	"analyze.json",
-	"edit.json",
-	"analyze-error.json",
-	"render.json",
-	"final.mp4",
-	"render-error.json",
-	"proxy.json",
-	"proxy.mp4",
-	"proxy-audio.pcm",
-	"proxy-error.json",
-];
+const OUR_VIDEOS = ["final.mp4", "proxy.mp4"]; // made by us; the folder's other .mp4 or .mov is the upload
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
 
@@ -53,7 +42,7 @@ export async function GET() {
 
 	const jobs = [...folders.entries()]
 		.map(([id, files]) => {
-			const video = [...files.values()].find((f) => !JOB_FILES.includes(f.key.split("/")[2]) && !f.key.includes("-before."));
+			const video = [...files.values()].find((f) => /\.(mp4|mov)$/i.test(f.key) && !OUR_VIDEOS.includes(f.key.split("/")[2]) && !f.key.includes("-before."));
 			return { id, files, video };
 		})
 		.filter((job) => job.video)
@@ -82,7 +71,10 @@ export async function GET() {
 		.filter((log) => /^logs\/[^/]+\.json$/.test(log.key))
 		.sort((a, b) => b.key.localeCompare(a.key))
 		.slice(0, SHOW_REPORTS);
-	const reports = (await Promise.all(recentLogs.map((log) => getJson<Record<string, unknown>>(log.key).catch(() => null)))).filter(Boolean);
+	const reports = (await Promise.all(recentLogs.map(async (log) => {
+		const report = await getJson<Record<string, unknown>>(log.key).catch(() => null);
+		return report && { ...report, file: log.key };
+	}))).filter(Boolean);
 
 	return Response.json({ jobs: jobList, reports });
 }
