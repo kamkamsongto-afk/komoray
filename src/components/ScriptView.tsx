@@ -170,9 +170,9 @@ type Props = {
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void;
 	faces: Faces | null; // where the speaker's face is, for cropping and Auto zoom
-	// Repeated takes are cut once, when the video is first opened (keeping the last try).
+	// Repeated takes are looked for once, when the video is first opened. withoutTakes: the deleted words if the earlier tries were cut.
 	takesApplied?: boolean;
-	onTakesApplied?: (count: number, before: number[]) => void;
+	onTakesApplied?: (count: number, withoutTakes: number[]) => void;
 };
 
 // What can be opened under the video. Nothing is open at first: the editor stays calm, and every
@@ -441,8 +441,9 @@ export function ScriptView({
 		onNoZoomChange(on ? subtractSpans(noZoom, [span]) : mergeSpans([...noZoom, span]));
 	};
 
-	// First time the video is opened: cut every earlier try, keep the last one (the user's own
-	// deletions and restores stay as they are on takes they already touched).
+	// First time the video is opened: say what was found and what cutting it would leave. Never cut by
+	// itself: a list ("the days with sad news, the days with bad news") looks the same as a retry, and
+	// cutting one turned "not what is prettiest, but what changes" into "not what changes".
 	const takesRef = useRef(false);
 	useEffect(() => {
 		if (takesApplied !== false || takesRef.current) return;
@@ -456,8 +457,7 @@ export function ScriptView({
 				count++;
 			}
 		}
-		if (count) onChange([...next].sort((a, b) => a - b));
-		onTakesApplied?.(count, deleted);
+		onTakesApplied?.(count, [...next].sort((a, b) => a - b));
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [takesApplied]);
 

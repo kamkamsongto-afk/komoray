@@ -24,7 +24,7 @@ type Analysis = {
 	deleted?: number[];
 	fixes?: Fix[];
 	dictionaryApplied?: boolean; // the personal dictionary already ran on this video once
-	takesApplied?: boolean; // repeated takes were already cut on this video once
+	takesApplied?: boolean; // repeated takes were already looked for on this video once
 	style?: unknown;
 	banners?: Banner[];
 	manual?: Cut[]; // cut by hand on the timeline
@@ -123,7 +123,7 @@ export default function EditPage() {
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
 	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
-	const [takesCut, setTakesCut] = useState<{ count: number; before: number[] } | null>(null);
+	const [takesFound, setTakesFound] = useState<{ count: number; withoutTakes: number[] } | null>(null);
 	const [desktopNotify, setDesktopNotify] = useState(false);
 	const [notifyBlocked, setNotifyBlocked] = useState(false);
 	// Browsers only allow sound after a click, so the Make video click creates this.
@@ -368,10 +368,10 @@ export default function EditPage() {
 	);
 
 	const takesApplied = useCallback(
-		(count: number, before: number[]) => {
+		(count: number, withoutTakes: number[]) => {
 			setAnalysis((a) => (a ? { ...a, takesApplied: true } : a));
 			save({ takesApplied: true });
-			if (count) setTakesCut({ count, before });
+			if (count) setTakesFound({ count, withoutTakes });
 		},
 		[save],
 	);
@@ -669,22 +669,22 @@ export default function EditPage() {
 					</button>
 				</div>
 			)}
-			{takesCut && (
+			{takesFound && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
 					<span>
-						You said {takesCut.count === 1 ? "a sentence" : `${takesCut.count} sentences`} more than once, so we kept your last take and cut the
-						others. Click the repeat mark on the timeline to pick a different take.
+						{takesFound.count === 1 ? "A sentence" : `${takesFound.count} sentences`} may have been said more than once. Nothing was cut. They are underlined
+						in the script: check them, or pick a take with the repeat mark on the timeline.
 					</span>
 					<button
 						onClick={() => {
-							changeDeleted(takesCut.before);
-							setTakesCut(null);
+							changeDeleted(takesFound.withoutTakes);
+							setTakesFound(null);
 						}}
 						className="rounded-lg border border-foreground/20 px-3 py-1 hover:bg-foreground/5"
 					>
-						Undo
+						Cut them all
 					</button>
-					<button onClick={() => setTakesCut(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
+					<button onClick={() => setTakesFound(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
 						<X className="h-3 w-3 shrink-0" aria-hidden />
 					</button>
 				</div>
