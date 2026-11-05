@@ -1,12 +1,12 @@
-// Subtitles that move: each line pops in, and with Bounce a word jumps out now and then as it is said.
-// Saved in the style as "motion". Same keyframes and rules as MOTION in modal_app/render.py,
-// which writes them as ASS \t tags, so the preview moves like the final video.
+// Subtitles that move: each line pops in, and with Bounce every word jumps out as it is said.
+// Saved in the style as "motion". Same keyframes and rules as POP, BOUNCE and bounce_events in
+// modal_app/render.py, which writes them as ASS \t tags, so the preview moves like the final video.
 
 export type Motion = "none" | "pop" | "bounce";
 export const MOTIONS: Record<Motion, { name: string; hint: string }> = {
 	none: { name: "Still", hint: "Subtitles don't move" },
 	pop: { name: "Pop", hint: "Each line pops in once, then stays still" },
-	bounce: { name: "Bounce", hint: "Words jump out big as they are said, from the first word on" },
+	bounce: { name: "Bounce", hint: "Every word jumps out big as it is said, from the first word on" },
 };
 
 // (milliseconds after the start, size in %), straight lines between them.
@@ -16,28 +16,19 @@ export const POP: Keys = [
 	[90, 110],
 	[170, 100],
 ];
+// Up, a moment at the top, down, a small dip, settle. Every word plays this from when it is said.
 export const BOUNCE: Keys = [
 	[0, 100],
-	[110, 150],
-	[280, 100],
+	[60, 125],
+	[120, 150],
+	[200, 145],
+	[300, 110],
+	[370, 97],
+	[440, 100],
 ];
+export const BOUNCE_WORD_GAP = 0.14; // of the text size: room kept between words, so two big words don't cover each other
 const BOUNCE_END = BOUNCE[BOUNCE.length - 1][0];
-const BOUNCE_GAP = 350; // ms: at most one word jumps in this time, else short words make the line shiver
 const POP_END = POP[POP.length - 1][0];
-
-// Which words of a line jump, from when each is said (ms after the line starts): the first one, then the
-// next one said at least BOUNCE_GAP later. Same as bouncing_words in render.py.
-export function bouncingWords(froms: number[]) {
-	const out: number[] = [];
-	let last = -Infinity;
-	froms.forEach((ms, k) => {
-		if (ms - last >= BOUNCE_GAP) {
-			out.push(k);
-			last = ms;
-		}
-	});
-	return out;
-}
 
 export function scaleAt(keys: Keys, ms: number) {
 	if (ms <= keys[0][0]) return keys[0][1];
@@ -49,18 +40,16 @@ export function scaleAt(keys: Keys, ms: number) {
 	return keys[keys.length - 1][1];
 }
 
-// How big the line and the word in mid-jump are at this moment (1 = normal size; bounced = that word, or -1).
+// How big the line and each of its words are at this moment (1 = normal size; jumping = in mid-jump).
 // sinceLine = frames since the line started; froms = when each of its words is said, in the same frames.
 export function motionScale(motion: Motion | undefined, fps: number, sinceLine: number, froms: number[]) {
-	if (!motion || motion === "none") return { line: 1, word: 1, bounced: -1 };
 	const ms = (frames: number) => (frames / fps) * 1000;
-	const popping = motion === "pop" && ms(sinceLine) < POP_END;
-	const line = popping ? scaleAt(POP, ms(sinceLine)) / 100 : 1;
-	if (motion !== "bounce") return { line, word: 1, bounced: -1 };
-	// A jump carries on after the next word starts: it only ends when it has finished.
 	const now = ms(sinceLine);
-	const from = froms.map(ms);
-	const bounced = bouncingWords(from).findLast((k) => from[k] <= now) ?? -1;
-	if (bounced < 0 || now - from[bounced] >= BOUNCE_END) return { line, word: 1, bounced: -1 };
-	return { line, word: scaleAt(BOUNCE, now - from[bounced]) / 100, bounced };
+	const line = motion === "pop" && now < POP_END ? scaleAt(POP, now) / 100 : 1;
+	const words = froms.map((from) => {
+		const since = now - ms(from);
+		const jumping = motion === "bounce" && since >= 0 && since < BOUNCE_END;
+		return { scale: jumping ? scaleAt(BOUNCE, since) / 100 : 1, jumping };
+	});
+	return { line, words };
 }

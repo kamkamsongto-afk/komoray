@@ -6,7 +6,7 @@ import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactN
 import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerMotion, cleanBannerText } from "@/lib/banners";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
-import { motionScale } from "@/lib/motion";
+import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
 import { FPS, type Line, ZOOM_ORIGIN } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
@@ -200,31 +200,47 @@ export function PlayerFrame({
 	const frame = outTime * FPS;
 	const now = line ? line.parts.findLastIndex((p) => p.from <= frame) : -1;
 	const said = subtitle.look === "highlight" ? now : -1;
-	// Motion (lib/motion.ts): the line pops in, a word jumps out. Drawn bigger (not stretched) so the
-	// words around it make room, as they do in the final video.
-	const motion = line
-		? motionScale(
-				subtitle.motion,
-				FPS,
-				frame - line.from,
-				line.parts.map((p) => p.from - line.from),
-			)
-		: { line: 1, word: 1, bounced: -1 };
+	// Motion (lib/motion.ts): the line pops in, every word jumps out. A jumping word grows around its own
+	// middle and never pushes the others: pushing made the whole line shake, like a seizure. Same in
+	// bounce_events in render.py.
+	const motion = motionScale(
+		subtitle.motion,
+		FPS,
+		line ? frame - line.from : 0,
+		line ? line.parts.map((p) => p.from - line.from) : [],
+	);
 	const text = line
-		? line.parts.map((p, k) => (
-				<span key={k}>
-					{k === line.row2 && <br />}
-					<span
-						style={
-							k === said || k === motion.bounced
-								? { color: k === said ? subtitle.color : undefined, fontSize: k === motion.bounced ? `${motion.word}em` : undefined }
-								: undefined
-						}
-					>
-						{p.text}
+		? line.parts.map((p, k) => {
+				if (subtitle.motion !== "bounce") {
+					return (
+						<span key={k}>
+							{k === line.row2 && <br />}
+							<span style={k === said ? { color: subtitle.color } : undefined}>{p.text}</span>
+						</span>
+					);
+				}
+				const word = p.text.trimStart();
+				const { scale: wordScale, jumping } = motion.words[k];
+				return (
+					<span key={k}>
+						{k === line.row2 && <br />}
+						{p.text.slice(0, p.text.length - word.length)}
+						<span
+							style={{
+								display: "inline-block",
+								position: "relative",
+								whiteSpace: "pre",
+								marginLeft: k > 0 && k !== line.row2 ? subtitle.size * BOUNCE_WORD_GAP : undefined,
+								transform: `scale(${wordScale})`,
+								zIndex: jumping ? 1 : undefined,
+								color: k === said ? subtitle.color : undefined,
+							}}
+						>
+							{word}
+						</span>
 					</span>
-				</span>
-			))
+				);
+			})
 		: "Your subtitles";
 
 	return (

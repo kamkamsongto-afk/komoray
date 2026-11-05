@@ -67,7 +67,7 @@ git log --oneline -15         # เพิ่งมีใครแก้อะไ
 | `zoom.ts` | `no_zoom_frames`, `zoom_shots`, `smooth_zoom_expr`, `zoom_ramps` |
 | `framing.ts` | `frame_piece` |
 | `banners.ts` | `banner_events`, `banner_motion`, `banner_ink`, `BANNER`, `BANNER_ANIMS`, `BANNER_TOP` |
-| `motion.ts` | `POP`, `BOUNCE`, `pop_tags`, `bouncing_words` |
+| `motion.ts` | `POP`, `BOUNCE`, `BOUNCE_WORD_GAP`, `pop_tags`, `word_places`, `bounce_events` |
 | `subtitle-style.ts` | `DEFAULT_STYLE`, `FONTS`, `FORMATS` |
 
 comment บางจุดในฝั่งเว็บอ้างชื่อเก่าที่ไม่มีใน `render.py` แล้ว เช่น `build_banners`, `MOTION`, `LOOKS` ให้ค้นจากชื่อจริงในตารางนี้
@@ -96,6 +96,7 @@ comment บางจุดในฝั่งเว็บอ้างชื่อ
 | กลับไปใช้ Remotion | ค้างเกิน 6 วิที่จุดตัด | "การตัดสินใจสำคัญ" ใน `PROGRESS.md` |
 | แปลซับด้วย Haiku | ส่งบรรทัดกลับไม่ครบ 3 จาก 4 รอบ | `src/lib/translate.ts` |
 | หน้า admin อ่านไฟล์ในโฟลเดอร์ย่อยของ `logs/` | ไฟล์ทดสอบใหญ่ถูกดาวน์โหลดทุกครั้งที่เปิดหน้า | `src/app/api/admin/jobs/route.ts` |
+| ซับ Bounce ขยายคำแบบดันคำข้าง ๆ (`fontSize`, `\fscx` ในบรรทัดเดียวกัน) | ทั้งบรรทัดสั่น คำขยับ ~17 จาก 360 px เหมือนตัวอักษรชัก | `bounce_events` ใน `render.py`, `src/components/PlayerFrame.tsx` |
 
 ## 6. ส่งงานและรีวิว
 
