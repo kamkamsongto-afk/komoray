@@ -134,7 +134,9 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 .k-pacefill { height: 100%; border-radius: 9px; background: #F4F3EF; transition: width .6s cubic-bezier(.65,0,.2,1); }
 .k-pacefill-on { background: #B9F36A; }
 .k-shape { overflow: hidden; border-radius: 12px; border: 1px solid #F4F3EF; transition: width .6s cubic-bezier(.65,0,.2,1), height .6s cubic-bezier(.65,0,.2,1); }
+.k-vis-shape { container-type: inline-size; }
 .k-shape img, .k-frame img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 24%; }
+.k-shape img { object-position: 51% 50%; }
 .k-frame { position: relative; width: 62%; aspect-ratio: 9 / 13; overflow: hidden; border-radius: 14px; }
 .k-zoom img { transform-origin: 50% 28%; transition: transform 1.2s cubic-bezier(.2,.8,.2,1); animation: k-breath 8s ease-in-out infinite alternate; }
 .k-card:hover .k-zoom img { animation: none; transform: scale(1.3); }

@@ -187,16 +187,20 @@ export function PaceCard() {
 
 type Shape = "9:16" | "1:1" | "16:9";
 const SHAPES: [Shape, string][] = [["9:16", "9:16"], ["1:1", "1:1"], ["16:9", "16:9"]];
-const SHAPE_SIZE: Record<Shape, [string, string]> = { "9:16": ["126px", "224px"], "1:1": ["210px", "210px"], "16:9": ["100%", "190px"] };
+// Real proportions on any screen: 16:9 follows the card's width (cqw) and its height follows that.
+// The picture is wide, so each shape is cropped around the face the way a wide video really is
+// (framePiece in lib/framing.ts). A tall picture can't fill 16:9: it showed only the eyes.
+const WIDE = "min(100cqw, 320px)";
+const SHAPE_SIZE: Record<Shape, [string, string]> = { "9:16": ["126px", "224px"], "1:1": ["210px", "210px"], "16:9": [WIDE, `calc(${WIDE} * 9 / 16)`] };
 
 export function ShapeCard() {
 	const [shape, setShape] = useState<Shape>("9:16");
 	const [width, height] = SHAPE_SIZE[shape];
 	return (
 		<article className="k-card">
-			<div className="k-vis">
+			<div className="k-vis k-vis-shape">
 				<div className="k-shape" style={{ width, height }}>
-					<Image src="/landing/mountain.webp" alt="" width={448} height={896} unoptimized />
+					<Image src="/landing/mountain-wide.webp" alt="" width={870} height={490} unoptimized />
 				</div>
 			</div>
 			<h3>Every shape</h3>
