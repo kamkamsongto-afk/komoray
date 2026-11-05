@@ -1,4 +1,4 @@
-import { deleteObject, exists, getJson, listObjects, putObject, siblingKey } from "@/lib/r2";
+import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, siblingKey } from "@/lib/r2";
 import { isAdmin } from "@/lib/supabase/server";
 import { videoDuration } from "@/lib/video-duration";
 
@@ -95,10 +95,22 @@ export async function startListening(key: string, email?: string | null): Promis
 	if (minutes > MINUTES_PER_VIDEO) return { error: `This video is ${minutes} minutes long. During the beta, each video can be up to ${MINUTES_PER_VIDEO} minutes. Please trim it and upload it again.`, status: 400 };
 	if (minutes > status.left) return { error: `This video needs ${minutes} minutes and you have ${status.left} left this month. Your minutes renew on ${status.resets}. Need more? Email hello@komoray.com.`, status: 429 };
 
+	// The same video sent twice at once: only one request gets past here, so speech-to-text is paid for once.
+	if (!(await putIfAbsent(recordKey, JSON.stringify({ listens: 1 }), "application/json"))) {
+		return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
+	}
 	const usageKey = `access/usage/${await hashEmail(email)}/${month()}/${key.split("/")[1]}.json`;
 	await putObject(usageKey, JSON.stringify({ minutes }), "application/json");
-	await putObject(recordKey, JSON.stringify({ listens: 1 }), "application/json");
 	return { usageKey };
+}
+
+// A job that never reported back has died: say so and give the minutes back. true = it had died.
+export async function settleDeadListen(key: string) {
+	const started = await getJson<{ startedAt?: string; usageKey?: string }>(siblingKey(key, "analyze.json"));
+	if (!started?.startedAt || Date.now() - new Date(started.startedAt).getTime() < JOB_TOO_OLD_MS) return false;
+	await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error: "This took too long and stopped. Your minutes are back. Please try again.", at: new Date().toISOString() }), "application/json");
+	if (started.usageKey) await refundListen(key, started.usageKey).catch(() => {});
+	return true;
 }
 
 // The job failed, so the minutes go back.

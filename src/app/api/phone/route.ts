@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { canUseStudio, NO_INVITE } from "@/lib/access";
+import { accessFor, canUseStudio, NO_INVITE } from "@/lib/access";
 import { OWNER_FILE } from "@/lib/admin-activity";
 import { hmac, verifyCallback } from "@/lib/callback";
 import { exists, getJson, putObject, signedUrl } from "@/lib/r2";
@@ -47,7 +47,9 @@ export async function POST(request: Request) {
 	if (body.action === "create") {
 		const { supabase, user } = await currentUser();
 		if (!user) return Response.json({ error: "Please sign in first" }, { status: 401 });
-		if (!(await canUseStudio(user.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
+		const access = await accessFor(user.email);
+		if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
+		if (!access.left) return Response.json({ error: `You've used your ${access.limit} minutes this month. They renew on ${access.resets}.` }, { status: 429 });
 		const limit = await uploadLimitReached(supabase, user);
 		if (limit) return Response.json({ error: limit }, { status: 429 });
 		const id = crypto.randomUUID();
