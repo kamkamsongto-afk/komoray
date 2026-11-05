@@ -11,7 +11,9 @@ export async function GET(request: Request) {
 	const key = FILES[new URL(request.url).searchParams.get("size") ?? ""];
 	if (!key) return new Response("Not found", { status: 404 });
 	const res = await fetchObject(key, request.headers.get("range"));
-	if (!res.ok) return new Response("Not found", { status: res.status === 416 ? 416 : 404 });
+	// A range past the end: say how big the file is, so the player can ask again.
+	if (res.status === 416) return new Response(null, { status: 416, headers: { "Content-Range": res.headers.get("Content-Range") ?? "bytes */*" } });
+	if (!res.ok) return new Response("Not found", { status: 404 });
 	const headers = new Headers({ "Cache-Control": "public, max-age=604800", "Accept-Ranges": "bytes" });
 	for (const name of ["Content-Type", "Content-Length", "Content-Range", "ETag"]) {
 		const value = res.headers.get(name);
