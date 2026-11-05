@@ -3,17 +3,43 @@
 import { useCallback, useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 import { PhoneUpload } from "@/components/PhoneUpload";
+import { WaitingForInvite } from "@/components/WaitingForInvite";
+import type { AccessStatus } from "@/lib/access";
 import { browserLanguage, isLanguage, LANGUAGES } from "@/lib/languages";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
 
 type Status = "idle" | "uploading" | "done" | "error";
+type Access = AccessStatus & { email: string };
 
 const ANALYZE_POLL_MS = 3000;
 const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
 const LANGUAGE_KEY = "komoray-language"; // the spoken language picked last time (this browser only)
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// The file's length in whole minutes, as the browser reads it. null = this browser can't tell.
+function minutesIn(file: File) {
+	return new Promise<number | null>((resolve) => {
+		const video = document.createElement("video");
+		const url = URL.createObjectURL(file);
+		const finish = (minutes: number | null) => {
+			URL.revokeObjectURL(url);
+			resolve(minutes);
+		};
+		video.preload = "metadata";
+		video.onloadedmetadata = () => finish(Number.isFinite(video.duration) ? Math.ceil(video.duration / 60) : null);
+		video.onerror = () => finish(null);
+		video.src = url;
+	});
+}
+
+function tooLongFor(minutes: number | null, access: Access) {
+	if (minutes === null) return null;
+	if (minutes > access.perVideo) return `This video is ${minutes} minutes long. During the beta, each video can be up to ${access.perVideo} minutes.`;
+	if (minutes > access.left) return `This video needs ${minutes} minutes and you have ${access.left} left this month. Your minutes renew on ${access.resets}.`;
+	return null;
+}
 
 export default function UploadPage() {
 	const user = useUser();
@@ -42,6 +68,15 @@ export default function UploadPage() {
 	const [analysisError, setAnalysisError] = useState("");
 	const [dragging, setDragging] = useState(false);
 	const [again, setAgain] = useState(false); // from the editor: listen to this video again, in another language
+	const [access, setAccess] = useState<Access | null>(null);
+
+	const loadAccess = useCallback(async () => {
+		const res = await fetch("/api/access").catch(() => null);
+		if (res?.ok) setAccess((await res.json()) as Access);
+	}, []);
+	useEffect(() => {
+		if (user) void loadAccess();
+	}, [user, loadAccess]);
 
 	// Opened from My projects (/upload?key=…): pick up where that video left off.
 	useEffect(() => {
@@ -90,6 +125,14 @@ export default function UploadPage() {
 		setMessage(file.name);
 		setKey(null);
 		setAnalysisError("");
+
+		// Say so now instead of after a long upload. The server checks again before anything is paid for.
+		const tooLong = access && !access.unlimited ? tooLongFor(await minutesIn(file), access) : null;
+		if (tooLong) {
+			setStatus("error");
+			setMessage(tooLong);
+			return;
+		}
 
 		try {
 			// 1) Ask our server for a short-lived upload link.
@@ -140,6 +183,7 @@ export default function UploadPage() {
 				});
 				const started = (await res.json()) as { error?: string };
 				if (!res.ok) throw new Error(started.error ?? "Analysis failed");
+				void loadAccess();
 			}
 
 			// Long videos take Deepgram a few minutes, so keep asking until the cut list is saved.
@@ -172,11 +216,21 @@ export default function UploadPage() {
 		);
 	}
 
+	if (access && !access.allowed) return <WaitingForInvite user={user} />;
+
 	return (
 		<main className="font-sans mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-6 p-4 sm:p-8">
 			<AccountBar user={user} />
 			<h1 className="text-3xl font-bold tracking-tight">Upload a video</h1>
-			<p className="text-foreground/70">MP4 or MOV, up to 500 MB.</p>
+			<p className="text-foreground/70">
+				MP4 or MOV, up to 500 MB{access && !access.unlimited && ` and ${access.perVideo} minutes`}.
+				{access && !access.unlimited && (
+					<span className="mt-1 block font-medium text-foreground">
+						{access.left} of {access.limit} minutes left this month
+						<span className="font-normal text-foreground/60"> · renews {access.resets}</span>
+					</span>
+				)}
+			</p>
 
 			<label
 				onDragOver={(e) => {

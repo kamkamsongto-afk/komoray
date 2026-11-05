@@ -1,4 +1,5 @@
-import { getJson, listObjects, putObject } from "@/lib/r2";
+import { sameOrigin } from "@/lib/access";
+import { deleteObject, getJson, listObjects, putObject } from "@/lib/r2";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
 
 // What beta users think, one file each at feedback/<time>-<id>.json (outside uploads/, so it stays).
@@ -31,6 +32,20 @@ export async function GET() {
 	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
 	if (!isAdmin(user.email)) return Response.json({ error: "This page is for the Komoray team only" }, { status: 403 });
 	const files = (await listObjects("feedback/")).sort((a, b) => b.key.localeCompare(a.key)).slice(0, SHOW);
-	const answers = await Promise.all(files.map((file) => getJson<Record<string, unknown>>(file.key).catch(() => null)));
+	const answers = await Promise.all(files.map(async (file) => {
+		const answer = await getJson<Record<string, unknown>>(file.key).catch(() => null);
+		return answer && { ...answer, file: file.key };
+	}));
 	return Response.json({ answers: answers.filter(Boolean) });
+}
+
+// The admin removes one answer.
+export async function DELETE(request: Request) {
+	const { user } = await currentUser();
+	if (!user || !isAdmin(user.email)) return Response.json({ error: "This page is for the Komoray team only" }, { status: 403 });
+	if (!sameOrigin(request)) return Response.json({ error: "Not allowed" }, { status: 403 });
+	const file = new URL(request.url).searchParams.get("file");
+	if (!file || !/^feedback\/[^/]+\.json$/.test(file)) return Response.json({ error: "Unknown answer" }, { status: 404 });
+	await deleteObject(file);
+	return Response.json({ ok: true });
 }
