@@ -3,8 +3,8 @@ import { fetchObject } from "@/lib/r2";
 // The home page banner's video, read piece by piece (HTTP Range): iPhones and iPads won't play a video
 // without it, and static files on this site ignore Range. Only these two files can be named here.
 const FILES: Record<string, string> = {
-	large: "site/hero-manta-v1-1600.mp4",
-	small: "site/hero-manta-v1-960.mp4",
+	large: "site/hero-manta-v2-1600.mp4",
+	small: "site/hero-manta-v2-960.mp4",
 };
 
 export async function GET(request: Request) {

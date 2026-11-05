@@ -19,12 +19,10 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 
 .k-hero { position: relative; min-height: 720px; margin: 0 12px; border-radius: 18px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; isolation: isolate; color: #F4F3EF; }
 /* Manta rays in deep water. Only transform and opacity move, so the browser keeps them smooth. */
-.k-scene { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: #04204f url("/landing/manta-poster.webp") center / cover no-repeat; }
+.k-scene { position: absolute; inset: 0; z-index: -1; overflow: hidden; background: #010818 url("/landing/manta-poster-v2.webp") center / cover no-repeat; }
 .k-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1.2s ease; }
 .k-video-on { opacity: 1; }
-.k-rays { position: absolute; inset: -10% -20%; background: repeating-linear-gradient(101deg, rgba(190,230,255,.1) 0 3%, transparent 3% 8%, rgba(190,230,255,.05) 8% 10%, transparent 10% 19%); -webkit-mask-image: linear-gradient(180deg, #000, transparent 72%); mask-image: linear-gradient(180deg, #000, transparent 72%); will-change: transform, opacity; animation: k-rays 43s ease-in-out infinite alternate; }
-@keyframes k-rays { from { transform: translateX(-5%); opacity: .35; } to { transform: translateX(5%); opacity: .9; } }
-.k-fish { position: absolute; left: 0; fill: #06254f; opacity: .72; will-change: transform; animation: k-swim linear infinite; }
+.k-fish { position: absolute; left: 0; fill: #020d24; opacity: .72; will-change: transform; animation: k-swim linear infinite; }
 .k-fish-back { animation-name: k-swim-back; }
 @keyframes k-swim { from { transform: translateX(-12vw) scaleX(-1); } to { transform: translateX(108vw) scaleX(-1); } }
 @keyframes k-swim-back { from { transform: translateX(108vw); } to { transform: translateX(-12vw); } }
@@ -171,7 +169,7 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 	.k-video { height: 62%; }
 	.k-scene { background-size: auto 62%; background-position: center top; }
 	/* The water fades into the dark behind the words, over both the video and the still picture. */
-	.k-scene::after { content: ""; position: absolute; left: 0; right: 0; top: 46%; height: 16.2%; background: linear-gradient(180deg, transparent, #04204f); }
+	.k-scene::after { content: ""; position: absolute; left: 0; right: 0; top: 46%; height: 16.2%; background: linear-gradient(180deg, transparent, #010818); }
 	.k-herotext { width: auto; margin: 0 10px 10px; padding: 20px; }
 	.k-herolead { margin: 12px 0 18px; font-size: 16px; }
 	.k-note { top: 10px; right: 10px; font-size: 10px; }
@@ -187,5 +185,5 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 @media (prefers-reduced-motion: reduce) {
 	.k-root *, .k-root *::after { animation: none !important; transition: none !important; }
 	.k-bannerpop { transform: none; opacity: 1; }
-	.k-fish, .k-rays { display: none; }
+	.k-fish { display: none; }
 }

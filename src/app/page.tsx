@@ -46,7 +46,6 @@ export default function Home() {
 				<section className="k-hero">
 					<div className="k-scene" aria-hidden>
 						<HeroVideo />
-						<div className="k-rays" />
 						{FISH.map(([top, size, seconds, delay, blur], i) => (
 							<svg key={i} className={`k-fish ${i % 2 ? "k-fish-back" : ""}`} viewBox="0 0 60 24" style={{ top, width: size, animationDuration: `${seconds}s`, animationDelay: `-${delay}s`, filter: `blur(${blur}px)` }}>
 								<path d="M2 12C12 2 30 1 44 10L58 2C56 9 56 15 58 22L44 14C30 23 12 22 2 12Z" />
