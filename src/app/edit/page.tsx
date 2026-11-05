@@ -4,6 +4,8 @@ import { Download, Redo2, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
+import { BadTakes } from "@/components/BadTakes";
+import type { BadTake } from "@/lib/bad-takes";
 import { ScriptView } from "@/components/ScriptView";
 import { VideoReady } from "@/components/VideoReady";
 import type { StudioMedia } from "@/components/StudioPlayer";
@@ -124,6 +126,8 @@ export default function EditPage() {
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
 	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
 	const [takesFound, setTakesFound] = useState<{ count: number; withoutTakes: number[] } | null>(null);
+	const [badTakes, setBadTakes] = useState<{ status: "checking" | "done" | "failed"; takes: BadTake[] }>({ status: "checking", takes: [] });
+	const [listen, setListen] = useState<{ seconds: number; original: boolean; ask: number } | null>(null);
 	const [desktopNotify, setDesktopNotify] = useState(false);
 	const [notifyBlocked, setNotifyBlocked] = useState(false);
 	// Browsers only allow sound after a click, so the Make video click creates this.
@@ -375,6 +379,32 @@ export default function EditPage() {
 		},
 		[save],
 	);
+
+	// Ask the AI for bad takes once the script is here, one part at a time. It is saved, so it is only paid for once.
+	const hasScript = Boolean(analysis?.words?.length);
+	useEffect(() => {
+		if (!key || !hasScript) return;
+		let stopped = false;
+		void (async () => {
+			for (;;) {
+				const res = await fetch("/api/bad-takes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) }).catch(() => null);
+				if (stopped) return;
+				const data = res?.ok ? ((await res.json()) as { takes: BadTake[]; remaining: number }) : null;
+				if (stopped) return;
+				if (!data) return setBadTakes((b) => ({ ...b, status: "failed" }));
+				setBadTakes({ status: data.remaining ? "checking" : "done", takes: data.takes });
+				if (!data.remaining) return;
+			}
+		})();
+		return () => {
+			stopped = true;
+		};
+	}, [key, hasScript]);
+	const keepBadTake = (take: BadTake) => {
+		setBadTakes((b) => ({ ...b, takes: b.takes.filter((t) => t.from !== take.from) }));
+		void fetch("/api/bad-takes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, keep: take.from }) }).catch(() => {});
+	};
+	const takeWords = (take: BadTake) => Array.from({ length: take.to - take.from + 1 }, (_, k) => take.from + k);
 
 	// Every fix made in the script goes into the personal dictionary (in the background).
 	const learn = useCallback(
@@ -669,7 +699,8 @@ export default function EditPage() {
 					</button>
 				</div>
 			)}
-			{takesFound && (
+			{/* The plain rule's own notice is only for when the AI could not read the video: it mistakes lists for retries. */}
+			{takesFound && badTakes.status === "failed" && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
 					<span>
 						{takesFound.count === 1 ? "A sentence" : `${takesFound.count} sentences`} may have been said more than once. Nothing was cut. They are underlined
@@ -713,6 +744,17 @@ export default function EditPage() {
 
 			{showReady && render.status === "done" && render.videoUrl && <VideoReady videoUrl={render.videoUrl} downloadUrl={render.downloadUrl} videoKey={key} onClose={closeReady} />}
 
+			<BadTakes
+				status={badTakes.status}
+				takes={badTakes.takes}
+				words={analysis.words}
+				deleted={analysis.deleted ?? []}
+				onCut={(take) => changeDeleted([...new Set([...(analysis.deleted ?? []), ...takeWords(take)])].sort((a, b) => a - b))}
+				onRestore={(take) => changeDeleted((analysis.deleted ?? []).filter((i) => i < take.from || i > take.to))}
+				onKeep={keepBadTake}
+				onListen={(take, isCut) => setListen((l) => ({ seconds: analysis.words[take.from].start, original: isCut, ask: (l?.ask ?? 0) + 1 }))}
+			/>
+
 			<ScriptView
 				videoUrl={analysis.videoUrl}
 				studio={analysis.studio ?? null}
@@ -738,6 +780,8 @@ export default function EditPage() {
 				faces={analysis.faces ?? null}
 				takesApplied={analysis.takesApplied ?? false}
 				onTakesApplied={takesApplied}
+				suggested={badTakes.status === "failed" ? null : new Set(badTakes.takes.flatMap(takeWords))}
+				listen={listen}
 			/>
 		</main>
 	);
