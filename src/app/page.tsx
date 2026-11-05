@@ -1,10 +1,19 @@
 import Image from "next/image";
 import Link from "next/link";
+import { HeroVideo } from "@/components/HeroVideo";
 import { HelloWord, LooksCard, PaceCard, ScriptDemo, ShapeCard, WordsDemo } from "@/components/LandingDemos";
 import { WaitlistForm } from "@/components/WaitlistForm";
 import "./landing.css";
 
-const SUBTITLES = ["Your raw take goes in.", "The silences leave.", "Your script stays.", "You make the final call."];
+// Small fish crossing in front of the video, each on its own time, so no two passes of the video look the same: top, width, seconds, start, blur.
+const FISH: [string, number, number, number, number][] = [
+	["18%", 26, 37, 5, 0.4],
+	["34%", 40, 53, 30, 0.8],
+	["52%", 20, 41, 22, 0.3],
+	["26%", 64, 71, 12, 2],
+	["64%", 30, 59, 44, 0.6],
+	["44%", 92, 97, 70, 4],
+];
 const ROOMS = ["home", "city", "mountain", "kitchen", "country"];
 const STEPS: [string, string, string][] = [
 	["01", "Shoot", "Upload from your computer, or send it from your phone with a QR code."],
@@ -36,33 +45,14 @@ export default function Home() {
 				</nav>
 				<section className="k-hero">
 					<div className="k-scene" aria-hidden>
-						<div className="k-sunpath">
-							<div className="k-sunrays" />
-							<div className="k-sun" />
-						</div>
-						<div className="k-clouds k-clouds-far" />
-						<div className="k-clouds" />
-						<div className="k-dusk" />
-						<div className="k-stage">
-							<div className="k-phone k-float k-float-a">
-								<Photo name="city" priority />
-							</div>
-							<div className="k-phone k-float k-float-b">
-								<Photo name="home" priority />
-								<div className="k-subs">
-									{SUBTITLES.map((line) => (
-										<div key={line} className="k-subline">
-											<span>{line}</span>
-										</div>
-									))}
-								</div>
-							</div>
-							<div className="k-phone k-float k-float-c">
-								<Photo name="country" priority />
-							</div>
-						</div>
+						<HeroVideo />
+						{FISH.map(([top, size, seconds, delay, blur], i) => (
+							<svg key={i} className={`k-fish ${i % 2 ? "k-fish-back" : ""}`} viewBox="0 0 60 24" style={{ top, width: size, animationDuration: `${seconds}s`, animationDelay: `-${delay}s`, filter: `blur(${blur}px)` }}>
+								<path d="M2 12C12 2 30 1 44 10L58 2C56 9 56 15 58 22L44 14C30 23 12 22 2 12Z" />
+							</svg>
+						))}
 					</div>
-					<div className="k-mono k-note">Illustrative images</div>
+					<div className="k-mono k-note">AI-generated video</div>
 					<div className="k-herotext">
 						<h1 className="k-herohead">You shoot. Komoray makes you shine.</h1>
 						<p className="k-herolead">The AI studio for people who talk to camera. Your raw take goes in. A clean first cut, script and subtitles come out, ready for your final call.</p>
