@@ -83,8 +83,7 @@ export default function PrivacyPage() {
 					video at a time.
 				</li>
 				<li>
-					<strong>Anthropic</strong> translates your subtitles with its AI model Claude, only when you ask for a translation. It
-					gets the subtitle text, never your video or audio, and does not train on it.
+					<strong>Anthropic</strong> reads your script with its AI model Claude to suggest parts you may want to cut, and translates your subtitles when you ask. It gets the text, never your video or audio, and does not train on it.
 				</li>
 				<li>
 					<strong>Supabase</strong> handles sign-in and stores your account details.

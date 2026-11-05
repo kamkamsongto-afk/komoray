@@ -173,6 +173,8 @@ type Props = {
 	// Repeated takes are looked for once, when the video is first opened. withoutTakes: the deleted words if the earlier tries were cut.
 	takesApplied?: boolean;
 	onTakesApplied?: (count: number, withoutTakes: number[]) => void;
+	suggested?: Set<number> | null; // words the AI suggests cutting (BadTakes); once there, they are the ones marked in the script
+	listen?: { seconds: number; original: boolean; ask: number } | null; // play from here; ask changes every time
 };
 
 // What can be opened under the video. Nothing is open at first: the editor stays calm, and every
@@ -215,6 +217,8 @@ export function ScriptView({
 	faces,
 	takesApplied,
 	onTakesApplied,
+	suggested,
+	listen,
 }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const boxRef = useRef<HTMLDivElement>(null);
@@ -529,6 +533,21 @@ export function ScriptView({
 		video.currentTime = seconds;
 		void video.play();
 	}
+
+	// A fixed word can stand for several: it is marked if any of them is.
+	const markedWord = (item: WordItem) => {
+		const marked = suggested ?? retakeWords;
+		for (let i = item.index; i <= item.last; i++) if (marked.has(i)) return true;
+		return false;
+	};
+
+	// The list of suggested cuts asks to hear one.
+	useEffect(() => {
+		if (!listen) return;
+		const later = setTimeout(() => seek(listen.seconds, listen.original), 0);
+		return () => clearTimeout(later);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [listen]);
 
 	// The timeline moves the playhead without starting or stopping playback.
 	function jump(seconds: number) {
@@ -932,7 +951,7 @@ export function ScriptView({
 									item={item}
 									gone={gone.has(item.index)}
 									active={item.index <= current && current <= item.last}
-									retake={retakeWords.has(item.index)}
+									retake={markedWord(item)}
 									heardAs={item.fixed ? originalText(item.index, item.last) : null}
 									actions={wordActions}
 								/>
