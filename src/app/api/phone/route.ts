@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, canUseStudio, NO_INVITE } from "@/lib/access";
+import { OWNER_FILE } from "@/lib/admin-activity";
 import { hmac, verifyCallback } from "@/lib/callback";
 import { exists, getJson, putObject, signedUrl } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
@@ -100,6 +101,7 @@ export async function POST(request: Request) {
 		// The video becomes the computer user's project, like an upload made on the computer.
 		const { error } = await supabase.from("projects").insert({ id, video_key: handoff.key, filename: handoff.filename, size: handoff.size });
 		if (error) return Response.json({ error: "Could not save your project" }, { status: 500 });
+		await putObject(`uploads/${id}/${OWNER_FILE}`, JSON.stringify({ email: user.email?.toLowerCase() }), "application/json").catch(() => {}); // for the Activity tab, never worth failing an upload
 		await putObject(handoffKey(id), JSON.stringify({ ...handoff, status: "claimed" }), "application/json");
 		return Response.json({ status: "claimed", key: handoff.key, filename: handoff.filename });
 	}

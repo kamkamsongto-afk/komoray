@@ -3,6 +3,8 @@
 import { Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
+import { ActivityTable } from "@/components/ActivityTable";
+import type { Activity } from "@/lib/admin-activity";
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
 type Job = {
@@ -19,7 +21,8 @@ type Report = { at: string; email?: string; stage: string; error: string; key?: 
 type Person = { email: string; at: string; used: number };
 type Waiting = { email: string; at: string };
 type Answer = { email: string; at: string; easy: number | null; result: number | null; pay: string | null; note: string; file: string };
-type Tab = "people" | "videos" | "feedback" | "logs";
+type Tab = "people" | "activity" | "videos" | "feedback" | "logs";
+type ActivityData = { people?: Activity[]; used?: Record<string, number>; shown?: number; total?: number };
 
 const BADGE: Record<Step["status"], string> = {
 	"not started": "bg-foreground/10 text-foreground/60",
@@ -62,6 +65,7 @@ export default function AdminPage() {
 	const [people, setPeople] = useState<Person[]>([]);
 	const [waitlist, setWaitlist] = useState<Waiting[]>([]);
 	const [feedback, setFeedback] = useState<Answer[]>([]);
+	const [activity, setActivity] = useState<ActivityData>({});
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
 	const [loading, setLoading] = useState(false);
@@ -86,9 +90,10 @@ export default function AdminPage() {
 			if (!res.ok || !data.jobs) throw new Error(data.error ?? "Could not load");
 			setJobs(data.jobs);
 			setReports(data.reports ?? []);
-			const [invited, list, heard] = await Promise.all(
-				["/api/admin/access", "/api/waitlist", "/api/feedback"].map((url) => fetch(url).then((r) => r.json()).catch(() => ({}))),
+			const [invited, list, heard, doing] = await Promise.all(
+				["/api/admin/access", "/api/waitlist", "/api/feedback", "/api/admin/activity"].map((url) => fetch(url).then((r) => r.json()).catch(() => ({}))),
 			);
+			setActivity(doing as ActivityData);
 			setPeople((invited as { people?: Person[] }).people ?? []);
 			setWaitlist((list as { people?: Waiting[] }).people ?? []);
 			setFeedback((heard as { answers?: Answer[] }).answers ?? []);
@@ -149,15 +154,23 @@ export default function AdminPage() {
 	const problemCount = jobs.filter(isProblem).length;
 	const shown = jobs.filter((j) => !onlyProblems || isProblem(j));
 	const invited = new Set(people.map((p) => p.email));
+	const sameEmail = (email?: string, other?: string | null) => Boolean(email && other) && email!.toLowerCase() === other!.toLowerCase();
+	const activityRows = (activity.people ?? []).map((row) => ({
+		...row,
+		used: row.email ? (activity.used?.[row.email] ?? null) : null,
+		feedback: feedback.filter((f) => sameEmail(f.email, row.email)).length,
+		errors: reports.filter((r) => sameEmail(r.email, row.email)).length,
+	}));
 	const tabs: [Tab, string, number][] = [
 		["people", "People", people.length + waitlist.length],
+		["activity", "Activity", activityRows.filter((row) => row.email).length],
 		["videos", "Videos", jobs.length],
 		["feedback", "Feedback", feedback.length],
 		["logs", "Logs", reports.length],
 	];
 
 	return (
-		<main className="font-sans mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-8">
+		<main className={`font-sans mx-auto flex flex-col gap-6 p-4 sm:p-8 ${tab === "activity" ? "max-w-6xl" : "max-w-4xl"}`}>
 			<div className="flex flex-wrap items-center justify-between gap-3">
 				<h1 className="text-2xl font-bold">Komoray admin</h1>
 				<button onClick={() => load()} disabled={loading} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm disabled:opacity-50">
@@ -245,6 +258,8 @@ export default function AdminPage() {
 					</section>
 				</div>
 			)}
+
+			{tab === "activity" && <ActivityTable rows={activityRows} shown={activity.shown ?? 0} total={activity.total ?? 0} />}
 
 			{tab === "videos" && (
 				<section className="flex flex-col gap-3">

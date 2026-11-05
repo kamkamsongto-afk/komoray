@@ -7,7 +7,7 @@ const CONTACT = "hello@komoray.com";
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" updated="November 3, 2026">
+		<LegalPage title="Privacy Policy" updated="November 5, 2026">
 			<p>
 				Komoray is an AI studio for talking-head creators. You upload a video, we cut the silences, add subtitles and give you
 				back a finished video. This page explains what we collect to do that, who helps us, and how long we keep it.
@@ -52,6 +52,9 @@ export default function PrivacyPage() {
 					file you upload, if any, so your next videos start with it. Only your videos use your font.
 				</li>
 				<li>
+					<strong>How you use Komoray:</strong> during the beta, we link your email address to your videos and keep track of how far each one got, how many words you fixed and any errors you saw, to help you and to improve Komoray. We also keep how many minutes you used each month. The link to each video is deleted with the video after 14 days.
+				</li>
+				<li>
 					<strong>Error reports:</strong> if something breaks, we record what went wrong, the file name and size, and your
 					browser type, so we can fix it.
 				</li>
@@ -63,7 +66,7 @@ export default function PrivacyPage() {
 			<p>We do not use advertising trackers. Your browser stores a few small settings for Komoray, such as whether you want desktop notifications.</p>
 
 			<h2>How we use it</h2>
-			<p>Only to run Komoray for you: to process your videos, keep you signed in, fix problems and answer your questions.</p>
+			<p>Only to run Komoray for you: to process your videos, keep you signed in, fix problems, answer your questions and, during the beta, see where people get stuck so we can improve it.</p>
 
 			<h2>Who helps us</h2>
 			<p>We use a few trusted services. Each one only gets what it needs for its job:</p>
