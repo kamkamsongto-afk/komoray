@@ -29,10 +29,10 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 
 
 
-.k-herotext { position: relative; width: min(46%, 620px); margin: 0 0 28px 28px; padding: 30px 32px 32px; border-radius: 18px; background: rgba(16,17,20,.66); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.k-herotext { position: relative; width: min(46%, 620px); margin: 0 0 28px 28px; padding: 30px 32px 32px; text-shadow: 0 1px 22px rgba(1,8,24,.6); }
 .k-herohead { margin: 0; font-size: clamp(40px, 4.4vw, 68px); line-height: 1.02; letter-spacing: -.04em; font-weight: 500; }
 .k-herolead { margin: 16px 0 24px; font-size: 17px; font-weight: 500; line-height: 1.42; }
-.k-herocta { display: inline-flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 18px; border-radius: 10px; background: #F4F3EF; color: #101114; font-size: 15px; font-weight: 600; transition: background .25s ease; }
+.k-herocta { text-shadow: none; display: inline-flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 18px; border-radius: 10px; background: #F4F3EF; color: #101114; font-size: 15px; font-weight: 600; transition: background .25s ease; }
 .k-herocta:hover { background: #B9F36A; }
 .k-herocta svg { width: 14px; height: 14px; transition: transform .25s ease; }
 .k-herocta:hover svg { transform: translateX(3px); }
