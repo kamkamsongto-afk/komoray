@@ -1,4 +1,5 @@
 import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, siblingKey } from "@/lib/r2";
+import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
 import { videoDuration } from "@/lib/video-duration";
 
@@ -82,10 +83,11 @@ export async function startListening(key: string, email?: string | null): Promis
 	if (status.unlimited) return {};
 
 	const recordKey = siblingKey(key, "access.json");
-	const record = await getJson<{ listens: number }>(recordKey);
+	const record = await getJson<{ listens: number; at?: string }>(recordKey);
 	if (record) {
+		if (justClaimed(record.at, Boolean(started?.startedAt), done || failed, Date.now())) return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
 		if (record.listens >= LISTENS_PER_VIDEO) return { error: `This video has been listened to ${LISTENS_PER_VIDEO} times. Please email hello@komoray.com for more.`, status: 429 };
-		await putObject(recordKey, JSON.stringify({ listens: record.listens + 1 }), "application/json");
+		await putObject(recordKey, JSON.stringify({ listens: record.listens + 1, at: new Date().toISOString() }), "application/json");
 		return {};
 	}
 
@@ -96,7 +98,7 @@ export async function startListening(key: string, email?: string | null): Promis
 	if (minutes > status.left) return { error: `This video needs ${minutes} minutes and you have ${status.left} left this month. Your minutes renew on ${status.resets}. Need more? Email hello@komoray.com.`, status: 429 };
 
 	// The same video sent twice at once: only one request gets past here, so speech-to-text is paid for once.
-	if (!(await putIfAbsent(recordKey, JSON.stringify({ listens: 1 }), "application/json"))) {
+	if (!(await putIfAbsent(recordKey, JSON.stringify({ listens: 1, at: new Date().toISOString() }), "application/json"))) {
 		return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
 	}
 	const usageKey = `access/usage/${await hashEmail(email)}/${month()}/${key.split("/")[1]}.json`;
