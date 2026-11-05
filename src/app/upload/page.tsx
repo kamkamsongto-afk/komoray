@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
+import { BetaWelcome } from "@/components/BetaWelcome";
 import { PhoneUpload } from "@/components/PhoneUpload";
 import { WaitingForInvite } from "@/components/WaitingForInvite";
 import type { AccessStatus } from "@/lib/access";
@@ -231,6 +232,7 @@ export default function UploadPage() {
 					</span>
 				)}
 			</p>
+			{access && !access.unlimited && <BetaWelcome access={access} />}
 
 			<label
 				onDragOver={(e) => {

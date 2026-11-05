@@ -36,10 +36,13 @@ export default function Home() {
 				</nav>
 				<section className="k-hero">
 					<div className="k-scene" aria-hidden>
-						<div className="k-bloom" />
-						<div className="k-cloud k-cloud-a" />
-						<div className="k-cloud k-cloud-b" />
-						<div className="k-cloud k-cloud-c" />
+						<div className="k-sunpath">
+							<div className="k-sunrays" />
+							<div className="k-sun" />
+						</div>
+						<div className="k-clouds k-clouds-far" />
+						<div className="k-clouds" />
+						<div className="k-dusk" />
 						<div className="k-stage">
 							<div className="k-phone k-float k-float-a">
 								<Photo name="city" priority />
@@ -59,7 +62,7 @@ export default function Home() {
 							</div>
 						</div>
 					</div>
-					<div className="k-mono k-note">Illustrative images, not customers</div>
+					<div className="k-mono k-note">Illustrative images</div>
 					<div className="k-herotext">
 						<h1 className="k-herohead">You shoot. Komoray makes you shine.</h1>
 						<p className="k-herolead">The AI studio for people who talk to camera. Your raw take goes in. A clean first cut, script and subtitles come out, ready for your final call.</p>
@@ -100,7 +103,7 @@ export default function Home() {
 							</div>
 						))}
 					</div>
-					<p className="k-mono k-small">Illustrative images, not customers.</p>
+					<p className="k-mono k-small">Illustrative images</p>
 				</div>
 			</section>
 
