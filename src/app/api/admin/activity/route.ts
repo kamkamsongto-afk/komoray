@@ -1,4 +1,4 @@
-import { type VideoFacts, OWNER_FILE, summarize, wordsFixed } from "@/lib/admin-activity";
+import { type VideoFacts, isUpload, OWNER_FILE, summarize, wordsFixed } from "@/lib/admin-activity";
 import { listPeople } from "@/lib/access";
 import { getJson, listObjects, type ObjectInfo } from "@/lib/r2";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
@@ -18,7 +18,8 @@ export async function GET() {
 		if (id) folders.set(id, [...(folders.get(id) ?? []), item]);
 	}
 	const newest = (files: ObjectInfo[]) => files.reduce((latest, file) => (file.lastModified > latest ? file.lastModified : latest), "");
-	const recent = [...folders.values()].sort((a, b) => newest(b).localeCompare(newest(a))).slice(0, MOST_VIDEOS);
+	const withVideo = [...folders.values()].filter((items) => items.some((item) => isUpload({ name: item.key.split("/")[2] ?? "", lastModified: item.lastModified })));
+	const recent = withVideo.sort((a, b) => newest(b).localeCompare(newest(a))).slice(0, MOST_VIDEOS);
 
 	const videos: VideoFacts[] = await Promise.all(
 		recent.map(async (items) => {
@@ -34,5 +35,5 @@ export async function GET() {
 		}),
 	);
 
-	return Response.json({ people: summarize(people.map((person) => person.email), videos), used: Object.fromEntries(people.map((person) => [person.email, person.used])), shown: recent.length, total: folders.size });
+	return Response.json({ people: summarize(people.map((person) => person.email), videos), used: Object.fromEntries(people.map((person) => [person.email, person.used])), shown: recent.length, total: withVideo.length });
 }
