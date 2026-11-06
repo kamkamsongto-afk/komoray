@@ -21,20 +21,30 @@ import {
 	type Zoom,
 	ZOOM_SPEEDS,
 } from "@/lib/subtitle-style";
+import { ZOOM_NAMES } from "@/lib/zoom";
 
 type Props = {
 	style: SubtitleStyle;
 	onChange: (style: SubtitleStyle) => void;
 	thai: boolean; // a Thai video: English-only fonts can't be picked
 	footer?: ReactNode;
+	top?: ReactNode; // shown first, above the section's own settings
 	section?: ControlSection; // show only this part (the editor's panels); left out: everything (Brand Kit page)
 };
 
 export type ControlSection = "text" | "zoom" | "shape" | "brand";
 
+const ZOOM_CHOICES: { id: Zoom; name: string; hint: string }[] = [
+	{ id: "off", name: "None", hint: "No zoom, except the parts that have their own" },
+	{ id: "in", name: ZOOM_NAMES.in, hint: "Glides closer, then starts again at a cut" },
+	{ id: "out", name: ZOOM_NAMES.out, hint: "Starts close and glides back, then starts again at a cut" },
+	{ id: "smooth", name: ZOOM_NAMES.smooth, hint: "A slow glide in and back out" },
+	{ id: "cuts", name: ZOOM_NAMES.cuts, hint: "Every other part is a little closer, like a second camera" },
+];
+
 // How the subtitles look: style, font, brand colour, channel name, size and outline. Used in the
 // editor (for one video) and on the Brand Kit page (for every new video).
-export function SubtitleControls({ style, onChange, thai, footer, section }: Props) {
+export function SubtitleControls({ style, onChange, thai, footer, top, section }: Props) {
 	const on = (part: ControlSection) => !section || section === part;
 	// The user's own uploaded font (one per account), if any.
 	const [own, setOwn] = useState<OwnFont | null>(null);
@@ -115,20 +125,38 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 
 	return (
 		<div className={`flex flex-col gap-2 p-3 ${section ? "" : "rounded-lg border border-foreground/15"}`}>
-			{on("shape") && <label className="flex items-center gap-3 text-sm text-foreground/70">
-				<span className="w-24 shrink-0">Video shape</span>
-				<select
-					value={style.format}
-					onChange={(e) => onChange({ ...style, format: e.target.value as Format, position: FORMATS[e.target.value as Format].position })}
-					className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
-				>
-					{(Object.keys(FORMATS) as Format[]).map((f) => (
-						<option key={f} value={f}>
-							{FORMATS[f].name}
-						</option>
-					))}
-				</select>
-			</label>}
+			{top}
+			{on("shape") && <div className="flex items-start gap-3 text-sm text-foreground/70">
+				<span className="w-24 shrink-0 pt-2">Video shape</span>
+				{/* A picture of each shape instead of a list (coach, 6 Nov): what it is for shows on hover. */}
+				<div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Video shape">
+					{(Object.keys(FORMATS) as Format[]).map((f) => {
+						const { width, height } = FORMATS[f];
+						const big = 34; // px, the longer side of the little picture
+						return (
+							<button
+								key={f}
+								type="button"
+								role="radio"
+								aria-checked={style.format === f}
+								title={`Best for ${FORMATS[f].for}`}
+								onClick={() => onChange({ ...style, format: f, position: FORMATS[f].position })}
+								className={`flex w-16 flex-col items-center gap-1 rounded-lg border px-1 pt-2 pb-1 ${
+									style.format === f ? "border-blue-600 bg-blue-600/10 text-foreground" : "border-foreground/20 hover:bg-foreground/5"
+								}`}
+							>
+								<span className="flex h-9 items-center justify-center">
+									<span
+										className={`block rounded-[3px] border-2 ${style.format === f ? "border-blue-600" : "border-current"}`}
+										style={{ width: (big * width) / Math.max(width, height), height: (big * height) / Math.max(width, height) }}
+									/>
+								</span>
+								<span className="text-xs font-medium tabular-nums">{f}</span>
+							</button>
+						);
+					})}
+				</div>
+			</div>}
 			{on("text") && <>
 			{!section && <p className="text-sm font-medium">Subtitles</p>}
 			<label className="flex items-center gap-2 text-sm">
@@ -312,21 +340,28 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 			)}
 			</>}
 			{on("zoom") && <>
-			<label className="flex items-center gap-3 text-sm text-foreground/70" title="Zoom in or out glides one way, then starts again at a cut, so it never goes back and forth. Back and forth glides in and out. Jump: every other part is a little closer, like a second camera.">
-				<span className="w-24 shrink-0">Auto zoom</span>
-				<select
-					value={style.zoom}
-					onChange={(e) => onChange({ ...style, zoom: e.target.value as Zoom })}
-					className="flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
-				>
-					<option value="in">Zoom in (glide closer, start again at a cut)</option>
-					<option value="out">Zoom out (glide back, start again at a cut)</option>
-					<option value="smooth">Back and forth (slow glide)</option>
-					<option value="cuts">Jump at every cut</option>
-					<option value="off">Off</option>
-				</select>
-			</label>
-			{style.zoom !== "off" && (
+			{/* Short names (coach, 6 Nov): what each one does shows on hover. */}
+			<div className="flex items-start gap-3 text-sm text-foreground/70">
+				<span className="w-24 shrink-0 pt-1" title={section ? "Everywhere that has no zoom part of its own" : undefined}>
+					{section ? "Whole video" : "Auto zoom"}
+				</span>
+				<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Auto zoom">
+					{ZOOM_CHOICES.map((z) => (
+						<button
+							key={z.id}
+							type="button"
+							role="radio"
+							aria-checked={style.zoom === z.id}
+							title={z.hint}
+							onClick={() => onChange({ ...style, zoom: z.id })}
+							className={`rounded-md border px-2.5 py-0.5 text-sm ${style.zoom === z.id ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"}`}
+						>
+							{z.name}
+						</button>
+					))}
+				</div>
+			</div>
+			{(style.zoom !== "off" || section) && (
 				<label className="flex items-center gap-3 text-sm text-foreground/70" title="How much closer the picture gets">
 					<span className="w-24 shrink-0">Zoom amount</span>
 					<input

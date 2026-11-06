@@ -11,10 +11,11 @@ export type Zoom = "off" | "in" | "out" | "smooth" | "cuts"; // Auto zoom (lib/z
 // The final video's shape. Same as FORMATS in render.py.
 export type Format = "9:16" | "1:1" | "16:9";
 // position: where subtitles go when this shape is picked (wide videos keep them near the bottom).
-export const FORMATS: Record<Format, { name: string; width: number; height: number; position: number }> = {
-	"9:16": { name: "9:16 · TikTok, Reels, Shorts", width: 1080, height: 1920, position: 0.31 },
-	"1:1": { name: "1:1 · Square post", width: 1080, height: 1080, position: 0.2 },
-	"16:9": { name: "16:9 · YouTube", width: 1920, height: 1080, position: 0.12 },
+// for: shown when the mouse is over the shape's picture (web only).
+export const FORMATS: Record<Format, { for: string; width: number; height: number; position: number }> = {
+	"9:16": { for: "TikTok, Reels, Shorts", width: 1080, height: 1920, position: 0.31 },
+	"1:1": { for: "Instagram posts", width: 1080, height: 1080, position: 0.2 },
+	"16:9": { for: "YouTube", width: 1920, height: 1080, position: 0.12 },
 };
 export const outputSize = (style: { format?: Format }) => FORMATS[style.format ?? "9:16"] ?? FORMATS["9:16"];
 // color: the brand colour (the Highlight look's word). logo: the channel name shown in a corner ("" = none).

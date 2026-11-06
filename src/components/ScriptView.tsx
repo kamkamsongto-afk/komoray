@@ -1,6 +1,6 @@
 "use client";
 
-import { Crop, Film, type LucideIcon, Palette, Pencil, Scissors, Search, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { Crop, Film, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
@@ -15,6 +15,7 @@ import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { type ControlSection, SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
 import { Timeline } from "./Timeline";
+import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -158,7 +159,10 @@ type Props = {
 	keep: Cut[];
 	onTimelineChange: (change: { deleted: number[]; manual: Cut[]; keep: Cut[] }) => void;
 	noZoom: Cut[]; // parts with Auto zoom turned off (lib/zoom.ts)
-	onNoZoomChange: (noZoom: Cut[]) => void;
+	zoomParts: ZoomPart[]; // parts with their own kind of zoom
+	onZoomChange: (change: { noZoom: Cut[]; zoomParts: ZoomPart[] }) => void;
+	moments: "idle" | "finding" | "failed"; // the AI picking where to zoom
+	onFindMoments: () => void;
 	fixes: Fix[];
 	onFixesChange: (fixes: Fix[]) => void;
 	// Personal dictionary: apply it once (then onDictionaryApplied), and learn from every fix made here.
@@ -204,7 +208,10 @@ export function ScriptView({
 	keep,
 	onTimelineChange,
 	noZoom,
-	onNoZoomChange,
+	zoomParts,
+	onZoomChange,
+	moments,
+	onFindMoments,
 	fixes,
 	onFixesChange,
 	dictionary,
@@ -440,9 +447,13 @@ export function ScriptView({
 	const handSpans = useMemo(() => mergeSpans([...manual, ...keep]), [manual, keep]);
 
 	// Turn Auto zoom on or off for a stretch of the source.
-	const zoomRange = (a: number, b: number, on: boolean) => {
+	// Give a stretch of the source its own zoom: a kind, "off" (no zoom), or null (back to the whole video's zoom).
+	const zoomRange = (a: number, b: number, zoom: PartZoom | "off" | null) => {
 		const span = { start: a, end: b };
-		onNoZoomChange(on ? subtractSpans(noZoom, [span]) : mergeSpans([...noZoom, span]));
+		onZoomChange({
+			noZoom: zoom === "off" ? mergeSpans([...noZoom, span]) : subtractSpans(noZoom, [span]),
+			zoomParts: setZoomPart(zoomParts, span, zoom === "off" ? null : zoom),
+		});
 	};
 
 	// First time the video is opened: say what was found and what cutting it would leave. Never cut by
@@ -606,6 +617,52 @@ export function ScriptView({
 		window.addEventListener("pointercancel", stop);
 	}
 
+	// The settings box closes with a click anywhere outside it (coach, 6 Nov: the X was too small to aim for),
+	// or Esc. Not on the video or the timeline: settings are changed while watching the video, and the zoom
+	// strip and banners on the timeline belong to the open box.
+	const panelRef = useRef<HTMLDivElement>(null);
+	const tabsRef = useRef<HTMLDivElement>(null);
+	const playerAreaRef = useRef<HTMLDivElement>(null);
+	const timelineRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (!panel) return;
+		const onDown = (e: PointerEvent) => {
+			const target = e.target as Node | null;
+			if (!target || !document.contains(target)) return; // something that went away as it was clicked
+			if ([panelRef, tabsRef, playerAreaRef, timelineRef].some((r) => r.current?.contains(target))) return;
+			setPanel(null);
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key !== "Escape" || (e.target as HTMLElement | null)?.closest("input, textarea, select")) return;
+			setPanel(null);
+		};
+		document.addEventListener("pointerdown", onDown);
+		document.addEventListener("keydown", onKey);
+		return () => {
+			document.removeEventListener("pointerdown", onDown);
+			document.removeEventListener("keydown", onKey);
+		};
+	}, [panel]);
+
+	// How tall the settings box is once dragged by its corner, while this video is open; null: as tall as it needs, up to a limit.
+	const [panelHeight, setPanelHeight] = useState<number | null>(null);
+	const resizePanel = (height: number | null) => setPanelHeight(height === null ? null : Math.round(Math.min(window.innerHeight - 32, Math.max(160, height))));
+	function startPanelResize(e: ReactPointerEvent<HTMLElement>) {
+		e.preventDefault();
+		const box = panelRef.current;
+		if (!box) return;
+		const from = { y: e.clientY, height: box.getBoundingClientRect().height };
+		const move = (ev: PointerEvent) => resizePanel(from.height + ev.clientY - from.y);
+		const stop = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", stop);
+			window.removeEventListener("pointercancel", stop);
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", stop);
+		window.addEventListener("pointercancel", stop);
+	}
+
 	return (
 		<div className="flex flex-col gap-4">
 			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_12px_var(--preview-w)] lg:items-start lg:gap-x-1" style={{ "--preview-w": `${previewWidth}px` } as CSSProperties}>
@@ -614,7 +671,7 @@ export function ScriptView({
 					className="flex flex-col gap-3 [--player-h:42vh] lg:sticky lg:top-4 lg:z-30 lg:order-3 lg:[--player-h:max(15rem,calc(100vh-14rem))]"
 				>
 					<div className="flex flex-col gap-2 lg:flex-row lg:items-start">
-					<div className="min-w-0 flex-1">
+					<div ref={playerAreaRef} className="min-w-0 flex-1">
 					{mode === "preview" && deciding ? (
 						<div
 							className="mx-auto w-full rounded-lg bg-black"
@@ -635,6 +692,7 @@ export function ScriptView({
 							onBannersChange={onBannersChange}
 							faces={faces}
 							noZoom={noZoom}
+							zoomParts={zoomParts}
 							onFail={(error) => {
 								reportError("studio player", error.message);
 								setStudioFailed(true);
@@ -654,8 +712,16 @@ export function ScriptView({
 							banners={banners}
 							onBannersChange={onBannersChange}
 							noZoom={noZoom}
+							zoomParts={zoomParts}
 						/>
 					) : (
+						<>
+						<div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-blue-600/10 px-3 py-1.5 text-xs">
+							<span>The original video, before any cuts. Your edits are safe.</span>
+							<button onClick={() => setMode("preview")} className="shrink-0 rounded-md bg-blue-600 px-2 py-1 font-medium text-white hover:bg-blue-700">
+								Back to editing
+							</button>
+						</div>
 						<video
 							ref={videoRef}
 							src={videoUrl}
@@ -671,10 +737,11 @@ export function ScriptView({
 							}}
 							className="max-h-[65vh] w-full rounded-lg bg-black"
 						/>
+						</>
 					)}
 					</div>
 					{/* Beside the video on big screens, so the tools never take height from it. */}
-					<div className="flex shrink-0 flex-wrap justify-center gap-1 lg:flex-col" role="tablist" aria-label="Settings">
+					<div ref={tabsRef} className="flex shrink-0 flex-wrap justify-center gap-1 lg:flex-col" role="tablist" aria-label="Settings">
 						{mode === "preview" &&
 							PANELS.map((p) => (
 								<button
@@ -694,22 +761,28 @@ export function ScriptView({
 						<button
 							onClick={() => setMode(mode === "preview" ? "original" : "preview")}
 							aria-pressed={mode === "original"}
-							title={mode === "preview" ? "See the original video, before any cuts" : "Back to the final video"}
+							title={mode === "preview" ? "See the original video, before any cuts" : "Back to the edited video: nothing was lost"}
 							className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-3 ${
-								mode === "original" ? "bg-foreground text-background" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+								mode === "original" ? "bg-blue-600 text-white hover:bg-blue-700" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
 							}`}
 						>
-							<Film className="h-[18px] w-[18px]" aria-hidden />
-							Original
+							{/* In the Original, the same button says how to get back, so it doesn't look like the edits are gone (coach, 6 Nov). */}
+							{mode === "original" ? <Undo2 className="h-[18px] w-[18px]" aria-hidden /> : <Film className="h-[18px] w-[18px]" aria-hidden />}
+							{mode === "original" ? "Back to editing" : "Original"}
 						</button>
 					</div>
 					</div>
 					{/* Floats over the script on big screens: the video keeps its size while you watch the change. */}
 					{mode === "preview" && panel && (
-						<div className="flex flex-col gap-2 surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:max-h-[calc(100vh-26rem)] lg:w-[26rem] lg:overflow-y-auto">
+						<div
+							ref={panelRef}
+							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] ${panelHeight ? "" : "lg:max-h-[calc(100vh-26rem)]"}`}
+							style={panelHeight ? ({ "--panel-h": `${panelHeight}px` } as CSSProperties) : undefined}
+						>
+						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${panelHeight ? "lg:h-[min(var(--panel-h),calc(100vh-2rem))]" : "lg:flex-1"}`}>
 							<div className="flex items-center justify-between px-3 pt-2 text-sm font-medium">
 								{PANELS.find((p) => p.id === panel)?.name}
-								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
+								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close (Esc, or click outside)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
 									<X className="h-4 w-4" aria-hidden />
 								</button>
 							</div>
@@ -719,27 +792,52 @@ export function ScriptView({
 							onChange={onSubtitleChange}
 							thai={thaiClip}
 							section={panel}
+							top={
+								panel === "zoom" ? (
+									<div className="flex flex-col gap-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 p-2 text-xs">
+										<div className="flex flex-wrap items-center gap-2">
+											<button
+												onClick={onFindMoments}
+												disabled={moments === "finding"}
+												title={zoomParts.length ? "Puts back the zoom parts the AI picked, in place of these" : "The AI reads the script and zooms only where it adds something: a punchline, a key point, a strong feeling"}
+												className="inline-flex items-center gap-1 rounded-md bg-purple-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-60"
+											>
+												<Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
+												{moments === "finding" ? "Finding key moments…" : zoomParts.length ? "Find key moments again" : "Zoom on key moments"}
+											</button>
+											{zoomParts.length > 0 && (
+												<button onClick={() => onZoomChange({ noZoom, zoomParts: [] })} className="rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
+													Remove all {zoomParts.length} zoom parts
+												</button>
+											)}
+										</div>
+										<span className="text-foreground/70">
+											{moments === "failed"
+												? "Could not find the key moments. Please try again."
+												: zoomParts.length
+													? `${zoomParts.length} ${zoomParts.length === 1 ? "part zooms" : "parts zoom"} on its own (purple on the timeline). Click one there to change it.`
+													: "The AI picks the moments worth a zoom, and how each one zooms."}{" "}
+											Drag across the timeline to pick any part, then choose how it zooms.
+										</span>
+									</div>
+								) : undefined
+							}
 							footer={
 								panel === "brand" ? (
-									<button
-										onClick={() => void saveBrand()}
-										disabled={brandSaved === "saving"}
-										className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
-										title="Use this look for every new video"
-									>
-										{brandSaved === "saved" ? "Saved to Brand Kit" : brandSaved === "failed" ? "Could not save, try again" : "Save as my Brand Kit"}
-									</button>
-								) : panel === "zoom" && subtitle.zoom !== "off" ? (
-									<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/60">
-										<span>
-											{noZoom.length ? `Zoom is off in ${noZoom.length} ${noZoom.length === 1 ? "part" : "parts"}.` : "Zoom is on for the whole video."} Click the purple strip on the
-											timeline to turn it off for a part, or drag across any stretch.
-										</span>
-										{noZoom.length > 0 && (
-											<button onClick={() => onNoZoomChange([])} className="rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
-												Zoom the whole video
-											</button>
-										)}
+									<div className="flex flex-col gap-1.5">
+										<button
+											onClick={() => void saveBrand()}
+											disabled={brandSaved === "saving"}
+											className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
+											title="Use this look for every new video"
+										>
+											{brandSaved === "saved" ? "Saved to Brand Kit" : brandSaved === "failed" ? "Could not save, try again" : "Save as my Brand Kit"}
+										</button>
+										{/* Coach, 6 Nov: does a saved logo stay, and how many Brand Kits are there? */}
+										<p className="text-xs text-foreground/60">
+											Your Brand Kit is one look kept in your account: every new video starts with it, so you never upload your logo again. Saving
+											again replaces it. Videos you already made keep their own look, but your logo is one picture: Change picture uses the new one everywhere.
+										</p>
 									</div>
 								) : undefined
 							}
@@ -753,8 +851,24 @@ export function ScriptView({
 							total={totalFrames(segments) / FPS}
 							brand={subtitle.color}
 							focus={focusBanner}
+							format={subtitle.format}
 						/>
 					)}
+						</div>
+						{/* Drag the corner to make the box taller, instead of scrolling inside it (coach, 6 Nov). */}
+						<div
+							role="separator"
+							aria-orientation="horizontal"
+							aria-label="Drag to make the settings taller or shorter"
+							title="Drag to make this box taller or shorter (double-click: back to normal)"
+							onPointerDown={startPanelResize}
+							onDoubleClick={() => resizePanel(null)}
+							className="absolute right-0 bottom-0 hidden h-4 w-4 cursor-nwse-resize touch-none items-end justify-end p-0.5 text-foreground/40 hover:text-foreground lg:flex"
+						>
+							<svg viewBox="0 0 10 10" className="h-2.5 w-2.5" aria-hidden>
+								<path d="M9 1 1 9M9 5 5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+							</svg>
+						</div>
 						</div>
 					)}
 				</div>
@@ -959,7 +1073,7 @@ export function ScriptView({
 						})}
 					</div>
 			{/* Pinned to the bottom of the screen on big screens, like a video editor's timeline. */}
-			<div className="sticky bottom-0 z-20 lg:bottom-2">
+			<div ref={timelineRef} className="sticky bottom-0 z-20 lg:bottom-2">
 				<Timeline
 					duration={duration}
 					words={words}
@@ -988,6 +1102,7 @@ export function ScriptView({
 						openPanel("banners");
 					}}
 					noZoom={noZoom}
+					zoomParts={zoomParts}
 					onZoomRange={zoomRange}
 					onPlayFrom={(t) => seek(t)}
 					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}

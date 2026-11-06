@@ -271,6 +271,8 @@ DEFAULT_STYLE = {
 ZOOM = 1.12
 SMOOTH_PERIOD = 12
 SMOOTH_FADE = 0.75
+PART_GLIDE = 0.8  # seconds a zoom part's push in (or pull back) takes (PART_GLIDE in src/lib/zoom.ts)
+PART_ZOOMS = ("in", "out", "smooth", "cuts")
 CUT_FADE = 0.004  # seconds of sound faded in and out at every cut
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
 
@@ -758,20 +760,62 @@ def no_zoom_frames(segments: list[tuple[int, int, int]], spans: list[dict] | Non
     return merged
 
 
-def zoom_shots(segments: list[tuple[int, int, int]], off: list[tuple[int, int]], zoom: str, amount: float = ZOOM) -> list[tuple[int, int, int, int, float]]:
-    """The picture's parts: (piece number, output frame, source frame, frame count, zoom). A jump
-    happens at every other cut, and also where a no-zoom part starts or ends inside a piece. Same
-    levels as the "cuts" mode of zoomTrack in src/lib/zoom.ts."""
+def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple[int, int, str]]:
+    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind).
+    A part across a cut is one run, so its zoom carries on over the cut. Same as zoomPartFrames in src/lib/zoom.ts."""
+    runs = []
+    for n in parts or []:
+        if n.get("zoom") not in PART_ZOOMS:
+            continue
+        run = None
+        for start, trim, frames in segments:
+            a, b = max(js_round(n["start"] * FPS), trim), min(js_round(n["end"] * FPS), trim + frames)
+            if b <= a:
+                continue
+            lo, hi = start + a - trim, start + b - trim
+            if run and lo == run[1]:
+                run[1] = hi
+            else:
+                if run:
+                    runs.append(tuple(run))
+                run = [lo, hi, n["zoom"]]
+        if run:
+            runs.append(tuple(run))
+    return sorted(runs)
+
+
+def part_zoom_expr(start: int, run: tuple[int, int, str], amount: float = ZOOM) -> str:
+    """A zoom part's zoom as an ffmpeg expression of the frame number (`in` counts from 1) of a shot
+    starting at output frame `start`. Same as partZoom in src/lib/zoom.ts."""
+    lo, hi, kind = run
+    frame = f"(in-1+{start})"
+    length = hi - lo
+    if kind == "smooth":
+        return f"(1+{amount - 1:.4f}*sin(PI*({frame}-{lo})/{length}))"
+    x = f"min(1,({frame}-{lo})/{min(length, PART_GLIDE * FPS)})"
+    k = f"({x}*{x}*(3-2*{x}))"
+    return f"(1+{amount - 1:.4f}*{k if kind == 'in' else f'(1-{k})'})"
+
+
+def zoom_shots(
+    segments: list[tuple[int, int, int]], off: list[tuple[int, int]], zoom: str, amount: float = ZOOM, runs: list[tuple[int, int, str]] | None = None
+) -> list[tuple[int, int, int, int, float, tuple[int, int, str] | None]]:
+    """The picture's parts: (piece number, output frame, source frame, frame count, zoom, zoom part). A jump
+    happens at every other cut, where a no-zoom part starts or ends inside a piece, and at the edges of
+    zoom parts. Same levels as the "cuts" mode of zoomTrack in src/lib/zoom.ts. Inside a zoom part
+    (runs), the part's own kind decides."""
     shots = []
     for i, (start, trim, frames) in enumerate(segments):
         marks = {0, frames}
         if zoom == "cuts":
             marks |= {min(max(edge - start, 0), frames) for r in off for edge in r}
+        marks |= {min(max(edge - start, 0), frames) for r in runs or [] for edge in r[:2]}
         ordered = sorted(marks)
         for a, b in zip(ordered, ordered[1:]):
+            run = next((r for r in runs or [] if r[0] <= start + a and start + b <= r[1]), None)
             inside = any(x <= start + a and start + b <= y for x, y in off)
-            level = amount if zoom == "cuts" and i % 2 == 1 and not inside else 1.0
-            shots.append((i, start + a, trim + a, b - a, level))
+            level = amount if (run and run[2] == "cuts") or (not run and zoom == "cuts" and i % 2 == 1 and not inside) else 1.0
+            shots.append((i, start + a, trim + a, b - a, level, run))
     return shots
 
 
@@ -847,29 +891,32 @@ def ffmpeg_command(
     no_zoom: list[dict] | None = None,
     zoom_amount: float = ZOOM,
     zoom_period: float = SMOOTH_PERIOD,
+    zoom_parts: list[dict] | None = None,
 ) -> list[str]:
     """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles.
-    no_zoom: parts with Auto zoom turned off (source seconds)."""
+    no_zoom: parts with Auto zoom turned off (source seconds). zoom_parts: parts with their own kind of zoom."""
     aspect = display_aspect(src)
     # The pieces in whole frames of the final video, as the preview has them (StudioPlayer): each piece's
     # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
     pieces = frame_segments(keeps)
     off = no_zoom_frames(pieces, no_zoom)
     ramps = zoom_ramps(pieces, zoom_period)
+    runs = zoom_part_frames(pieces, zoom_parts)
     parts, video_labels, audio_labels = [], [], []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
-    for k, (i, out_frame, trim, frames, level) in enumerate(zoom_shots(pieces, off, zoom, zoom_amount)):
+    for k, (i, out_frame, trim, frames, level, run) in enumerate(zoom_shots(pieces, off, zoom, zoom_amount, runs)):
         a, b = trim / FPS, (trim + frames) / FPS
         # Framed on its own (face crop, Auto zoom), so parts can differ before they are joined. The face
         # is found per whole piece, so it doesn't move at a no-zoom edge.
         piece_trim, piece_frames = pieces[i][1], pieces[i][2]
         focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)
-        framing = (
-            smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off, zoom_amount, zoom_period, zoom, ramps[i]), size, zoom_amount)
-            if zoom in ("smooth", "in", "out")
-            else piece_filter(aspect, focus, level, size)
-        )
+        if run and run[2] != "cuts":
+            framing = smooth_filter(aspect, focus, part_zoom_expr(out_frame, run, zoom_amount), size, zoom_amount)
+        elif not run and zoom in ("smooth", "in", "out"):
+            framing = smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off, zoom_amount, zoom_period, zoom, ramps[i]), size, zoom_amount)
+        else:
+            framing = piece_filter(aspect, focus, level, size)
         parts.append(
             f"[0:v]trim=start={a:.6f}:end={b:.6f},setpts=PTS-STARTPTS,fps={FPS},"
             f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={frames},setpts=PTS-STARTPTS,"
@@ -968,6 +1015,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     edit.get("noZoom"),
                     float(style.get("zoomAmount") or ZOOM),
                     float(style.get("zoomPeriod") or SMOOTH_PERIOD),
+                    edit.get("zoomParts"),
                 ),
                 cwd=workdir,
                 capture_output=True,

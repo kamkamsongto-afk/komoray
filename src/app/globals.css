@@ -3,7 +3,7 @@
 :root {
 	--background: #ffffff;
 	--foreground: #171717;
-	--inverse-background: #171717;
+	--inverse-background: #706f6f; /* coach, 6 Nov: softer than black */
 	--inverse-foreground: #ffffff;
 	--inverse-scheme: dark;
 	color-scheme: light;
@@ -21,7 +21,7 @@
 	:root:not([data-theme="light"]) {
 		--background: #0a0a0a;
 		--foreground: #ededed;
-		--inverse-background: #ffffff;
+		--inverse-background: #f7f7f7; /* warm white, coach 6 Nov */
 		--inverse-foreground: #171717;
 		--inverse-scheme: light;
 		color-scheme: dark;
@@ -31,7 +31,7 @@
 :root[data-theme="dark"] {
 	--background: #0a0a0a;
 	--foreground: #ededed;
-	--inverse-background: #ffffff;
+	--inverse-background: #f7f7f7; /* warm white, coach 6 Nov */
 	--inverse-foreground: #171717;
 	--inverse-scheme: light;
 	color-scheme: dark;

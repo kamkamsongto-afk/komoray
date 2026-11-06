@@ -4,10 +4,82 @@
 //   "cuts"    every other kept piece a little closer: a jump at the cut, like a second camera
 //   "smooth"  the picture glides slowly in and back out, across the cuts
 // noZoom: parts the user turned zoom off for (source seconds, so they survive new cuts).
-// Same sums as no_zoom_frames, zoom_shots and smooth_zoom_expr in render.py: change one, change the other.
+// parts: stretches with their own kind of zoom (picked on the timeline, or the AI's key moments), whatever
+// the rest of the video does. Inside one, "in" pushes closer and stays, "out" starts close and pulls back,
+// "smooth" goes in and back out once, "cuts" (Jump) is closer the whole time.
+// Same sums as no_zoom_frames, zoom_shots, zoom_part_frames, part_zoom_expr and smooth_zoom_expr in
+// render.py: change one, change the other.
 import { FPS, type Segment } from "./timeline";
 
 type Span = { start: number; end: number };
+
+export type PartZoom = "in" | "out" | "smooth" | "cuts";
+export type ZoomPart = Span & { zoom: PartZoom };
+export const PART_ZOOMS: PartZoom[] = ["in", "out", "smooth", "cuts"];
+export const ZOOM_NAMES: Record<PartZoom, string> = { in: "Zoom in", out: "Zoom out", smooth: "Back and forth", cuts: "Jump cut" };
+export const PART_GLIDE = 0.8; // seconds a part's push in (or pull back) takes, or the whole part if shorter
+export const MAX_ZOOM_PARTS = 300;
+
+// Parts checked as they come from the browser (or the AI): real kinds, inside the video, not over each other.
+export function readZoomParts(value: unknown, duration: number): ZoomPart[] | null {
+	if (!Array.isArray(value) || value.length > MAX_ZOOM_PARTS) return null;
+	const parts: ZoomPart[] = [];
+	for (const v of value as Partial<ZoomPart>[]) {
+		const { start, end, zoom } = v ?? {};
+		if (typeof start !== "number" || typeof end !== "number" || !Number.isFinite(start) || !Number.isFinite(end)) return null;
+		if (!PART_ZOOMS.includes(zoom as PartZoom) || start < 0 || end <= start || start > duration) return null;
+		parts.push({ start: Math.round(start * 1000) / 1000, end: Math.round(Math.min(end, duration) * 1000) / 1000, zoom: zoom as PartZoom });
+	}
+	parts.sort((a, b) => a.start - b.start);
+	return parts.filter((p, i) => i === 0 || p.start >= parts[i - 1].end - 0.0005);
+}
+
+// The parts with `span` given this kind (or taken out of them: null). Parts it overlaps keep what is outside it.
+export function setZoomPart(parts: ZoomPart[], span: Span, zoom: PartZoom | null): ZoomPart[] {
+	const out: ZoomPart[] = [];
+	for (const p of parts) {
+		if (p.end <= span.start || p.start >= span.end) out.push(p);
+		else {
+			if (p.start < span.start) out.push({ ...p, end: span.start });
+			if (p.end > span.end) out.push({ ...p, start: span.end });
+		}
+	}
+	if (zoom) out.push({ ...span, zoom });
+	return out.sort((a, b) => a.start - b.start);
+}
+
+// Each part as frames of the final video: [from, to) with its kind. A part across a cut is one run, so
+// its zoom carries on over the cut. Same as zoom_part_frames in render.py.
+export function zoomPartFrames(segments: Segment[], parts: ZoomPart[]): { from: number; to: number; zoom: PartZoom }[] {
+	const runs: { from: number; to: number; zoom: PartZoom }[] = [];
+	for (const p of parts) {
+		let run: { from: number; to: number; zoom: PartZoom } | null = null;
+		for (const s of segments) {
+			const a = Math.max(Math.round(p.start * FPS), s.trim);
+			const b = Math.min(Math.round(p.end * FPS), s.trim + s.frames);
+			if (b <= a) continue;
+			const from = s.from + a - s.trim;
+			const to = s.from + b - s.trim;
+			if (run && from === run.to) run.to = to;
+			else {
+				if (run) runs.push(run);
+				run = { from, to, zoom: p.zoom };
+			}
+		}
+		if (run) runs.push(run);
+	}
+	return runs.sort((x, y) => x.from - y.from);
+}
+
+// How close a part is at frame f (from..to of the final video). Same as part_zoom_expr in render.py.
+export function partZoom(run: { from: number; to: number; zoom: PartZoom }, f: number, amount: number) {
+	if (run.zoom === "cuts") return amount;
+	const length = run.to - run.from;
+	if (run.zoom === "smooth") return 1 + (amount - 1) * Math.sin((Math.PI * (f - run.from)) / length);
+	const x = Math.min(1, (f - run.from) / Math.min(length, PART_GLIDE * FPS));
+	const k = x * x * (3 - 2 * x); // eased: starts and ends gently
+	return 1 + (amount - 1) * (run.zoom === "in" ? k : 1 - k);
+}
 
 export const SMOOTH_FADE = 0.75; // seconds to glide out before (and back in after) a part with no zoom
 
@@ -44,8 +116,19 @@ export function noZoomFrames(segments: Segment[], noZoom: Span[]): [number, numb
 	return merged;
 }
 
-// The zoom at a frame of the final video (1 = none).
-export function zoomTrack(segments: Segment[], noZoom: Span[], style: ZoomStyle): (frame: number) => number {
+// The zoom at a frame of the final video (1 = none): a part's own zoom, else the whole video's.
+export function zoomTrack(segments: Segment[], noZoom: Span[], style: ZoomStyle, parts: ZoomPart[] = []): (frame: number) => number {
+	const base = videoZoom(segments, noZoom, style);
+	if (!parts.length) return base;
+	const runs = zoomPartFrames(segments, parts);
+	return (f) => {
+		const run = runs.find((r) => f >= r.from && f < r.to);
+		return run ? partZoom(run, f, style.zoomAmount) : base(f);
+	};
+}
+
+// The whole video's zoom (style.zoom), with noZoom turned off.
+function videoZoom(segments: Segment[], noZoom: Span[], style: ZoomStyle): (frame: number) => number {
 	const { zoom: mode, zoomAmount: amount, zoomPeriod: period } = style;
 	if (mode === "off") return () => 1;
 	const off = noZoomFrames(segments, noZoom);

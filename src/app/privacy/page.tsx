@@ -7,7 +7,7 @@ const CONTACT = "hello@komoray.com";
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" updated="November 5, 2026">
+		<LegalPage title="Privacy Policy" updated="November 6, 2026">
 			<p>
 				Komoray is an AI studio for talking-head creators. You upload a video, we cut the silences, add subtitles and give you
 				back a finished video. This page explains what we collect to do that, who helps us, and how long we keep it.
@@ -83,7 +83,7 @@ export default function PrivacyPage() {
 					video at a time.
 				</li>
 				<li>
-					<strong>Anthropic</strong> reads your script with its AI model Claude to suggest parts you may want to cut, and translates your subtitles when you ask. It gets the text, never your video or audio, and does not train on it.
+					<strong>Anthropic</strong> reads your script with its AI model Claude to suggest parts you may want to cut and the moments worth a zoom, and translates your subtitles when you ask. It gets the text, never your video or audio, and does not train on it.
 				</li>
 				<li>
 					<strong>Supabase</strong> handles sign-in and stores your account details.

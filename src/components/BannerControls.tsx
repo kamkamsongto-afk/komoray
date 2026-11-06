@@ -1,9 +1,9 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Star, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Star, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { BANNER, BANNER_ANIMS, BANNER_KINDS, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText } from "@/lib/banners";
-import { EDGE_COLORS } from "@/lib/subtitle-style";
+import { BANNER, BANNER_ANIMS, BANNER_KINDS, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText } from "@/lib/banners";
+import { EDGE_COLORS, type Format } from "@/lib/subtitle-style";
 
 type Props = {
 	banners: Banner[];
@@ -12,6 +12,7 @@ type Props = {
 	total: number; // length of the final video, seconds
 	brand: string; // the Brand Kit's colour: a banner's background until one is picked
 	focus: string | null; // the banner just clicked on the timeline: open it here
+	format: Format; // the video's shape: where a banner sits before it is dragged
 };
 
 // The two kinds to add. Follow still shows on videos that already have one: it was the same as a call to action.
@@ -21,11 +22,24 @@ const round = (n: number) => Math.round(n * 10) / 10;
 
 // The editor's Banners box: add a price tag, a call to action or "follow me" at the spot the
 // preview is at, then change its words, place and when it shows.
-export function BannerControls({ banners, onChange, now, total, brand, focus }: Props) {
+export function BannerControls({ banners, onChange, now, total, brand, focus, format }: Props) {
 	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
 	const [open, setOpen] = useState<string | null>(focus);
 	useEffect(() => setOpen(focus), [focus]);
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+
+	// Where each banner was dragged to, so picking Top and then "Where you dragged it" brings it back (coach, 6 Nov).
+	const [dragged, setDragged] = useState<Record<string, { x: number; y: number }>>({});
+	const moved = banners.filter((b) => b.x !== undefined && b.y !== undefined && (dragged[b.id]?.x !== b.x || dragged[b.id]?.y !== b.y));
+	if (moved.length) setDragged({ ...dragged, ...Object.fromEntries(moved.map((b) => [b.id, { x: b.x as number, y: b.y as number }])) });
+	function placeBanner(b: Banner, value: string) {
+		if (value !== "dragged") return update(b.id, { place: value as BannerPlace, x: undefined, y: undefined });
+		// Never dragged yet: start from the middle of where it sits now, ready to be dragged on the video.
+		const spot = dragged[b.id] ?? { x: 0.5, y: Math.round((BANNER_TOP[format][b.place] + 0.04) * 1000) / 1000 };
+		update(b.id, spot);
+	}
+	// The saved banner waiting for "yes, delete it", so a slip of the mouse never loses one.
+	const [forgetting, setForgetting] = useState<string | null>(null);
 
 	// My banners: saved to the account, for any video. Each starts at 0 and ends after as long as it shows.
 	const [templates, setTemplates] = useState<Banner[]>([]);
@@ -98,27 +112,48 @@ export function BannerControls({ banners, onChange, now, total, brand, focus }: 
 				))}
 			</div>
 			{templates.length > 0 && (
-				<div className="flex flex-wrap items-center gap-1.5 text-sm">
-					<span className="text-xs text-foreground/60">My banners</span>
-					{templates.map((t) => (
-						<span key={t.id} className="flex items-center rounded-md border border-foreground/20">
-							<button
-								onClick={() => addTemplate(t)}
-								disabled={banners.length >= BANNER.maxBanners}
-								title="Add it where the video is now"
-								className="max-w-40 truncate rounded-l-md px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-40"
-							>
-								+ {t.text}
-							</button>
-							<button
-								onClick={() => saveTemplates(templates.filter((x) => x.id !== t.id))}
-								aria-label={`Forget ${t.text}`}
-								className="rounded-r-md px-1.5 py-0.5 text-foreground/50 hover:bg-red-500/10 hover:text-red-600"
-							>
-								<X className="h-3 w-3 shrink-0" aria-hidden />
-							</button>
-						</span>
-					))}
+				<div className="flex flex-col gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
+					<p className="flex items-center gap-1 text-xs font-medium">
+						<Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" aria-hidden />
+						My banners
+						<span className="font-normal text-foreground/60">· made by you, for any video. Click one to add it.</span>
+					</p>
+					<div className="flex flex-wrap items-center gap-1.5 text-sm">
+						{templates.map((t) =>
+							forgetting === t.id ? (
+								<span key={t.id} className="flex items-center gap-1.5 rounded-md border border-red-500/50 bg-background px-2 py-0.5 text-xs">
+									Delete &ldquo;{t.text}&rdquo; from My banners?
+									<button onClick={() => { saveTemplates(templates.filter((x) => x.id !== t.id)); setForgetting(null); }} className="rounded bg-red-600 px-1.5 py-0.5 font-medium text-white hover:bg-red-700">
+										Delete
+									</button>
+									<button onClick={() => setForgetting(null)} className="rounded border border-foreground/20 px-1.5 py-0.5 hover:bg-foreground/5">
+										Keep
+									</button>
+								</span>
+							) : (
+								<span key={t.id} className="flex items-center overflow-hidden rounded-md border border-foreground/20 bg-background">
+									<button
+										onClick={() => addTemplate(t)}
+										disabled={banners.length >= BANNER.maxBanners}
+										title="Add it where the video is now"
+										className="flex max-w-44 items-center gap-1.5 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-40"
+									>
+										<span className="h-3 w-3 shrink-0 rounded-sm border border-foreground/20" style={{ background: t.color ?? brand }} aria-hidden />
+										<span className="truncate">{t.text}</span>
+										<Plus className="h-3 w-3 shrink-0 text-foreground/50" aria-hidden />
+									</button>
+									<button
+										onClick={() => setForgetting(t.id)}
+										aria-label={`Delete ${t.text} from My banners`}
+										title="Delete from My banners"
+										className="border-l border-foreground/10 px-1.5 py-1 text-foreground/50 hover:bg-red-500/10 hover:text-red-600"
+									>
+										<X className="h-3 w-3 shrink-0" aria-hidden />
+									</button>
+								</span>
+							),
+						)}
+					</div>
 				</div>
 			)}
 			{banners.length === 0 && (
@@ -146,11 +181,11 @@ export function BannerControls({ banners, onChange, now, total, brand, focus }: 
 						<button
 							onClick={() => saveAsTemplate(b)}
 							disabled={!cleanBannerText(b.text) || templates.some((t) => t.text === cleanBannerText(b.text) && t.sub === b.sub)}
-							title="Save to My banners, to use on any video"
+							title={templates.some((t) => t.text === cleanBannerText(b.text) && t.sub === b.sub) ? "In My banners" : "Save to My banners, to use on any video"}
 							aria-label="Save to My banners"
 							className="rounded px-1.5 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:opacity-30"
 						>
-							<Star className="h-3.5 w-3.5 shrink-0" aria-hidden />
+							<Star className={`h-3.5 w-3.5 shrink-0 ${templates.some((t) => t.text === cleanBannerText(b.text) && t.sub === b.sub) ? "fill-amber-400 text-amber-500" : ""}`} aria-hidden />
 						</button>
 						<button
 							onClick={() => onChange(banners.filter((x) => x.id !== b.id))}
@@ -186,11 +221,11 @@ export function BannerControls({ banners, onChange, now, total, brand, focus }: 
 						</select>
 						<select
 							value={b.x !== undefined ? "dragged" : b.place}
-							onChange={(e) => e.target.value !== "dragged" && update(b.id, { place: e.target.value as BannerPlace, x: undefined, y: undefined })}
+							onChange={(e) => placeBanner(b, e.target.value)}
 							aria-label="Where on the video"
 							className="rounded-md border border-foreground/20 bg-background px-1 py-0.5"
 						>
-							{b.x !== undefined && <option value="dragged">Where you dragged it</option>}
+							<option value="dragged">{dragged[b.id] ? "Where you dragged it" : "Anywhere (drag it on the video)"}</option>
 							<option value="top">Top</option>
 							<option value="middle">Middle</option>
 							<option value="bottom">Bottom</option>
