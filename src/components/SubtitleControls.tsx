@@ -131,6 +131,10 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 			</label>}
 			{on("text") && <>
 			{!section && <p className="text-sm font-medium">Subtitles</p>}
+			<label className="flex items-center gap-2 text-sm">
+				<input type="checkbox" checked={style.subtitles} onChange={(e) => onChange({ ...style, subtitles: e.target.checked })} />
+				Show subtitles on the video
+			</label>
 			<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Subtitle style">
 				{(Object.keys(LOOKS) as Look[]).map((look) => (
 					<button

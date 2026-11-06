@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// The only file that asks Claude about bad takes. It only suggests: the creator decides what is cut.
+// The only file that asks Claude about bad takes. It only finds them: they are cut only if the creator ticked
+// Bad takes when uploading (once), or presses the Bad takes button in the editor, which also brings them back.
 // Nov 2026 test on 12 minutes of our clips: Opus marked no real speech by mistake, Sonnet cut real speech.
 const MODEL = "claude-opus-5-5";
 const REQUEST_MS = 90_000; // Cloudflare gives up on a silent request after 100 seconds

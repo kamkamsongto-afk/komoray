@@ -101,7 +101,7 @@ export function PlayerFrame({
 	playing,
 	outTime,
 	total,
-	line,
+	line: saying,
 	subtitle,
 	onSubtitleChange,
 	onToggle,
@@ -115,6 +115,7 @@ export function PlayerFrame({
 	speed = 1,
 	onSpeedChange,
 }: Props) {
+	const line = subtitle.subtitles ? saying : null; // subtitles turned off: none drawn, like the final video (build_subtitles)
 	const boxRef = useRef<HTMLDivElement>(null);
 
 	// Move a banner (its middle follows the pointer) or resize it (by how far the pointer is from its

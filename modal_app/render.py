@@ -264,6 +264,7 @@ DEFAULT_STYLE = {
     "logoOpacity": 1,
     "zoom": "off",  # Auto zoom: "in" / "out" = one way across the whole video, "smooth" = a slow glide in and out, "cuts" = every other kept piece a little closer
     "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
+    "subtitles": True,  # False: no subtitles on the video (banners and the logo stay)
 }
 # Auto zoom: how close it gets, seconds to glide in and out (both picked by the user: zoomAmount and
 # zoomPeriod in src/lib/subtitle-style.ts), seconds to settle around a no-zoom part (src/lib/zoom.ts).
@@ -559,6 +560,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     spacing = int(style.get("letterSpacing") or 0)
     max_letters = math.floor(limits["thai_letters"] * limits["size"] * THAI_LETTER_EM / (max(size, limits["size"]) * THAI_LETTER_EM + spacing) + 1e-9)
     lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames)
+    if style.get("subtitles") is False:  # turned off: same as the preview (PlayerFrame shows no line)
+        lines = []
 
     brand = style.get("color", "#FFE600")
     highlight = ass_colour(brand)

@@ -5,22 +5,22 @@
 // Before adding one: languages with no spaces (Japanese, Chinese) need their own line breaks, right-to-left
 // ones (Arabic, Persian) need testing with word-by-word subtitles, and both need fonts in render.py.
 export const LANGUAGES = [
-	{ code: "en", name: "English" },
-	{ code: "th", name: "ไทย" },
-	{ code: "es", name: "Español" },
-	{ code: "fr", name: "Français" },
-	{ code: "de", name: "Deutsch" },
-	{ code: "pt", name: "Português" },
-	{ code: "it", name: "Italiano" },
-	{ code: "nl", name: "Nederlands" },
-	{ code: "pl", name: "Polski" },
-	{ code: "id", name: "Bahasa Indonesia" },
-	{ code: "ru", name: "Русский" },
-	{ code: "uk", name: "Українська" },
-	{ code: "bg", name: "Български" },
-	{ code: "fi", name: "Suomi" },
-	{ code: "no", name: "Norsk" },
-	{ code: "ca", name: "Català" },
+	{ code: "en", name: "English", english: "English" },
+	{ code: "th", name: "ไทย", english: "Thai" },
+	{ code: "es", name: "Español", english: "Spanish" },
+	{ code: "fr", name: "Français", english: "French" },
+	{ code: "de", name: "Deutsch", english: "German" },
+	{ code: "pt", name: "Português", english: "Portuguese" },
+	{ code: "it", name: "Italiano", english: "Italian" },
+	{ code: "nl", name: "Nederlands", english: "Dutch" },
+	{ code: "pl", name: "Polski", english: "Polish" },
+	{ code: "id", name: "Bahasa Indonesia", english: "Indonesian" },
+	{ code: "ru", name: "Русский", english: "Russian" },
+	{ code: "uk", name: "Українська", english: "Ukrainian" },
+	{ code: "bg", name: "Български", english: "Bulgarian" },
+	{ code: "fi", name: "Suomi", english: "Finnish" },
+	{ code: "no", name: "Norsk", english: "Norwegian" },
+	{ code: "ca", name: "Català", english: "Catalan" },
 ] as const;
 
 export const isLanguage = (code: unknown): code is string => LANGUAGES.some((l) => l.code === code);

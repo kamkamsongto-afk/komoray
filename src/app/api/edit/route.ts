@@ -15,15 +15,17 @@ import { readStyle } from "@/lib/subtitle-style";
 //   keep     silences kept by hand on the timeline
 //   noZoom   parts with Auto zoom turned off on the timeline
 //   pace    tight / natural / relaxed: finds the silences again (answers with the new cuts)
+//   badTakesApplied  the AI's bad takes were cut once, as asked when uploading (never again by themselves)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, takesApplied, style, banners, pace, manual, keep, noZoom } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, style, banners, pace, manual, keep, noZoom } = (await request.json()) as {
 		key?: string;
 		pace?: unknown;
 		deleted?: unknown;
 		fixes?: unknown;
 		dictionaryApplied?: unknown;
 		takesApplied?: unknown;
+		badTakesApplied?: unknown;
 		style?: unknown;
 		banners?: unknown;
 		manual?: unknown;
@@ -42,6 +44,7 @@ export async function PUT(request: Request) {
 		fixes?: Fix[];
 		dictionaryApplied?: boolean;
 		takesApplied?: boolean;
+		badTakesApplied?: boolean;
 		style?: unknown;
 		banners?: Banner[];
 		manual?: { start: number; end: number }[];
@@ -74,6 +77,7 @@ export async function PUT(request: Request) {
 	}
 	if (dictionaryApplied === true) edit.dictionaryApplied = true;
 	if (takesApplied === true) edit.takesApplied = true;
+	if (badTakesApplied === true) edit.badTakesApplied = true;
 	if (style !== undefined) edit.style = readStyle(style);
 	if (banners !== undefined) {
 		const checked = readBanners(banners);

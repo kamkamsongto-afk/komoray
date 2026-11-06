@@ -1,11 +1,9 @@
 "use client";
 
-import { Download, Redo2, Undo2, X } from "lucide-react";
+import { Check, Download, Redo2, Sparkles, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
-import { BadTakes } from "@/components/BadTakes";
-import { ADMIN_EMAIL } from "@/lib/supabase/config";
 import type { BadTake } from "@/lib/bad-takes";
 import { ScriptView } from "@/components/ScriptView";
 import { VideoReady } from "@/components/VideoReady";
@@ -18,6 +16,7 @@ import { TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
+import type { UploadOptions } from "@/lib/upload-options";
 
 type Cut = { start: number; end: number };
 type Analysis = {
@@ -28,6 +27,8 @@ type Analysis = {
 	fixes?: Fix[];
 	dictionaryApplied?: boolean; // the personal dictionary already ran on this video once
 	takesApplied?: boolean; // repeated takes were already looked for on this video once
+	options?: UploadOptions; // what was asked for when uploading (none on videos from before)
+	badTakesApplied?: boolean; // the AI's bad takes were cut once, as asked when uploading
 	style?: unknown;
 	banners?: Banner[];
 	manual?: Cut[]; // cut by hand on the timeline
@@ -127,11 +128,10 @@ export default function EditPage() {
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
 	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
 	const [takesFound, setTakesFound] = useState<{ count: number; withoutTakes: number[] } | null>(null);
-	const [badTakesFound, setBadTakes] = useState<{ status: "checking" | "done" | "failed"; takes: BadTake[] }>({ status: "checking", takes: [] });
-	// Owner only for now (see /api/bad-takes). Everyone else gets what "failed" shows: the plain rule's notice, and no AI.
-	const aiTakes = user?.email?.toLowerCase() === ADMIN_EMAIL;
-	const badTakes = aiTakes ? badTakesFound : { status: "failed" as const, takes: [] as BadTake[] };
-	const [listen, setListen] = useState<{ seconds: number; original: boolean; ask: number } | null>(null);
+	// The AI's bad takes (api/bad-takes). Read by itself unless Bad takes was unticked when uploading; then
+	// only when the creator presses Find bad takes (it costs us, so not for nothing).
+	const [badTakes, setBadTakes] = useState<{ status: "checking" | "done" | "failed"; takes: BadTake[] }>({ status: "checking", takes: [] });
+	const [findTakes, setFindTakes] = useState(false);
 	const [desktopNotify, setDesktopNotify] = useState(false);
 	const [notifyBlocked, setNotifyBlocked] = useState(false);
 	// Browsers only allow sound after a click, so the Make video click creates this.
@@ -158,13 +158,21 @@ export default function EditPage() {
 			setKey(saved);
 			setAnalysis(data);
 			setSubtitle(readStyle(data.style));
-			// A video without its own look yet starts with the Brand Kit (saved, so Make video uses it too).
+			// A video without its own look yet starts with the Brand Kit, then what was asked for when uploading
+			// (saved, so Make video uses it too).
 			if (!data.style) {
 				const brand = (await (await fetch("/api/brand")).json().catch(() => ({}))) as { style?: SubtitleStyle | null };
-				if (brand.style) {
+				let style = brand.style ?? null;
+				if (style) {
 					// English-only fonts have no Thai letters: a Thai video uses Kanit instead.
 					const thai = data.words.some((w) => /[฀-๿]/.test(w.text));
-					const style = thai && !fontMetrics(brand.style).thai ? { ...brand.style, font: DEFAULT_STYLE.font } : brand.style;
+					if (thai && !fontMetrics(style).thai) style = { ...style, font: DEFAULT_STYLE.font };
+				}
+				const asked = data.options;
+				if (asked && (!asked.zoom || !asked.subtitles)) {
+					style = { ...(style ?? readStyle(null)), ...(!asked.zoom && { zoom: "off" as const }), ...(!asked.subtitles && { subtitles: false }) };
+				}
+				if (style) {
 					setSubtitle(style);
 					void fetch("/api/edit", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: saved, style }) });
 				}
@@ -228,6 +236,7 @@ export default function EditPage() {
 			fixes?: Fix[];
 			dictionaryApplied?: boolean;
 			takesApplied?: boolean;
+			badTakesApplied?: boolean;
 			style?: SubtitleStyle;
 			banners?: Banner[];
 			manual?: Cut[];
@@ -386,9 +395,23 @@ export default function EditPage() {
 
 	// Ask the AI for bad takes once the script is here, one part at a time. It is saved, so it is only paid for once.
 	const hasScript = Boolean(analysis?.words?.length);
-	const keptRef = useRef(new Set<number>()); // kept here, while an answer already on its way may still list them
+	const readTakes = analysis?.options?.badTakes !== false || findTakes;
+	const takeWords = (take: BadTake) => Array.from({ length: take.to - take.from + 1 }, (_, k) => take.from + k);
+	// Ticked when uploading: cut them once, when the AI has read the whole script. Never again by itself,
+	// so bringing them back sticks.
+	const cutFirstTime = useCallback(
+		(takes: BadTake[]) => {
+			const a = analysisRef.current;
+			if (a?.options?.badTakes !== true || a.badTakesApplied) return;
+			const words = takes.flatMap((t) => Array.from({ length: t.to - t.from + 1 }, (_, k) => t.from + k));
+			if (words.length) changeDeleted([...new Set([...(a.deleted ?? []), ...words])].sort((x, y) => x - y));
+			setAnalysis((b) => (b ? { ...b, badTakesApplied: true } : b));
+			save({ badTakesApplied: true });
+		},
+		[changeDeleted, save],
+	);
 	useEffect(() => {
-		if (!key || !hasScript || !aiTakes) return;
+		if (!key || !hasScript || !readTakes) return;
 		let stopped = false;
 		void (async () => {
 			for (;;) {
@@ -397,8 +420,8 @@ export default function EditPage() {
 				const data = res?.ok ? ((await res.json()) as { takes: BadTake[]; remaining: number; busy?: boolean }) : null;
 				if (stopped) return;
 				if (!data) return setBadTakes((b) => ({ ...b, status: "failed" }));
-				setBadTakes({ status: data.remaining ? "checking" : "done", takes: data.takes.filter((t) => !keptRef.current.has(t.from)) });
-				if (!data.remaining) return;
+				setBadTakes({ status: data.remaining ? "checking" : "done", takes: data.takes });
+				if (!data.remaining) return cutFirstTime(data.takes);
 				// Another tab is reading this part: wait for it instead of paying again.
 				if (data.busy) await new Promise((resolve) => setTimeout(resolve, 3000));
 			}
@@ -406,13 +429,15 @@ export default function EditPage() {
 		return () => {
 			stopped = true;
 		};
-	}, [key, hasScript, aiTakes]);
-	const keepBadTake = (take: BadTake) => {
-		keptRef.current.add(take.from);
-		setBadTakes((b) => ({ ...b, takes: b.takes.filter((t) => t.from !== take.from) }));
-		void fetch("/api/bad-takes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, keep: take.from }) }).catch(() => {});
+	}, [key, hasScript, readTakes, cutFirstTime]);
+	const badWords = badTakes.takes.flatMap(takeWords);
+	// One button for all of them: cut every bad take, or bring every one back. Other cuts stay as they are.
+	const badTakesCut = badWords.length > 0 && badWords.every((i) => (analysis?.deleted ?? []).includes(i));
+	const toggleBadTakes = (cut: boolean) => {
+		const words = new Set(badWords);
+		const rest = (analysisRef.current?.deleted ?? []).filter((i) => !words.has(i));
+		changeDeleted(cut ? [...rest, ...words].sort((a, b) => a - b) : rest);
 	};
-	const takeWords = (take: BadTake) => Array.from({ length: take.to - take.from + 1 }, (_, k) => take.from + k);
 
 	// Every fix made in the script goes into the personal dictionary (in the background).
 	const learn = useCallback(
@@ -640,6 +665,30 @@ export default function EditPage() {
 						</select>
 						{paceBusy && <span>Finding silences…</span>}
 					</label>
+					{badTakes.status !== "failed" &&
+						(!readTakes ? (
+							<button onClick={() => setFindTakes(true)} className="inline-flex items-center gap-1 rounded border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+								<Sparkles className="h-3 w-3 shrink-0" aria-hidden />
+								Find bad takes
+							</button>
+						) : badTakes.status === "checking" ? (
+							<span className="inline-flex items-center gap-1 text-xs text-foreground/60">
+								<Sparkles className="h-3 w-3 shrink-0 animate-pulse" aria-hidden />
+								Looking for bad takes…
+							</span>
+						) : !badTakes.takes.length ? (
+							<span className="text-xs text-foreground/60">No bad takes found</span>
+						) : (
+							<button
+								onClick={() => toggleBadTakes(!badTakesCut)}
+								aria-pressed={badTakesCut}
+								title={badTakesCut ? "Bring every bad take back" : "Cut every bad take the AI found. Press again to bring them back"}
+								className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${badTakesCut ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"}`}
+							>
+								{badTakesCut ? <Check className="h-3 w-3 shrink-0" aria-hidden /> : <Sparkles className="h-3 w-3 shrink-0" aria-hidden />}
+								{badTakesCut ? `Bad takes cut (${badTakes.takes.length})` : `Cut bad takes (${badTakes.takes.length})`}
+							</button>
+						))}
 					<Link href={`/upload?key=${encodeURIComponent(key)}&again=1`} className="text-xs text-foreground/50 underline hover:text-foreground" title="Listen to this video again in another language">
 						Wrong language?
 					</Link>
@@ -752,17 +801,6 @@ export default function EditPage() {
 
 			{showReady && render.status === "done" && render.videoUrl && <VideoReady videoUrl={render.videoUrl} downloadUrl={render.downloadUrl} videoKey={key} onClose={closeReady} />}
 
-			<BadTakes
-				status={badTakes.status}
-				takes={badTakes.takes}
-				words={analysis.words}
-				deleted={analysis.deleted ?? []}
-				onCut={(take) => changeDeleted([...new Set([...(analysis.deleted ?? []), ...takeWords(take)])].sort((a, b) => a - b))}
-				onRestore={(take) => changeDeleted((analysis.deleted ?? []).filter((i) => i < take.from || i > take.to))}
-				onKeep={keepBadTake}
-				onListen={(take, isCut) => setListen((l) => ({ seconds: analysis.words[take.from].start, original: isCut, ask: (l?.ask ?? 0) + 1 }))}
-			/>
-
 			<ScriptView
 				videoUrl={analysis.videoUrl}
 				studio={analysis.studio ?? null}
@@ -788,8 +826,7 @@ export default function EditPage() {
 				faces={analysis.faces ?? null}
 				takesApplied={analysis.takesApplied ?? false}
 				onTakesApplied={takesApplied}
-				suggested={badTakes.status === "failed" ? null : new Set(badTakes.takes.flatMap(takeWords))}
-				listen={listen}
+				suggested={badTakes.status === "failed" ? null : new Set(readTakes ? badWords : [])}
 			/>
 		</main>
 	);

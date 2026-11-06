@@ -7,9 +7,10 @@ import { facesFor, mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/pro
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
 import { startTranscription } from "@/lib/transcribe";
+import { readOptions } from "@/lib/upload-options";
 
 // Finding silences lives in the video's folder:
-//   analyze.json        written when we hand the video to Deepgram
+//   analyze.json        written when we hand the video to Deepgram (with what the creator asked for: lib/upload-options.ts)
 //   edit.json           written by the callback when the cut list is ready
 //   analyze-error.json  written by the callback if speech-to-text failed
 const LINK_SECONDS = 3 * 3600; // Deepgram may queue long videos for a while before downloading
@@ -19,7 +20,7 @@ type EditFile = Parameters<typeof mergeThaiEdit>[0] & { wordsJoined?: boolean };
 
 // Start finding the silences. Returns right away; the page then polls GET below.
 export async function POST(request: Request) {
-	const { key, language } = (await request.json()) as { key?: string; language?: string };
+	const { key, language, options: asked } = (await request.json()) as { key?: string; language?: string; options?: unknown };
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 	if (language !== undefined && !isLanguage(language)) return Response.json({ error: "We don't support that language yet" }, { status: 400 });
 
@@ -34,9 +35,15 @@ export async function POST(request: Request) {
 
 	const env = getCloudflareContext().env as unknown as AnalyzeEnv;
 	try {
+		// Listening again (Wrong language?) sends no choices: the ones made the first time stay.
+		const options = readOptions(asked) ?? readOptions((await getJson<{ options?: unknown }>(siblingKey(key, "analyze.json")))?.options);
 		await Promise.all([deleteObject(siblingKey(key, "edit.json")), deleteObject(siblingKey(key, "analyze-error.json"))]);
 		// usageKey: lets the callback give the minutes back if the job fails.
-		await putObject(siblingKey(key, "analyze.json"), JSON.stringify({ startedAt: new Date().toISOString(), usageKey: listen.usageKey }), "application/json");
+		await putObject(
+			siblingKey(key, "analyze.json"),
+			JSON.stringify({ startedAt: new Date().toISOString(), usageKey: listen.usageKey, ...(options && { options }) }),
+			"application/json",
+		);
 
 		const callbackUrl = await signedCallbackUrl(new URL("/api/analyze/callback", request.url).toString(), key, env.RENDER_TOKEN);
 		// Deepgram downloads the video itself through a temporary read-only link.
