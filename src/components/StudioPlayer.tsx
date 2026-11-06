@@ -22,7 +22,7 @@ const SAMPLE_MS = 250; // debug mode: how often the engine's state is written do
 // The final video, played by our own engine (lib/player/engine.ts) on a canvas: smooth cuts on
 // every browser, including Safari on iPhone, iPad and Mac. Same controls and subtitles as PreviewPlayer.
 export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlayer(
-	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, faces, noZoom },
+	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, faces, noZoom, zoomParts },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -108,7 +108,7 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 	// Face crop and Auto zoom are drawn by the engine, frame by frame, so they change exactly at each cut.
 	const focuses = useMemo(() => pieces.map((p) => focusFor(faces ?? null, p.start, p.end)), [pieces, faces]);
 	const size = outputSize(subtitle);
-	const zoomAt = useMemo(() => zoomTrack(segments, noZoom ?? [], subtitle), [segments, noZoom, subtitle]);
+	const zoomAt = useMemo(() => zoomTrack(segments, noZoom ?? [], subtitle, zoomParts), [segments, noZoom, subtitle, zoomParts]);
 	useEffect(
 		() => engineRef.current?.setFraming((piece, aspect, out) => framePiece(aspect, focuses[piece] ?? null, zoomAt(Math.round(out * FPS)), size), size.width),
 		[focuses, zoomAt, size, loaded],

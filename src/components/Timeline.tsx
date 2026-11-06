@@ -1,12 +1,12 @@
 "use client";
 
-import { Ban, ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Banner } from "@/lib/banners";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
-import { type ZoomStyle, zoomTrack } from "@/lib/zoom";
+import { PART_ZOOMS, type PartZoom, ZOOM_NAMES, type ZoomPart, type ZoomStyle, zoomTrack } from "@/lib/zoom";
 
 type Word = { text: string; start: number; end: number };
 // A word as the script draws it (a fixed run of words is one item, with the new text).
@@ -35,7 +35,8 @@ type Props = {
 	onOpenZoom: () => void; // the 🔍 on the waveform
 	onOpenSubtitles: () => void; // a sentence chip clicked
 	noZoom: { start: number; end: number }[]; // parts with Auto zoom turned off
-	onZoomRange: (start: number, end: number, on: boolean) => void;
+	zoomParts: ZoomPart[]; // parts with their own kind of zoom
+	onZoomRange: (start: number, end: number, zoom: PartZoom | "off" | null) => void; // null: back to the whole video's zoom
 	onPlayFrom: (source: number) => void; // play from here (to hear a cut edge just moved)
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void; // dragged along the timeline
@@ -48,7 +49,7 @@ const CHIPS_TOP = RULER + 4;
 const CHIPS = 26;
 const WAVE_TOP = CHIPS_TOP + CHIPS + 6;
 const ZOOM_TOP = WAVE_TOP;
-const ZOOM_STRIP = 12;
+const ZOOM_STRIP = 16;
 const WAVE = 58;
 const HEIGHT = WAVE_TOP + WAVE + 4;
 const LANE_ROW = 20; // one row of things shown over the video (banners, later graphics): all in this one lane, stacked only where they overlap
@@ -114,6 +115,7 @@ export function Timeline({
 	onOpenZoom,
 	onOpenSubtitles,
 	noZoom,
+	zoomParts,
 	onZoomRange,
 	onPlayFrom,
 	banners,
@@ -261,9 +263,9 @@ export function Timeline({
 	};
 
 	const chips = useMemo(() => makeChips(words, scriptWords, gone), [words, scriptWords, gone]);
-	const zoomOn = zoomStyle.zoom !== "off" && zoomEditing;
+	const zoomOn = zoomEditing; // parts can zoom even when the whole video doesn't
 	const zoomAmount = zoomStyle.zoomAmount;
-	const zoomAt = useMemo(() => zoomTrack(segments, noZoom, zoomStyle), [segments, noZoom, zoomStyle]);
+	const zoomAt = useMemo(() => zoomTrack(segments, noZoom, zoomStyle, zoomParts), [segments, noZoom, zoomStyle, zoomParts]);
 	// The cut parts of the source, merged (for shading with Show cuts on).
 	const cutSpans = useMemo(() => {
 		const spans: [number, number][] = [];
@@ -393,7 +395,7 @@ export function Timeline({
 				const t = timeAt(left + px);
 				if (!segments.some((s) => t * FPS >= s.trim && t * FPS < s.trim + s.frames)) continue;
 				if (noZoom.some((n) => t >= n.start && t < n.end)) ctx.fillStyle = "rgba(127, 127, 127, 0.4)";
-				else ctx.fillStyle = `rgba(147, 51, 234, ${0.25 + (0.75 * (zoomAt(Math.round(toOutSeconds(t, segments) * FPS)) - 1)) / (zoomAmount - 1)})`;
+				else ctx.fillStyle = `rgba(147, 51, 234, ${0.15 + (0.85 * (zoomAt(Math.round(toOutSeconds(t, segments) * FPS)) - 1)) / Math.max(0.01, zoomAmount - 1)})`;
 				ctx.fillRect(px, ZOOM_TOP, 1, ZOOM_STRIP);
 			}
 		}
@@ -528,8 +530,13 @@ export function Timeline({
 		}
 		if (p.moved) return setSelection((s) => (s && s.end - s.start >= MIN_PICK ? s : null));
 		if (p.kind === "scrub") return;
-		const piece = p.strip && p.kind === "pick" ? segments.find((s) => p.at * FPS >= s.trim && p.at * FPS < s.trim + s.frames) : undefined;
-		if (piece) return onZoomRange(piece.trim / FPS, (piece.trim + piece.frames) / FPS, noZoom.some((n) => p.at >= n.start && p.at < n.end));
+		// The zoom strip: pick the zoom part under the click (or that kept piece), then choose how it zooms.
+		if (p.strip && p.kind === "pick") {
+			const part = zoomParts.find((z) => p.at >= z.start && p.at < z.end) ?? noZoom.find((z) => p.at >= z.start && p.at < z.end);
+			const piece = segments.find((s) => p.at * FPS >= s.trim && p.at * FPS < s.trim + s.frames);
+			if (part) return setSelection({ start: part.start, end: part.end });
+			if (piece) return setSelection({ start: piece.trim / FPS, end: (piece.trim + piece.frames) / FPS });
+		}
 		if (p.chip && chips.some((c) => !c.gone && p.at >= c.start && p.at <= c.end)) onOpenSubtitles();
 		const cut = showCuts ? cutSpans.find(([a, b]) => p.at >= a && p.at < b) : undefined;
 		if (cut) setSelection({ start: cut[0], end: cut[1] });
@@ -558,10 +565,12 @@ export function Timeline({
 		let kept = 0;
 		for (const s of segments) kept += Math.max(0, Math.min(f1, s.trim + s.frames) - Math.max(f0, s.trim));
 		const hand = handSpans.some((h) => h.end > selection.start && h.start < selection.end);
-		const zoomOff = noZoom.some((n) => n.end > selection.start && n.start < selection.end); // some of it has zoom off
-		const zoomOffAll = noZoom.some((n) => n.start <= selection.start && n.end >= selection.end);
-		return { kept: kept > 1, cut: f1 - f0 - kept > 1, hand, zoomOff, zoomOffAll, seconds: selection.end - selection.start };
-	}, [selection, segments, handSpans, noZoom]);
+		// How it zooms now, if all of it zooms the same way by its own choice ("off", a kind), else null.
+		const own = (spans: { start: number; end: number }[]) => spans.some((n) => n.start <= selection.start + 0.001 && n.end >= selection.end - 0.001);
+		const zoom: PartZoom | "off" | null = own(noZoom) ? "off" : (PART_ZOOMS.find((z) => own(zoomParts.filter((n) => n.zoom === z))) ?? null);
+		const zoomOwn = [...noZoom, ...zoomParts].some((n) => n.end > selection.start && n.start < selection.end);
+		return { kept: kept > 1, cut: f1 - f0 - kept > 1, hand, zoom, zoomOwn, seconds: selection.end - selection.start };
+	}, [selection, segments, handSpans, noZoom, zoomParts]);
 	const cutPicked = useCallback(() => {
 		if (!selection) return;
 		onCut(selection.start, selection.end);
@@ -701,31 +710,37 @@ export function Timeline({
 								Auto
 							</button>
 						)}
-						{zoomOn && picked.kept && !picked.zoomOffAll && (
-							<button
-								onClick={() => {
-									onZoomRange(selection.start, selection.end, false);
-									setSelection(null);
-								}}
-								className="inline-flex items-center gap-1 rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
-								title="No Auto zoom in this part"
-							>
-								<Ban className="h-3 w-3 shrink-0" aria-hidden />
-								No zoom
-							</button>
-						)}
-						{zoomOn && picked.zoomOff && (
-							<button
-								onClick={() => {
-									onZoomRange(selection.start, selection.end, true);
-									setSelection(null);
-								}}
-								className="inline-flex items-center gap-1 rounded-md bg-purple-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-purple-700"
-								title="Auto zoom again in this part"
-							>
-								<ZoomIn className="h-3 w-3 shrink-0" aria-hidden />
-								Zoom
-							</button>
+						{/* How this part zooms (coach, 6 Nov: one kind for the whole video wasn't enough). */}
+						{zoomOn && picked.kept && (
+							<span className="flex flex-wrap items-center gap-1 rounded-md bg-purple-500/10 px-1 py-0.5" role="radiogroup" aria-label="How this part zooms">
+								<ZoomIn className="h-3 w-3 shrink-0 text-purple-600" aria-hidden />
+								{([...PART_ZOOMS, "off"] as const).map((z) => (
+									<button
+										key={z}
+										role="radio"
+										aria-checked={picked.zoom === z}
+										onClick={() => {
+											onZoomRange(selection.start, selection.end, z);
+											setSelection(null);
+										}}
+										className={`rounded px-1.5 py-0.5 text-xs font-medium ${picked.zoom === z ? "bg-purple-600 text-white" : "hover:bg-purple-500/20"}`}
+									>
+										{z === "off" ? "No zoom" : ZOOM_NAMES[z]}
+									</button>
+								))}
+								{picked.zoomOwn && (
+									<button
+										onClick={() => {
+											onZoomRange(selection.start, selection.end, null);
+											setSelection(null);
+										}}
+										title="Zoom here like the rest of the video"
+										className="rounded px-1.5 py-0.5 text-xs hover:bg-purple-500/20"
+									>
+										<RotateCcw className="inline h-3 w-3" aria-hidden /> Reset
+									</button>
+								)}
+							</span>
 						)}
 						<button onClick={() => setSelection(null)} className="px-1 text-foreground/50 hover:text-foreground" aria-label="Clear the selection" title="Esc">
 							<X className="h-3 w-3 shrink-0" aria-hidden />
@@ -869,6 +884,22 @@ export function Timeline({
 							</div>
 						);
 					})}
+					{zoomOn &&
+						zoomParts.map((z, i) => {
+							const x0 = xOf(z.start);
+							const x1 = xOf(z.end);
+							if (x1 - x0 < 3) return null;
+							return (
+								<div
+									key={`zoom${i}`}
+									title={`${ZOOM_NAMES[z.zoom]}: click to change it`}
+									className="pointer-events-none absolute z-[1] truncate rounded-sm border border-purple-700/70 px-1 text-[9px] leading-[14px] font-medium text-white"
+									style={{ left: x0, width: x1 - x0, top: ZOOM_TOP, height: ZOOM_STRIP }}
+								>
+									{x1 - x0 > 28 ? ZOOM_NAMES[z.zoom] : ""}
+								</div>
+							);
+						})}
 					{mark !== null && <div className="pointer-events-none absolute top-0 z-[1] w-0.5 bg-amber-500" style={{ left: xOf(mark), height: HEIGHT }} />}
 					{groups.map((g, i) => {
 						const kept = g.takes.find(isKept) ?? g.takes[g.takes.length - 1];

@@ -5,6 +5,7 @@ import { ownsVideo } from "@/lib/supabase/server";
 import { type Fix, readFixes, readSpans } from "@/lib/edit";
 import { getJson, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { readStyle } from "@/lib/subtitle-style";
+import { readZoomParts, type ZoomPart } from "@/lib/zoom";
 
 // Save the user's edits from the editor into edit.json, next to the silences:
 //   deleted  word positions deleted in the script (Make video cuts them)
@@ -14,11 +15,13 @@ import { readStyle } from "@/lib/subtitle-style";
 //   manual   parts cut by hand on the timeline (source seconds)
 //   keep     silences kept by hand on the timeline
 //   noZoom   parts with Auto zoom turned off on the timeline
+//   zoomParts  parts with their own kind of zoom (picked on the timeline, or the AI's key moments)
+//   zoomMomentsApplied  the AI's key moments were put in once, as Auto zoom asks when uploading
 //   pace    tight / natural / relaxed: finds the silences again (answers with the new cuts)
 //   badTakesApplied  the AI's bad takes were cut once, as asked when uploading (never again by themselves)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, style, banners, pace, manual, keep, noZoom } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, style, banners, pace, manual, keep, noZoom, zoomParts, zoomMomentsApplied } = (await request.json()) as {
 		key?: string;
 		pace?: unknown;
 		deleted?: unknown;
@@ -31,6 +34,8 @@ export async function PUT(request: Request) {
 		manual?: unknown;
 		keep?: unknown;
 		noZoom?: unknown;
+		zoomParts?: unknown;
+		zoomMomentsApplied?: unknown;
 	};
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
@@ -50,6 +55,8 @@ export async function PUT(request: Request) {
 		manual?: { start: number; end: number }[];
 		keep?: { start: number; end: number }[];
 		noZoom?: { start: number; end: number }[];
+		zoomParts?: ZoomPart[];
+		zoomMomentsApplied?: boolean;
 	}>(editKey);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
@@ -78,6 +85,12 @@ export async function PUT(request: Request) {
 	if (dictionaryApplied === true) edit.dictionaryApplied = true;
 	if (takesApplied === true) edit.takesApplied = true;
 	if (badTakesApplied === true) edit.badTakesApplied = true;
+	if (zoomMomentsApplied === true) edit.zoomMomentsApplied = true;
+	if (zoomParts !== undefined) {
+		const checked = readZoomParts(zoomParts, edit.duration);
+		if (!checked) return Response.json({ error: "Bad zoom parts" }, { status: 400 });
+		edit.zoomParts = checked;
+	}
 	if (style !== undefined) edit.style = readStyle(style);
 	if (banners !== undefined) {
 		const checked = readBanners(banners);

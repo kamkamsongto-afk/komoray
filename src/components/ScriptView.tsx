@@ -1,6 +1,6 @@
 "use client";
 
-import { Crop, Film, type LucideIcon, Palette, Pencil, Scissors, Search, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { Crop, Film, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
@@ -15,6 +15,7 @@ import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { type ControlSection, SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
 import { Timeline } from "./Timeline";
+import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -158,7 +159,10 @@ type Props = {
 	keep: Cut[];
 	onTimelineChange: (change: { deleted: number[]; manual: Cut[]; keep: Cut[] }) => void;
 	noZoom: Cut[]; // parts with Auto zoom turned off (lib/zoom.ts)
-	onNoZoomChange: (noZoom: Cut[]) => void;
+	zoomParts: ZoomPart[]; // parts with their own kind of zoom
+	onZoomChange: (change: { noZoom: Cut[]; zoomParts: ZoomPart[] }) => void;
+	moments: "idle" | "finding" | "failed"; // the AI picking where to zoom
+	onFindMoments: () => void;
 	fixes: Fix[];
 	onFixesChange: (fixes: Fix[]) => void;
 	// Personal dictionary: apply it once (then onDictionaryApplied), and learn from every fix made here.
@@ -204,7 +208,10 @@ export function ScriptView({
 	keep,
 	onTimelineChange,
 	noZoom,
-	onNoZoomChange,
+	zoomParts,
+	onZoomChange,
+	moments,
+	onFindMoments,
 	fixes,
 	onFixesChange,
 	dictionary,
@@ -440,9 +447,13 @@ export function ScriptView({
 	const handSpans = useMemo(() => mergeSpans([...manual, ...keep]), [manual, keep]);
 
 	// Turn Auto zoom on or off for a stretch of the source.
-	const zoomRange = (a: number, b: number, on: boolean) => {
+	// Give a stretch of the source its own zoom: a kind, "off" (no zoom), or null (back to the whole video's zoom).
+	const zoomRange = (a: number, b: number, zoom: PartZoom | "off" | null) => {
 		const span = { start: a, end: b };
-		onNoZoomChange(on ? subtractSpans(noZoom, [span]) : mergeSpans([...noZoom, span]));
+		onZoomChange({
+			noZoom: zoom === "off" ? mergeSpans([...noZoom, span]) : subtractSpans(noZoom, [span]),
+			zoomParts: setZoomPart(zoomParts, span, zoom === "off" ? null : zoom),
+		});
 	};
 
 	// First time the video is opened: say what was found and what cutting it would leave. Never cut by
@@ -681,6 +692,7 @@ export function ScriptView({
 							onBannersChange={onBannersChange}
 							faces={faces}
 							noZoom={noZoom}
+							zoomParts={zoomParts}
 							onFail={(error) => {
 								reportError("studio player", error.message);
 								setStudioFailed(true);
@@ -700,6 +712,7 @@ export function ScriptView({
 							banners={banners}
 							onBannersChange={onBannersChange}
 							noZoom={noZoom}
+							zoomParts={zoomParts}
 						/>
 					) : (
 						<>
@@ -779,27 +792,52 @@ export function ScriptView({
 							onChange={onSubtitleChange}
 							thai={thaiClip}
 							section={panel}
+							top={
+								panel === "zoom" ? (
+									<div className="flex flex-col gap-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 p-2 text-xs">
+										<div className="flex flex-wrap items-center gap-2">
+											<button
+												onClick={onFindMoments}
+												disabled={moments === "finding"}
+												title="The AI reads the script and zooms only where it adds something: a punchline, a key point, a strong feeling"
+												className="inline-flex items-center gap-1 rounded-md bg-purple-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-60"
+											>
+												<Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
+												{moments === "finding" ? "Finding key moments…" : zoomParts.length ? "Find key moments again" : "Zoom on key moments"}
+											</button>
+											{zoomParts.length > 0 && (
+												<button onClick={() => onZoomChange({ noZoom, zoomParts: [] })} className="rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
+													Remove all {zoomParts.length} zoom parts
+												</button>
+											)}
+										</div>
+										<span className="text-foreground/70">
+											{moments === "failed"
+												? "Could not find the key moments. Please try again."
+												: zoomParts.length
+													? `${zoomParts.length} ${zoomParts.length === 1 ? "part zooms" : "parts zoom"} on its own (purple on the timeline). Click one there to change it.`
+													: "The AI picks the moments worth a zoom, and how each one zooms."}{" "}
+											Drag across the timeline to pick any part, then choose how it zooms.
+										</span>
+									</div>
+								) : undefined
+							}
 							footer={
 								panel === "brand" ? (
-									<button
-										onClick={() => void saveBrand()}
-										disabled={brandSaved === "saving"}
-										className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
-										title="Use this look for every new video"
-									>
-										{brandSaved === "saved" ? "Saved to Brand Kit" : brandSaved === "failed" ? "Could not save, try again" : "Save as my Brand Kit"}
-									</button>
-								) : panel === "zoom" && subtitle.zoom !== "off" ? (
-									<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/60">
-										<span>
-											{noZoom.length ? `Zoom is off in ${noZoom.length} ${noZoom.length === 1 ? "part" : "parts"}.` : "Zoom is on for the whole video."} Click the purple strip on the
-											timeline to turn it off for a part, or drag across any stretch.
-										</span>
-										{noZoom.length > 0 && (
-											<button onClick={() => onNoZoomChange([])} className="rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
-												Zoom the whole video
-											</button>
-										)}
+									<div className="flex flex-col gap-1.5">
+										<button
+											onClick={() => void saveBrand()}
+											disabled={brandSaved === "saving"}
+											className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
+											title="Use this look for every new video"
+										>
+											{brandSaved === "saved" ? "Saved to Brand Kit" : brandSaved === "failed" ? "Could not save, try again" : "Save as my Brand Kit"}
+										</button>
+										{/* Coach, 6 Nov: does a saved logo stay, and how many Brand Kits are there? */}
+										<p className="text-xs text-foreground/60">
+											Your Brand Kit is one look kept in your account: every new video starts with it, so you never upload your logo again. Saving
+											again replaces it. Videos you already made keep their own look, but your logo is one picture: Change picture uses the new one everywhere.
+										</p>
 									</div>
 								) : undefined
 							}
@@ -1064,6 +1102,7 @@ export function ScriptView({
 						openPanel("banners");
 					}}
 					noZoom={noZoom}
+					zoomParts={zoomParts}
 					onZoomRange={zoomRange}
 					onPlayFrom={(t) => seek(t)}
 					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}

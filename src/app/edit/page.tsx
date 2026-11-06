@@ -17,6 +17,7 @@ import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
+import type { ZoomPart } from "@/lib/zoom";
 
 type Cut = { start: number; end: number };
 type Analysis = {
@@ -34,6 +35,8 @@ type Analysis = {
 	manual?: Cut[]; // cut by hand on the timeline
 	keep?: Cut[]; // silences kept by hand on the timeline
 	noZoom?: Cut[]; // parts with Auto zoom turned off on the timeline
+	zoomParts?: ZoomPart[]; // parts with their own kind of zoom (the timeline, or the AI's key moments)
+	zoomMomentsApplied?: boolean; // the AI's key moments were put in once, as Auto zoom asks when uploading
 	pace?: Pace;
 	faces?: Faces | null; // where the speaker's face is (found by Modal after the preview copy)
 	facesPending?: boolean;
@@ -242,6 +245,8 @@ export default function EditPage() {
 			manual?: Cut[];
 			keep?: Cut[];
 			noZoom?: Cut[];
+			zoomParts?: ZoomPart[];
+			zoomMomentsApplied?: boolean;
 		}) => {
 			if (!key) return;
 			setSaveError("");
@@ -278,7 +283,7 @@ export default function EditPage() {
 
 	// Undo / Redo for script and timeline edits (deleted and fixed words, hand cuts, zoom parts): what
 	// they were before each change.
-	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[]; noZoom: Cut[] };
+	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[]; noZoom: Cut[]; zoomParts: ZoomPart[] };
 	const analysisRef = useRef(analysis);
 	useEffect(() => {
 		analysisRef.current = analysis;
@@ -287,7 +292,7 @@ export default function EditPage() {
 	const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
 	const snapshot = (): Snapshot => {
 		const a = analysisRef.current;
-		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [], noZoom: a?.noZoom ?? [] };
+		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [], noZoom: a?.noZoom ?? [], zoomParts: a?.zoomParts ?? [] };
 	};
 	const remember = useCallback(() => {
 		const h = history.current;
@@ -356,11 +361,12 @@ export default function EditPage() {
 		[save, remember],
 	);
 
-	const changeNoZoom = useCallback(
-		(noZoom: Cut[]) => {
+	// Zoom turned off, or given its own kind, for parts of the video (both change together).
+	const changeZoom = useCallback(
+		(change: { noZoom: Cut[]; zoomParts: ZoomPart[] }) => {
 			remember();
-			setAnalysis((a) => (a ? { ...a, noZoom } : a));
-			save({ noZoom });
+			setAnalysis((a) => (a ? { ...a, ...change } : a));
+			save(change);
 		},
 		[save, remember],
 	);
@@ -476,6 +482,38 @@ export default function EditPage() {
 		[save],
 	);
 
+	// Key moments (api/zoom-moments): the AI picks where to zoom and how, instead of zooming every take
+	// (coach, 6 Nov). Put in by itself once if Auto zoom was ticked when uploading, or with Find key moments.
+	// They replace the zoom parts, and the rest of the video stops zooming. Saved, so only paid for once.
+	const [moments, setMoments] = useState<"idle" | "finding" | "failed">("idle");
+	const subtitleRef = useRef(subtitle);
+	useEffect(() => {
+		subtitleRef.current = subtitle;
+	});
+	const findMoments = useCallback(async () => {
+		if (!key) return;
+		setMoments("finding");
+		for (;;) {
+			const res = await fetch("/api/zoom-moments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) }).catch(() => null);
+			const data = res?.ok ? ((await res.json()) as { parts: ZoomPart[]; remaining: number }) : null;
+			if (!data) return setMoments("failed");
+			if (data.remaining) continue;
+			const a = analysisRef.current;
+			changeZoom({ noZoom: a?.noZoom ?? [], zoomParts: data.parts });
+			changeSubtitle({ ...subtitleRef.current, zoom: "off" });
+			save({ zoomMomentsApplied: true });
+			setAnalysis((b) => (b ? { ...b, zoomMomentsApplied: true } : b));
+			return setMoments("idle");
+		}
+	}, [key, changeZoom, changeSubtitle, save]);
+	const autoMoments = useRef(false);
+	useEffect(() => {
+		const a = analysisRef.current;
+		if (!key || !hasScript || autoMoments.current || a?.options?.zoom !== true || a.zoomMomentsApplied || a.zoomParts?.length) return;
+		autoMoments.current = true;
+		void findMoments();
+	}, [key, hasScript, findMoments]);
+
 	// Tighter or looser: the server finds the silences again in the words it has (a second or so).
 	const [paceBusy, setPaceBusy] = useState(false);
 	async function changePace(pace: Pace) {
@@ -527,6 +565,7 @@ export default function EditPage() {
 			manual: analysis?.manual ?? [],
 			keep: analysis?.keep ?? [],
 			noZoom: analysis?.noZoom ?? [],
+			zoomParts: analysis?.zoomParts ?? [],
 		});
 		setRender({ status: "processing" });
 		try {
@@ -814,7 +853,10 @@ export default function EditPage() {
 				keep={analysis.keep ?? []}
 				onTimelineChange={changeTimeline}
 				noZoom={analysis.noZoom ?? []}
-				onNoZoomChange={changeNoZoom}
+				zoomParts={analysis.zoomParts ?? []}
+				onZoomChange={changeZoom}
+				moments={moments}
+				onFindMoments={() => void findMoments()}
 				fixes={fixes}
 				onFixesChange={changeFixes}
 				dictionary={dictionary}
