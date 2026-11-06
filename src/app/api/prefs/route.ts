@@ -20,7 +20,7 @@ export async function GET() {
 export async function PUT(request: Request) {
 	const { user } = await currentUser();
 	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
-	const { language } = (await request.json().catch(() => ({}))) as Prefs;
+	const { language } = (((await request.json().catch(() => null)) as Prefs | null) ?? {}) as Prefs;
 	if (language !== null && !isLanguage(language)) return Response.json({ error: "We don't support that language yet" }, { status: 400 });
 	const saved = (await getJson<Prefs>(prefsKey(user.id))) ?? {};
 	await putObject(prefsKey(user.id), JSON.stringify({ ...saved, language, updatedAt: new Date().toISOString() }), "application/json");

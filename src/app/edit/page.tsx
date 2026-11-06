@@ -128,7 +128,7 @@ export default function EditPage() {
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
 	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
 	const [takesFound, setTakesFound] = useState<{ count: number; withoutTakes: number[] } | null>(null);
-	// The AI's bad takes (api/bad-takes). Read by itself unless Bad takes was unticked when uploading; then
+	// The AI's bad takes (api/bad-takes). Read by itself when Bad takes was ticked when uploading; otherwise
 	// only when the creator presses Find bad takes (it costs us, so not for nothing).
 	const [badTakes, setBadTakes] = useState<{ status: "checking" | "done" | "failed"; takes: BadTake[] }>({ status: "checking", takes: [] });
 	const [findTakes, setFindTakes] = useState(false);
@@ -395,7 +395,8 @@ export default function EditPage() {
 
 	// Ask the AI for bad takes once the script is here, one part at a time. It is saved, so it is only paid for once.
 	const hasScript = Boolean(analysis?.words?.length);
-	const readTakes = analysis?.options?.badTakes !== false || findTakes;
+	// Only if ticked when uploading: videos from before the upload window wait for Find bad takes too.
+	const readTakes = analysis?.options?.badTakes === true || findTakes;
 	const takeWords = (take: BadTake) => Array.from({ length: take.to - take.from + 1 }, (_, k) => take.from + k);
 	// Ticked when uploading: cut them once, when the AI has read the whole script. Never again by itself,
 	// so bringing them back sticks.
