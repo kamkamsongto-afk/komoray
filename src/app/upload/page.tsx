@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 import { BetaWelcome } from "@/components/BetaWelcome";
+import { LanguagePicker } from "@/components/LanguagePicker";
 import { PhoneUpload } from "@/components/PhoneUpload";
+import { UploadOptions } from "@/components/UploadOptions";
 import { WaitingForInvite } from "@/components/WaitingForInvite";
 import type { AccessStatus } from "@/lib/access";
-import { browserLanguage, isLanguage, LANGUAGES } from "@/lib/languages";
+import { browserLanguage, isLanguage } from "@/lib/languages";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
+import { DEFAULT_OPTIONS, type UploadOptions as Options } from "@/lib/upload-options";
 
 type Status = "idle" | "uploading" | "done" | "error";
 type Access = AccessStatus & { email: string };
@@ -64,6 +67,38 @@ export default function UploadPage() {
 		try {
 			localStorage.setItem(LANGUAGE_KEY, value);
 		} catch {}
+	};
+	// The default set with the star (api/prefs, the same on every device) wins over the last one picked here.
+	const [defaultLanguage, setDefaultLanguageState] = useState<string | null>(null);
+	useEffect(() => {
+		if (!user) return;
+		void (async () => {
+			const res = await fetch("/api/prefs").catch(() => null);
+			const data = res?.ok ? ((await res.json()) as { language?: string | null }) : null;
+			if (!data?.language) return;
+			setDefaultLanguageState(data.language);
+			setLanguageState(data.language);
+		})();
+	}, [user]);
+	const setDefaultLanguage = (code: string | null) => {
+		setDefaultLanguageState(code);
+		if (code) setLanguage(code);
+		void fetch("/api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: code }) }).catch(() => {});
+	};
+
+	// What to do with the video (components/UploadOptions.tsx). The window opens when a video arrives.
+	const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS);
+	const [showOptions, setShowOptions] = useState(false);
+	const [queued, setQueued] = useState(false); // Start was pressed before the upload finished
+	const queuedRef = useRef(false);
+	// Read when Find silences starts, which can be after the upload that was running when Start was pressed.
+	const choice = useRef({ language, options });
+	useEffect(() => {
+		choice.current = { language, options };
+	});
+	const queue = (on: boolean) => {
+		queuedRef.current = on;
+		setQueued(on);
 	};
 	const [analyzing, setAnalyzing] = useState(false);
 	const [analysisError, setAnalysisError] = useState("");
@@ -126,6 +161,7 @@ export default function UploadPage() {
 		setMessage(file.name);
 		setKey(null);
 		setAnalysisError("");
+		queue(false);
 
 		// Say so now instead of after a long upload. The server checks again before anything is paid for.
 		const tooLong = access && !access.unlimited ? tooLongFor(await minutesIn(file), access) : null;
@@ -134,6 +170,7 @@ export default function UploadPage() {
 			setMessage(tooLong);
 			return;
 		}
+		setShowOptions(true);
 
 		try {
 			// 1) Ask our server for a short-lived upload link.
@@ -153,8 +190,14 @@ export default function UploadPage() {
 			setKey(data.key);
 			// Put the project in the address bar so a refresh (or a bookmark) comes back to it.
 			window.history.replaceState(null, "", `/upload?key=${encodeURIComponent(data.key)}`);
+			if (queuedRef.current) {
+				queue(false);
+				setShowOptions(false);
+				void findSilences(data.key);
+			}
 		} catch (err) {
 			const error = err instanceof Error ? err.message : "Something went wrong";
+			queue(false);
 			setStatus("error");
 			setMessage(error);
 			reportError("upload", error, { filename: file.name, size: file.size });
@@ -168,6 +211,7 @@ export default function UploadPage() {
 		setMessage(filename);
 		setKey(videoKey);
 		window.history.replaceState(null, "", `/upload?key=${encodeURIComponent(videoKey)}`);
+		setShowOptions(true);
 	}, []);
 
 	// start=false: it is already running (e.g. reopened from My projects), just wait for the result.
@@ -180,7 +224,8 @@ export default function UploadPage() {
 				const res = await fetch("/api/analyze", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ key: videoKey, language }),
+					// Listen again keeps the choices made for this video the first time (the server has them).
+					body: JSON.stringify({ key: videoKey, language: choice.current.language, ...(!again && { options: choice.current.options }) }),
 				});
 				const started = (await res.json()) as { error?: string };
 				if (!res.ok) throw new Error(started.error ?? "Analysis failed");
@@ -232,7 +277,28 @@ export default function UploadPage() {
 					</span>
 				)}
 			</p>
-			{access && !access.unlimited && <BetaWelcome access={access} />}
+			{access && !access.unlimited && !showOptions && <BetaWelcome access={access} />}
+			{showOptions && status !== "idle" && (
+				<UploadOptions
+					options={options}
+					onOptionsChange={setOptions}
+					language={language}
+					onLanguageChange={setLanguage}
+					defaultLanguage={defaultLanguage}
+					onSetDefaultLanguage={setDefaultLanguage}
+					upload={{ status: status === "done" ? "done" : status === "error" ? "error" : "uploading", progress, queued }}
+					onStart={() => {
+						if (status === "done" && key) {
+							setShowOptions(false);
+							void findSilences(key);
+						} else queue(true);
+					}}
+					onClose={() => {
+						queue(false);
+						setShowOptions(false);
+					}}
+				/>
+			)}
 
 			<label
 				onDragOver={(e) => {
@@ -288,19 +354,7 @@ export default function UploadPage() {
 				<div className="flex flex-col gap-4 rounded-2xl border border-foreground/15 p-6">
 					<div className="flex flex-wrap items-center gap-3">
 						<span className="text-sm text-foreground/70">Spoken language</span>
-						<select
-							value={language}
-							aria-label="Spoken language"
-							onChange={(e) => setLanguage(e.target.value)}
-							disabled={analyzing}
-							className="rounded-lg border border-foreground/20 bg-background px-3 py-2"
-						>
-							{LANGUAGES.map((l) => (
-								<option key={l.code} value={l.code}>
-									{l.name}
-								</option>
-							))}
-						</select>
+						<LanguagePicker value={language} onChange={setLanguage} defaultCode={defaultLanguage} onSetDefault={setDefaultLanguage} disabled={analyzing} />
 						<button
 							onClick={() => void findSilences()}
 							disabled={analyzing}
@@ -309,6 +363,12 @@ export default function UploadPage() {
 							{analyzing ? "Listening…" : again ? "Listen again" : "Find silences"}
 						</button>
 					</div>
+
+					{!again && !analyzing && (
+						<button type="button" onClick={() => setShowOptions(true)} className="w-fit text-sm text-foreground/60 underline underline-offset-2 hover:text-foreground">
+							Choose what Komoray does
+						</button>
+					)}
 
 					{again && !analyzing && <p className="text-sm text-foreground/70">This writes the script again and starts over: your fixes, cuts and subtitle settings on this video will be replaced.</p>}
 

@@ -45,6 +45,7 @@ export type SubtitleStyle = {
 	zoomPeriod: number; // Smooth: seconds to glide in and back out
 	format: Format;
 	motion: Motion; // lines pop in, words bounce (lib/motion.ts)
+	subtitles: boolean; // false: no subtitles on the video (banners and the logo stay)
 };
 
 export const DEFAULT_STYLE: SubtitleStyle = {
@@ -70,6 +71,7 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	zoomPeriod: 12,
 	format: "9:16",
 	motion: "none",
+	subtitles: true,
 };
 
 export const MAX_LOGO_LENGTH = 30;
@@ -177,5 +179,6 @@ export function readStyle(value: unknown): SubtitleStyle {
 		zoomPeriod: Math.round(pick("zoomPeriod")),
 		format: typeof v.format === "string" && v.format in FORMATS ? (v.format as Format) : DEFAULT_STYLE.format,
 		motion: typeof v.motion === "string" && v.motion in MOTIONS ? (v.motion as Motion) : DEFAULT_STYLE.motion,
+		subtitles: v.subtitles !== false,
 	};
 }

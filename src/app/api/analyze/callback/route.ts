@@ -12,6 +12,7 @@ import {
 } from "@/lib/silences";
 import { mergeThaiWords } from "@/lib/thai-words";
 import { readTranscript } from "@/lib/transcribe";
+import { readOptions } from "@/lib/upload-options";
 
 // Deepgram POSTs the transcript here when it is done. We turn it into edit.json.
 export async function POST(request: Request) {
@@ -27,6 +28,8 @@ export async function POST(request: Request) {
 		const transcript = readTranscript(await request.json());
 		// Trimmed words feed both the cuts and the subtitle timing in edit.json.
 		const words = trimStretchedWords(transcript.words);
+		// What the creator asked for when uploading (none on videos from before): the editor uses it once.
+		const options = readOptions((await getJson<{ options?: unknown }>(siblingKey(key, "analyze.json")).catch(() => null))?.options);
 		const edit = {
 			source: key,
 			duration: transcript.duration,
@@ -36,10 +39,12 @@ export async function POST(request: Request) {
 				wordBaseSeconds: WORD_BASE_SECONDS,
 				wordSecondsPerLetter: WORD_SECONDS_PER_LETTER,
 			},
-			cuts: findSilences({ duration: transcript.duration, words }),
+			// Silences unticked: nothing cut. Pace in the editor finds them if they change their mind.
+			cuts: options?.silences === false ? [] : findSilences({ duration: transcript.duration, words }),
 			// Deepgram's Thai comes in pieces of words; the script works on whole words.
 			words: mergeThaiWords(words),
 			wordsJoined: true,
+			...(options && { options }),
 		};
 		await putObject(siblingKey(key, "edit.json"), JSON.stringify(edit, null, 2), "application/json");
 	} catch (err) {
