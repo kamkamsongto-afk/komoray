@@ -196,7 +196,9 @@ export function Timeline({
 	}, [banners]);
 	const laneRows = lane.length ? Math.max(...lane.map((l) => l.row)) + 1 : 0;
 	const laneHeight = laneRows * LANE_ROW + (laneRows ? 2 : 0);
-	const startBannerDrag = (e: PointerEvent<HTMLElement>, b: Banner, resize: boolean) => {
+	// The banner clicked on the timeline: highlighted, and Delete removes it (coach, 6 Nov: no trip back to the box's ×).
+	const [pickedBanner, setPickedBanner] = useState<string | null>(null);
+	const startBannerDrag = (e: PointerEvent<HTMLElement>, b: Banner, resize: false | "start" | "end") => {
 		e.stopPropagation();
 		e.preventDefault();
 		const outAt = (clientX: number) => toOutSeconds(timeAt(xAt(clientX)), segments);
@@ -209,13 +211,20 @@ export function Timeline({
 			if (!moved && Math.abs(ev.clientX - startX) < DRAG_PX) return;
 			moved = true;
 			const at = outAt(ev.clientX);
-			const patch = resize ? { end: tenths(Math.min(total, Math.max(b.start + 0.3, at))) } : { start: tenths(Math.min(total - seconds, Math.max(0, at - grab))), end: tenths(Math.min(total - seconds, Math.max(0, at - grab)) + seconds) };
+			const patch =
+				resize === "end"
+					? { end: tenths(Math.min(total, Math.max(b.start + 0.3, at))) }
+					: resize === "start"
+						? { start: tenths(Math.max(0, Math.min(b.end - 0.3, at))) }
+						: { start: tenths(Math.min(total - seconds, Math.max(0, at - grab))), end: tenths(Math.min(total - seconds, Math.max(0, at - grab)) + seconds) };
 			onBannersChange(banners.map((x) => (x.id === b.id ? { ...x, ...patch } : x)));
 		};
 		const stop = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", stop);
 			window.removeEventListener("pointercancel", stop);
+			setPickedBanner(b.id);
+			setSelection(null);
 			if (moved) return;
 			onOpenBanners(b.id);
 			onSeek(toSource(b.start));
@@ -475,6 +484,7 @@ export function Timeline({
 		} catch {
 			// the pointer is already gone: the press still works while it stays over the timeline
 		}
+		setPickedBanner(null);
 		const x = xAt(e.clientX);
 		const y = e.clientY - el.getBoundingClientRect().top;
 		const onRuler = y < RULER + 2;
@@ -562,6 +572,22 @@ export function Timeline({
 		onKeep(selection.start, selection.end);
 		setSelection(null);
 	};
+
+	// Delete / Backspace removes the picked banner, Esc lets it go.
+	useEffect(() => {
+		if (!pickedBanner) return;
+		const onKey = (e: KeyboardEvent) => {
+			if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return;
+			if (e.key === "Escape") setPickedBanner(null);
+			else if ((e.key === "Delete" || e.key === "Backspace") && window.getSelection()?.isCollapsed !== false) {
+				e.preventDefault();
+				onBannersChange(banners.filter((x) => x.id !== pickedBanner));
+				setPickedBanner(null);
+			}
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [pickedBanner, banners, onBannersChange]);
 
 	// Delete / Backspace cuts the picked stretch, Esc lets it go (not while typing or with script words highlighted).
 	useEffect(() => {
@@ -810,16 +836,36 @@ export function Timeline({
 					{lane.map(({ banner: b, row }) => {
 						const x0 = xOf(toSource(b.start));
 						const x1 = Math.max(x0 + 24, xOf(toSource(b.end)));
+						const picked = pickedBanner === b.id;
 						return (
-							<div key={b.id} className="absolute z-[1] flex" style={{ left: x0, width: x1 - x0 - 1, top: HEIGHT + row * LANE_ROW, height: LANE_ROW - 2 }}>
+							<div
+								key={b.id}
+								className={`absolute z-[1] flex rounded ${picked ? "ring-2 ring-fuchsia-600 ring-offset-1 ring-offset-background" : ""}`}
+								style={{ left: x0, width: x1 - x0 - 1, top: HEIGHT + row * LANE_ROW, height: LANE_ROW - 2 }}
+							>
+								<button onPointerDown={(e) => startBannerDrag(e, b, "start")} aria-label={`When ${b.text} starts`} title="Drag to change when it starts" className="w-1.5 shrink-0 cursor-ew-resize touch-none rounded-l bg-fuchsia-500/70" />
 								<button
 									onPointerDown={(e) => startBannerDrag(e, b, false)}
-									title={`${b.text}: drag to change when it shows, click to edit`}
-									className="min-w-0 flex-1 cursor-grab touch-none truncate rounded-l bg-fuchsia-500/30 px-1.5 text-left text-[11px] leading-[18px] text-foreground hover:bg-fuchsia-500/45"
+									title={`${b.text}: drag to change when it shows, click to pick it (Delete removes it)`}
+									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-[11px] leading-[18px] text-foreground ${picked ? "bg-fuchsia-500/55" : "bg-fuchsia-500/30 hover:bg-fuchsia-500/45"}`}
 								>
 									{b.text}
 								</button>
-								<button onPointerDown={(e) => startBannerDrag(e, b, true)} aria-label={`How long ${b.text} shows`} title="Drag to change how long it shows" className="w-2 shrink-0 cursor-ew-resize touch-none rounded-r bg-fuchsia-500/70" />
+								{picked && (
+									<button
+										onPointerDown={(e) => e.stopPropagation()}
+										onClick={() => {
+											onBannersChange(banners.filter((x) => x.id !== b.id));
+											setPickedBanner(null);
+										}}
+										aria-label={`Remove ${b.text}`}
+										title="Remove this banner (Delete)"
+										className="flex w-4 shrink-0 items-center justify-center bg-red-600 text-white hover:bg-red-700"
+									>
+										<X className="h-2.5 w-2.5" aria-hidden />
+									</button>
+								)}
+								<button onPointerDown={(e) => startBannerDrag(e, b, "end")} aria-label={`How long ${b.text} shows`} title="Drag to change how long it shows" className="w-2 shrink-0 cursor-ew-resize touch-none rounded-r bg-fuchsia-500/70" />
 							</div>
 						);
 					})}

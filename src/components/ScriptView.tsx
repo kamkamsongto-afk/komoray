@@ -606,6 +606,52 @@ export function ScriptView({
 		window.addEventListener("pointercancel", stop);
 	}
 
+	// The settings box closes with a click anywhere outside it (coach, 6 Nov: the X was too small to aim for),
+	// or Esc. Not on the video or the timeline: settings are changed while watching the video, and the zoom
+	// strip and banners on the timeline belong to the open box.
+	const panelRef = useRef<HTMLDivElement>(null);
+	const tabsRef = useRef<HTMLDivElement>(null);
+	const playerAreaRef = useRef<HTMLDivElement>(null);
+	const timelineRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (!panel) return;
+		const onDown = (e: PointerEvent) => {
+			const target = e.target as Node | null;
+			if (!target || !document.contains(target)) return; // something that went away as it was clicked
+			if ([panelRef, tabsRef, playerAreaRef, timelineRef].some((r) => r.current?.contains(target))) return;
+			setPanel(null);
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key !== "Escape" || (e.target as HTMLElement | null)?.closest("input, textarea, select")) return;
+			setPanel(null);
+		};
+		document.addEventListener("pointerdown", onDown);
+		document.addEventListener("keydown", onKey);
+		return () => {
+			document.removeEventListener("pointerdown", onDown);
+			document.removeEventListener("keydown", onKey);
+		};
+	}, [panel]);
+
+	// How tall the settings box is once dragged by its corner, while this video is open; null: as tall as it needs, up to a limit.
+	const [panelHeight, setPanelHeight] = useState<number | null>(null);
+	const resizePanel = (height: number | null) => setPanelHeight(height === null ? null : Math.round(Math.min(window.innerHeight - 32, Math.max(160, height))));
+	function startPanelResize(e: ReactPointerEvent<HTMLElement>) {
+		e.preventDefault();
+		const box = panelRef.current;
+		if (!box) return;
+		const from = { y: e.clientY, height: box.getBoundingClientRect().height };
+		const move = (ev: PointerEvent) => resizePanel(from.height + ev.clientY - from.y);
+		const stop = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", stop);
+			window.removeEventListener("pointercancel", stop);
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", stop);
+		window.addEventListener("pointercancel", stop);
+	}
+
 	return (
 		<div className="flex flex-col gap-4">
 			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_12px_var(--preview-w)] lg:items-start lg:gap-x-1" style={{ "--preview-w": `${previewWidth}px` } as CSSProperties}>
@@ -614,7 +660,7 @@ export function ScriptView({
 					className="flex flex-col gap-3 [--player-h:42vh] lg:sticky lg:top-4 lg:z-30 lg:order-3 lg:[--player-h:max(15rem,calc(100vh-14rem))]"
 				>
 					<div className="flex flex-col gap-2 lg:flex-row lg:items-start">
-					<div className="min-w-0 flex-1">
+					<div ref={playerAreaRef} className="min-w-0 flex-1">
 					{mode === "preview" && deciding ? (
 						<div
 							className="mx-auto w-full rounded-lg bg-black"
@@ -656,6 +702,13 @@ export function ScriptView({
 							noZoom={noZoom}
 						/>
 					) : (
+						<>
+						<div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-blue-600/10 px-3 py-1.5 text-xs">
+							<span>The original video, before any cuts. Your edits are safe.</span>
+							<button onClick={() => setMode("preview")} className="shrink-0 rounded-md bg-blue-600 px-2 py-1 font-medium text-white hover:bg-blue-700">
+								Back to editing
+							</button>
+						</div>
 						<video
 							ref={videoRef}
 							src={videoUrl}
@@ -671,10 +724,11 @@ export function ScriptView({
 							}}
 							className="max-h-[65vh] w-full rounded-lg bg-black"
 						/>
+						</>
 					)}
 					</div>
 					{/* Beside the video on big screens, so the tools never take height from it. */}
-					<div className="flex shrink-0 flex-wrap justify-center gap-1 lg:flex-col" role="tablist" aria-label="Settings">
+					<div ref={tabsRef} className="flex shrink-0 flex-wrap justify-center gap-1 lg:flex-col" role="tablist" aria-label="Settings">
 						{mode === "preview" &&
 							PANELS.map((p) => (
 								<button
@@ -694,22 +748,28 @@ export function ScriptView({
 						<button
 							onClick={() => setMode(mode === "preview" ? "original" : "preview")}
 							aria-pressed={mode === "original"}
-							title={mode === "preview" ? "See the original video, before any cuts" : "Back to the final video"}
+							title={mode === "preview" ? "See the original video, before any cuts" : "Back to the edited video: nothing was lost"}
 							className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-3 ${
-								mode === "original" ? "bg-foreground text-background" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+								mode === "original" ? "bg-blue-600 text-white hover:bg-blue-700" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
 							}`}
 						>
-							<Film className="h-[18px] w-[18px]" aria-hidden />
-							Original
+							{/* In the Original, the same button says how to get back, so it doesn't look like the edits are gone (coach, 6 Nov). */}
+							{mode === "original" ? <Undo2 className="h-[18px] w-[18px]" aria-hidden /> : <Film className="h-[18px] w-[18px]" aria-hidden />}
+							{mode === "original" ? "Back to editing" : "Original"}
 						</button>
 					</div>
 					</div>
 					{/* Floats over the script on big screens: the video keeps its size while you watch the change. */}
 					{mode === "preview" && panel && (
-						<div className="flex flex-col gap-2 surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:max-h-[calc(100vh-26rem)] lg:w-[26rem] lg:overflow-y-auto">
+						<div
+							ref={panelRef}
+							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] ${panelHeight ? "" : "lg:max-h-[calc(100vh-26rem)]"}`}
+							style={panelHeight ? ({ "--panel-h": `${panelHeight}px` } as CSSProperties) : undefined}
+						>
+						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${panelHeight ? "lg:h-[min(var(--panel-h),calc(100vh-2rem))]" : "lg:flex-1"}`}>
 							<div className="flex items-center justify-between px-3 pt-2 text-sm font-medium">
 								{PANELS.find((p) => p.id === panel)?.name}
-								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
+								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close (Esc, or click outside)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
 									<X className="h-4 w-4" aria-hidden />
 								</button>
 							</div>
@@ -753,8 +813,24 @@ export function ScriptView({
 							total={totalFrames(segments) / FPS}
 							brand={subtitle.color}
 							focus={focusBanner}
+							format={subtitle.format}
 						/>
 					)}
+						</div>
+						{/* Drag the corner to make the box taller, instead of scrolling inside it (coach, 6 Nov). */}
+						<div
+							role="separator"
+							aria-orientation="horizontal"
+							aria-label="Drag to make the settings taller or shorter"
+							title="Drag to make this box taller or shorter (double-click: back to normal)"
+							onPointerDown={startPanelResize}
+							onDoubleClick={() => resizePanel(null)}
+							className="absolute right-0 bottom-0 hidden h-4 w-4 cursor-nwse-resize touch-none items-end justify-end p-0.5 text-foreground/40 hover:text-foreground lg:flex"
+						>
+							<svg viewBox="0 0 10 10" className="h-2.5 w-2.5" aria-hidden>
+								<path d="M9 1 1 9M9 5 5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+							</svg>
+						</div>
 						</div>
 					)}
 				</div>
@@ -959,7 +1035,7 @@ export function ScriptView({
 						})}
 					</div>
 			{/* Pinned to the bottom of the screen on big screens, like a video editor's timeline. */}
-			<div className="sticky bottom-0 z-20 lg:bottom-2">
+			<div ref={timelineRef} className="sticky bottom-0 z-20 lg:bottom-2">
 				<Timeline
 					duration={duration}
 					words={words}

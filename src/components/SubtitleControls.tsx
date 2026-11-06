@@ -115,20 +115,37 @@ export function SubtitleControls({ style, onChange, thai, footer, section }: Pro
 
 	return (
 		<div className={`flex flex-col gap-2 p-3 ${section ? "" : "rounded-lg border border-foreground/15"}`}>
-			{on("shape") && <label className="flex items-center gap-3 text-sm text-foreground/70">
-				<span className="w-24 shrink-0">Video shape</span>
-				<select
-					value={style.format}
-					onChange={(e) => onChange({ ...style, format: e.target.value as Format, position: FORMATS[e.target.value as Format].position })}
-					className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
-				>
-					{(Object.keys(FORMATS) as Format[]).map((f) => (
-						<option key={f} value={f}>
-							{FORMATS[f].name}
-						</option>
-					))}
-				</select>
-			</label>}
+			{on("shape") && <div className="flex items-start gap-3 text-sm text-foreground/70">
+				<span className="w-24 shrink-0 pt-2">Video shape</span>
+				{/* A picture of each shape instead of a list (coach, 6 Nov): what it is for shows on hover. */}
+				<div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Video shape">
+					{(Object.keys(FORMATS) as Format[]).map((f) => {
+						const { width, height } = FORMATS[f];
+						const big = 34; // px, the longer side of the little picture
+						return (
+							<button
+								key={f}
+								type="button"
+								role="radio"
+								aria-checked={style.format === f}
+								title={`Best for ${FORMATS[f].for}`}
+								onClick={() => onChange({ ...style, format: f, position: FORMATS[f].position })}
+								className={`flex w-16 flex-col items-center gap-1 rounded-lg border px-1 pt-2 pb-1 ${
+									style.format === f ? "border-blue-600 bg-blue-600/10 text-foreground" : "border-foreground/20 hover:bg-foreground/5"
+								}`}
+							>
+								<span className="flex h-9 items-center justify-center">
+									<span
+										className={`block rounded-[3px] border-2 ${style.format === f ? "border-blue-600" : "border-current"}`}
+										style={{ width: (big * width) / Math.max(width, height), height: (big * height) / Math.max(width, height) }}
+									/>
+								</span>
+								<span className="text-xs font-medium tabular-nums">{f}</span>
+							</button>
+						);
+					})}
+				</div>
+			</div>}
 			{on("text") && <>
 			{!section && <p className="text-sm font-medium">Subtitles</p>}
 			<label className="flex items-center gap-2 text-sm">
