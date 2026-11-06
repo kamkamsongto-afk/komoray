@@ -73,12 +73,17 @@ export async function askForMoments(words: Word[], done: number, apiKey: string)
 const LEAD = 0.15; // seconds: a moment's zoom starts just before its first word
 const TAIL = 0.35; // and lasts a little after its last one
 const MIN_SECONDS = 1.2; // shorter than this, a zoom looks like a glitch
+// Seconds of no zoom between two moments. Asked for 8, but a 45 second test script still got 6 moments,
+// two of them 2 to 4 seconds after the one before: too busy, the thing the coach wanted gone.
+const MIN_GAP = 5;
 
 // The moments as zoom parts of the source video.
 export function momentParts(words: Word[], moments: Moment[], duration: number): ZoomPart[] {
 	const parts: ZoomPart[] = [];
 	for (const m of moments) {
-		const start = Math.max(0, words[m.from].start - LEAD, parts.length ? parts[parts.length - 1].end : 0);
+		const before = parts[parts.length - 1];
+		if (before && words[m.from].start - LEAD < before.end + MIN_GAP) continue;
+		const start = Math.max(0, words[m.from].start - LEAD);
 		const end = Math.min(duration, Math.max(words[m.to].end + TAIL, start + MIN_SECONDS));
 		if (end > start) parts.push({ start: Math.round(start * 1000) / 1000, end: Math.round(end * 1000) / 1000, zoom: m.zoom });
 	}

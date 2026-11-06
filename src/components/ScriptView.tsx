@@ -799,7 +799,7 @@ export function ScriptView({
 											<button
 												onClick={onFindMoments}
 												disabled={moments === "finding"}
-												title="The AI reads the script and zooms only where it adds something: a punchline, a key point, a strong feeling"
+												title={zoomParts.length ? "Puts back the zoom parts the AI picked, in place of these" : "The AI reads the script and zooms only where it adds something: a punchline, a key point, a strong feeling"}
 												className="inline-flex items-center gap-1 rounded-md bg-purple-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-60"
 											>
 												<Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
