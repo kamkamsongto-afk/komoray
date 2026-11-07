@@ -4,7 +4,7 @@
 // (written straight into the code at build time, so the browser gets the right one too).
 export const IS_STAGING = process.env.NEXT_PUBLIC_KOMORAY_STAGE === "staging";
 const LIVE = { url: "https://icjjeinussbapihdjiym.supabase.co", key: "sb_publishable_d0jo4S-cv0_bEhHjXLsnyg_ZiwSlCLo" };
-const STAGING = { url: "STAGING_SUPABASE_URL", key: "STAGING_SUPABASE_KEY" };
+const STAGING = { url: "https://msiosdpbqfkvglixvpnq.supabase.co", key: "sb_publishable_lvUTGorBWaOZtsySUn1b6Q_yQ314iBE" };
 export const SUPABASE_URL = IS_STAGING ? STAGING.url : LIVE.url;
 export const SUPABASE_PUBLISHABLE_KEY = IS_STAGING ? STAGING.key : LIVE.key;
 

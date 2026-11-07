@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process";
 
 const env = { ...process.env, NEXT_PUBLIC_KOMORAY_STAGE: "staging" };
-for (const args of [["opennextjs-cloudflare", "build"], ["opennextjs-cloudflare", "deploy", "--env", "staging"]]) {
-	const run = spawnSync("npx", args, { env, stdio: "inherit", shell: process.platform === "win32" });
+for (const command of ["npx opennextjs-cloudflare build", "npx opennextjs-cloudflare deploy --env staging"]) {
+	const run = spawnSync(command, { env, stdio: "inherit", shell: true });
 	if (run.status !== 0) process.exit(run.status ?? 1);
 }
