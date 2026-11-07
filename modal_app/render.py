@@ -242,6 +242,175 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
     return events
 
 
+# ---- Cutout layers (src/lib/behind.ts): text behind the speaker, pictures and clips behind a smaller speaker.
+# The motion is worked out frame by frame with the same formulas as behindMotion, so the final video
+# matches the preview exactly. The speaker's matte comes from modal_app/cutout.py (matte.mp4).
+BEHIND = {"fade": 0.25}
+RUN_SPEED = {"slow": 150, "normal": 300, "fast": 600}
+ARRIVE_TIME = {"slow": 1.6, "normal": 1, "fast": 0.6}
+RUN_GAP = "   •   "
+INSERT_FADE = 0.25
+INSERT_EDGE_FADE = 0.12  # a smaller speaker fades out at the left and right (INSERT.edgeFade in behind.ts)
+
+
+def run_repeats(t: dict, width: int) -> int:
+    """How many times running text repeats its words (runRepeats in behind.ts)."""
+    reach = width + RUN_SPEED.get(t.get("speed"), 300) * (float(t["end"]) - float(t["start"]))
+    each = 0.4 * float(t["size"]) * len(str(t["text"]) + RUN_GAP)
+    return min(40, math.ceil(reach / max(1, each)) + 1)
+
+
+def _smooth(p: float) -> float:
+    q = min(1.0, max(0.0, p))
+    return q * q * (3 - 2 * q)
+
+
+def behind_motion(b: dict, t: float, width: int, height: int) -> list[dict]:
+    """Where a text is at final-video second t (behindMotion in behind.ts): opacity, x, y, sx, sy, align."""
+    start, end = float(b["start"]), float(b["end"])
+    if t < start or t >= end:
+        return []
+    s = t - start
+    k = ARRIVE_TIME.get(b.get("speed"), 1)
+    out = min(1.0, (end - t) / BEHIND["fade"])
+    y = float(b["y"]) * height
+    size = float(b["size"])
+
+    def pose(opacity, py=y, sx=1.0, sy=None, x=width / 2, align="center"):
+        return {"opacity": opacity * out, "x": x, "y": py, "sx": sx, "sy": sx if sy is None else sy, "align": align}
+
+    fx = b.get("fx")
+    if fx == "pulse":
+        q = s % 0.9
+        beat = 0.09 * math.exp(-(((q - 0.05) / 0.05) ** 2)) + 0.05 * math.exp(-(((q - 0.25) / 0.05) ** 2))
+        return [pose(min(1.0, s / 0.2), y, 1 + beat)]
+    if fx == "burst":
+        span = 0.45 * k
+        p = min(s / span, 1.0)
+        scale = 0.25 + 0.75 * (1 + 2.9 * (p - 1) ** 3 + 1.9 * (p - 1) ** 2)
+        py = y + 0.12 * height * (1 - _smooth(s / (0.3 * k)))
+        poses = [pose(min(1.0, s / 0.08), py, scale)]
+        fade = max(0.0, 1 - s / span)
+        if fade > 0:
+            poses += [pose(0.35 * fade, py, scale * (1 + 0.18 * (1 - fade))), pose(0.15 * fade, py, scale * (1 + 0.4 * (1 - fade)))]
+        return poses
+    if fx == "drop":
+        fall = 0.32 * k
+        if s < fall:
+            return [pose(1, -size + (y + size) * (s / fall) ** 2)]
+        q = s - fall
+        squash = math.exp(-q / 0.07) * math.cos(q * 45)
+        return [pose(1, y + 20 * squash, 1 + 0.12 * squash, 1 - 0.18 * squash)]
+    if fx == "runLeft":
+        return [pose(min(1.0, s / 0.3), y, 1, 1, 0.1 * width - RUN_SPEED.get(b.get("speed"), 300) * s, "left")]
+    if fx == "runRight":
+        return [pose(min(1.0, s / 0.3), y, 1, 1, 0.9 * width + RUN_SPEED.get(b.get("speed"), 300) * s, "right")]
+    p = _smooth(s / (0.8 * k))  # fade
+    return [pose(p, y + 40 * (1 - p))]
+
+
+def build_behind(texts: list[dict], shape: str = "9:16") -> str:
+    """The text behind the speaker as subtitles, one line per text per frame (the motion is worked out here,
+    see behind_motion). Each text was checked by the app (readCutout in behind.ts)."""
+    width, height = FORMATS.get(shape, (WIDTH, HEIGHT))
+    events = []
+    for b in texts:
+        text = ass_text(str(b.get("text", ""))).strip()
+        if not text:
+            continue
+        if b.get("fx") in ("runLeft", "runRight"):
+            text = RUN_GAP.join([text] * run_repeats(b, width))
+        font = FONTS.get(b.get("font"), FONTS["kanit"])
+        stroke = int(b.get("stroke") or 0)
+        look = f"\\fn{font}\\fs{int(b['size'])}\\1c{ass_colour(b.get('color', '#FFFFFF'))}\\3c{ass_colour(b.get('strokeColor', '#000000'))}\\bord{stroke}\\shad2\\4c&H000000&"
+        for f in range(math.ceil(float(b["start"]) * FPS), math.ceil(float(b["end"]) * FPS)):
+            for pose in behind_motion(b, f / FPS, width, height):
+                if pose["opacity"] <= 0.004:
+                    continue
+                an = {"center": 5, "left": 4, "right": 6}[pose["align"]]
+                # The soft shadow under the letters, as in the preview (roundOutline in PlayerFrame): 40% black.
+                tags = (
+                    f"\\an{an}\\pos({pose['x']:.1f},{pose['y']:.1f})\\fscx{pose['sx'] * 100:.2f}\\fscy{pose['sy'] * 100:.2f}"
+                    f"\\alpha{alpha_of(pose['opacity'])}\\4a{alpha_of(0.4 * pose['opacity'])}"
+                )
+                events.append(f"Dialogue: 0,{ass_time(f / FPS)},{ass_time((f + 1) / FPS)},Behind,,0,0,0,,{{{look}{tags}}}{text}")
+    return "\n".join(
+        [
+            "[Script Info]",
+            "ScriptType: v4.00+",
+            f"PlayResX: {width}",
+            f"PlayResY: {height}",
+            "WrapStyle: 2",
+            "",
+            "[V4+ Styles]",
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+            "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
+            "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+            f"Style: Behind,{FONTS['kanit']},200,&H00FFFFFF,&H00FFFFFF,&H00000000,&H66000000,0,0,0,0,100,100,0,0,1,0,2,5,0,0,0,1",
+            "",
+            "[Events]",
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+            *events,
+            "",
+        ]
+    )
+
+
+def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: dict, inputs: dict) -> str:
+    """Puts the cutout layers on the joined video `base`, in the preview's order (PlayerFrame): text behind
+    the speaker, then each picture or clip fading in over the whole picture, then the speaker cut out
+    (matte from cutout.py, already cut and framed like the picture as [cm]): full size outside the
+    pictures, smaller in front of one (or hidden). Returns the new label."""
+    W, H = size
+    inserts = cutout.get("inserts") or []
+    person = "matte" in inputs
+    smalls = [i for i in inserts if not i.get("hidden")] if person else []
+    if person:
+        parts.append(f"{base}split=2[cbg][cpic]")
+        base = "[cbg]"
+    if cutout.get("behind"):
+        parts.append(f"{base}ass={cutout['behind']}:shaping=complex{f':fontsdir={cutout['fontsdir']}' if cutout.get('fontsdir') else ''}[cbt]")
+        base = "[cbt]"
+    for j, ins in enumerate(inserts):
+        a, b = float(ins["start"]), float(ins["end"])
+        d = b - a
+        hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if ins.get("kind") == "video" else ""
+        parts.append(
+            f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
+            f"format=yuva420p,fade=t=in:st=0:d={INSERT_FADE}:alpha=1,fade=t=out:st={max(0.0, d - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1,"
+            f"setpts=PTS-STARTPTS+{a:.3f}/TB[ins{j}]"
+        )
+        parts.append(f"{base}[ins{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[cbi{j}]")
+        base = f"[cbi{j}]"
+    if not person:
+        return base
+    parts.append(f"[cpic][cm]alphamerge,split={1 + len(smalls)}[cper]{''.join(f'[cps{j}]' for j in range(len(smalls)))}")
+    if smalls:
+        # The fade at a smaller speaker's sides: a still left-to-right ramp (made once, then repeated),
+        # multiplied into each one's see-through. Same as the mask in PlayerFrame.
+        parts.append(
+            f"color=c=black:s={W}x{H}:r={FPS}:d=1,format=gray,geq=lum='255*min(1,min(X+0.5,W-X-0.5)/({INSERT_EDGE_FADE}*W))',"
+            f"loop=loop=-1:size=1:start=0,split={len(smalls)}{''.join(f'[cg{j}]' for j in range(len(smalls)))}"
+        )
+    away = "+".join(f"between(t,{float(i['start']):.3f},{float(i['end']):.3f})" for i in inserts) or "0"
+    parts.append(f"{base}[cper]overlay=enable='not({away})'[cfull]")
+    base = "[cfull]"
+    for j, ins in enumerate(smalls):
+        a, b, k = float(ins["start"]), float(ins["end"]), float(ins["speakerScale"])
+        w = max(2, round(W * k / 2) * 2)
+        x = float(ins["speakerX"]) * W - w / 2
+        parts.append(f"[cps{j}]split[cpa{j}][cpb{j}]")
+        parts.append(f"[cpa{j}]alphaextract[cpe{j}]")
+        parts.append(f"[cpe{j}][cg{j}]blend=all_mode=multiply:shortest=1[cpf{j}]")
+        parts.append(
+            f"[cpb{j}][cpf{j}]alphamerge,scale={w}:-2,format=yuva420p,fade=t=in:st={a:.3f}:d={INSERT_FADE}:alpha=1,"
+            f"fade=t=out:st={max(a, b - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1[csm{j}]"
+        )
+        parts.append(f"{base}[csm{j}]overlay=x={x:.1f}:y=main_h-overlay_h:enable='between(t,{a:.3f},{b:.3f})'[cs{j}]")
+        base = f"[cs{j}]"
+    return base
+
+
 def ass_colour(hex_colour: str) -> str:
     """#RRGGBB to an ASS colour (&H00BBGGRR&)."""
     h = hex_colour.lstrip("#") if re.fullmatch(r"#[0-9a-fA-F]{6}", hex_colour or "") else "FFE600"
@@ -894,9 +1063,11 @@ def ffmpeg_command(
     zoom_amount: float = ZOOM,
     zoom_period: float = SMOOTH_PERIOD,
     zoom_parts: list[dict] | None = None,
+    cutout: dict | None = None,
 ) -> list[str]:
     """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles.
-    no_zoom: parts with Auto zoom turned off (source seconds). zoom_parts: parts with their own kind of zoom."""
+    no_zoom: parts with Auto zoom turned off (source seconds). zoom_parts: parts with their own kind of zoom.
+    cutout: {"behind": subtitles file, "matte": path, "inserts": [{"path", "kind", "start", ...}]} (cutout_filters)."""
     aspect = display_aspect(src)
     # The pieces in whole frames of the final video, as the preview has them (StudioPlayer): each piece's
     # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
@@ -905,6 +1076,14 @@ def ffmpeg_command(
     ramps = zoom_ramps(pieces, zoom_period)
     runs = zoom_part_frames(pieces, zoom_parts)
     parts, video_labels, audio_labels = [], [], []
+    inputs: dict = {}
+    extra = 1 + (1 if logo else 0)
+    if cutout and cutout.get("matte"):
+        inputs["matte"] = extra
+        extra += 1
+    if cutout:
+        inputs["inserts"] = list(range(extra, extra + len(cutout.get("inserts") or [])))
+    matte_labels = []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
     for k, (i, out_frame, trim, frames, level, run) in enumerate(zoom_shots(pieces, off, zoom, zoom_amount, runs)):
@@ -925,6 +1104,14 @@ def ffmpeg_command(
             f"{framing},setsar=1[v{k}]"
         )
         video_labels.append(f"[v{k}]")
+        if "matte" in inputs:
+            # The speaker's matte (30 fps from 0, like the source) cut and framed exactly like the picture.
+            parts.append(
+                f"[{inputs['matte']}:v]format=yuv420p,trim=start={a:.6f}:end={b:.6f},setpts=PTS-STARTPTS,fps={FPS},"
+                f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={frames},setpts=PTS-STARTPTS,"
+                f"{framing},setsar=1[m{k}]"
+            )
+            matte_labels.append(f"[m{k}]")
     if audio:
         for i, (_, trim, frames) in enumerate(pieces):
             a, b, length = trim / FPS, (trim + frames) / FPS, frames / FPS
@@ -937,6 +1124,10 @@ def ffmpeg_command(
         parts.append(f"{''.join(audio_labels)}concat=n={len(audio_labels)}:v=0:a=1[ca]")
     parts.append(f"{''.join(video_labels)}concat=n={len(video_labels)}:v=1:a=0[cv]")
     base = "[cv]"
+    if matte_labels:
+        parts.append(f"{''.join(matte_labels)}concat=n={len(matte_labels)}:v=1:a=0[cm]")
+    if cutout:
+        base = cutout_filters(parts, base, size, cutout, inputs)
     if logo:
         # Same place as the preview (PlayerFrame): LOGO side / top px from its corner, size px wide.
         side, edge = LOGO["side"], LOGO["top"]
@@ -944,7 +1135,7 @@ def ffmpeg_command(
         y = f"main_h-overlay_h-{edge}" if str(logo["at"]).startswith("bottom") else str(edge)
         opacity = min(1.0, max(0.2, float(logo["opacity"])))
         parts.append(f"[1:v]scale={int(logo['size'])}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[lg]")
-        parts.append(f"[cv][lg]overlay={x}:{y}:format=auto[cl]")
+        parts.append(f"{base}[lg]overlay={x}:{y}:format=auto[cl]")
         base = "[cl]"
     parts.append(
         f"{base}fps={FPS},"
@@ -955,6 +1146,12 @@ def ffmpeg_command(
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
     if logo:
         cmd += ["-i", str(logo["path"])]
+    if cutout:
+        if cutout.get("matte"):
+            cmd += ["-i", str(cutout["matte"])]
+        for ins in cutout.get("inserts") or []:
+            # A picture is one frame: repeated for as long as it shows (trimmed in cutout_filters).
+            cmd += (["-loop", "1", "-framerate", str(FPS)] if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         cmd += ["-map", "[ca]", "-c:a", "aac", "-b:a", "160k"]
@@ -995,6 +1192,25 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 style["_ownFontPath"] = str(workdir / "fonts" / "own.ttf")
             subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners")), encoding="utf-8")
 
+            # Cutout layers (behind.ts): sent by the app with links to the matte and each picture or clip.
+            cutout = None
+            layers = edit.get("cutout") or {}
+            if layers.get("texts") or layers.get("inserts"):
+                cutout = {"fontsdir": fonts_dir, "inserts": []}
+                if layers.get("texts"):
+                    (workdir / "behind.ass").write_text(build_behind(layers["texts"], style.get("format", "9:16")), encoding="utf-8")
+                    cutout["behind"] = "behind.ass"
+                if layers.get("matteUrl"):
+                    urllib.request.urlretrieve(layers["matteUrl"], workdir / "matte.mp4")
+                    cutout["matte"] = workdir / "matte.mp4"
+                for n, ins in enumerate(layers.get("inserts") or []):
+                    link = (layers.get("files") or {}).get(ins.get("file"))
+                    if not link:
+                        continue
+                    path = workdir / f"insert-{n}"
+                    urllib.request.urlretrieve(link, path)
+                    cutout["inserts"].append({**ins, "path": path})
+
             # The user's logo picture, if this look shows it.
             logo = None
             if style.get("logoUrl"):
@@ -1018,6 +1234,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     float(style.get("zoomAmount") or ZOOM),
                     float(style.get("zoomPeriod") or SMOOTH_PERIOD),
                     edit.get("zoomParts"),
+                    cutout,
                 ),
                 cwd=workdir,
                 capture_output=True,

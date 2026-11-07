@@ -1,9 +1,11 @@
 "use client";
 
-import { Crop, Film, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { Crop, Film, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
+import type { CutoutLayers } from "@/lib/behind";
+import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, groupTakes, type TakeGroup } from "@/lib/takes";
@@ -14,6 +16,7 @@ import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
 import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { type ControlSection, SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
+import { CutoutControls } from "./CutoutControls";
 import { Timeline } from "./Timeline";
 import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
 
@@ -173,6 +176,10 @@ type Props = {
 	onSubtitleChange: (style: SubtitleStyle) => void;
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void;
+	// Cutout (lib/behind.ts): text behind the speaker, pictures and clips behind a smaller speaker.
+	cutoutLayers: CutoutLayers;
+	onCutoutChange: (layers: CutoutLayers) => void;
+	cutout: ReturnType<typeof useCutout>;
 	faces: Faces | null; // where the speaker's face is, for cropping and Auto zoom
 	// Repeated takes are looked for once, when the video is first opened. withoutTakes: the deleted words if the earlier tries were cut.
 	takesApplied?: boolean;
@@ -183,11 +190,12 @@ type Props = {
 
 // What can be opened under the video. Nothing is open at first: the editor stays calm, and every
 // setting is a click away (here, or by clicking its part of the timeline).
-type Panel = ControlSection | "banners";
+type Panel = ControlSection | "banners" | "cutout";
 const PANELS: { id: Panel; icon: LucideIcon; name: string }[] = [
 	{ id: "text", icon: Type, name: "Subtitles" },
 	{ id: "zoom", icon: ZoomIn, name: "Zoom" },
 	{ id: "banners", icon: Tag, name: "Banners" },
+	{ id: "cutout", icon: Layers, name: "Cutout" }, // only for people with Cutout on (/admin)
 	{ id: "shape", icon: Crop, name: "Shape" },
 	{ id: "brand", icon: Palette, name: "Brand" },
 ];
@@ -221,6 +229,9 @@ export function ScriptView({
 	onSubtitleChange,
 	banners,
 	onBannersChange,
+	cutoutLayers,
+	onCutoutChange,
+	cutout,
 	faces,
 	takesApplied,
 	onTakesApplied,
@@ -257,6 +268,8 @@ export function ScriptView({
 	const [canStudio, setCanStudio] = useState<boolean | null>(null); // null: not checked yet (first render)
 	useEffect(() => setCanStudio(studioSupported() && !new URLSearchParams(window.location.search).has("engine", "old")), []);
 	const useStudio = Boolean(studio) && canStudio === true && !studioFailed;
+	// Once the speaker is cut out, the preview plays the copy with the matte under each picture (lib/cutout.ts).
+	const stackedPreview = cutout.status === "done" ? (cutout.previewUrl ?? null) : null;
 	// Don't start the <video> player for a moment only to swap it for ours.
 	const deciding = Boolean(studio) && canStudio === null;
 	const segments = useMemo(
@@ -679,9 +692,10 @@ export function ScriptView({
 						/>
 					) : mode === "preview" && useStudio && studio ? (
 						<StudioPlayer
-							key={studio.videoUrl}
+							key={stackedPreview ?? studio.videoUrl}
 							ref={playerRef}
-							media={studio}
+							media={stackedPreview ? { ...studio, videoUrl: stackedPreview, stacked: true } : studio}
+							cutout={{ layers: cutoutLayers, files: cutout.files }}
 							segments={segments}
 							lines={lines}
 							subtitle={subtitle}
@@ -743,7 +757,7 @@ export function ScriptView({
 					{/* Beside the video on big screens, so the tools never take height from it. */}
 					<div ref={tabsRef} className="flex shrink-0 flex-wrap justify-center gap-1 lg:flex-col" role="tablist" aria-label="Settings">
 						{mode === "preview" &&
-							PANELS.map((p) => (
+							PANELS.filter((p) => p.id !== "cutout" || cutout.on).map((p) => (
 								<button
 									key={p.id}
 									role="tab"
@@ -786,7 +800,7 @@ export function ScriptView({
 									<X className="h-4 w-4" aria-hidden />
 								</button>
 							</div>
-					{panel !== "banners" && (
+					{panel !== "banners" && panel !== "cutout" && (
 						<SubtitleControls
 							style={subtitle}
 							onChange={onSubtitleChange}
@@ -841,6 +855,17 @@ export function ScriptView({
 									</div>
 								) : undefined
 							}
+						/>
+					)}
+					{panel === "cutout" && (
+						<CutoutControls
+							layers={cutoutLayers}
+							onChange={onCutoutChange}
+							cutout={cutout}
+							segments={segments}
+							now={() => toOutSeconds(timeRef.current, segments)}
+							total={totalFrames(segments) / FPS}
+							thai={thaiClip}
 						/>
 					)}
 					{panel === "banners" && (

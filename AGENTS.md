@@ -69,6 +69,7 @@ git log --oneline -15         # เพิ่งมีใครแก้อะไ
 | `banners.ts` | `banner_events`, `banner_motion`, `banner_ink`, `BANNER`, `BANNER_ANIMS`, `BANNER_TOP` |
 | `motion.ts` | `POP`, `BOUNCE`, `BOUNCE_WORD_GAP`, `pop_tags`, `word_places`, `bounce_events` |
 | `subtitle-style.ts` | `DEFAULT_STYLE`, `FONTS`, `FORMATS` |
+| `behind.ts` (+ ชั้นใน `PlayerFrame.tsx`) | `behind_motion`, `run_repeats`, `build_behind`, `cutout_filters`, `RUN_SPEED`, `ARRIVE_TIME`, `INSERT_FADE`, `INSERT_EDGE_FADE` |
 
 comment บางจุดในฝั่งเว็บอ้างชื่อเก่าที่ไม่มีใน `render.py` แล้ว เช่น `build_banners`, `MOTION`, `LOOKS` ให้ค้นจากชื่อจริงในตารางนี้
 
@@ -97,6 +98,7 @@ comment บางจุดในฝั่งเว็บอ้างชื่อ
 | แปลซับด้วย Haiku | ส่งบรรทัดกลับไม่ครบ 3 จาก 4 รอบ | `src/lib/translate.ts` |
 | หน้า admin อ่านไฟล์ในโฟลเดอร์ย่อยของ `logs/` | ไฟล์ทดสอบใหญ่ถูกดาวน์โหลดทุกครั้งที่เปิดหน้า | `src/app/api/admin/jobs/route.ts` |
 | ซับ Bounce ขยายคำแบบดันคำข้าง ๆ (`fontSize`, `\fscx` ในบรรทัดเดียวกัน) | ทั้งบรรทัดสั่น คำขยับ ~17 จาก 360 px เหมือนตัวอักษรชัก | `bounce_events` ใน `render.py`, `src/components/PlayerFrame.tsx` |
+| ทำขอบจางของคนตัวเล็ก (ตอนแทรกรูป) ในไฟล์ matte ก่อนจัดกรอบ | การจัดกรอบครอปขอบทิ้ง ไหล่ยังโดนตัดเป็นเส้นตรง ต้องจางหลังจัดกรอบ (mask ใน `PlayerFrame`, `cutout_filters`) | `INSERT.edgeFade` ใน `src/lib/behind.ts` |
 | ตัดเทคซ้ำให้เองด้วยกฎที่ไม่ใช้ AI หรือตัด Bad takes ของ AI ทั้งที่ผู้ใช้ไม่ได้ติ๊กตอนอัปโหลด หรือตัดซ้ำหลังผู้ใช้กดคืน | กฎแยกการพูดซ้ำกับการไล่รายการไม่ได้ ตัดเนื้อหาจริงจนความหมายกลับด้าน (อ่านแล้วผิด 5 จาก 11 จุดในคลิปไทย) · 6 พ.ย. โยชิอนุมัติให้ AI ตัดเองได้เฉพาะเมื่อติ๊ก Bad takes และตัดครั้งเดียว | `src/components/ScriptView.tsx`, `cutFirstTime` ใน `src/app/edit/page.tsx` |
 
 ## 6. ส่งงานและรีวิว

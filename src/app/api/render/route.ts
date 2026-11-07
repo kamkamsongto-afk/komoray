@@ -5,6 +5,7 @@ import { fontKeys, type OwnFont } from "@/lib/font-info";
 import { logoKey } from "@/lib/logo";
 import type { Faces } from "@/lib/framing";
 import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
+import type { CutoutLayers } from "@/lib/behind";
 import { readStyle } from "@/lib/subtitle-style";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
 		deleted?: number[];
 		fixes?: Fix[];
 		style?: unknown;
+		cutout?: CutoutLayers;
 	} & HandEdits>(
 		siblingKey(key, "edit.json"),
 	);
@@ -63,6 +65,15 @@ export async function POST(request: Request) {
 		if (user && (await exists(logoKey(user.id)))) style.logoUrl = await signedUrl(logoKey(user.id), "GET", LINK_SECONDS);
 	}
 
+	// Cutout layers (lib/behind.ts): links to the speaker's matte (once cut out) and each picture or clip.
+	let cutout: (CutoutLayers & { matteUrl?: string; files: Record<string, string> }) | undefined;
+	if (edit.cutout && (edit.cutout.texts.length || edit.cutout.inserts.length)) {
+		const matte = (await exists(siblingKey(key, "cutout.json"))) ? await signedUrl(siblingKey(key, "matte.mp4"), "GET", LINK_SECONDS) : undefined;
+		const names = [...new Set(edit.cutout.inserts.map((i) => i.file))];
+		const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
+		cutout = { ...edit.cutout, files, ...(matte && { matteUrl: matte }) };
+	}
+
 	const env = getCloudflareContext().env as unknown as RenderEnv;
 	const res = await fetch(env.RENDER_URL, {
 		method: "POST",
@@ -72,7 +83,7 @@ export async function POST(request: Request) {
 			// Modal just removes every cut, so hand it the deleted words and the timeline's hand cuts as cuts too,
 			// and the words already fixed: it only uses them for subtitles.
 			// faces: frame wide videos around the speaker, as the preview does (lib/framing.ts).
-			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes), faces: await getJson<Faces>(siblingKey(key, "faces.json")) },
+			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout },
 			// How the subtitles look, from the editor (lib/subtitle-style.ts).
 			style,
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.

@@ -9,6 +9,8 @@ import { ScriptView } from "@/components/ScriptView";
 import { VideoReady } from "@/components/VideoReady";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
+import { type CutoutLayers, NO_LAYERS } from "@/lib/behind";
+import { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { type Pace, PACES, PADDING } from "@/lib/silences";
 import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpans, type WordFix } from "@/lib/edit";
@@ -32,6 +34,7 @@ type Analysis = {
 	badTakesApplied?: boolean; // the AI's bad takes were cut once, as asked when uploading
 	style?: unknown;
 	banners?: Banner[];
+	cutout?: CutoutLayers; // text behind the speaker, pictures and clips behind them (lib/behind.ts)
 	manual?: Cut[]; // cut by hand on the timeline
 	keep?: Cut[]; // silences kept by hand on the timeline
 	noZoom?: Cut[]; // parts with Auto zoom turned off on the timeline
@@ -247,6 +250,7 @@ export default function EditPage() {
 			noZoom?: Cut[];
 			zoomParts?: ZoomPart[];
 			zoomMomentsApplied?: boolean;
+			cutout?: CutoutLayers;
 		}) => {
 			if (!key) return;
 			setSaveError("");
@@ -471,6 +475,23 @@ export default function EditPage() {
 		[save],
 	);
 
+	// Cutout layers: typed into and dragged like banners, so saved a moment after the last change. Then the
+	// links to their pictures and clips are fetched again (a new one is shown from this computer meanwhile).
+	const cutout = useCutout(key);
+	const cutoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const refreshCutout = cutout.refresh;
+	const changeCutout = useCallback(
+		(layers: CutoutLayers) => {
+			setAnalysis((a) => (a ? { ...a, cutout: layers } : a));
+			if (cutoutTimer.current) clearTimeout(cutoutTimer.current);
+			cutoutTimer.current = setTimeout(() => {
+				save({ cutout: layers });
+				void savingRef.current?.then(() => refreshCutout());
+			}, STYLE_SAVE_DELAY_MS);
+		},
+		[save, refreshCutout],
+	);
+
 	// Banners are typed into, so they are saved a moment after the last change too.
 	const bannersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const changeBanners = useCallback(
@@ -556,7 +577,8 @@ export default function EditPage() {
 		// failed (and a style change still waiting for its delay goes out now).
 		if (styleTimer.current) clearTimeout(styleTimer.current);
 		if (bannersTimer.current) clearTimeout(bannersTimer.current);
-		styleTimer.current = bannersTimer.current = null;
+		if (cutoutTimer.current) clearTimeout(cutoutTimer.current);
+		styleTimer.current = bannersTimer.current = cutoutTimer.current = null;
 		save({
 			deleted: analysis?.deleted ?? [],
 			fixes: analysis?.fixes ?? [],
@@ -566,6 +588,7 @@ export default function EditPage() {
 			keep: analysis?.keep ?? [],
 			noZoom: analysis?.noZoom ?? [],
 			zoomParts: analysis?.zoomParts ?? [],
+			...(analysis?.cutout && { cutout: analysis.cutout }),
 		});
 		setRender({ status: "processing" });
 		try {
@@ -866,6 +889,9 @@ export default function EditPage() {
 				onSubtitleChange={changeSubtitle}
 				banners={analysis.banners ?? []}
 				onBannersChange={changeBanners}
+				cutoutLayers={analysis.cutout ?? NO_LAYERS}
+				onCutoutChange={changeCutout}
+				cutout={cutout}
 				faces={analysis.faces ?? null}
 				takesApplied={analysis.takesApplied ?? false}
 				onTakesApplied={takesApplied}

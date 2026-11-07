@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor } from "@/lib/access";
+import type { CutoutLayers } from "@/lib/behind";
 import { cleanWindows, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TOO_OLD_MS, type Window, windowSeconds } from "@/lib/cutout";
 import { mediaUrl } from "@/lib/proxy";
 import { deleteObject, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
@@ -7,7 +8,8 @@ import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // Cut the speaker out of the background for some windows of a video (lib/cutout.ts), on Modal's GPU.
 //   POST { key, windows: [[start, end], ...] }   start (only people with Cutout on, see /admin)
-//   GET  ?key=…   { status: none | processing | done | failed, windows, previewUrl?, error? }
+//   GET  ?key=…   { status: none | processing | done | failed, windows, previewUrl?, error?, files }
+//                 files: a link to each picture or clip the video's layers show (lib/behind.ts)
 const LINK_SECONDS = 3600;
 
 type CutoutEnv = { CUTOUT_URL: string; RENDER_TOKEN: string };
@@ -33,10 +35,12 @@ async function status(key: string) {
 export async function GET(request: Request) {
 	const key = await readKey(new URL(request.url).searchParams.get("key"));
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
-	const now = await status(key);
-	if (now.status !== "done") return Response.json(now);
+	const [now, edit] = await Promise.all([status(key), getJson<{ cutout?: CutoutLayers }>(siblingKey(key, "edit.json"))]);
+	const names = [...new Set((edit?.cutout?.inserts ?? []).map((i) => i.file))];
+	const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
+	if (now.status !== "done") return Response.json({ ...now, files });
 	const env = getCloudflareContext().env as unknown as CutoutEnv;
-	return Response.json({ ...now, previewUrl: await mediaUrl(key, "proxy-cutout.mp4", env.RENDER_TOKEN) });
+	return Response.json({ ...now, files, previewUrl: await mediaUrl(key, "proxy-cutout.mp4", env.RENDER_TOKEN) });
 }
 
 export async function POST(request: Request) {
