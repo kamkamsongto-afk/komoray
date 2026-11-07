@@ -9,6 +9,7 @@ import type { Segment } from "@/lib/timeline";
 import type { useCutout } from "@/lib/use-cutout";
 
 type Props = {
+	focus: string | null; // the layer just clicked on the timeline: open it here
 	layers: CutoutLayers;
 	onChange: (layers: CutoutLayers) => void;
 	cutout: ReturnType<typeof useCutout>;
@@ -28,8 +29,14 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
-export function CutoutControls({ layers, onChange, cutout, segments, now, total, thai }: Props) {
-	const [open, setOpen] = useState<string | null>(null);
+export function CutoutControls({ layers, onChange, cutout, segments, now, total, thai, focus }: Props) {
+	const [open, setOpen] = useState<string | null>(focus);
+	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
+	const [focused, setFocused] = useState(focus);
+	if (focus !== focused) {
+		setFocused(focus);
+		setOpen(focus);
+	}
 	const [uploading, setUploading] = useState(false);
 	const [notice, setNotice] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);

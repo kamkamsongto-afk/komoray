@@ -191,6 +191,7 @@ type Props = {
 // What can be opened under the video. Nothing is open at first: the editor stays calm, and every
 // setting is a click away (here, or by clicking its part of the timeline).
 type Panel = ControlSection | "banners" | "cutout";
+const SCRIPT_HEIGHT = "komoray.scriptHeight"; // the script box's dragged height, px
 const PANELS: { id: Panel; icon: LucideIcon; name: string }[] = [
 	{ id: "text", icon: Type, name: "Subtitles" },
 	{ id: "zoom", icon: ZoomIn, name: "Zoom" },
@@ -256,6 +257,7 @@ export function ScriptView({
 	const [mode, setMode] = useState<"preview" | "original">("preview");
 	const [panel, setPanel] = useState<Panel | null>(null);
 	const [focusBanner, setFocusBanner] = useState<string | null>(null);
+	const [focusCutout, setFocusCutout] = useState<string | null>(null);
 	// From the timeline: the panels live under the preview.
 	const openPanel = (next: Panel) => {
 		setMode("preview");
@@ -657,6 +659,42 @@ export function ScriptView({
 		};
 	}, [panel]);
 
+	// How tall the script box is once the line above the timeline is dragged (remembered in this browser).
+	// Only drawn in the browser (the page waits for the video's data), so the saved height can be read at once.
+	const [scriptHeight, setScriptHeight] = useState<number | null>(() => {
+		try {
+			const saved = Number(localStorage.getItem(SCRIPT_HEIGHT));
+			return saved > 0 ? Math.min(window.innerHeight - 140, saved) : null;
+		} catch {
+			return null; // no storage: as tall as the screen allows
+		}
+	});
+	const resizeScript = (h: number | null) => {
+		const next = h === null ? null : Math.round(Math.min(window.innerHeight - 140, Math.max(120, h)));
+		setScriptHeight(next);
+		try {
+			if (next === null) localStorage.removeItem(SCRIPT_HEIGHT);
+			else localStorage.setItem(SCRIPT_HEIGHT, String(next));
+		} catch {
+			// not remembered, that's fine
+		}
+	};
+	function startScriptResize(e: ReactPointerEvent<HTMLElement>) {
+		e.preventDefault();
+		const box = boxRef.current;
+		if (!box) return;
+		const from = { y: e.clientY, height: box.getBoundingClientRect().height };
+		const move = (ev: PointerEvent) => resizeScript(from.height + ev.clientY - from.y);
+		const stop = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", stop);
+			window.removeEventListener("pointercancel", stop);
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", stop);
+		window.addEventListener("pointercancel", stop);
+	}
+
 	// How tall the settings box is once dragged by its corner, while this video is open; null: as tall as it needs, up to a limit.
 	const [panelHeight, setPanelHeight] = useState<number | null>(null);
 	const resizePanel = (height: number | null) => setPanelHeight(height === null ? null : Math.round(Math.min(window.innerHeight - 32, Math.max(160, height))));
@@ -866,6 +904,7 @@ export function ScriptView({
 							now={() => toOutSeconds(timeRef.current, segments)}
 							total={totalFrames(segments) / FPS}
 							thai={thaiClip}
+							focus={focusCutout}
 						/>
 					)}
 					{panel === "banners" && (
@@ -1067,7 +1106,8 @@ export function ScriptView({
 					</div>
 					<div
 						ref={boxRef}
-						className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-29rem)] lg:text-lg lg:leading-9"
+						className={`relative overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:text-lg lg:leading-9 ${scriptHeight ? "" : "max-h-[50vh] lg:max-h-[calc(100vh-29rem)]"}`}
+						style={scriptHeight ? { height: scriptHeight } : undefined}
 					>
 						{items.map((item, i) => {
 							if (item.kind === "break") return <span key={i} className="block h-3" />;
@@ -1098,7 +1138,19 @@ export function ScriptView({
 						})}
 					</div>
 			{/* Pinned to the bottom of the screen on big screens, like a video editor's timeline. */}
-			<div ref={timelineRef} className="sticky bottom-0 z-20 lg:bottom-2">
+			<div ref={timelineRef} className="sticky bottom-0 z-20 flex flex-col lg:bottom-2">
+				{/* Drag to give the script more room, or the timeline (coach, 7 Nov: only a few lines of the script showed). */}
+				<div
+					role="separator"
+					aria-orientation="horizontal"
+					aria-label="Drag to make the script taller or shorter"
+					title="Drag to make the script taller or shorter (double-click: back to normal)"
+					onPointerDown={startScriptResize}
+					onDoubleClick={() => resizeScript(null)}
+					className="group flex h-3 cursor-row-resize touch-none items-center justify-center"
+				>
+					<span className="h-1 w-12 rounded-full bg-foreground/15 transition-colors group-hover:bg-blue-600" />
+				</div>
 				<Timeline
 					duration={duration}
 					words={words}
@@ -1125,6 +1177,12 @@ export function ScriptView({
 					onOpenBanners={(id) => {
 						setFocusBanner(id);
 						openPanel("banners");
+					}}
+					cutoutLayers={cutoutLayers}
+					onCutoutChange={onCutoutChange}
+					onOpenCutout={(id) => {
+						setFocusCutout(id);
+						openPanel("cutout");
 					}}
 					noZoom={noZoom}
 					zoomParts={zoomParts}
