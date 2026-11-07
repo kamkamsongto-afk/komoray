@@ -23,7 +23,9 @@ from pathlib import Path
 
 import modal
 
-app = modal.App("komoray-render")
+# The test site's own copy: KOMORAY_RENDER_APP=komoray-render-staging python -m modal deploy modal_app/render.py
+# (its address then has -staging in it, which RENDER_URL in wrangler.jsonc's staging part points at).
+app = modal.App(os.environ.get("KOMORAY_RENDER_APP", "komoray-render"))
 
 GOOGLE_FONTS = "https://github.com/google/fonts/raw/main/ofl"
 

@@ -40,6 +40,22 @@
 		"R2_ACCOUNT_ID": "be3b27d119ef421e4b13632b0976cfa3",
 		"R2_BUCKET": "komoray-uploads",
 		"RENDER_URL": "https://kamkamsongto--komoray-render-start.us-east.modal.run"
+	},
+	// The test site: staging.komoray.com, its own bucket, database and Modal app, so trying a change never
+	// touches users' videos. Deployed from a computer with `npm run deploy:staging` (not by pushing to main).
+	// Secrets are its own too: `npx wrangler secret put <NAME> --env staging`.
+	"env": {
+		"staging": {
+			"name": "komoray-staging",
+			"routes": [{ "pattern": "staging.komoray.com", "custom_domain": true }],
+			"images": { "binding": "IMAGES" },
+			"services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "komoray-staging" }],
+			"vars": {
+				"R2_ACCOUNT_ID": "be3b27d119ef421e4b13632b0976cfa3",
+				"R2_BUCKET": "komoray-uploads-staging",
+				"RENDER_URL": "https://kamkamsongto--komoray-render-staging-start.us-east.modal.run"
+			}
+		}
 	}
 	/**
 	 * Smart Placement
