@@ -1,11 +1,13 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { canUseStudio, NO_INVITE, renderRunning } from "@/lib/access";
+import { accessFor, canUseStudio, NO_INVITE, renderRunning } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
 import { logoKey } from "@/lib/logo";
 import type { Faces } from "@/lib/framing";
 import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
-import type { CutoutLayers } from "@/lib/behind";
+import { type CutoutLayers, covered, cutoutWindows } from "@/lib/behind";
+import type { Window } from "@/lib/cutout";
+import { keepSegments } from "@/lib/timeline";
 import { readStyle } from "@/lib/subtitle-style";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
@@ -43,6 +45,19 @@ export async function POST(request: Request) {
 	);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
+	// Cutout layers only go in where the speaker is cut out for them: else text behind the speaker lands
+	// in front, and a picture fills the screen with no speaker (Codex review, 7 Nov). Layers saved while
+	// Cutout was on for this person are left out once it is turned off on /admin.
+	let layers = edit.cutout && (edit.cutout.texts.length || edit.cutout.inserts.length) ? edit.cutout : undefined;
+	if (layers && !(await accessFor((await currentUser()).user?.email)).features.cutout.on) layers = undefined;
+	if (layers) {
+		const done = await getJson<{ windows: Window[] }>(siblingKey(key, "cutout.json"));
+		const need = cutoutWindows(layers, keepSegments(edit.duration, allCuts(edit)));
+		if (!done || !covered(need, done.windows)) {
+			return Response.json({ error: "Press Cut me out in the Cutout box first: you aren't cut out yet where your text, pictures or clips show." }, { status: 409 });
+		}
+	}
+
 	const finalKey = siblingKey(key, "final.mp4");
 	const errorKey = siblingKey(key, "render-error.json");
 	// Clear the previous attempt so the status check can't pick up an old result.
@@ -66,12 +81,12 @@ export async function POST(request: Request) {
 	}
 
 	// Cutout layers (lib/behind.ts): links to the speaker's matte (once cut out) and each picture or clip.
-	let cutout: (CutoutLayers & { matteUrl?: string; files: Record<string, string> }) | undefined;
-	if (edit.cutout && (edit.cutout.texts.length || edit.cutout.inserts.length)) {
-		const matte = (await exists(siblingKey(key, "cutout.json"))) ? await signedUrl(siblingKey(key, "matte.mp4"), "GET", LINK_SECONDS) : undefined;
-		const names = [...new Set(edit.cutout.inserts.map((i) => i.file))];
+	let cutout: (CutoutLayers & { matteUrl: string; files: Record<string, string> }) | undefined;
+	if (layers) {
+		const matte = await signedUrl(siblingKey(key, "matte.mp4"), "GET", LINK_SECONDS);
+		const names = [...new Set(layers.inserts.map((i) => i.file))];
 		const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
-		cutout = { ...edit.cutout, files, ...(matte && { matteUrl: matte }) };
+		cutout = { ...layers, files, matteUrl: matte };
 	}
 
 	const env = getCloudflareContext().env as unknown as RenderEnv;
