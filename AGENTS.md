@@ -133,6 +133,15 @@ python -m py_compile modal_app/render.py    # เมื่อแก้ไฟล�
 - เรื่องรสนิยมการเขียนโค้ดไม่นับเป็นข้อค้นพบ
 - เจ้าของงานเป็นคนแก้ ถ้าไม่เห็นด้วยให้ตอบพร้อมหลักฐานได้หนึ่งรอบ ถ้ายังไม่ตรงกัน ให้สรุปทั้งสองฝั่งให้โยชิตัดสิน
 
+### ลองบน staging ก่อนรวม
+
+staging.komoray.com คือเว็บทดลอง มี Worker, R2 (`komoray-uploads-staging`), Supabase (`komoray-staging`) และ Modal (`komoray-render-staging`) ของตัวเอง ไม่แตะข้อมูลผู้ใช้จริง และไม่ใช่ที่ให้ผู้ใช้หนีไปใช้ตอนเว็บจริงพัง
+
+- งานที่ต้องรีวิวตามย่อหน้าบน ต้องขึ้น staging ให้โยชิลองก่อนรวม: `npm run deploy:staging` (ขึ้น branch ปัจจุบัน) ถ้าแก้ `render.py` ให้ `KOMORAY_RENDER_APP=komoray-render-staging python -m modal deploy modal_app/render.py` ก่อน
+- ขึ้น staging ทำได้เองโดยไม่ต้องรอโยชิสั่ง แต่ห้ามใช้คำสั่ง deploy ของเว็บจริงหรือ Modal ตัวจริงแทน
+- ตารางหรือ migration ใหม่ ต้องรันบน `komoray-staging` ก่อน แล้วจึงให้โยชิรันบนตัวจริงตอนรวม
+- กุญแจของ staging ตั้งด้วย `npx wrangler secret put <ชื่อ> --env staging` ค่าอยู่ใน `.dev.vars` ชื่อขึ้นต้นด้วย `STAGING_` หรือ `R2_STAGING_`
+
 ## 7. รวมงานและขึ้นเว็บ
 
 1. รวมเมื่อโยชิบอกให้รวมเท่านั้น: ถ้า `main` ขยับไปแล้ว ให้ merge `main` เข้า branch และตรวจตามข้อ 6 ซ้ำ จากนั้น `git checkout main` แล้ว `git merge --no-ff <branch>` ห้าม rebase branch ที่ push แล้ว
@@ -140,7 +149,7 @@ python -m py_compile modal_app/render.py    # เมื่อแก้ไฟล�
 3. ลำดับขึ้นเว็บ: ถ้าแก้ `render.py` ให้ `python -m modal deploy modal_app/render.py` **ก่อน** แล้วจึง `git push origin main` คำสั่ง deploy และ push ทำเมื่อโยชิสั่งในงานนั้น หรือให้โยชิรันเอง
 4. หลัง deploy Modal งานแรก ๆ อาจยังวิ่งบนเครื่องรุ่นเก่า ถ้าผลไม่ตรงโค้ด ให้สั่งใหม่อีกครั้งก่อนสงสัยโค้ด
 5. หลัง push ตรวจว่า `git log origin/main..main --oneline` ว่าง เคยมี commit ไม่ถูก push จนโยชิไม่เห็นฟีเจอร์บนเว็บจริง
-6. ย้อนงานที่รวมแล้วด้วย `git revert -m 1 <merge commit>` เท่านั้น ถ้าจะแก้ใหม่ทีหลัง ให้ดูประวัติที่ย้อนก่อน
+6. ย้อนงานที่รวมแล้วด้วย `git revert -m 1 <merge commit>` เท่านั้น ถ้าจะแก้ใหม่ทีหลัง ให้ดูประวัติที่ย้อนก่อน ถ้าเว็บจริงพังและต้องรีบ ให้ย้อน Worker ไปเวอร์ชันก่อนใน Cloudflare (`Workers & Pages` → `komoray` → `Deployments` → `Rollback`) ก่อน แล้วค่อย revert ตามมา
 7. `PROGRESS.md` และแผน 67 วันอัปเดตตอนปิดงานตามกิจวัตรใน `CLAUDE.md` โดย agent ที่โยชิสั่ง ทำบน `main` หลังรวมงานแล้ว เพื่อไม่ให้ไฟล์นี้ชนกันในแต่ละ branch
 
 ## 8. ห้ามทำถ้าโยชิไม่ได้สั่งในงานนั้น
