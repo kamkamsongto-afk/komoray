@@ -31,7 +31,7 @@ export async function proxyStatus(key: string): Promise<ProxyStatus> {
 export const proxyUrl = (key: string, seconds = LINK_SECONDS) => signedUrl(siblingKey(key, "proxy.mp4"), "GET", seconds);
 
 // Links for the editor's own player, read through /api/media on our site (see there why).
-export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm"];
+export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm", "proxy-cutout.mp4"]; // proxy-cutout.mp4: lib/cutout.ts
 export const mediaMessage = (key: string, file: string, exp: number) => `media:${key}:${file}:${exp}`;
 export async function mediaUrl(key: string, file: string, secret: string, seconds = LINK_SECONDS) {
 	const exp = Math.floor(Date.now() / 1000) + seconds;

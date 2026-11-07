@@ -39,7 +39,8 @@
 	"vars": {
 		"R2_ACCOUNT_ID": "be3b27d119ef421e4b13632b0976cfa3",
 		"R2_BUCKET": "komoray-uploads",
-		"RENDER_URL": "https://kamkamsongto--komoray-render-start.us-east.modal.run"
+		"RENDER_URL": "https://kamkamsongto--komoray-render-start.us-east.modal.run",
+		"CUTOUT_URL": "https://kamkamsongto--komoray-cutout-start.us-east.modal.run"
 	},
 	// The test site: staging.komoray.com, its own bucket, database and Modal app, so trying a change never
 	// touches users' videos. Deployed from a computer with `npm run deploy:staging` (not by pushing to main).
@@ -53,7 +54,8 @@
 			"vars": {
 				"R2_ACCOUNT_ID": "be3b27d119ef421e4b13632b0976cfa3",
 				"R2_BUCKET": "komoray-uploads-staging",
-				"RENDER_URL": "https://kamkamsongto--komoray-render-staging-start.us-east.modal.run"
+				"RENDER_URL": "https://kamkamsongto--komoray-render-staging-start.us-east.modal.run",
+				"CUTOUT_URL": "https://kamkamsongto--komoray-cutout-staging-start.us-east.modal.run"
 			}
 		}
 	}
