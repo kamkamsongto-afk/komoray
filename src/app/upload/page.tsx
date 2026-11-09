@@ -280,6 +280,7 @@ export default function UploadPage() {
 			{access && !access.unlimited && !showOptions && <BetaWelcome access={access} />}
 			{showOptions && status !== "idle" && (
 				<UploadOptions
+					fileName={message}
 					options={options}
 					onOptionsChange={setOptions}
 					language={language}
