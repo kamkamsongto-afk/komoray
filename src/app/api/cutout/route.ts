@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { accessFor, bestSecondsUsed, chargeBest, refundBest } from "@/lib/access";
+import { accessFor, bestSecondsUsed, chargeBest, lockBest, refundBest } from "@/lib/access";
 import type { CutoutLayers } from "@/lib/behind";
 import { cleanWindows, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TOO_OLD_MS, type CutoutTier, LOCAL_MATTE, LOCAL_TOO_OLD_MS, LOCAL_RUNS_PER_VIDEO, newSeconds, type Window } from "@/lib/cutout";
 import { mediaUrl } from "@/lib/proxy";
@@ -77,19 +77,32 @@ export async function POST(request: Request) {
 	const windows = cleanWindows(body.windows, edit.duration);
 	if (windows.length === 0) return Response.json({ error: "Pick at least half a second to cut out." }, { status: 400 });
 
+	if (tier === "best") {
+		const unlock = user?.email ? await lockBest(user.email) : null;
+		if (!unlock) return Response.json({ error: "A cutout is already starting. Please wait a moment." }, { status: 409 });
+		try {
+			return await startBest(key, windows, access, user?.email);
+		} finally {
+			await unlock();
+		}
+	}
+
 	const now = await status(key);
 	if (now.status === "processing") return Response.json({ error: "The cutout is still being made. Please wait for it to finish." }, { status: 409 });
 
-	const files = { done: siblingKey(key, "cutout.json"), error: siblingKey(key, "cutout-error.json"), job: siblingKey(key, "cutout-job.json"), matte: siblingKey(key, "matte.mp4") };
-	const startedAt = new Date().toISOString();
+	if (!access.unlimited && now.localRuns >= LOCAL_RUNS_PER_VIDEO) return Response.json({ error: "This video has been cut out too many times today. Please email hello@komoray.com." }, { status: 429 });
+	const files = cutoutFiles(key);
+	await Promise.all([deleteObject(files.done), deleteObject(files.error), deleteObject(siblingKey(key, LOCAL_MATTE))]);
+	await putObject(files.job, JSON.stringify({ startedAt: new Date().toISOString(), windows, runs: now.runs, localRuns: now.localRuns + 1, local: tier } satisfies Job), "application/json");
+	return Response.json({ uploadUrl: await signedUrl(siblingKey(key, LOCAL_MATTE), "PUT", LINK_SECONDS, "video/h264") });
+}
 
-	if (tier !== "best") {
-		if (!access.unlimited && now.localRuns >= LOCAL_RUNS_PER_VIDEO) return Response.json({ error: "This video has been cut out too many times today. Please email hello@komoray.com." }, { status: 429 });
-		await Promise.all([deleteObject(files.done), deleteObject(files.error), deleteObject(siblingKey(key, LOCAL_MATTE))]);
-		await putObject(files.job, JSON.stringify({ startedAt, windows, runs: now.runs, localRuns: now.localRuns + 1, local: tier } satisfies Job), "application/json");
-		return Response.json({ uploadUrl: await signedUrl(siblingKey(key, LOCAL_MATTE), "PUT", LINK_SECONDS, "video/h264") });
-	}
+const cutoutFiles = (key: string) => ({ done: siblingKey(key, "cutout.json"), error: siblingKey(key, "cutout-error.json"), job: siblingKey(key, "cutout-job.json"), matte: siblingKey(key, "matte.mp4") });
 
+async function startBest(key: string, windows: Window[], access: Awaited<ReturnType<typeof accessFor>>, email?: string | null) {
+	const now = await status(key);
+	if (now.status === "processing") return Response.json({ error: "The cutout is still being made. Please wait for it to finish." }, { status: 409 });
+	const files = cutoutFiles(key);
 	if (!access.unlimited && now.runs >= CUTOUT_RUNS_PER_VIDEO) {
 		return Response.json({ error: `This video has been cut out ${CUTOUT_RUNS_PER_VIDEO} times with Best. Please email hello@komoray.com for more.` }, { status: 429 });
 	}
@@ -98,21 +111,18 @@ export async function POST(request: Request) {
 	const previous = now.status === "done" && now.tier === "best" && (await exists(files.matte)) ? now.windows : [];
 	const charged = newSeconds(windows, previous);
 	let usageKey: string | undefined;
-	if (!access.unlimited && user?.email) {
-		const left = access.features.cutout.seconds - (await bestSecondsUsed(user.email));
+	if (!access.unlimited && email) {
+		const left = access.features.cutout.seconds - (await bestSecondsUsed(email));
 		if (charged > left + 0.05) return Response.json({ error: `Best needs ${charged} seconds and you have ${Math.max(0, Math.floor(left))} left this month. Try Fast or Balanced.` }, { status: 402 });
-		usageKey = await chargeBest(user.email, key, charged);
+		usageKey = await chargeBest(email, key, charged);
 	}
 
 	const env = getCloudflareContext().env as unknown as CutoutEnv;
-	const previousUrl = previous.length ? await signedUrl(files.matte, "GET", 2 * LINK_SECONDS) : undefined;
-	await Promise.all([deleteObject(files.done), deleteObject(files.error)]);
-	await putObject(files.job, JSON.stringify({ startedAt, windows, runs: now.runs + 1, localRuns: now.localRuns, usageKey, charged } satisfies Job), "application/json");
-
-	const res = await fetch(env.CUTOUT_URL, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
+	let payload: string;
+	try {
+		// The links first: if making them fails, nothing is deleted and the seconds go straight back.
+		const previousUrl = previous.length ? await signedUrl(files.matte, "GET", 2 * LINK_SECONDS) : undefined;
+		payload = JSON.stringify({
 			token: env.RENDER_TOKEN,
 			windows,
 			previousUrl,
@@ -122,8 +132,15 @@ export async function POST(request: Request) {
 			previewUrl: await signedUrl(siblingKey(key, "proxy-cutout.mp4"), "PUT", 2 * LINK_SECONDS, "video/mp4"),
 			doneUrl: await signedUrl(files.done, "PUT", 2 * LINK_SECONDS, "application/json"),
 			errorUrl: await signedUrl(files.error, "PUT", 2 * LINK_SECONDS, "application/json"),
-		}),
-	}).catch(() => null);
+		});
+		await putObject(files.job, JSON.stringify({ startedAt: new Date().toISOString(), windows, runs: now.runs + 1, localRuns: now.localRuns, usageKey, charged } satisfies Job), "application/json");
+	} catch {
+		if (usageKey) await refundBest(usageKey, charged).catch(() => {});
+		return Response.json({ error: "Could not start the cutout. Your Best seconds are back. Please try again." }, { status: 502 });
+	}
+	await Promise.all([deleteObject(files.done), deleteObject(files.error)]);
+
+	const res = await fetch(env.CUTOUT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload }).catch(() => null);
 	const data = (await res?.json().catch(() => ({}))) as { callId?: string; error?: string } | undefined;
 	if (!res?.ok || !data?.callId) {
 		const error = data?.error ?? `Could not start the cutout (${res?.status ?? "no answer"})`;

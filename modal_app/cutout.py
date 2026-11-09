@@ -182,7 +182,8 @@ def matte_writer(path: Path, w: int, h: int):
     )
 
 
-@app.function(image=image, gpu="L4", cpu=4, memory=16384, timeout=30 * 60)
+# L4 is cheapest; when none is free (9 Nov: over 30 minutes in the queue) the next type is taken instead.
+@app.function(image=image, gpu=["L4", "A10"], cpu=4, memory=16384, timeout=30 * 60)
 def cut_part(video_url: str, runs: list, w: int, h: int) -> dict:
     """One GPU machine's share: the matte for these runs of frames, as one small video."""
     import cv2

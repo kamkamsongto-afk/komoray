@@ -134,6 +134,14 @@ export async function refundListen(key: string, usageKey: string) {
 	await Promise.all([deleteObject(usageKey), deleteObject(siblingKey(key, "access.json"))]);
 }
 
+// Only one Best can be starting per person at a time, so two presses can't both pay for a GPU or both
+// slip past the allowance. Named by the minute: a lock left by a crash clears itself. null = busy.
+export async function lockBest(email: string) {
+	const lock = `access/best-lock/${await hashEmail(email)}/${Math.floor(Date.now() / 60000)}.json`;
+	if (!(await putIfAbsent(lock, "{}", "application/json"))) return null;
+	return () => deleteObject(lock).catch(() => {});
+}
+
 // Cutout Best is paid GPU time. Its seconds are taken when it starts and given back if it fails.
 export async function bestSecondsUsed(email: string) {
 	const files = await listObjects(`access/best/${await hashEmail(email)}/${month()}/`);
