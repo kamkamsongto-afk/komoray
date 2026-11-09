@@ -41,7 +41,7 @@ export function UploadOptions({
 	onLanguageChange: (code: string) => void;
 	defaultLanguage: string | null;
 	onSetDefaultLanguage: (code: string | null) => void;
-	upload: { status: "uploading" | "done" | "error"; progress: number; queued: boolean };
+	upload: { status: "uploading" | "done" | "error"; progress: number };
 	onStart: () => void;
 	onClose: () => void;
 }) {
@@ -75,7 +75,6 @@ export function UploadOptions({
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
 
-	const waiting = upload.queued && upload.status === "uploading";
 	const picked = READY.filter(({ id }) => options[id]).length;
 
 	return (
@@ -155,10 +154,9 @@ export function UploadOptions({
 						<button
 							type="button"
 							onClick={onStart}
-							disabled={waiting}
-							className="min-h-12 rounded-xl bg-blue-600 px-8 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+							className="min-h-12 rounded-xl bg-blue-600 px-8 py-2 font-semibold text-white hover:bg-blue-700"
 						>
-							{waiting ? `Starts when the upload is done · ${upload.progress}%` : `Start · ${picked} ${picked === 1 ? "thing" : "things"} to do`}
+							{`Start · ${picked} ${picked === 1 ? "thing" : "things"} to do`}
 						</button>
 					)}
 				</div>
