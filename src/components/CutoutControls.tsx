@@ -51,7 +51,10 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [notice, setNotice] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
 
-	const [picked, setPicked] = useState<CutoutTier>("balanced");
+	const [choice, setPicked] = useState<CutoutTier>("balanced");
+	// A quality this device can't run is never the one picked.
+	const canRun = (id: CutoutTier) => id === "best" || cutout.support[id];
+	const picked: CutoutTier = canRun(choice) ? choice : canRun("balanced") ? "balanced" : canRun("fast") ? "fast" : "best";
 	const whole: Window[] = keptWindows(segments);
 	const cutOut = cutout.status === "done";
 	const ready = cutOut && covered(whole, cutout.windows);
@@ -189,7 +192,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						</span>
 						<div className="grid gap-1 sm:grid-cols-3" role="radiogroup" aria-label="Cutout quality">
 							{TIER_ORDER.map((id) => {
-								const off = (id === "fast" || id === "balanced") && !cutout.support[id];
+								const off = !canRun(id);
 								return (
 									<button
 										key={id}
@@ -216,7 +219,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							disabled={tooMuch || !whole.length || (picked !== "best" && !videoUrl)}
 							className="self-start rounded-md bg-blue-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 						>
-							Cut me out
+							{cutOut && ready ? "Cut me out again" : "Cut me out"}
 						</button>
 						{picked !== "best" && !videoUrl && <span className="text-foreground/60">Your preview is still being made. This will work in a moment.</span>}
 					</>
