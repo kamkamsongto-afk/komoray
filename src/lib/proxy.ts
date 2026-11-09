@@ -1,6 +1,6 @@
 import { hmac } from "@/lib/callback";
 import type { Faces } from "@/lib/framing";
-import { exists, getJson, putObject, siblingKey, signedUrl } from "@/lib/r2";
+import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl } from "@/lib/r2";
 
 // The editor's preview copy lives next to the original video:
 //   proxy.json        written when we ask Modal to make it
@@ -27,10 +27,11 @@ export async function proxyStatus(key: string): Promise<ProxyStatus> {
 	const running = Boolean(started?.startedAt && Date.now() - Date.parse(started.startedAt) < GIVE_UP_MS);
 	const failed = await exists(siblingKey(key, "proxy-error.json"));
 	// A preview from before the newer sound file gets one try at being made again. An error from an attempt
-	// before that doesn't count (withClean: this attempt asked for the file), and a failed try isn't repeated: Modal costs money.
+	// before that doesn't count (withClean: startProxy cleared old errors and asked for the file), and a failed
+	// try isn't repeated: Modal costs money.
 	if (video && audio) {
-		if (running) return "processing";
-		return failed && started?.withClean ? "failed" : "none";
+		if (failed && started?.withClean) return "failed";
+		return running ? "processing" : "none";
 	}
 	if (failed) return "failed";
 	return running ? "processing" : "none";
@@ -77,6 +78,7 @@ export async function facesFor(key: string, env: ProxyEnv): Promise<{ faces: Fac
 // Ask Modal to make the preview copy. Never throws: without it the editor just plays the original.
 export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatus> {
 	try {
+		await deleteObject(siblingKey(key, "proxy-error.json")).catch(() => {}); // from now on an error means this attempt failed
 		await putObject(siblingKey(key, "proxy.json"), JSON.stringify({ startedAt: new Date().toISOString(), withClean: true }), "application/json");
 		const res = await fetch(env.RENDER_URL, {
 			method: "POST",
