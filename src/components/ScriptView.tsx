@@ -273,6 +273,28 @@ export function ScriptView({
 	const useStudio = Boolean(studio) && canStudio === true && !studioFailed;
 	// Once the speaker is cut out, the preview plays the copy with the matte under each picture (lib/cutout.ts).
 	const stackedPreview = cutout.status === "done" ? (cutout.previewUrl ?? null) : null;
+	// Never the link itself: it is signed anew on every look at the cutout, which threw the player away
+	// and started the video from the beginning each time a layer was changed (coach, 9 Nov).
+	const playerKey = stackedPreview ? `cutout-${cutout.version}` : "plain";
+	// The dot on the Cutout button: a finished cutout nobody has looked at yet, also after coming back to the page.
+	const cutoutBusy = cutout.status === "processing" || Boolean(cutout.local);
+	const seenKey = `komoray.cutoutSeen.${cutout.version ?? ""}`;
+	useEffect(() => {
+		if (panel !== "cutout" || !cutout.version) return;
+		try {
+			localStorage.setItem(seenKey, "1");
+		} catch {
+			// no storage: the dot comes back after closing the panel
+		}
+	}, [panel, cutout.version, seenKey]);
+	const cutoutNews = useMemo(() => {
+		if (cutout.status !== "done" || !cutout.version || panel === "cutout") return false;
+		try {
+			return !localStorage.getItem(seenKey);
+		} catch {
+			return true;
+		}
+	}, [cutout.status, cutout.version, panel, seenKey]);
 	// Don't start the <video> player for a moment only to swap it for ours.
 	const deciding = Boolean(studio) && canStudio === null;
 	const segments = useMemo(
@@ -525,7 +547,7 @@ export function ScriptView({
 		setPlaying(false);
 		if (mode === "preview") playerRef.current?.seek(timeRef.current);
 		else if (videoRef.current) videoRef.current.currentTime = timeRef.current;
-	}, [mode]);
+	}, [mode, playerKey]); // playerKey: a finished cutout swaps the player, the video stays where it was
 
 	// Keep the highlighted word visible inside the transcript box (without scrolling the whole page).
 	useEffect(() => {
@@ -731,7 +753,7 @@ export function ScriptView({
 						/>
 					) : mode === "preview" && useStudio && studio ? (
 						<StudioPlayer
-							key={stackedPreview ?? studio.videoUrl}
+							key={playerKey}
 							ref={playerRef}
 							media={stackedPreview ? { ...studio, videoUrl: stackedPreview, stacked: true } : studio}
 							cutout={{ layers: cutoutLayers, files: cutout.files }}
@@ -807,7 +829,11 @@ export function ScriptView({
 										panel === p.id ? "bg-foreground text-background" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
 									}`}
 								>
-									<p.icon className="h-[18px] w-[18px]" aria-hidden />
+									<span className="relative">
+										<p.icon className="h-[18px] w-[18px]" aria-hidden />
+										{p.id === "cutout" && cutoutBusy && <span title="Cutting you out" className="absolute -top-1 -right-1 h-2 w-2 animate-pulse rounded-full bg-blue-500" />}
+										{p.id === "cutout" && cutoutNews && <span title="Your cutout is ready" className="absolute -top-1 -right-1 h-2.5 w-2.5 animate-pulse rounded-full bg-green-500 ring-2 ring-background" />}
+									</span>
 									{p.name}
 								</button>
 							))}
@@ -905,6 +931,7 @@ export function ScriptView({
 							segments={segments}
 							now={() => toOutSeconds(timeRef.current, segments)}
 							total={totalFrames(segments) / FPS}
+							videoUrl={studio?.videoUrl ?? null}
 							thai={thaiClip}
 							focus={focusCutout}
 						/>

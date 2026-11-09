@@ -7,6 +7,7 @@ import { videoDuration } from "@/lib/video-duration";
 // Who may use the studio during the beta, and how much. All kept in R2, away from uploads/ so it stays:
 //   access/people/<hash of email>.json                   invited by the admin: { email, at, features? } (lib/features.ts)
 //   access/usage/<hash>/<YYYY-MM>/<video id>.json        minutes this video took from that month: { minutes }
+//   access/best/<hash>/<YYYY-MM>/<video id>.json         Cutout Best seconds this video took from that month: { seconds }
 //   uploads/<id>/access.json                             how many times this video was listened to
 // Minutes count the length of the original video, once, when Find silences is pressed. Deleting the
 // video gives nothing back; a failed job does (refundListen).
@@ -131,6 +132,26 @@ export async function settleDeadListen(key: string) {
 // The job failed, so the minutes go back.
 export async function refundListen(key: string, usageKey: string) {
 	await Promise.all([deleteObject(usageKey), deleteObject(siblingKey(key, "access.json"))]);
+}
+
+// Cutout Best is paid GPU time. Its seconds are taken when it starts and given back if it fails.
+export async function bestSecondsUsed(email: string) {
+	const files = await listObjects(`access/best/${await hashEmail(email)}/${month()}/`);
+	const used = await Promise.all(files.map((file) => getJson<{ seconds: number }>(file.key).catch(() => null)));
+	return Math.round(used.reduce((sum, item) => sum + (item?.seconds ?? 0), 0) * 10) / 10;
+}
+
+export async function chargeBest(email: string, key: string, seconds: number) {
+	const usageKey = `access/best/${await hashEmail(email)}/${month()}/${key.split("/")[1]}.json`;
+	const before = await getJson<{ seconds: number }>(usageKey);
+	await putObject(usageKey, JSON.stringify({ seconds: (before?.seconds ?? 0) + seconds }), "application/json");
+	return usageKey;
+}
+
+export async function refundBest(usageKey: string, seconds: number) {
+	const before = await getJson<{ seconds: number }>(usageKey);
+	if (!before) return;
+	await putObject(usageKey, JSON.stringify({ seconds: Math.max(0, before.seconds - seconds) }), "application/json");
 }
 
 // A second render of the same video must wait for the first: each one is paid for.

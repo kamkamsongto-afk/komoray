@@ -2,8 +2,8 @@
 
 import { ChevronDown, ChevronRight, ImagePlus, Type, X } from "lucide-react";
 import { useRef, useState } from "react";
-import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, covered, cutoutWindows, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
-import { windowSeconds } from "@/lib/cutout";
+import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, covered, cutoutWindows, type CutoutLayers, INSERT, type Insert, keptWindows } from "@/lib/behind";
+import { type CutoutTier, newSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
 import type { useCutout } from "@/lib/use-cutout";
@@ -16,10 +16,20 @@ type Props = {
 	segments: Segment[];
 	now: () => number; // where the preview is, seconds of the final video
 	total: number; // length of the final video, seconds
+	videoUrl: string | null; // the preview copy, which Fast and Balanced read on this device
 	thai: boolean; // Thai video: only fonts with Thai letters
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.ceil(seconds % 60) % 60).padStart(2, "0")}`;
+
+// Chosen before cutting out (coach, 9 Nov): Fast and Balanced run on the customer's device and cost no GPU, Best on ours.
+const TIER_ORDER: CutoutTier[] = ["fast", "balanced", "best"];
+const TIERS: Record<CutoutTier, { name: string; note: string }> = {
+	fast: { name: "Fast", note: "Ready in about the length of the video" },
+	balanced: { name: "Balanced", note: "Cleaner edges. A few minutes for each minute" },
+	best: { name: "Best", note: "Finest hair and edges. Close the page if you like" },
+};
 const SPEEDS: [BehindSpeed, string][] = [
 	["slow", "Slow"],
 	["normal", "Normal"],
@@ -29,7 +39,7 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
-export function CutoutControls({ layers, onChange, cutout, segments, now, total, thai, focus }: Props) {
+export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
@@ -41,11 +51,14 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [notice, setNotice] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
 
+	const [picked, setPicked] = useState<CutoutTier>("balanced");
 	const need = cutoutWindows(layers, segments);
-	const needSeconds = windowSeconds(need.map(([a, b]): [number, number] => [Math.max(0, a), b]));
-	const ready = cutout.status === "done" && covered(need, cutout.windows);
-	const tooLong = needSeconds > cutout.seconds + 0.05;
-	const empty = layers.texts.length + layers.inserts.length === 0;
+	const whole: Window[] = keptWindows(segments);
+	const cutOut = cutout.status === "done";
+	const ready = cutOut && covered(whole, cutout.windows);
+	const bestCost = newSeconds(whole, cutOut && cutout.tier === "best" ? cutout.windows : []);
+	const bestLeft = Math.max(0, cutout.best.limit - cutout.best.used);
+	const tooMuch = picked === "best" && !cutout.best.unlimited && bestCost > bestLeft + 0.05;
 
 	const setTexts = (texts: BehindText[]) => onChange({ ...layers, texts });
 	const setInserts = (inserts: Insert[]) => onChange({ ...layers, inserts });
@@ -82,7 +95,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		setUploading(false);
 		if ("error" in done) return setNotice(done.error);
 		const start = startAt();
-		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, Math.max(1, cutout.seconds - needSeconds), total - start);
+		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
 		const insert: Insert = { id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: INSERT.scale.start, speakerX: 0.25, hidden: false };
 		setOpen(insert.id);
 		setInserts([...layers.inserts, insert].sort((a, b) => a.start - b.start));
@@ -125,10 +138,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 
 	return (
 		<div className="flex flex-col gap-2 p-3 pt-1">
-			<p className="text-xs text-foreground/60">
-				Put big text behind you, or a picture or clip behind a smaller you. Komoray cuts you out of the background for those parts: up to {cutout.seconds} seconds of
-				each video.
-			</p>
+			<p className="text-xs text-foreground/60">Put big text behind you, or a picture or clip behind a smaller you.</p>
 			<div className="flex flex-wrap items-center gap-1.5">
 				<button onClick={addText} disabled={layers.texts.length >= BEHIND.maxItems} className="inline-flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
 					<Type className="h-3.5 w-3.5" aria-hidden /> Text behind you
@@ -150,26 +160,69 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			</div>
 			{notice && <p className="text-xs text-red-500">{notice}</p>}
 
-			{!empty && (
-				<div className={`flex flex-col gap-1.5 rounded-lg border p-2 text-xs ${ready ? "border-green-600/40 bg-green-600/10" : "border-blue-600/40 bg-blue-600/10"}`}>
-					<span>
-						{cutout.status === "processing"
-							? "Cutting you out of the background… this takes about 5 minutes. Keep editing."
-							: ready
-								? "You're cut out for these parts. The preview shows how it will look."
-								: tooLong
-									? `These parts need ${needSeconds} seconds cut out, more than the ${cutout.seconds} seconds you can use. Make them shorter.`
+			<div className={`flex flex-col gap-2 rounded-lg border p-2 text-xs ${cutOut ? "border-green-600/40 bg-green-600/10" : "border-blue-600/40 bg-blue-600/10"}`}>
+				{cutout.local ? (
+					<>
+						<span>
+							{cutout.local.phase === "sending" ? "Saving your cutout…" : `Cutting you out on this device… ${Math.round(cutout.local.part * 100)}%. Keep this page open.`}
+						</span>
+						<div className="h-1.5 overflow-hidden rounded-full bg-foreground/10">
+							<div className="h-full bg-blue-600 transition-[width]" style={{ width: `${Math.round(cutout.local.part * 100)}%` }} />
+						</div>
+						{cutout.local.phase === "cutting" && (
+							<button onClick={cutout.cancel} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
+								Cancel
+							</button>
+						)}
+					</>
+				) : cutout.status === "processing" ? (
+					<span>{cutout.tier === "best" ? "Best is cutting you out… about 5 minutes or more. You can keep editing or close this page." : "Almost done, putting your cutout together…"}</span>
+				) : (
+					<>
+						<span>
+							{cutOut && ready
+								? `You're cut out with ${TIERS[cutout.tier ?? "best"].name}. Put text, pictures or clips anywhere in the kept video.`
+								: cutOut
+									? "Part of your video has changed since you were cut out. Cut me out again to cover it."
 									: cutout.status === "failed"
 										? (cutout.error ?? "The cutout failed. Please try again.")
-										: `When the parts are where you want them, cut yourself out (${needSeconds} of ${cutout.seconds} seconds).`}
-					</span>
-					{!ready && cutout.status !== "processing" && (
-						<button onClick={() => void cutout.start(need)} disabled={tooLong} className="self-start rounded-md bg-blue-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+										: "Choose a quality, then cut yourself out of the whole video once."}
+						</span>
+						<div className="grid gap-1 sm:grid-cols-3" role="radiogroup" aria-label="Cutout quality">
+							{TIER_ORDER.map((id) => {
+								const off = (id === "fast" || id === "balanced") && !cutout.support[id];
+								return (
+									<button
+										key={id}
+										role="radio"
+										aria-checked={picked === id}
+										disabled={off}
+										onClick={() => setPicked(id)}
+										className={`rounded-md border p-1.5 text-left disabled:opacity-40 ${picked === id ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
+									>
+										<span className="block text-sm font-medium">{TIERS[id].name}</span>
+										<span className="block text-[11px] leading-4 text-foreground/60">{off ? "This device can't run it" : TIERS[id].note}</span>
+									</button>
+								);
+							})}
+						</div>
+						{picked === "best" && !cutout.best.unlimited && (
+							<span className="text-foreground/70">
+								{tooMuch ? `Best needs ${clock(bestCost)}, and you have ${clock(bestLeft)} left this month. Try Fast or Balanced.` : `This will use ${clock(bestCost)} of your ${clock(bestLeft)} Best left this month.`}
+							</span>
+						)}
+						{picked !== "best" && <span className="text-foreground/70">Runs on this device, so keep this page open until it finishes. Edges are simpler than Best.</span>}
+						<button
+							onClick={() => cutout.start(whole, picked, videoUrl)}
+							disabled={tooMuch || !whole.length || (picked !== "best" && !videoUrl)}
+							className="self-start rounded-md bg-blue-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+						>
 							Cut me out
 						</button>
-					)}
-				</div>
-			)}
+						{picked !== "best" && !videoUrl && <span className="text-foreground/60">Your preview is still being made. This will work in a moment.</span>}
+					</>
+				)}
+			</div>
 
 			{layers.texts.map((t) => (
 				<div key={t.id} className="rounded-lg border border-foreground/15">

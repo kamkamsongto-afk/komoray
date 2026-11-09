@@ -5,12 +5,21 @@
 //   cutout-error.json   { error }   it failed
 //   matte.mp4           the matte (white = person) for the whole video, 30 fps, for the final render
 //   proxy-cutout.mp4    the editor's preview copy: picture on top, matte below
-// How many seconds one video may have cut out is per person (lib/features.ts).
+//   matte-local.h264    Fast and Balanced: the matte the customer's computer made (lib/cutout-local.ts)
+// Best is paid GPU time, so its seconds per month are per person (lib/features.ts, lib/access.ts).
+// Fast and Balanced run on the customer's own computer: they take none of those seconds.
 
 export type Window = [number, number];
+export type CutoutTier = "fast" | "balanced" | "best";
 
-export const CUTOUT_RUNS_PER_VIDEO = 5; // each run is paid GPU time; the admin has no limit
-export const CUTOUT_TOO_OLD_MS = 30 * 60 * 1000; // a run still going after this has died
+export const CUTOUT_RUNS_PER_VIDEO = 5; // each Best run is paid GPU time; the admin has no limit
+export const LOCAL_RUNS_PER_VIDEO = 30; // Fast and Balanced cost a moment of server time each to finish
+export const LOCAL_MATTE = "matte-local.h264";
+export const LOCAL_MATTE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+export const CUTOUT_TOO_OLD_MS = 95 * 60 * 1000; // a Best run still going after this has died (GPUs can queue a long time)
+export const LOCAL_TOO_OLD_MS = 15 * 60 * 1000; // a page that asked to upload its matte and never finished
+
+const MAX_WINDOWS = 400; // the whole kept video can be many short parts
 
 // The windows asked for, cleaned: inside the video, at least half a second, a tenth of a second
 // precise, sorted, overlapping ones joined.
@@ -29,7 +38,22 @@ export function cleanWindows(raw: unknown, duration: number): Window[] {
 		if (last && w[0] <= last[1]) last[1] = Math.max(last[1], w[1]);
 		else joined.push([...w]);
 	}
-	return joined.slice(0, 20);
+	return joined.slice(0, MAX_WINDOWS);
+}
+
+// How many seconds of these windows aren't in the ones already cut out: all that Best has to pay for.
+export function newSeconds(wins: Window[], before: Window[]) {
+	let seconds = 0;
+	for (const [a, b] of wins) {
+		let at = a;
+		for (const [x, y] of before) {
+			if (y <= at || x >= b) continue;
+			if (x > at) seconds += x - at;
+			at = Math.max(at, y);
+		}
+		if (at < b) seconds += b - at;
+	}
+	return Math.round(seconds * 10) / 10;
 }
 
 export const windowSeconds = (wins: Window[]) => Math.round(wins.reduce((sum, [a, b]) => sum + (b - a), 0) * 10) / 10;

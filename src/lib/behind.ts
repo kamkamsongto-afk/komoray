@@ -141,6 +141,21 @@ export function cutoutWindows(layers: CutoutLayers, segments: Segment[]): Window
 	return spans;
 }
 
+// Every part of the source video that stays in the final video: Cut me out covers all of it, so a text or
+// picture can then go anywhere without cutting out again. Gaps under a second are bridged: it costs almost
+// nothing and a short part on its own would be too short to ask for.
+export function keptWindows(segments: Segment[]): Window[] {
+	const parts: Window[] = [];
+	for (const seg of segments) {
+		const start = Math.max(0, seg.trim / FPS - 0.1);
+		const end = (seg.trim + seg.frames) / FPS + 0.1;
+		const last = parts.at(-1);
+		if (last && start - last[1] < 1) last[1] = Math.max(last[1], end);
+		else parts.push([start, end]);
+	}
+	return parts.map(([a, b]): Window => [a, Math.max(b, a + 0.5)]);
+}
+
 // Are these windows (what the layers need) all inside the ones already cut out?
 export const covered = (need: Window[], done: Window[]) => need.every(([a, b]) => done.some(([c, d]) => c <= a + 0.15 && d >= b - 0.15));
 

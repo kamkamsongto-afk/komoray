@@ -231,14 +231,14 @@ export default function AdminPage() {
 										</label>
 										{p.features.cutout.on && (
 											<select
-												aria-label={`Cutout seconds per video for ${p.email}`}
+												aria-label={`Cutout Best minutes per month for ${p.email}`}
 												value={p.features.cutout.seconds}
 												onChange={(e) => void saveFeatures(p.email, { ...p.features, cutout: { ...p.features.cutout, seconds: Number(e.target.value) } })}
 												className="rounded border border-foreground/20 bg-background px-1 py-0.5"
 											>
 												{CUTOUT_SECONDS.map((s) => (
 													<option key={s} value={s}>
-														{s} s per video
+														{s / 60} min Best / month
 													</option>
 												))}
 											</select>
