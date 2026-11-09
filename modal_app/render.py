@@ -50,6 +50,9 @@ image = (
             ]
         ],
         "fc-cache -f",
+        # The noise reduction model of polish_sound, a fixed version ("conjoined-burgers": fans, AC, computers).
+        "mkdir -p /opt/rnnoise",
+        "curl -fsSL -o /opt/rnnoise/cb.rnnn https://raw.githubusercontent.com/richardpl/arnndn-models/0fda24c46d78f0207d820bb970fbe85c1971b39c/cb.rnnn",
     )
     .pip_install("fastapi[standard]", "opencv-python-headless==4.10.0.84", "numpy<2.3", "uharfbuzz==0.51.1")
 )
@@ -955,7 +958,8 @@ def ffmpeg_command(
         cmd += ["-i", str(logo["path"])]
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
-        cmd += ["-map", "[ca]", "-c:a", "aac", "-b:a", "160k"]
+        # High on purpose: polish_sound encodes this sound a second time, at the bitrate people get.
+        cmd += ["-map", "[ca]", "-c:a", "aac", "-b:a", "320k"]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
     # The last fps filter can add a frame at the very end: exactly as many frames as the pieces have.
     cmd += ["-frames:v", str(sum(frames for _, _, frames in pieces))]
@@ -968,6 +972,69 @@ def put(url: str, data: bytes, content_type: str) -> None:
     with urllib.request.urlopen(req) as res:
         if res.status >= 300:
             raise RuntimeError(f"upload failed ({res.status})")
+
+
+# Studio sound on the final video, in this order: noise reduction (85%, all of it can sound hollow), cut the
+# low rumble and the muddy 250 Hz, lift the clarity at 3.5 kHz, soften the s sounds, even out quiet and loud
+# moments. Picked by ear on 9 Nov from five versions of a real clip.
+VOICE_CHAIN = (
+    "aresample=48000,arnndn=m=/opt/rnnoise/cb.rnnn:mix=0.85,"
+    "highpass=f=80,equalizer=f=250:t=q:w=1.2:g=-2,equalizer=f=3500:t=q:w=1.0:g=2,"
+    "deesser=i=0.3:m=0.5:f=0.5:s=o,acompressor=threshold=-22dB:ratio=2.5:attack=15:release=180:makeup=2"
+)
+LOUDNESS = "I=-14:TP=-1.5:LRA=11"  # what the big platforms play at, with room for their own encoding
+DEAD_SIDE_DB = 30  # one side this much quieter than the other: the mic only recorded on one side
+
+
+def one_sided_fix(video: Path) -> str:
+    """Some clip-on mics record on one side only, and the video would play in one ear: copy the live side."""
+    stats = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(video), "-vn", "-af", "astats=measure_perchannel=RMS_level:measure_overall=none", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+    ).stderr
+    levels = [float(x) for x in re.findall(r"RMS level dB: (\S+)", stats)]
+    if len(levels) != 2 or abs(levels[0] - levels[1]) < DEAD_SIDE_DB:
+        return ""
+    live = 0 if levels[0] > levels[1] else 1
+    return f"pan=stereo|c0=c{live}|c1=c{live},"
+
+
+def polish_sound(video: Path) -> bool:
+    """Studio sound, in place. A video with its plain sound beats no video, so a failure here only logs."""
+    try:
+        if not has_audio(video):
+            return False
+        chain = one_sided_fix(video) + VOICE_CHAIN
+        # Loudness is measured first and then applied evenly: one pass alone makes the voice pump up and down.
+        probe = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-i", str(video), "-vn", "-af", f"{chain},loudnorm={LOUDNESS}:print_format=json", "-f", "null", "-"],
+            capture_output=True,
+            text=True,
+        ).stderr
+        m = json.loads(probe[probe.rindex("{") : probe.rindex("}") + 1])
+        if not math.isfinite(float(m["input_i"])):  # silent from start to end: nothing to bring up
+            return False
+        level = (
+            f"loudnorm={LOUDNESS}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
+            f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true,aresample=48000"
+        )
+        polished = video.with_name("polished.mp4")
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video), "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy"]
+            + ["-af", f"{chain},{level}", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(polished)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-600:])
+        if abs(duration_of(polished) - duration_of(video)) > 0.1:
+            raise RuntimeError("the polished video changed length")
+        polished.replace(video)
+        return True
+    except Exception as err:
+        print(f"sound not polished: {err}")
+        return False
 
 
 @app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
@@ -1024,8 +1091,9 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
 
+            sound = polish_sound(out)
             put(output_url, out.read_bytes(), "video/mp4")
-            return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size}
+            return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size, "sound": sound}
     except Exception as err:
         if error_url:
             put(error_url, json.dumps({"error": str(err)}).encode(), "application/json")
