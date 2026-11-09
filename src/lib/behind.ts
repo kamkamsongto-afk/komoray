@@ -49,6 +49,12 @@ export type Insert = {
 	speakerScale: number;
 	speakerX: number;
 	hidden: boolean;
+	// Added 10 Nov, so videos saved before may not have them: read with ?? (picMoved, picturePlace, speakerTransform).
+	speakerLift?: number; // how far the speaker's bottom edge is raised, share of the height
+	picScale?: number; // 1 = just fills the screen
+	picX?: number; // the picture's middle, away from the screen's, share of the width
+	picY?: number; // same, share of the height
+	picRotate?: number; // degrees, clockwise
 };
 
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
@@ -58,7 +64,7 @@ export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 
 // edgeFade: a smaller speaker fades out over this share of their width at the left and right. The camera
 // often cuts the shoulders off at the frame's side, which else ends in a hard straight line (7 Nov test).
 // Same as INSERT_EDGE_FADE in render.py.
-export const INSERT = { scale: { min: 0.25, max: 1, start: 0.5 }, fade: 0.25, edgeFade: 0.12, maxBytes: { image: 10_000_000, video: 150_000_000 } };
+export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0.12, maxBytes: { image: 10_000_000, video: 150_000_000 } };
 // Running text: the words, again and again, so the screen stays full for as long as it runs. Counted the
 // same way here and in render.py (run_repeats), so both draw the same string.
 export const RUN_GAP = "   •   ";
@@ -124,6 +130,21 @@ export function insertShown(i: Insert, t: number) {
 	if (t < i.start || t >= i.end) return 0;
 	return Math.min(1, (t - i.start) / INSERT.fade, (i.end - t) / INSERT.fade);
 }
+
+// Has the customer moved, turned or resized the picture? Then it sits on black, and is the whole picture, not
+// the part that fills the screen. The same placement is in cutout_filters in render.py.
+export const picMoved = (i: Insert) => (i.picScale ?? 1) !== 1 || (i.picX ?? 0) !== 0 || (i.picY ?? 0) !== 0 || (i.picRotate ?? 0) !== 0;
+// In percent of the screen. ratio: the picture's width / height. frame: the screen's.
+export function picturePlace(i: Insert, ratio: number, frame: number) {
+	return {
+		left: `${50 + (i.picX ?? 0) * 100}%`,
+		top: `${50 + (i.picY ?? 0) * 100}%`,
+		width: `${ratio > frame ? (ratio / frame) * 100 : 100}%`,
+		height: `${ratio > frame ? 100 : (frame / ratio) * 100}%`,
+		transform: `translate(-50%, -50%) rotate(${i.picRotate ?? 0}deg) scale(${i.picScale ?? 1})`,
+	};
+}
+export const speakerTransform = (i: Insert, boxWidth: number) => `translate(${(i.speakerX - 0.5) * boxWidth}px, ${-(i.speakerLift ?? 0) * 100}%) scale(${i.speakerScale})`;
 
 // The parts of the source video the speaker must be cut out for: every layer's time on the final video,
 // back on the source, a little wider so a cut-in-between never shows the edge.
@@ -214,6 +235,11 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			speakerScale: round(num(i.speakerScale, INSERT.scale.min, INSERT.scale.max, INSERT.scale.start)),
 			speakerX: round(num(i.speakerX, 0, 1, 0.25), 1000),
 			hidden: i.hidden === true,
+			speakerLift: round(num(i.speakerLift, 0, INSERT.lift.max, 0), 1000),
+			picScale: round(num(i.picScale, INSERT.picture.scale.min, INSERT.picture.scale.max, 1)),
+			picX: round(num(i.picX, -INSERT.picture.move, INSERT.picture.move, 0), 1000),
+			picY: round(num(i.picY, -INSERT.picture.move, INSERT.picture.move, 0), 1000),
+			picRotate: Math.round(num(i.picRotate, -INSERT.picture.rotate, INSERT.picture.rotate, 0)),
 		});
 	}
 	return { texts, inserts };

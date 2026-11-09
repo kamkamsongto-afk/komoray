@@ -4,7 +4,7 @@ import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerMotion, cleanBannerText } from "@/lib/banners";
-import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, runText } from "@/lib/behind";
+import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, runText, speakerTransform } from "@/lib/behind";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -98,7 +98,7 @@ type Props = {
 };
 
 // An inserted clip, kept at the final video's time: it plays with the preview, and jumps when it is far off.
-function InsertClip({ src, at, playing, style }: { src: string; at: number; playing: boolean; style: CSSProperties }) {
+function InsertClip({ src, at, playing, style, onRatio }: { src: string; at: number; playing: boolean; style: CSSProperties; onRatio: (ratio: number) => void }) {
 	const ref = useRef<HTMLVideoElement>(null);
 	useEffect(() => {
 		const video = ref.current;
@@ -108,7 +108,7 @@ function InsertClip({ src, at, playing, style }: { src: string; at: number; play
 		if (playing && want < (video.duration || Infinity) - 0.05) void video.play().catch(() => {});
 		else video.pause();
 	}, [at, playing]);
-	return <video ref={ref} src={src} muted playsInline preload="auto" style={style} />;
+	return <video ref={ref} src={src} muted playsInline preload="auto" style={style} onLoadedMetadata={(e) => e.currentTarget.videoHeight && onRatio(e.currentTarget.videoWidth / e.currentTarget.videoHeight)} />;
 }
 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
@@ -183,6 +183,7 @@ export function PlayerFrame({
 		bannersRef.current = banners;
 	}, [banners]);
 	const [boxWidth, setBoxWidth] = useState(324);
+	const [ratios, setRatios] = useState<Record<string, number>>({}); // each inserted picture or clip's width / height
 	const dragRef = useRef<{ y: number; position: number } | null>(null);
 	// The final video's size (9:16, 1:1 or 16:9); everything on it is laid out at full size and shrunk.
 	const { width: W, height: H } = outputSize(subtitle);
@@ -275,7 +276,7 @@ export function PlayerFrame({
 					maskImage: edges,
 					WebkitMaskImage: edges,
 					transformOrigin: "50% 100%",
-					transform: `translateX(${(insert.speakerX - 0.5) * boxWidth}px) scale(${insert.speakerScale})`,
+					transform: speakerTransform(insert, boxWidth),
 					opacity: insert.hidden ? 0 : shown,
 				}
 			: {};
@@ -314,12 +315,19 @@ export function PlayerFrame({
 					const show = insertShown(i, outTime);
 					const src = files[i.file];
 					if (!show || !src) return null;
-					const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: show, zIndex: 1 };
-					return i.kind === "video" ? (
-						<InsertClip key={i.id} src={src} at={outTime - i.start} playing={playing} style={fill} />
-					) : (
-						// eslint-disable-next-line @next/next/no-img-element
-						<img key={i.id} src={src} alt="" style={fill} />
+					const moved = picMoved(i);
+					const ratio = ratios[i.file];
+					const seen = (r: number) => setRatios((all) => (all[i.file] === r ? all : { ...all, [i.file]: r }));
+					const fill: CSSProperties = moved && ratio ? { position: "absolute", maxWidth: "none", objectFit: "fill", ...picturePlace(i, ratio, W / H) } : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+					return (
+						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved ? "#000" : undefined }}>
+							{i.kind === "video" ? (
+								<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} />
+							) : (
+								// eslint-disable-next-line @next/next/no-img-element
+								<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
+							)}
+						</div>
 					);
 				})}
 				<div className="pointer-events-none absolute inset-0" style={{ zIndex: 1, ...personStyle }}>

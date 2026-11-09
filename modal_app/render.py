@@ -378,11 +378,21 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
         a, b = float(ins["start"]), float(ins["end"])
         d = b - a
         hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if ins.get("kind") == "video" else ""
-        parts.append(
-            f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
+        fades = (
             f"format=yuva420p,fade=t=in:st=0:d={INSERT_FADE}:alpha=1,fade=t=out:st={max(0.0, d - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1,"
             f"setpts=PTS-STARTPTS+{a:.3f}/TB[ins{j}]"
         )
+        grow, turn = float(ins.get("picScale", 1)), float(ins.get("picRotate", 0))
+        dx, dy = float(ins.get("picX", 0)) * W, float(ins.get("picY", 0)) * H
+        if grow == 1 and turn == 0 and dx == 0 and dy == 0:
+            parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{fades}")
+        else:
+            # Moved, turned or resized: the whole picture on black. Same as picturePlace in behind.ts.
+            angle = f"{turn}*PI/180"
+            rotate = f",rotate={angle}:ow=rotw({angle}):oh=roth({angle}):c=none" if turn else ""
+            parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,scale=iw*{grow}:ih*{grow},format=rgba{rotate}[ipic{j}]")
+            parts.append(f"color=c=black:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[ibg{j}]")
+            parts.append(f"[ibg{j}][ipic{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1,{fades}")
         parts.append(f"{base}[ins{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[cbi{j}]")
         base = f"[cbi{j}]"
     if not person:
@@ -409,7 +419,8 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
             f"[cpb{j}][cpf{j}]alphamerge,scale={w}:-2,format=yuva420p,fade=t=in:st={a:.3f}:d={INSERT_FADE}:alpha=1,"
             f"fade=t=out:st={max(a, b - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1[csm{j}]"
         )
-        parts.append(f"{base}[csm{j}]overlay=x={x:.1f}:y=main_h-overlay_h:enable='between(t,{a:.3f},{b:.3f})'[cs{j}]")
+        lift = float(ins.get("speakerLift", 0)) * H
+        parts.append(f"{base}[csm{j}]overlay=x={x:.1f}:y=main_h-overlay_h-{lift:.1f}:enable='between(t,{a:.3f},{b:.3f})'[cs{j}]")
         base = f"[cs{j}]"
     return base
 

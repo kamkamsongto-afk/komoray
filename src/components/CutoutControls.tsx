@@ -32,9 +32,9 @@ const TIERS: Record<CutoutTier, { name: string; card: string; note: string }> = 
 	best: { name: "Slow", card: "Slow (High Quality)", note: "Finest hair and edges. Close the page if you like" },
 };
 const SPEEDS: [BehindSpeed, string][] = [
-	["slow", "Slow"],
-	["normal", "Normal"],
 	["fast", "Fast"],
+	["normal", "Normal"],
+	["slow", "Slow"],
 ];
 
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
@@ -170,7 +170,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				) : cutout.local ? (
 					<>
 						<span className="flex items-baseline justify-between gap-2">
-							<span>{cutout.local.phase === "sending" ? "Saving your cutout…" : `Cutting you out on this device… ${Math.round(cutout.local.part * 100)}%`}</span>
+							<span>{cutout.local.phase === "sending" ? "Saving your cutout…" : `Cutting you out… ${Math.round(cutout.local.part * 100)}%`}</span>
 							<span className="shrink-0 font-medium tabular-nums">{wait}</span>
 						</span>
 						<div className="h-1.5 overflow-hidden rounded-full bg-foreground/10">
@@ -335,16 +335,18 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									))}
 								</select>,
 							)}
-							{row(
-								"Speed",
-								<span className="flex gap-1">
-									{SPEEDS.map(([id, name]) => (
-										<button key={id} onClick={() => updateText(t.id, { speed: id })} className={`rounded border px-1.5 py-0.5 ${t.speed === id ? "border-blue-600 bg-blue-600/10" : "border-foreground/20"}`}>
-											{name}
-										</button>
-									))}
-								</span>,
-							)}
+							{/* How fast the words move, nothing to do with the cutout's quality. Heartbeat has one speed. */}
+							{t.fx !== "pulse" &&
+								row(
+									"Text speed",
+									<span className="flex gap-1">
+										{SPEEDS.map(([id, name]) => (
+											<button key={id} onClick={() => updateText(t.id, { speed: id })} className={`rounded border px-1.5 py-0.5 ${t.speed === id ? "border-blue-600 bg-blue-600/10" : "border-foreground/20"}`}>
+												{name}
+											</button>
+										))}
+									</span>,
+								)}
 							{row(
 								"Font",
 								<select value={t.font} onChange={(e) => updateText(t.id, { font: e.target.value as FontId })} className="rounded border border-foreground/20 bg-background px-1 py-0.5">
@@ -409,6 +411,12 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							</label>
 							{!i.hidden && row("Your size", range(i.speakerScale, INSERT.scale.min, INSERT.scale.max, 0.05, `${Math.round(i.speakerScale * 100)}%`, (speakerScale) => updateInsert(i.id, { speakerScale })))}
 							{!i.hidden && row("You stand", range(i.speakerX, 0, 1, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
+							{!i.hidden && row("You rise", range(i.speakerLift ?? 0, 0, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
+							<span className="mt-1 text-xs font-medium text-foreground/70">{i.kind === "video" ? "The clip" : "The picture"}</span>
+							{row("Size", range(i.picScale ?? 1, INSERT.picture.scale.min, INSERT.picture.scale.max, 0.05, `${Math.round((i.picScale ?? 1) * 100)}%`, (picScale) => updateInsert(i.id, { picScale })))}
+							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
+							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}
+							{row("Rotate", range(i.picRotate ?? 0, -INSERT.picture.rotate, INSERT.picture.rotate, 1, `${i.picRotate ?? 0}°`, (picRotate) => updateInsert(i.id, { picRotate })))}
 							{times(i, (patch) => updateInsert(i.id, patch))}
 						</div>
 					))}
