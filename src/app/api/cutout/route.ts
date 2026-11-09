@@ -1,7 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, bestSecondsUsed, chargeBest, lockBest, refundBest } from "@/lib/access";
 import { covered, type CutoutLayers } from "@/lib/behind";
-import { cleanWindows, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TOO_OLD_MS, type CutoutTier, LOCAL_MATTE, LOCAL_TOO_OLD_MS, LOCAL_RUNS_PER_VIDEO, newSeconds, SLOW_SAVED, type Window } from "@/lib/cutout";
+import { cleanWindows, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TIERS, CUTOUT_TOO_OLD_MS, type CutoutTier, LOCAL_MATTE, LOCAL_TOO_OLD_MS, LOCAL_RUNS_PER_VIDEO, newSeconds, savedFiles, type Window } from "@/lib/cutout";
 import { mediaUrl } from "@/lib/proxy";
 import { copyObject, deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
@@ -48,9 +48,9 @@ export async function GET(request: Request) {
 	const key = await readKey(new URL(request.url).searchParams.get("key"));
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const { user } = await currentUser();
-	const [now, edit, access, saved] = await Promise.all([status(key), getJson<{ cutout?: CutoutLayers }>(siblingKey(key, "edit.json")), accessFor(user?.email), getJson<Done>(siblingKey(key, SLOW_SAVED.done))]);
-	// What Slow would not have to make (or charge for) again.
-	const slowWindows = now.status === "done" && now.tier === "best" ? now.windows : (saved?.windows ?? []);
+	const [now, edit, access, notes] = await Promise.all([status(key), getJson<{ cutout?: CutoutLayers }>(siblingKey(key, "edit.json")), accessFor(user?.email), Promise.all(CUTOUT_TIERS.map((tier) => getJson<Done>(siblingKey(key, savedFiles(tier).done))))]);
+	// What each quality would not have to make (or charge for) again.
+	const saved = Object.fromEntries(CUTOUT_TIERS.map((tier, i) => [tier, now.status === "done" && now.tier === tier ? now.windows : (notes[i]?.windows ?? [])]));
 	const best = {
 		unlimited: access.unlimited,
 		limit: access.features.cutout.seconds,
@@ -58,13 +58,13 @@ export async function GET(request: Request) {
 	};
 	const names = [...new Set((edit?.cutout?.inserts ?? []).map((i) => i.file))];
 	const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
-	if (now.status !== "done") return Response.json({ ...now, files, best, slowWindows });
+	if (now.status !== "done") return Response.json({ ...now, files, best, saved });
 	const env = getCloudflareContext().env as unknown as CutoutEnv;
-	return Response.json({ ...now, files, best, slowWindows, previewUrl: await mediaUrl(key, "proxy-cutout.mp4", env.RENDER_TOKEN, PREVIEW_LINK_SECONDS) });
+	return Response.json({ ...now, files, best, saved, previewUrl: await mediaUrl(key, "proxy-cutout.mp4", env.RENDER_TOKEN, PREVIEW_LINK_SECONDS) });
 }
 
 export async function POST(request: Request) {
-	const body = (await request.json().catch(() => ({}))) as { key?: unknown; windows?: unknown; tier?: unknown };
+	const body = (await request.json().catch(() => ({}))) as { key?: unknown; windows?: unknown; tier?: unknown; restore?: unknown };
 	const key = await readKey(body.key);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const tier: CutoutTier = isTier(body.tier) ? body.tier : "best";
@@ -78,6 +78,15 @@ export async function POST(request: Request) {
 	if (!edit?.duration) return Response.json({ error: "Please wait until the script is ready." }, { status: 400 });
 	const windows = cleanWindows(body.windows, edit.duration);
 	if (windows.length === 0) return Response.json({ error: "Pick at least half a second to cut out." }, { status: 400 });
+
+	// Switching to a quality already made: no GPU, no seconds, no run used up.
+	if (body.restore === true) {
+		const now = await status(key);
+		if (now.status === "processing") return Response.json({ error: "The cutout is still being made. Please wait for it to finish." }, { status: 409 });
+		const note = await savedCutout(key, tier);
+		if (!note || !covered(windows, note.windows)) return Response.json({ error: "That cutout isn't saved for this video." }, { status: 404 });
+		return bringBack(key, tier, note, now);
+	}
 
 	if (tier === "best") {
 		const unlock = user?.email ? await lockBest(user.email) : null;
@@ -94,9 +103,9 @@ export async function POST(request: Request) {
 
 	if (!access.unlimited && now.localRuns >= LOCAL_RUNS_PER_VIDEO) return Response.json({ error: "This video has been cut out too many times today. Please email hello@komoray.com." }, { status: 429 });
 	const files = cutoutFiles(key);
-	// Fast or Balanced is about to write over a Best cutout. Failing to keep it mustn't waste the work
-	// just done on this computer: going back to Slow then simply asks to pay again, and says so first.
-	if (now.status === "done" && now.tier === "best") await keepSlow(key, now.windows).catch(() => {});
+	// Another quality is about to be written over this one. Failing to keep it mustn't waste the work
+	// just done on this computer: going back then simply means cutting again.
+	if (now.status === "done" && now.tier !== tier) await keepCurrent(key, now).catch(() => {});
 	await Promise.all([deleteObject(files.done), deleteObject(files.error), deleteObject(siblingKey(key, LOCAL_MATTE))]);
 	await putObject(files.job, JSON.stringify({ startedAt: new Date().toISOString(), windows, runs: now.runs, localRuns: now.localRuns + 1, local: tier } satisfies Job), "application/json");
 	return Response.json({ uploadUrl: await signedUrl(siblingKey(key, LOCAL_MATTE), "PUT", LINK_SECONDS, "video/h264") });
@@ -104,19 +113,40 @@ export async function POST(request: Request) {
 
 const cutoutFiles = (key: string) => ({ done: siblingKey(key, "cutout.json"), error: siblingKey(key, "cutout-error.json"), job: siblingKey(key, "cutout-job.json"), matte: siblingKey(key, "matte.mp4") });
 
-// The note is written last and removed first, so it only ever describes two complete files.
-async function keepSlow(key: string, windows: Window[]) {
-	const noteKey = siblingKey(key, SLOW_SAVED.done);
+// Copies the cutout in use aside, under its quality's own names. The note is written last and removed
+// first, so it only ever describes two complete files. Already kept (same version): nothing to copy.
+async function keepCurrent(key: string, now: { windows: Window[]; tier: CutoutTier; version: string }) {
+	const names = savedFiles(now.tier);
+	const noteKey = siblingKey(key, names.done);
+	if ((await getJson<Done>(noteKey))?.at === now.version) return;
 	await deleteObject(noteKey);
-	await Promise.all([copyObject(siblingKey(key, "matte.mp4"), siblingKey(key, SLOW_SAVED.matte)), copyObject(siblingKey(key, "proxy-cutout.mp4"), siblingKey(key, SLOW_SAVED.preview))]);
-	await putObject(noteKey, JSON.stringify({ windows, tier: "best" } satisfies Done), "application/json");
+	await Promise.all([copyObject(siblingKey(key, "matte.mp4"), siblingKey(key, names.matte)), copyObject(siblingKey(key, "proxy-cutout.mp4"), siblingKey(key, names.preview))]);
+	await putObject(noteKey, JSON.stringify({ windows: now.windows, tier: now.tier, at: now.version } satisfies Done), "application/json");
 }
 
-async function savedSlow(key: string) {
-	const saved = await getJson<Done>(siblingKey(key, SLOW_SAVED.done));
-	if (!saved) return null;
-	const [matte, preview] = await Promise.all([exists(siblingKey(key, SLOW_SAVED.matte)), exists(siblingKey(key, SLOW_SAVED.preview))]);
-	return matte && preview ? saved : null;
+async function savedCutout(key: string, tier: CutoutTier) {
+	const names = savedFiles(tier);
+	const note = await getJson<Done>(siblingKey(key, names.done));
+	if (!note) return null;
+	const [matte, preview] = await Promise.all([exists(siblingKey(key, names.matte)), exists(siblingKey(key, names.preview))]);
+	return matte && preview ? note : null;
+}
+
+// Puts a kept cutout back in use. It keeps its own version (at), so switching back and forth doesn't
+// light the "your cutout is ready" dot every time.
+async function bringBack(key: string, tier: CutoutTier, note: Done, now: Awaited<ReturnType<typeof status>>) {
+	const files = cutoutFiles(key);
+	const names = savedFiles(tier);
+	if (now.status === "done" && now.tier !== tier) await keepCurrent(key, now).catch(() => {});
+	try {
+		await deleteObject(files.done);
+		await Promise.all([copyObject(siblingKey(key, names.matte), files.matte), copyObject(siblingKey(key, names.preview), siblingKey(key, "proxy-cutout.mp4"))]);
+		await deleteObject(files.error);
+		await putObject(files.done, JSON.stringify({ windows: note.windows, tier, at: note.at ?? new Date().toISOString() } satisfies Done), "application/json");
+	} catch {
+		return Response.json({ error: "Could not switch to that cutout. Please try again." }, { status: 502 });
+	}
+	return Response.json({ status: "done", windows: note.windows });
 }
 
 async function startBest(key: string, windows: Window[], access: Awaited<ReturnType<typeof accessFor>>, email?: string | null) {
@@ -124,19 +154,10 @@ async function startBest(key: string, windows: Window[], access: Awaited<ReturnT
 	if (now.status === "processing") return Response.json({ error: "The cutout is still being made. Please wait for it to finish." }, { status: 409 });
 	const files = cutoutFiles(key);
 	const current = now.status === "done" && now.tier === "best" && (await exists(files.matte));
-	const saved = current ? null : await savedSlow(key);
+	const saved = current ? null : await savedCutout(key, "best");
 
-	// Everything asked for is already in the kept Best cutout: put it back. No GPU, no seconds, no run used up.
-	if (saved && covered(windows, saved.windows)) {
-		try {
-			await Promise.all([copyObject(siblingKey(key, SLOW_SAVED.matte), files.matte), copyObject(siblingKey(key, SLOW_SAVED.preview), siblingKey(key, "proxy-cutout.mp4"))]);
-			await deleteObject(files.error);
-			await putObject(files.done, JSON.stringify({ windows: saved.windows, tier: "best", at: new Date().toISOString() } satisfies Done), "application/json");
-		} catch {
-			return Response.json({ error: "Could not bring back your Slow cutout. Please try again." }, { status: 502 });
-		}
-		return Response.json({ status: "done", windows: saved.windows });
-	}
+	// Everything asked for is already in the kept Best cutout: put it back.
+	if (saved && covered(windows, saved.windows)) return bringBack(key, "best", saved, now);
 
 	if (!access.unlimited && now.runs >= CUTOUT_RUNS_PER_VIDEO) {
 		return Response.json({ error: `This video has been cut out ${CUTOUT_RUNS_PER_VIDEO} times with Slow. Please email hello@komoray.com for more.` }, { status: 429 });
@@ -144,7 +165,7 @@ async function startBest(key: string, windows: Window[], access: Awaited<ReturnT
 
 	// What an earlier Best cutout made is reused and not charged again. A Fast or Balanced matte is never reused.
 	const previous = current ? now.windows : (saved?.windows ?? []);
-	const previousFile = current ? files.matte : siblingKey(key, SLOW_SAVED.matte);
+	const previousFile = current ? files.matte : siblingKey(key, savedFiles("best").matte);
 	const charged = newSeconds(windows, previous);
 	let usageKey: string | undefined;
 	if (!access.unlimited && email) {
@@ -174,6 +195,7 @@ async function startBest(key: string, windows: Window[], access: Awaited<ReturnT
 		if (usageKey) await refundBest(usageKey, charged).catch(() => {});
 		return Response.json({ error: "Could not start the cutout. Your Slow seconds are back. Please try again." }, { status: 502 });
 	}
+	if (now.status === "done" && now.tier !== "best") await keepCurrent(key, now).catch(() => {});
 	await Promise.all([deleteObject(files.done), deleteObject(files.error)]);
 
 	const res = await fetch(env.CUTOUT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload }).catch(() => null);

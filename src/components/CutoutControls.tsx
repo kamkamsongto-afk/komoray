@@ -69,8 +69,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const cutOut = cutout.status === "done";
 	const ready = cutOut && covered(whole, cutout.windows);
 	// covered, not newSeconds === 0: the kept video runs a tenth of a second past the end, the server's windows stop at it.
-	const bestCost = covered(whole, cutout.slowWindows) ? 0 : newSeconds(whole, cutout.slowWindows);
-	const slowIsSaved = cutout.tier !== "best" && cutout.slowWindows.length > 0 && bestCost === 0; // comes back at once, free
+	const slowWindows = cutout.saved.best ?? [];
+	const bestCost = covered(whole, slowWindows) ? 0 : newSeconds(whole, slowWindows);
+	// Already made for this video and not the one in use: switching is a moment, and free.
+	const isSaved = (id: CutoutTier) => whole.length > 0 && !(cutOut && cutout.tier === id) && covered(whole, cutout.saved[id] ?? []);
+	const pickedSaved = isSaved(picked);
 	const bestLeft = Math.max(0, cutout.best.limit - cutout.best.used);
 	const tooMuch = picked === "best" && !cutout.best.unlimited && bestCost > bestLeft + 0.05;
 	const same = cutOut && ready && picked === cutout.tier; // the same quality over the same video gives the same result
@@ -162,7 +165,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		<div className="flex flex-col gap-2 p-3 pt-1">
 			<p className="text-xs text-foreground/60">Put big text behind you, or a picture or clip behind a smaller you.</p>
 			<div className={`flex flex-col gap-2 rounded-lg border p-2 text-xs ${cutOut ? "border-green-600/40 bg-green-600/10" : "border-blue-600/40 bg-blue-600/10"}`}>
-				{cutout.local ? (
+				{cutout.restoring ? (
+					<span>Switching to {TIERS[cutout.restoring].name}…</span>
+				) : cutout.local ? (
 					<>
 						<span className="flex items-baseline justify-between gap-2">
 							<span>{cutout.local.phase === "sending" ? "Saving your cutout…" : `Cutting you out on this device… ${Math.round(cutout.local.part * 100)}%`}</span>
@@ -224,23 +229,23 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										className={`rounded-md border p-1.5 text-left disabled:opacity-40 ${picked === id ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
 									>
 										<span className="block text-sm font-medium">{TIERS[id].card}</span>
-										<span className="block text-[11px] leading-4 text-foreground/60">{off ? "This device can't run it" : TIERS[id].note}</span>
+										<span className="block text-[11px] leading-4 text-foreground/60">{cutOut && cutout.tier === id ? "In use now" : isSaved(id) ? "Saved. Switches right away" : off ? "This device can't run it" : TIERS[id].note}</span>
 									</button>
 								);
 							})}
 						</div>
-						{picked === "best" && slowIsSaved && <span className="text-foreground/70">Your Slow cutout is saved. It comes back right away and uses none of your minutes.</span>}
-						{picked === "best" && !slowIsSaved && !cutout.best.unlimited && (
+						{pickedSaved && <span className="text-foreground/70">Your {TIERS[picked].name} cutout is saved. It comes back right away{picked === "best" ? " and uses none of your minutes" : ""}.</span>}
+						{picked === "best" && !pickedSaved && !same && !cutout.best.unlimited && (
 							<span className="text-foreground/70">
 								{tooMuch ? `Slow needs ${clock(bestCost)}, and you have ${clock(bestLeft)} left this month. Try Fast or Normal.` : `This will use ${clock(bestCost)} of your ${clock(bestLeft)} Slow left this month.`}
 							</span>
 						)}
-						{picked !== "best" && <span className="text-foreground/70">Runs on this device, so keep this page open until it finishes.</span>}
+						{picked !== "best" && !pickedSaved && !same && <span className="text-foreground/70">Runs on this device, so keep this page open until it finishes.</span>}
 						{/* What a switch really does, read from /api/cutout: only one cutout is kept per video. */}
 						{cutOut && ready && !same && (
 							<span className="text-foreground/70">
-								This replaces your {TIERS[cutout.tier ?? "best"].name} cutout.
-								{cutout.tier === "best" ? " Your Slow cutout stays saved, so you can come back to it for free." : picked === "best" && !slowIsSaved ? " Your text shows in front of you again until Slow finishes." : ""}
+								Your {TIERS[cutout.tier ?? "best"].name} cutout stays saved, so you can switch back any time.
+								{picked === "best" && !pickedSaved ? " Your text shows in front of you again until Slow finishes." : ""}
 							</span>
 						)}
 						<span className="flex items-center gap-2">
@@ -250,7 +255,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								disabled={same || tooMuch || !whole.length || (picked !== "best" && !videoUrl)}
 								className="rounded-md bg-blue-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 							>
-								{cutOut && ready ? "Cut me out again" : "Cut me out"}
+								{pickedSaved ? `Switch to ${TIERS[picked].name}` : cutOut && ready ? "Cut me out again" : "Cut me out"}
 							</button>
 							{cutOut && ready && (
 								<button onClick={() => setChanging(false)} className="rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5">

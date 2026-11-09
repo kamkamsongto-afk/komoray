@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { covered } from "./behind";
 import { clock, type CutoutTier, slowSeconds, type Window } from "./cutout";
 import { type LocalTier, localSupport, makeLocalMatte } from "./cutout-local";
 
@@ -19,7 +20,8 @@ export type CutoutState = {
 	support: Record<LocalTier, boolean>; // what this computer can run itself
 	local: { tier: LocalTier; phase: "cutting" | "sending"; part: number; left: number | null } | null; // being cut out on this computer now
 	startedAt?: string; // when the running job began
-	slowWindows: Window[]; // what Slow has already made for this video, kept even after Fast or Normal replaced it
+	saved: Partial<Record<CutoutTier, Window[]>>; // what each quality has already made for this video, kept when another replaced it
+	restoring?: CutoutTier; // switching to a saved quality: takes a moment
 	runs?: number; // how many times Slow has run on this video
 };
 
@@ -40,7 +42,7 @@ const SHOW_EVERY_MS = 250;
 const NO_BEST = { unlimited: false, limit: 0, used: 0 };
 
 export function useCutout(key: string | null) {
-	const [state, setState] = useState<CutoutState>({ on: false, status: "none", windows: [], files: {}, best: NO_BEST, support: { fast: false, balanced: false }, local: null, slowWindows: [] });
+	const [state, setState] = useState<CutoutState>({ on: false, status: "none", windows: [], files: {}, best: NO_BEST, support: { fast: false, balanced: false }, local: null, saved: {} });
 	const local = useRef<Record<string, string>>({}); // files just uploaded: shown from this computer at once
 	const stop = useRef<AbortController | null>(null);
 
@@ -49,7 +51,7 @@ export function useCutout(key: string | null) {
 		const res = await fetch(`/api/cutout?key=${encodeURIComponent(key)}`).catch(() => null);
 		if (!res?.ok) return;
 		const data = (await res.json()) as Omit<CutoutState, "on" | "support" | "local">;
-		setState((s) => ({ ...s, previewUrl: undefined, version: undefined, tier: undefined, error: undefined, startedAt: undefined, ...data, files: { ...data.files, ...local.current } }));
+		setState((s) => ({ ...s, previewUrl: undefined, version: undefined, tier: undefined, error: undefined, startedAt: undefined, restoring: undefined, ...data, files: { ...data.files, ...local.current } }));
 	}, [key]);
 
 	useEffect(() => {
@@ -147,12 +149,30 @@ export function useCutout(key: string | null) {
 		[key, refresh, failed],
 	);
 
+	// Back to a quality already made. If that fails, Fast and Normal simply cut again (they cost nothing);
+	// Slow says so, because cutting again would cost minutes the person didn't agree to.
+	const restore = useCallback(
+		async (windows: Window[], tier: CutoutTier, videoUrl: string | null) => {
+			if (!key) return;
+			// previewUrl off: proxy-cutout.mp4 is about to be replaced, and a player halfway through reading it would get the other file's bytes.
+			setState((s) => ({ ...s, restoring: tier, previewUrl: undefined, error: undefined }));
+			const res = await fetch("/api/cutout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, windows, tier, restore: true }) }).catch(() => null);
+			if (res?.ok) return void refresh();
+			setState((s) => ({ ...s, restoring: undefined }));
+			if (tier === "best") return failed("Could not switch to your Slow cutout. Please try again.");
+			if (videoUrl) void startLocal(windows, tier, videoUrl);
+		},
+		[key, refresh, failed, startLocal],
+	);
+
+	const { saved, status, tier: currentTier } = state;
 	const start = useCallback(
 		(windows: Window[], tier: CutoutTier, videoUrl: string | null) => {
+			if (windows.length && covered(windows, saved[tier] ?? []) && !(status === "done" && currentTier === tier)) return void restore(windows, tier, videoUrl);
 			if (tier === "best") return void startBest(windows);
 			if (videoUrl) void startLocal(windows, tier, videoUrl);
 		},
-		[startBest, startLocal],
+		[saved, status, currentTier, restore, startBest, startLocal],
 	);
 	const cancel = useCallback(() => stop.current?.abort(), []);
 
