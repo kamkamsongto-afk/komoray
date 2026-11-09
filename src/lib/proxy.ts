@@ -10,7 +10,7 @@ import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl } from 
 //   faces.json        written by Modal: where the speaker's face is, every half second (facesFor)
 //   thumb.jpg         written by Modal: the picture on My projects (/api/thumb)
 // The final video is still made from the original, so this only affects what the editor plays.
-//   proxy-audio-clean.pcm  written by Modal: the same sound, fully optimized (the Audio optimization slider mixes the two)
+//   proxy-audio-clean2.pcm written by Modal: the same sound, fully optimized (the Audio optimization slider mixes the two)
 // A proxy.mp4 without both sound files is from before they existed and gets made again.
 export type ProxyStatus = "done" | "processing" | "failed" | "none";
 
@@ -21,7 +21,7 @@ const GIVE_UP_MS = 30 * 60 * 1000; // no proxy after this long: Modal died quiet
 type ProxyEnv = { RENDER_URL: string; RENDER_TOKEN: string };
 
 export async function proxyStatus(key: string): Promise<ProxyStatus> {
-	const [video, audio, clean] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm")), exists(siblingKey(key, "proxy-audio-clean.pcm"))]);
+	const [video, audio, clean] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm")), exists(siblingKey(key, CLEAN_SOUND))]);
 	if (video && audio && clean) return "done";
 	const started = await getJson<{ startedAt?: string; withClean?: boolean }>(siblingKey(key, "proxy.json"));
 	const running = Boolean(started?.startedAt && Date.now() - Date.parse(started.startedAt) < GIVE_UP_MS);
@@ -40,7 +40,8 @@ export async function proxyStatus(key: string): Promise<ProxyStatus> {
 export const proxyUrl = (key: string, seconds = LINK_SECONDS) => signedUrl(siblingKey(key, "proxy.mp4"), "GET", seconds);
 
 // Links for the editor's own player, read through /api/media on our site (see there why).
-export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm", "proxy-audio-clean.pcm"];
+export const CLEAN_SOUND = "proxy-audio-clean2.pcm"; // 2: previews made before the sound was put on the picture's clock lack it, so they are made again
+export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm", CLEAN_SOUND];
 export const mediaMessage = (key: string, file: string, exp: number) => `media:${key}:${file}:${exp}`;
 export async function mediaUrl(key: string, file: string, secret: string, seconds = LINK_SECONDS) {
 	const exp = Math.floor(Date.now() / 1000) + seconds;
@@ -90,7 +91,7 @@ export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatu
 				videoUrl: await signedUrl(key, "GET", LINK_SECONDS),
 				outputUrl: await signedUrl(siblingKey(key, "proxy.mp4"), "PUT", LINK_SECONDS, "video/mp4"),
 				audioUrl: await signedUrl(siblingKey(key, "proxy-audio.pcm"), "PUT", LINK_SECONDS, "application/octet-stream"),
-				cleanAudioUrl: await signedUrl(siblingKey(key, "proxy-audio-clean.pcm"), "PUT", LINK_SECONDS, "application/octet-stream"),
+				cleanAudioUrl: await signedUrl(siblingKey(key, CLEAN_SOUND), "PUT", LINK_SECONDS, "application/octet-stream"),
 				facesUrl: await signedUrl(siblingKey(key, "faces.json"), "PUT", LINK_SECONDS, "application/json"),
 				thumbUrl: await signedUrl(siblingKey(key, "thumb.jpg"), "PUT", LINK_SECONDS, "image/jpeg"),
 				errorUrl: await signedUrl(siblingKey(key, "proxy-error.json"), "PUT", LINK_SECONDS, "application/json"),

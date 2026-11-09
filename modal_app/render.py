@@ -1147,6 +1147,9 @@ def duration_of(path: Path) -> float:
     return float(out.stdout.strip() or 0)
 
 
+SOUND_ON_PICTURE_CLOCK = "aresample=async=1:first_pts=0"  # adds silence for a late start, drops an early one
+
+
 def proxy_command(src: Path, out: Path, pcm: Path, audio: bool) -> list[str]:
     # Camera files store a full picture only every 1-2 s, so jumping to a cut means decoding up to
     # 2 s of video first: that was the stutter at every cut in the browser preview. This copy is
@@ -1165,7 +1168,9 @@ def proxy_command(src: Path, out: Path, pcm: Path, audio: bool) -> list[str]:
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-tune", "fastdecode", "-bf", "0"]
     cmd += ["-g", str(PROXY_KEYFRAME_FRAMES), "-keyint_min", str(PROXY_KEYFRAME_FRAMES), "-sc_threshold", "0"]
     cmd += ["-movflags", "+faststart", str(out)]
-    cmd += ["-map", sound, "-ac", "1", "-ar", str(PROXY_AUDIO_RATE), "-f", "s16le", str(pcm)]
+    # On the picture's clock: phone files often start their sound after the picture (122 ms on a real clip),
+    # and raw samples have no timestamps, so without this the preview played that much ahead of the picture.
+    cmd += ["-map", sound, "-af", SOUND_ON_PICTURE_CLOCK, "-ac", "1", "-ar", str(PROXY_AUDIO_RATE), "-f", "s16le", str(pcm)]
     return cmd
 
 
@@ -1239,7 +1244,7 @@ def clean_preview(src: Path, pcm: Path, clean: Path) -> bytes:
         if voice is None:
             return plain
         result = subprocess.run(
-            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-vn", "-af", f"{stereo}{voice},aresample={PROXY_AUDIO_RATE}", "-ac", "1", "-f", "s16le", str(clean)],
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-vn", "-af", f"{SOUND_ON_PICTURE_CLOCK},{stereo}{voice},aresample={PROXY_AUDIO_RATE}", "-ac", "1", "-f", "s16le", str(clean)],
             capture_output=True,
             text=True,
         )
