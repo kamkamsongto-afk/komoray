@@ -5,6 +5,8 @@ import { type FormEvent, useEffect, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ActivityTable } from "@/components/ActivityTable";
 import type { Activity } from "@/lib/admin-activity";
+import { CUTOUT_ON } from "@/lib/cutout";
+import { CUTOUT_SECONDS, type Features } from "@/lib/features";
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
 type Job = {
@@ -18,7 +20,7 @@ type Job = {
 	finalUrl: string | null;
 };
 type Report = { at: string; email?: string; stage: string; error: string; key?: string; filename?: string; size?: number; browser?: string; file: string };
-type Person = { email: string; at: string; used: number };
+type Person = { email: string; at: string; used: number; features: Features };
 type Waiting = { email: string; at: string };
 type Answer = { email: string; at: string; easy: number | null; result: number | null; pay: string | null; note: string; file: string };
 type Tab = "people" | "activity" | "videos" | "feedback" | "logs";
@@ -123,6 +125,8 @@ export default function AdminPage() {
 	}
 
 	const invite = (email: string) => change("/api/admin/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+	const saveFeatures = (email: string, features: Features) =>
+		change("/api/admin/access", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, features }) });
 	const removeInvite = (email: string) => {
 		if (window.confirm(`Take the invite back from ${email}? Their videos stay, but they can't start new work.`)) void change(`/api/admin/access?email=${encodeURIComponent(email)}`, { method: "DELETE" });
 	};
@@ -217,7 +221,29 @@ export default function AdminPage() {
 							{people.map((p) => (
 								<li key={p.email} className="flex items-center justify-between gap-3 py-1.5 text-sm">
 									<span className="min-w-0 break-all">{p.email}</span>
-									<span className="flex flex-none items-center gap-3 text-xs text-foreground/60">
+									<span className="flex flex-none flex-wrap items-center justify-end gap-3 text-xs text-foreground/60">
+										<label className="flex items-center gap-1" title="Cut the speaker out of the background: text behind them, a picture or clip behind them">
+											<input
+												type="checkbox"
+												checked={p.features.cutout.on}
+												onChange={(e) => void saveFeatures(p.email, { ...p.features, cutout: { ...p.features.cutout, on: e.target.checked } })}
+											/>
+											Cutout
+										</label>
+										{p.features.cutout.on && CUTOUT_ON.includes("best") && (
+											<select
+												aria-label={`Cutout Best minutes per month for ${p.email}`}
+												value={p.features.cutout.seconds}
+												onChange={(e) => void saveFeatures(p.email, { ...p.features, cutout: { ...p.features.cutout, seconds: Number(e.target.value) } })}
+												className="rounded border border-foreground/20 bg-background px-1 py-0.5"
+											>
+												{CUTOUT_SECONDS.map((s) => (
+													<option key={s} value={s}>
+														{s / 60} min Slow / month
+													</option>
+												))}
+											</select>
+										)}
 										{p.used} of {MINUTES_PER_MONTH} min this month
 										<DeleteButton label={`Take the invite back from ${p.email}`} onClick={() => removeInvite(p.email)} />
 									</span>

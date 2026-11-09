@@ -4,8 +4,9 @@ import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerMotion, cleanBannerText } from "@/lib/banners";
+import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, runText, speakerTransform } from "@/lib/behind";
 import type { OwnFont } from "@/lib/font-info";
-import { CYRILLIC_FONT, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
+import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
 import { FPS, type Line, ZOOM_ORIGIN } from "@/lib/timeline";
 
@@ -91,7 +92,24 @@ type Props = {
 	onBannersChange?: (banners: Banner[]) => void; // dragged or resized on the video (while paused)
 	speed?: number;
 	onSpeedChange?: (speed: number) => void; // left out: this player can't change speed
+	// Cutout (lib/behind.ts): text behind the speaker, pictures and clips behind a smaller speaker.
+	// person: the canvas the cut-out speaker is drawn on; files: a link to each inserted picture or clip.
+	cutout?: { layers: CutoutLayers; files: Record<string, string>; person: ReactNode };
 };
+
+// An inserted clip, kept at the final video's time: it plays with the preview, and jumps when it is far off.
+function InsertClip({ src, at, playing, style, onRatio }: { src: string; at: number; playing: boolean; style: CSSProperties; onRatio: (ratio: number) => void }) {
+	const ref = useRef<HTMLVideoElement>(null);
+	useEffect(() => {
+		const video = ref.current;
+		if (!video) return;
+		const want = Math.min(at, Math.max(0, (video.duration || at + 1) - 0.05)); // past its end: its last picture
+		if (Math.abs(video.currentTime - want) > 0.25) video.currentTime = want;
+		if (playing && want < (video.duration || Infinity) - 0.05) void video.play().catch(() => {});
+		else video.pause();
+	}, [at, playing]);
+	return <video ref={ref} src={src} muted playsInline preload="auto" style={style} onLoadedMetadata={(e) => e.currentTarget.videoHeight && onRatio(e.currentTarget.videoWidth / e.currentTarget.videoHeight)} />;
+}
 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
 // (drawn at full 1080x1920 and shrunk, so sizes match the final video; drag it to move it),
@@ -114,6 +132,7 @@ export function PlayerFrame({
 	onBannersChange,
 	speed = 1,
 	onSpeedChange,
+	cutout,
 }: Props) {
 	const line = subtitle.subtitles ? saying : null; // subtitles turned off: none drawn, like the final video (build_subtitles)
 	const boxRef = useRef<HTMLDivElement>(null);
@@ -164,6 +183,7 @@ export function PlayerFrame({
 		bannersRef.current = banners;
 	}, [banners]);
 	const [boxWidth, setBoxWidth] = useState(324);
+	const [ratios, setRatios] = useState<Record<string, number>>({}); // each inserted picture or clip's width / height
 	const dragRef = useRef<{ y: number; position: number } | null>(null);
 	// The final video's size (9:16, 1:1 or 16:9); everything on it is laid out at full size and shrunk.
 	const { width: W, height: H } = outputSize(subtitle);
@@ -244,6 +264,79 @@ export function PlayerFrame({
 			})
 		: "Your subtitles";
 
+	// Under the subtitles, in this order: text behind the speaker, an inserted picture or clip (fading in
+	// over the whole picture), then the cut-out speaker: full size over the text, or smaller in front of an
+	// insert (or hidden). Same order and sizes as the final video (render.py).
+	function cutoutLayers({ layers, files, person }: NonNullable<Props["cutout"]>) {
+		const insert = layers.inserts.find((i) => insertShown(i, outTime) > 0) as Insert | undefined;
+		const shown = insert ? insertShown(insert, outTime) : 0;
+		const edges = `linear-gradient(to right, transparent 0%, #000 ${INSERT.edgeFade * 100}%, #000 ${100 - INSERT.edgeFade * 100}%, transparent 100%)`;
+		const personStyle: CSSProperties = insert
+			? {
+					maskImage: edges,
+					WebkitMaskImage: edges,
+					transformOrigin: "50% 100%",
+					transform: speakerTransform(insert, boxWidth),
+					opacity: insert.hidden ? 0 : shown,
+				}
+			: {};
+		return (
+			<>
+				<div className="pointer-events-none absolute top-0 left-0" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 1 }}>
+					{layers.texts.flatMap((t) => {
+						const face = FONT_FACES[t.font] ?? FONT_FACES.kanit;
+						const em = FONTS[t.font]?.height ?? FONTS.kanit.height;
+						const words = t.fx === "runLeft" || t.fx === "runRight" ? runText(t, W) : t.text;
+						return behindMotion(t, outTime, W, H).map((pose, k) => (
+							<div
+								key={`${t.id}-${k}`}
+								style={{
+									position: "absolute",
+									left: pose.x,
+									top: pose.y,
+									transform: `translate(${pose.align === "center" ? "-50%" : pose.align === "right" ? "-100%" : "0"}, -50%) scale(${pose.sx}, ${pose.sy})`,
+									transformOrigin: pose.align === "center" ? "50% 50%" : pose.align === "right" ? "100% 50%" : "0 50%",
+									whiteSpace: "pre",
+									fontFamily: face.family,
+									fontWeight: face.weight,
+									fontSize: t.size / em,
+									lineHeight: em,
+									color: t.color,
+									textShadow: roundOutline(t.stroke, t.strokeColor),
+									opacity: pose.opacity,
+								}}
+							>
+								{words}
+							</div>
+						));
+					})}
+				</div>
+				{layers.inserts.map((i) => {
+					const show = insertShown(i, outTime);
+					const src = files[i.file];
+					if (!show || !src) return null;
+					const moved = picMoved(i);
+					const ratio = ratios[i.file];
+					const seen = (r: number) => setRatios((all) => (all[i.file] === r ? all : { ...all, [i.file]: r }));
+					const fill: CSSProperties = moved && ratio ? { position: "absolute", maxWidth: "none", objectFit: "fill", ...picturePlace(i, ratio, W / H) } : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+					return (
+						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved ? "#000" : undefined }}>
+							{i.kind === "video" ? (
+								<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} />
+							) : (
+								// eslint-disable-next-line @next/next/no-img-element
+								<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
+							)}
+						</div>
+					);
+				})}
+				<div className="pointer-events-none absolute inset-0" style={{ zIndex: 1, ...personStyle }}>
+					{person}
+				</div>
+			</>
+		);
+	}
+
 	return (
 		// As wide as fits, but never taller than --player-h (ScriptView keeps it clear of the timeline), else ~70% of the screen.
 		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: `calc(var(--player-h, 70vh) * ${W} / ${H})` }}>
@@ -259,6 +352,7 @@ export function PlayerFrame({
 				>
 					{children}
 				</div>
+				{cutout && cutoutLayers(cutout)}
 				<div
 					className="pointer-events-none absolute top-0 left-0"
 					style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}

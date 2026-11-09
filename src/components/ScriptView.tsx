@@ -1,9 +1,11 @@
 "use client";
 
-import { Crop, Film, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { Crop, Film, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, type Fix, fixedWords, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
+import type { CutoutLayers } from "@/lib/behind";
+import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, groupTakes, type TakeGroup } from "@/lib/takes";
@@ -14,6 +16,9 @@ import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
 import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { type ControlSection, SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
+import { CutoutControls } from "./CutoutControls";
+import { clock } from "@/lib/cutout";
+import { waitLabel } from "@/lib/use-cutout";
 import { AudioControls } from "./AudioControls";
 import { Timeline } from "./Timeline";
 import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
@@ -174,6 +179,10 @@ type Props = {
 	onSubtitleChange: (style: SubtitleStyle) => void;
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void;
+	// Cutout (lib/behind.ts): text behind the speaker, pictures and clips behind a smaller speaker.
+	cutoutLayers: CutoutLayers;
+	onCutoutChange: (layers: CutoutLayers) => void;
+	cutout: ReturnType<typeof useCutout>;
 	faces: Faces | null; // where the speaker's face is, for cropping and Auto zoom
 	// Repeated takes are looked for once, when the video is first opened. withoutTakes: the deleted words if the earlier tries were cut.
 	takesApplied?: boolean;
@@ -184,11 +193,13 @@ type Props = {
 
 // What can be opened under the video. Nothing is open at first: the editor stays calm, and every
 // setting is a click away (here, or by clicking its part of the timeline).
-type Panel = ControlSection | "banners";
+type Panel = ControlSection | "banners" | "cutout";
+const SCRIPT_HEIGHT = "komoray.scriptHeight"; // the script box's dragged height, px
 const PANELS: { id: Panel; icon: LucideIcon; name: string }[] = [
 	{ id: "text", icon: Type, name: "Subtitles" },
 	{ id: "zoom", icon: ZoomIn, name: "Zoom" },
 	{ id: "banners", icon: Tag, name: "Banners" },
+	{ id: "cutout", icon: Layers, name: "Cutout" }, // only for people with Cutout on (/admin)
 	{ id: "shape", icon: Crop, name: "Shape" },
 	{ id: "brand", icon: Palette, name: "Brand" },
 ];
@@ -222,6 +233,9 @@ export function ScriptView({
 	onSubtitleChange,
 	banners,
 	onBannersChange,
+	cutoutLayers,
+	onCutoutChange,
+	cutout,
 	faces,
 	takesApplied,
 	onTakesApplied,
@@ -246,6 +260,7 @@ export function ScriptView({
 	const [mode, setMode] = useState<"preview" | "original">("preview");
 	const [panel, setPanel] = useState<Panel | null>(null);
 	const [focusBanner, setFocusBanner] = useState<string | null>(null);
+	const [focusCutout, setFocusCutout] = useState<string | null>(null);
 	// From the timeline: the panels live under the preview.
 	const openPanel = (next: Panel) => {
 		setMode("preview");
@@ -258,6 +273,35 @@ export function ScriptView({
 	const [canStudio, setCanStudio] = useState<boolean | null>(null); // null: not checked yet (first render)
 	useEffect(() => setCanStudio(studioSupported() && !new URLSearchParams(window.location.search).has("engine", "old")), []);
 	const useStudio = Boolean(studio) && canStudio === true && !studioFailed;
+	// Once the speaker is cut out, the preview plays the copy with the matte under each picture (lib/cutout.ts).
+	const stackedPreview = cutout.status === "done" ? (cutout.previewUrl ?? null) : null;
+	// Never the link itself: it is signed anew on every look at the cutout, which threw the player away
+	// and started the video from the beginning each time a layer was changed (coach, 9 Nov).
+	const playerKey = stackedPreview ? `cutout-${cutout.version}` : "plain";
+	// The dot on the Cutout button: a finished cutout nobody has looked at yet, also after coming back to the page.
+	const cutoutBusy = cutout.status === "processing" || Boolean(cutout.local);
+	const seenKey = `komoray.cutoutSeen.${cutout.version ?? ""}`;
+	const [seenNow, setSeenNow] = useState<string | null>(null);
+	// Only a press on the button counts as seen. Counting an open box hid the dot from everyone who
+	// waited with the box open, which is nearly everyone (coach, 9 Nov).
+	const markCutoutSeen = () => {
+		if (!cutout.version || cutout.status !== "done") return;
+		setSeenNow(cutout.version);
+		try {
+			localStorage.setItem(seenKey, "1");
+		} catch {
+			// no storage: the dot comes back on the next visit
+		}
+	};
+	const cutoutNews = useMemo(() => {
+		if (cutout.status !== "done" || !cutout.version || seenNow === cutout.version) return false;
+		try {
+			return !localStorage.getItem(seenKey);
+		} catch {
+			return true;
+		}
+	}, [cutout.status, cutout.version, seenNow, seenKey]);
+	const cutoutWait = waitLabel(cutout);
 	// Don't start the <video> player for a moment only to swap it for ours.
 	const deciding = Boolean(studio) && canStudio === null;
 	const segments = useMemo(
@@ -510,7 +554,7 @@ export function ScriptView({
 		setPlaying(false);
 		if (mode === "preview") playerRef.current?.seek(timeRef.current);
 		else if (videoRef.current) videoRef.current.currentTime = timeRef.current;
-	}, [mode]);
+	}, [mode, playerKey]); // playerKey: a finished cutout swaps the player, the video stays where it was
 
 	// Keep the highlighted word visible inside the transcript box (without scrolling the whole page).
 	useEffect(() => {
@@ -645,6 +689,42 @@ export function ScriptView({
 		};
 	}, [panel]);
 
+	// How tall the script box is once the line above the timeline is dragged (remembered in this browser).
+	// Only drawn in the browser (the page waits for the video's data), so the saved height can be read at once.
+	const [scriptHeight, setScriptHeight] = useState<number | null>(() => {
+		try {
+			const saved = Number(localStorage.getItem(SCRIPT_HEIGHT));
+			return saved > 0 ? Math.min(window.innerHeight - 140, saved) : null;
+		} catch {
+			return null; // no storage: as tall as the screen allows
+		}
+	});
+	const resizeScript = (h: number | null) => {
+		const next = h === null ? null : Math.round(Math.min(window.innerHeight - 140, Math.max(120, h)));
+		setScriptHeight(next);
+		try {
+			if (next === null) localStorage.removeItem(SCRIPT_HEIGHT);
+			else localStorage.setItem(SCRIPT_HEIGHT, String(next));
+		} catch {
+			// not remembered, that's fine
+		}
+	};
+	function startScriptResize(e: ReactPointerEvent<HTMLElement>) {
+		e.preventDefault();
+		const box = boxRef.current;
+		if (!box) return;
+		const from = { y: e.clientY, height: box.getBoundingClientRect().height };
+		const move = (ev: PointerEvent) => resizeScript(from.height + ev.clientY - from.y);
+		const stop = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", stop);
+			window.removeEventListener("pointercancel", stop);
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", stop);
+		window.addEventListener("pointercancel", stop);
+	}
+
 	// How tall the settings box is once dragged by its corner, while this video is open; null: as tall as it needs, up to a limit.
 	const [panelHeight, setPanelHeight] = useState<number | null>(null);
 	const resizePanel = (height: number | null) => setPanelHeight(height === null ? null : Math.round(Math.min(window.innerHeight - 32, Math.max(160, height))));
@@ -672,7 +752,13 @@ export function ScriptView({
 					className="flex flex-col gap-3 [--player-h:42vh] lg:sticky lg:top-4 lg:z-30 lg:order-3 lg:[--player-h:max(15rem,calc(100vh-14rem))]"
 				>
 					<div className="flex flex-col gap-2 lg:flex-row lg:items-start">
-					<div ref={playerAreaRef} className="min-w-0 flex-1">
+					<div ref={playerAreaRef} className="relative min-w-0 flex-1">
+					{/* Over the video, where people look when their text is still in front. */}
+					{mode === "preview" && cutoutWait && (
+						<div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center px-2">
+							<span className="rounded-full bg-black/75 px-3 py-1 text-xs text-white tabular-nums">Cutting you out · {cutoutWait}</span>
+						</div>
+					)}
 					{mode === "preview" && deciding ? (
 						<div
 							className="mx-auto w-full rounded-lg bg-black"
@@ -680,9 +766,10 @@ export function ScriptView({
 						/>
 					) : mode === "preview" && useStudio && studio ? (
 						<StudioPlayer
-							key={studio.videoUrl}
+							key={playerKey}
 							ref={playerRef}
-							media={studio}
+							media={stackedPreview ? { ...studio, videoUrl: stackedPreview, stacked: true } : studio}
+							cutout={{ layers: cutoutLayers, files: cutout.files }}
 							segments={segments}
 							lines={lines}
 							subtitle={subtitle}
@@ -744,19 +831,26 @@ export function ScriptView({
 					{/* Beside the video on big screens, so the tools never take height from it. */}
 					<div ref={tabsRef} className="flex shrink-0 flex-wrap justify-center gap-1 lg:flex-col" role="tablist" aria-label="Settings">
 						{mode === "preview" &&
-							PANELS.map((p) => (
+							PANELS.filter((p) => p.id !== "cutout" || cutout.on).map((p) => (
 								<button
 									key={p.id}
 									role="tab"
 									aria-selected={panel === p.id}
 									title={p.name}
-									onClick={() => setPanel(panel === p.id ? null : p.id)}
+									onClick={() => {
+										if (p.id === "cutout") markCutoutSeen();
+										setPanel(panel === p.id ? null : p.id);
+									}}
 									className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-3 ${
 										panel === p.id ? "bg-foreground text-background" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
 									}`}
 								>
-									<p.icon className="h-[18px] w-[18px]" aria-hidden />
-									{p.name}
+									<span className="relative">
+										<p.icon className="h-[18px] w-[18px]" aria-hidden />
+										{p.id === "cutout" && cutoutBusy && <span title="Cutting you out" className="absolute -top-1 -right-1 h-2 w-2 animate-pulse rounded-full bg-blue-500" />}
+										{p.id === "cutout" && cutoutNews && <span title="Your cutout is ready" className="absolute -top-1.5 -right-1.5 h-3 w-3 animate-pulse rounded-full bg-green-500 ring-2 ring-background" />}
+									</span>
+									{p.id === "cutout" && cutout.timeLeft !== null && cutout.timeLeft > 0 ? <span className="tabular-nums">{clock(cutout.timeLeft)}</span> : p.name}
 								</button>
 							))}
 						<button
@@ -788,7 +882,7 @@ export function ScriptView({
 									<X className="h-4 w-4" aria-hidden />
 								</button>
 							</div>
-					{panel !== "banners" && (
+					{panel !== "banners" && panel !== "cutout" && (
 						<SubtitleControls
 							style={subtitle}
 							onChange={onSubtitleChange}
@@ -843,6 +937,19 @@ export function ScriptView({
 									</div>
 								) : undefined
 							}
+						/>
+					)}
+					{panel === "cutout" && (
+						<CutoutControls
+							layers={cutoutLayers}
+							onChange={onCutoutChange}
+							cutout={cutout}
+							segments={segments}
+							now={() => toOutSeconds(timeRef.current, segments)}
+							total={totalFrames(segments) / FPS}
+							videoUrl={studio?.videoUrl ?? null}
+							thai={thaiClip}
+							focus={focusCutout}
 						/>
 					)}
 					{panel === "banners" && (
@@ -1044,7 +1151,8 @@ export function ScriptView({
 					</div>
 					<div
 						ref={boxRef}
-						className="relative max-h-[50vh] overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:max-h-[calc(100vh-29rem)] lg:text-lg lg:leading-9"
+						className={`relative overflow-y-auto rounded-lg bg-foreground/5 p-4 text-base leading-8 lg:text-lg lg:leading-9 ${scriptHeight ? "" : "max-h-[50vh] lg:max-h-[calc(100vh-29rem)]"}`}
+						style={scriptHeight ? { height: scriptHeight } : undefined}
 					>
 						{items.map((item, i) => {
 							if (item.kind === "break") return <span key={i} className="block h-3" />;
@@ -1075,7 +1183,19 @@ export function ScriptView({
 						})}
 					</div>
 			{/* Pinned to the bottom of the screen on big screens, like a video editor's timeline. */}
-			<div ref={timelineRef} className="sticky bottom-0 z-20 lg:bottom-2">
+			<div ref={timelineRef} className="sticky bottom-0 z-20 flex flex-col lg:bottom-2">
+				{/* Drag to give the script more room, or the timeline (coach, 7 Nov: only a few lines of the script showed). */}
+				<div
+					role="separator"
+					aria-orientation="horizontal"
+					aria-label="Drag to make the script taller or shorter"
+					title="Drag to make the script taller or shorter (double-click: back to normal)"
+					onPointerDown={startScriptResize}
+					onDoubleClick={() => resizeScript(null)}
+					className="group flex h-3 cursor-row-resize touch-none items-center justify-center"
+				>
+					<span className="h-1 w-12 rounded-full bg-foreground/15 transition-colors group-hover:bg-blue-600" />
+				</div>
 				<Timeline
 					duration={duration}
 					words={words}
@@ -1102,6 +1222,12 @@ export function ScriptView({
 					onOpenBanners={(id) => {
 						setFocusBanner(id);
 						openPanel("banners");
+					}}
+					cutoutLayers={cutoutLayers}
+					onCutoutChange={onCutoutChange}
+					onOpenCutout={(id) => {
+						setFocusCutout(id);
+						openPanel("cutout");
 					}}
 					noZoom={noZoom}
 					zoomParts={zoomParts}

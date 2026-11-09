@@ -1,4 +1,5 @@
 import { type Banner, readBanners } from "@/lib/banners";
+import { type CutoutLayers, readCutout } from "@/lib/behind";
 import { type Cut, findSilences, type Pace, readPace } from "@/lib/silences";
 import type { Word } from "@/lib/transcribe";
 import { ownsVideo } from "@/lib/supabase/server";
@@ -17,11 +18,12 @@ import { readZoomParts, type ZoomPart } from "@/lib/zoom";
 //   noZoom   parts with Auto zoom turned off on the timeline
 //   zoomParts  parts with their own kind of zoom (picked on the timeline, or the AI's key moments)
 //   zoomMomentsApplied  the AI's key moments were put in once, as Auto zoom asks when uploading
+//   cutout   text behind the speaker, pictures and clips behind a smaller speaker (lib/behind.ts)
 //   pace    tight / natural / relaxed: finds the silences again (answers with the new cuts)
 //   badTakesApplied  the AI's bad takes were cut once, as asked when uploading (never again by themselves)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, style, banners, pace, manual, keep, noZoom, zoomParts, zoomMomentsApplied } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, style, banners, pace, manual, keep, noZoom, zoomParts, zoomMomentsApplied, cutout } = (await request.json()) as {
 		key?: string;
 		pace?: unknown;
 		deleted?: unknown;
@@ -36,6 +38,7 @@ export async function PUT(request: Request) {
 		noZoom?: unknown;
 		zoomParts?: unknown;
 		zoomMomentsApplied?: unknown;
+		cutout?: unknown;
 	};
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 
@@ -57,6 +60,7 @@ export async function PUT(request: Request) {
 		noZoom?: { start: number; end: number }[];
 		zoomParts?: ZoomPart[];
 		zoomMomentsApplied?: boolean;
+		cutout?: CutoutLayers;
 	}>(editKey);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
@@ -96,6 +100,11 @@ export async function PUT(request: Request) {
 		const checked = readBanners(banners);
 		if (!checked) return Response.json({ error: "Bad banners" }, { status: 400 });
 		edit.banners = checked;
+	}
+	if (cutout !== undefined) {
+		const checked = readCutout(cutout);
+		if (!checked) return Response.json({ error: "Bad cutout layers" }, { status: 400 });
+		edit.cutout = checked;
 	}
 
 	// A new pace: the silences are found again in the words we already have (no new transcript).

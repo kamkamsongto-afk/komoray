@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { type CutoutLayers, insertShown } from "@/lib/behind";
 import { createDebugLog, type DebugLog } from "@/lib/debug-log";
 import { StudioEngine, type StudioMedia } from "@/lib/player/engine";
 import { focusFor, framePiece } from "@/lib/framing";
@@ -15,6 +16,9 @@ export type { StudioMedia };
 type Props = Omit<PreviewProps, "src"> & {
 	media: StudioMedia;
 	onFail: (error: Error) => void; // can't play here: the page switches to the <video> player
+	// Cutout layers (lib/behind.ts) and links to their pictures and clips. The speaker is only cut out
+	// when media is the stacked preview copy (proxy-cutout.mp4).
+	cutout?: { layers: CutoutLayers; files: Record<string, string> };
 };
 
 const SAMPLE_MS = 250; // debug mode: how often the engine's state is written down
@@ -22,13 +26,14 @@ const SAMPLE_MS = 250; // debug mode: how often the engine's state is written do
 // The final video, played by our own engine (lib/player/engine.ts) on a canvas: smooth cuts on
 // every browser, including Safari on iPhone, iPad and Mac. Same controls and subtitles as PreviewPlayer.
 export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlayer(
-	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, faces, noZoom, zoomParts },
+	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, faces, noZoom, zoomParts, cutout },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
 	const last = pieces[pieces.length - 1];
 	const total = last ? last.out + last.end - last.start : 0;
 	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const personRef = useRef<HTMLCanvasElement>(null);
 	const engineRef = useRef<StudioEngine | null>(null);
 	const debugRef = useRef<DebugLog | null>(null);
 	const startAt = useRef(0); // a jump asked for before the engine was ready (source seconds)
@@ -80,6 +85,7 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 		});
 		engine.setSound(soundRef.current);
 		engineRef.current = engine;
+		if (media.stacked) engine.setPerson(personRef.current);
 		engine
 			.load(piecesRef.current, engine.toOut(startAt.current, piecesRef.current))
 			.then(() => setLoaded(true))
@@ -121,6 +127,12 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 		() => engineRef.current?.setFraming((piece, aspect, out) => framePiece(aspect, focuses[piece] ?? null, zoomAt(Math.round(out * FPS)), size), size.width),
 		[focuses, zoomAt, size, loaded],
 	);
+
+	// The speaker is only drawn apart while a layer is showing: every other frame costs nothing extra.
+	const layers = cutout?.layers;
+	useEffect(() => {
+		engineRef.current?.setPersonWanted((out) => Boolean(layers && (layers.texts.some((t) => out >= t.start && out < t.end) || layers.inserts.some((i) => insertShown(i, out) > 0))));
+	}, [layers, loaded]);
 
 	useImperativeHandle(
 		ref,
@@ -167,6 +179,7 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 				setSpeed(next);
 				engineRef.current?.setRate(next);
 			}}
+			cutout={cutout && (media.stacked || cutout.layers.texts.length || cutout.layers.inserts.length) ? { ...cutout, person: media.stacked ? <canvas ref={personRef} className="absolute inset-0 h-full w-full" /> : null } : undefined}
 		>
 			<canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 		</PlayerFrame>

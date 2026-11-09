@@ -9,10 +9,13 @@ import { type ByteSource, RangeSource } from "./bytes";
 import { type Frame, readVideoTrack, type VideoTrack } from "./mp4";
 import { stretch } from "./stretch";
 import { framePiece, type Rect } from "../framing";
+import { type PersonPainter, personPainter } from "./person";
 import { WIDTH } from "../timeline";
 
 export type Piece = { start: number; end: number; out: number }; // play source [start, end) at final-video time `out`
-export type StudioMedia = { videoUrl: string; audioUrl: string; cleanAudioUrl?: string };
+// stacked: proxy-cutout.mp4 (lib/cutout.ts), each frame the picture on top and its matte (white =
+// the speaker) below. The picture is drawn as usual; the speaker alone goes on the person canvas.
+export type StudioMedia = { videoUrl: string; audioUrl: string; cleanAudioUrl?: string; stacked?: boolean };
 
 export type EngineEvents = {
 	onTime: (out: number) => void; // every frame while playing, and after jumps
@@ -53,6 +56,12 @@ export class StudioEngine {
 	private framing: (piece: number, aspect: number, out: number) => Rect = (_, aspect) => framePiece(aspect, null, 1);
 	private outWidth = WIDTH;
 	private sizeLogged = false;
+	private stacked = false;
+	private person: HTMLCanvasElement | null = null;
+	private scratch: HTMLCanvasElement | null = null;
+	private painter: PersonPainter | null | undefined; // undefined: not tried yet; null: this browser can't
+	private personWanted: (out: number) => boolean = () => true;
+	private personShown = false;
 	private pumping = false;
 
 	private ctx: AudioContext | null = null;
@@ -82,6 +91,7 @@ export class StudioEngine {
 	) {
 		const onFetch = (kind: string) => (info: { block: number; ms: number; bytes: number }) => events.log("fetch", { kind, ...info });
 		this.video = new RangeSource(media.videoUrl, onFetch("video"));
+		this.stacked = Boolean(media.stacked);
 		this.audio = new RangeSource(media.audioUrl, onFetch("audio"));
 		if (media.cleanAudioUrl) this.clean = new RangeSource(media.cleanAudioUrl, onFetch("clean"));
 	}
@@ -506,6 +516,18 @@ export class StudioEngine {
 		this.lastShownOut = this.now();
 	}
 
+	// The canvas the cut-out speaker is drawn on (PlayerFrame puts it over the text behind them).
+	setPerson(canvas: HTMLCanvasElement | null) {
+		this.person = canvas;
+		if (this.shownFrame) this.paint(this.shownFrame, this.shownOut);
+	}
+
+	// When the speaker has to be drawn apart at all: only while a text, picture or clip is showing.
+	setPersonWanted(wanted: (out: number) => boolean) {
+		this.personWanted = wanted;
+		if (this.shownFrame) this.paint(this.shownFrame, this.shownOut);
+	}
+
 	private paint(frame: VideoFrame, out: number) {
 		const ctx2d = this.canvas.getContext("2d");
 		if (!ctx2d) return false;
@@ -520,7 +542,7 @@ export class StudioEngine {
 		// whole frame is drawn and the canvas edge cuts off the rest: Safari squashes the frame instead
 		// of cropping when drawImage is given a source rectangle.
 		const fw = frame.displayWidth;
-		const fh = frame.displayHeight;
+		const fh = this.stacked ? frame.displayHeight / 2 : frame.displayHeight; // stacked: the picture is the top half
 		const cw = this.canvas.width;
 		const ch = this.canvas.height;
 		const piece = this.pieces.findLastIndex((p) => p.out <= out + EPS);
@@ -530,8 +552,61 @@ export class StudioEngine {
 			this.sizeLogged = true;
 			this.events.log("size", { fw, fh, coded: `${frame.codedWidth}x${frame.codedHeight}`, cw, ch });
 		}
-		ctx2d.drawImage(frame, rect.x * k, rect.y * k, rect.w * k, rect.h * k);
+		// Stacked: drawn twice as tall, the picture fills the box and its matte falls off the bottom edge.
+		ctx2d.drawImage(frame, rect.x * k, rect.y * k, rect.w * k, rect.h * k * (this.stacked ? 2 : 1));
+		if (this.stacked && this.person) {
+			if (this.personWanted(out)) {
+				this.personShown = true;
+				this.paintPerson(frame, rect);
+			} else if (this.personShown) {
+				this.personShown = false;
+				this.clearPerson();
+			}
+		}
 		return true;
+	}
+
+	// The speaker alone: the picture where the matte is white, see-through where it is black. Worked out at
+	// the person canvas's own (smaller) size, pixel by pixel: canvas can't use a picture's brightness as
+	// see-through by itself. Like paint, never a source rectangle in drawImage (Safari squashes then).
+	private paintPerson(frame: VideoFrame, rect: Rect) {
+		const person = this.person as HTMLCanvasElement;
+		if (this.painter === undefined) this.painter = personPainter(person, frame);
+		if (this.painter?.draw(frame, rect, this.outWidth)) return;
+		if (this.painter) return; // the graphics card went away for a moment: this canvas can't be drawn the other way
+		const w = Math.round(person.clientWidth);
+		const h = Math.round(person.clientHeight);
+		if (!w || !h) return;
+		if (person.width !== w || person.height !== h) {
+			person.width = w;
+			person.height = h;
+		}
+		this.scratch ??= document.createElement("canvas");
+		const scratch = this.scratch;
+		if (scratch.width !== w || scratch.height !== h) {
+			scratch.width = w;
+			scratch.height = h;
+		}
+		const k = w / this.outWidth;
+		const sctx = scratch.getContext("2d", { willReadFrequently: true });
+		const pctx = person.getContext("2d", { willReadFrequently: true });
+		if (!sctx || !pctx) return;
+		// The matte: the frame drawn one box higher, so its bottom half lands in the box.
+		sctx.clearRect(0, 0, w, h);
+		sctx.drawImage(frame, rect.x * k, (rect.y - rect.h) * k, rect.w * k, rect.h * k * 2);
+		const matte = sctx.getImageData(0, 0, w, h).data;
+		pctx.clearRect(0, 0, w, h);
+		pctx.drawImage(frame, rect.x * k, rect.y * k, rect.w * k, rect.h * k * 2);
+		const picture = pctx.getImageData(0, 0, w, h);
+		const px = picture.data;
+		for (let i = 3; i < px.length; i += 4) px[i] = matte[i - 3];
+		pctx.putImageData(picture, 0, 0);
+	}
+
+	private clearPerson() {
+		if (this.painter) return this.painter.clear();
+		const person = this.person;
+		person?.getContext("2d")?.clearRect(0, 0, person.width, person.height);
 	}
 
 	private emitState() {

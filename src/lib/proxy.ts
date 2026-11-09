@@ -41,7 +41,7 @@ export const proxyUrl = (key: string, seconds = LINK_SECONDS) => signedUrl(sibli
 
 // Links for the editor's own player, read through /api/media on our site (see there why).
 export const CLEAN_SOUND = "proxy-audio-clean2.pcm"; // 2: previews made before the sound was put on the picture's clock lack it, so they are made again
-export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm", CLEAN_SOUND];
+export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm", CLEAN_SOUND, "proxy-cutout.mp4"]; // proxy-cutout.mp4: lib/cutout.ts
 export const mediaMessage = (key: string, file: string, exp: number) => `media:${key}:${file}:${exp}`;
 export async function mediaUrl(key: string, file: string, secret: string, seconds = LINK_SECONDS) {
 	const exp = Math.floor(Date.now() / 1000) + seconds;

@@ -1,11 +1,13 @@
 import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, siblingKey } from "@/lib/r2";
 import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
+import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/features";
 import { videoDuration } from "@/lib/video-duration";
 
 // Who may use the studio during the beta, and how much. All kept in R2, away from uploads/ so it stays:
-//   access/people/<hash of email>.json                   invited by the admin: { email, at }
+//   access/people/<hash of email>.json                   invited by the admin: { email, at, features? } (lib/features.ts)
 //   access/usage/<hash>/<YYYY-MM>/<video id>.json        minutes this video took from that month: { minutes }
+//   access/best/<hash>/<YYYY-MM>/<video id>.json         Cutout Best seconds this video took from that month: { seconds }
 //   uploads/<id>/access.json                             how many times this video was listened to
 // Minutes count the length of the original video, once, when Find silences is pressed. Deleting the
 // video gives nothing back; a failed job does (refundListen).
@@ -16,7 +18,8 @@ const JOB_TOO_OLD_MS = 30 * 60 * 1000; // a job still running after this has die
 
 export const NO_INVITE = "Komoray is invite-only for now. Your invite will come by email.";
 
-export type AccessStatus = { allowed: boolean; unlimited: boolean; used: number; limit: number; left: number; perVideo: number; resets: string };
+export type AccessStatus = { allowed: boolean; unlimited: boolean; used: number; limit: number; left: number; perVideo: number; resets: string; features: Features };
+type PersonRecord = { email: string; at: string; features?: unknown };
 
 export async function hashEmail(email: string) {
 	const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email.trim().toLowerCase())));
@@ -40,11 +43,13 @@ async function minutesUsed(email: string) {
 
 export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	const base = { limit: MINUTES_PER_MONTH, perVideo: MINUTES_PER_VIDEO, resets: nextMonth() };
-	if (!email) return { ...base, allowed: false, unlimited: false, used: 0, left: 0 };
-	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, used: 0, left: MINUTES_PER_MONTH };
-	if (!(await exists(await personKey(email)))) return { ...base, allowed: false, unlimited: false, used: 0, left: 0 };
+	const none = { ...base, allowed: false, unlimited: false, used: 0, left: 0, features: NO_FEATURES };
+	if (!email) return none;
+	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, used: 0, left: MINUTES_PER_MONTH, features: ALL_FEATURES };
+	const person = await getJson<PersonRecord>(await personKey(email));
+	if (!person) return none;
 	const used = await minutesUsed(email);
-	return { ...base, allowed: true, unlimited: false, used, left: Math.max(0, MINUTES_PER_MONTH - used) };
+	return { ...base, allowed: true, unlimited: false, used, left: Math.max(0, MINUTES_PER_MONTH - used), features: readFeatures(person.features) };
 }
 
 export async function canUseStudio(email?: string | null) {
@@ -53,15 +58,24 @@ export async function canUseStudio(email?: string | null) {
 
 export async function listPeople() {
 	const files = await listObjects("access/people/");
-	const people = await Promise.all(files.map((file) => getJson<{ email: string; at: string }>(file.key).catch(() => null)));
-	const known = people.filter((person): person is { email: string; at: string } => Boolean(person));
-	const rows = await Promise.all(known.map(async (person) => ({ ...person, used: await minutesUsed(person.email) })));
+	const people = await Promise.all(files.map((file) => getJson<PersonRecord>(file.key).catch(() => null)));
+	const known = people.filter((person): person is PersonRecord => Boolean(person));
+	const rows = await Promise.all(known.map(async (person) => ({ ...person, features: readFeatures(person.features), used: await minutesUsed(person.email) })));
 	return rows.sort((a, b) => b.at.localeCompare(a.at));
 }
 
 export async function addPerson(email: string) {
 	const key = await personKey(email);
 	if (!(await exists(key))) await putObject(key, JSON.stringify({ email: email.trim().toLowerCase(), at: new Date().toISOString() }), "application/json");
+}
+
+// Turn features on or off for someone already invited. false = not invited.
+export async function setFeatures(email: string, features: Features) {
+	const key = await personKey(email);
+	const person = await getJson<PersonRecord>(key);
+	if (!person) return false;
+	await putObject(key, JSON.stringify({ ...person, features }), "application/json");
+	return true;
 }
 
 export async function removePerson(email: string) {
@@ -118,6 +132,34 @@ export async function settleDeadListen(key: string) {
 // The job failed, so the minutes go back.
 export async function refundListen(key: string, usageKey: string) {
 	await Promise.all([deleteObject(usageKey), deleteObject(siblingKey(key, "access.json"))]);
+}
+
+// Only one Best can be starting per person at a time, so two presses can't both pay for a GPU or both
+// slip past the allowance. Named by the minute: a lock left by a crash clears itself. null = busy.
+export async function lockBest(email: string) {
+	const lock = `access/best-lock/${await hashEmail(email)}/${Math.floor(Date.now() / 60000)}.json`;
+	if (!(await putIfAbsent(lock, "{}", "application/json"))) return null;
+	return () => deleteObject(lock).catch(() => {});
+}
+
+// Cutout Best is paid GPU time. Its seconds are taken when it starts and given back if it fails.
+export async function bestSecondsUsed(email: string) {
+	const files = await listObjects(`access/best/${await hashEmail(email)}/${month()}/`);
+	const used = await Promise.all(files.map((file) => getJson<{ seconds: number }>(file.key).catch(() => null)));
+	return Math.round(used.reduce((sum, item) => sum + (item?.seconds ?? 0), 0) * 10) / 10;
+}
+
+export async function chargeBest(email: string, key: string, seconds: number) {
+	const usageKey = `access/best/${await hashEmail(email)}/${month()}/${key.split("/")[1]}.json`;
+	const before = await getJson<{ seconds: number }>(usageKey);
+	await putObject(usageKey, JSON.stringify({ seconds: (before?.seconds ?? 0) + seconds }), "application/json");
+	return usageKey;
+}
+
+export async function refundBest(usageKey: string, seconds: number) {
+	const before = await getJson<{ seconds: number }>(usageKey);
+	if (!before) return;
+	await putObject(usageKey, JSON.stringify({ seconds: Math.max(0, before.seconds - seconds) }), "application/json");
 }
 
 // A second render of the same video must wait for the first: each one is paid for.

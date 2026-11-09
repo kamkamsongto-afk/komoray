@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
 					{ key: "X-Frame-Options", value: "DENY" },
 					{ key: "X-Content-Type-Options", value: "nosniff" },
 					{ key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+					// The test site stays out of Google.
+					...(process.env.NEXT_PUBLIC_KOMORAY_STAGE === "staging" ? [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] : []),
 				],
 			},
 		];

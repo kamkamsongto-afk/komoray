@@ -69,6 +69,7 @@ git log --oneline -15         # เพิ่งมีใครแก้อะไ
 | `banners.ts` | `banner_events`, `banner_motion`, `banner_ink`, `BANNER`, `BANNER_ANIMS`, `BANNER_TOP` |
 | `motion.ts` | `POP`, `BOUNCE`, `BOUNCE_WORD_GAP`, `pop_tags`, `word_places`, `bounce_events` |
 | `subtitle-style.ts` | `DEFAULT_STYLE`, `FONTS`, `FORMATS` |
+| `behind.ts` (+ ชั้นใน `PlayerFrame.tsx`) | `behind_motion`, `run_repeats`, `build_behind`, `cutout_filters`, `RUN_SPEED`, `ARRIVE_TIME`, `INSERT_FADE`, `INSERT_EDGE_FADE` |
 
 comment บางจุดในฝั่งเว็บอ้างชื่อเก่าที่ไม่มีใน `render.py` แล้ว เช่น `build_banners`, `MOTION`, `LOOKS` ให้ค้นจากชื่อจริงในตารางนี้
 
@@ -97,9 +98,15 @@ comment บางจุดในฝั่งเว็บอ้างชื่อ
 | แปลซับด้วย Haiku | ส่งบรรทัดกลับไม่ครบ 3 จาก 4 รอบ | `src/lib/translate.ts` |
 | หน้า admin อ่านไฟล์ในโฟลเดอร์ย่อยของ `logs/` | ไฟล์ทดสอบใหญ่ถูกดาวน์โหลดทุกครั้งที่เปิดหน้า | `src/app/api/admin/jobs/route.ts` |
 | ซับ Bounce ขยายคำแบบดันคำข้าง ๆ (`fontSize`, `\fscx` ในบรรทัดเดียวกัน) | ทั้งบรรทัดสั่น คำขยับ ~17 จาก 360 px เหมือนตัวอักษรชัก | `bounce_events` ใน `render.py`, `src/components/PlayerFrame.tsx` |
+| ทำขอบจางของคนตัวเล็ก (ตอนแทรกรูป) ในไฟล์ matte ก่อนจัดกรอบ | การจัดกรอบครอปขอบทิ้ง ไหล่ยังโดนตัดเป็นเส้นตรง ต้องจางหลังจัดกรอบ (mask ใน `PlayerFrame`, `cutout_filters`) | `INSERT.edgeFade` ใน `src/lib/behind.ts` |
 | ตัดเทคซ้ำให้เองด้วยกฎที่ไม่ใช้ AI หรือตัด Bad takes ของ AI ทั้งที่ผู้ใช้ไม่ได้ติ๊กตอนอัปโหลด หรือตัดซ้ำหลังผู้ใช้กดคืน | กฎแยกการพูดซ้ำกับการไล่รายการไม่ได้ ตัดเนื้อหาจริงจนความหมายกลับด้าน (อ่านแล้วผิด 5 จาก 11 จุดในคลิปไทย) · 6 พ.ย. โยชิอนุมัติให้ AI ตัดเองได้เฉพาะเมื่อติ๊ก Bad takes และตัดครั้งเดียว | `src/components/ScriptView.tsx`, `cutFirstTime` ใน `src/app/edit/page.tsx` |
+| ทำคลิปจริงที่มีชั้น Cutout โดยไม่เช็กว่าตัดคนไว้ครอบเวลาของทุกชั้นแล้ว (`covered`) | ตัวอักษรที่ควรอยู่หลังคนขึ้นมาอยู่หน้าคน ส่วนรูปหรือคลิปแทรกขึ้นเต็มจอโดยไม่มีคน (Codex รีวิว 7 พ.ย.) | `src/app/api/render/route.ts` |
 | ชดเชยความช้าของ `arnndn` ด้วยเวลา (`atrim=start=`) หรือผสมเสียงโดยไม่ตั้งเวลาเริ่มเป็น 0 | คลิปมือถือเริ่มที่ ~21 ms จึงตัดไม่ติด เสียงเดิมกับเสียงที่ปรับเหลื่อมกันจนหักล้าง แถบกลางเบาลง ~3 dB | `VOICE_CHAIN`, `polish_sound` ใน `render.py` |
 | ปรับความดังคลิปจริงด้วย `loudnorm` โดยตรง หรือวัดความดังหลังตัด | คลิปที่ช่วงดังเบาต่างกันมาก `loudnorm` เปลี่ยนค่าเองตามเนื้อเสียง คลิปจริงต่างจากแถบเสียงในตัวอย่าง 4.7 dB | `voice_filter`, `polish_sound` ใน `render.py` |
+| ใช้ `ort.webgpu.min.mjs` แทน `ort.all.min.mjs` รัน MODNet ใน `Balanced` | ได้ขอบตัวคนแหว่ง ตรงกับ BiRefNet แค่ 79% จาก 97% (ทดสอบ 9 พ.ย. บนคลิปจริง) | `src/lib/cutout-local.ts` |
+| ตั้ง key ของ `StudioPlayer` จากลิงก์วิดีโอ | ลิงก์เซ็นใหม่ทุกครั้งที่แก้ชั้น Cutout ตัวเล่นถูกสร้างใหม่ เด้งกลับต้นคลิป | `playerKey` ใน `src/components/ScriptView.tsx` |
+| นับจุดเขียวบนไอคอน Cutout ว่าเห็นแล้วเพราะกล่อง Cutout เปิดอยู่ | คนส่วนใหญ่รอโดยเปิดกล่องค้าง ตัดเสร็จแล้วจุดเลยไม่ขึ้นเลย ต้องนับตอนกดไอคอนเท่านั้น | `markCutoutSeen` ใน `src/components/ScriptView.tsx` |
+| เขียนทับ Cutout คุณภาพหนึ่งด้วยอีกคุณภาพโดยไม่เก็บสำเนาก่อน (`keepCurrent`) | คนจะกดสลับเทียบกัน ถ้าไม่เก็บต้องรอตัดใหม่ และ Slow ต้องจ่ายโควตากับค่า GPU ซ้ำเต็มจำนวน | `src/app/api/cutout/route.ts` |
 | ทำไฟล์เสียงตัวอย่าง (`.pcm`) โดยไม่ใช้ `SOUND_ON_PICTURE_CLOCK` | ไฟล์ดิบไม่มีเวลากำกับ คลิปมือถือที่เสียงเริ่มหลังภาพ เสียงในตัวอย่างนำภาพไป 122 ms ทั้งคลิป | `proxy_command`, `clean_preview` ใน `render.py` |
 
 ## 6. ส่งงานและรีวิว
@@ -136,6 +143,15 @@ python -m py_compile modal_app/render.py    # เมื่อแก้ไฟล�
 - เรื่องรสนิยมการเขียนโค้ดไม่นับเป็นข้อค้นพบ
 - เจ้าของงานเป็นคนแก้ ถ้าไม่เห็นด้วยให้ตอบพร้อมหลักฐานได้หนึ่งรอบ ถ้ายังไม่ตรงกัน ให้สรุปทั้งสองฝั่งให้โยชิตัดสิน
 
+### ลองบน staging ก่อนรวม
+
+staging.komoray.com คือเว็บทดลอง มี Worker, R2 (`komoray-uploads-staging`), Supabase (`komoray-staging`) และ Modal (`komoray-render-staging`) ของตัวเอง ไม่แตะข้อมูลผู้ใช้จริง และไม่ใช่ที่ให้ผู้ใช้หนีไปใช้ตอนเว็บจริงพัง
+
+- งานที่ต้องรีวิวตามย่อหน้าบน ต้องขึ้น staging ให้โยชิลองก่อนรวม: `npm run deploy:staging` (ขึ้น branch ปัจจุบัน) ถ้าแก้ `render.py` ให้ `KOMORAY_RENDER_APP=komoray-render-staging python -m modal deploy modal_app/render.py` ก่อน
+- ขึ้น staging ทำได้เองโดยไม่ต้องรอโยชิสั่ง แต่ห้ามใช้คำสั่ง deploy ของเว็บจริงหรือ Modal ตัวจริงแทน
+- ตารางหรือ migration ใหม่ ต้องรันบน `komoray-staging` ก่อน แล้วจึงให้โยชิรันบนตัวจริงตอนรวม
+- กุญแจของ staging ตั้งด้วย `npx wrangler secret put <ชื่อ> --env staging` ค่าอยู่ใน `.dev.vars` ชื่อขึ้นต้นด้วย `STAGING_` หรือ `R2_STAGING_`
+
 ## 7. รวมงานและขึ้นเว็บ
 
 1. รวมเมื่อโยชิบอกให้รวมเท่านั้น: ถ้า `main` ขยับไปแล้ว ให้ merge `main` เข้า branch และตรวจตามข้อ 6 ซ้ำ จากนั้น `git checkout main` แล้ว `git merge --no-ff <branch>` ห้าม rebase branch ที่ push แล้ว
@@ -143,7 +159,7 @@ python -m py_compile modal_app/render.py    # เมื่อแก้ไฟล�
 3. ลำดับขึ้นเว็บ: ถ้าแก้ `render.py` ให้ `python -m modal deploy modal_app/render.py` **ก่อน** แล้วจึง `git push origin main` คำสั่ง deploy และ push ทำเมื่อโยชิสั่งในงานนั้น หรือให้โยชิรันเอง
 4. หลัง deploy Modal งานแรก ๆ อาจยังวิ่งบนเครื่องรุ่นเก่า ถ้าผลไม่ตรงโค้ด ให้สั่งใหม่อีกครั้งก่อนสงสัยโค้ด
 5. หลัง push ตรวจว่า `git log origin/main..main --oneline` ว่าง เคยมี commit ไม่ถูก push จนโยชิไม่เห็นฟีเจอร์บนเว็บจริง
-6. ย้อนงานที่รวมแล้วด้วย `git revert -m 1 <merge commit>` เท่านั้น ถ้าจะแก้ใหม่ทีหลัง ให้ดูประวัติที่ย้อนก่อน
+6. ย้อนงานที่รวมแล้วด้วย `git revert -m 1 <merge commit>` เท่านั้น ถ้าจะแก้ใหม่ทีหลัง ให้ดูประวัติที่ย้อนก่อน ถ้าเว็บจริงพังและต้องรีบ ให้ย้อน Worker ไปเวอร์ชันก่อนใน Cloudflare (`Workers & Pages` → `komoray` → `Deployments` → `Rollback`) ก่อน แล้วค่อย revert ตามมา
 7. `PROGRESS.md` และแผน 67 วันอัปเดตตอนปิดงานตามกิจวัตรใน `CLAUDE.md` โดย agent ที่โยชิสั่ง ทำบน `main` หลังรวมงานแล้ว เพื่อไม่ให้ไฟล์นี้ชนกันในแต่ละ branch
 
 ## 8. ห้ามทำถ้าโยชิไม่ได้สั่งในงานนั้น

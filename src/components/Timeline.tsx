@@ -3,10 +3,12 @@
 import { AudioWaveform, ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Banner } from "@/lib/banners";
+import type { CutoutLayers } from "@/lib/behind";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
 import { PART_ZOOMS, type PartZoom, ZOOM_NAMES, type ZoomPart, type ZoomStyle, zoomTrack } from "@/lib/zoom";
+import { ConfirmDelete } from "./ConfirmDelete";
 
 type Word = { text: string; start: number; end: number };
 // A word as the script draws it (a fixed run of words is one item, with the new text).
@@ -41,7 +43,31 @@ type Props = {
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void; // dragged along the timeline
 	onOpenBanners: (id: string) => void; // a banner's strip clicked
+	cutoutLayers: CutoutLayers; // text behind the speaker, pictures or clips: their own rows under the banners
+	onCutoutChange: (layers: CutoutLayers) => void;
+	onOpenCutout: (id: string) => void;
 };
+
+// Things shown over the video, as strips under the waveform: banners first, then the Cutout layers in rows of their own.
+type LaneKind = "banner" | "text" | "insert";
+type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number };
+const LANE_LOOK: Record<LaneKind, { edge: string; body: string; picked: string; ring: string; name: string }> = {
+	banner: { edge: "bg-fuchsia-500/70", body: "bg-fuchsia-500/30 hover:bg-fuchsia-500/45", picked: "bg-fuchsia-500/55", ring: "ring-fuchsia-600", name: "banner" },
+	text: { edge: "bg-sky-500/70", body: "bg-sky-500/30 hover:bg-sky-500/45", picked: "bg-sky-500/55", ring: "ring-sky-600", name: "text behind you" },
+	insert: { edge: "bg-orange-500/70", body: "bg-orange-500/30 hover:bg-orange-500/45", picked: "bg-orange-500/55", ring: "ring-orange-600", name: "picture or clip" },
+};
+// Each item goes in the first row with room, so a row only starts where two overlap.
+function packRows(items: LaneItem[], first: number) {
+	const ends: number[] = [];
+	return [...items]
+		.sort((a, b) => a.start - b.start)
+		.map((item) => {
+			let row = ends.findIndex((end) => end <= item.start);
+			if (row === -1) row = ends.length;
+			ends[row] = item.end;
+			return { item, row: first + row };
+		});
+}
 
 // Heights, px: time ruler, sentence chips, waveform (the zoom strip lies on top of it while it shows).
 const RULER = 22;
@@ -122,6 +148,9 @@ export function Timeline({
 	banners,
 	onBannersChange,
 	onOpenBanners,
+	cutoutLayers,
+	onCutoutChange,
+	onOpenCutout,
 }: Props) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -149,7 +178,7 @@ export function Timeline({
 			if (localStorage.getItem(SHOW_CUTS) === "0") setShowCuts(false);
 			if (localStorage.getItem(SMALL_WAVE) === "1") setSmallWave(true);
 		} catch {
-			// no storage: the switch starts on
+			// no storage: the switches start as they are
 		}
 	}, []);
 	const toggleWave = () => {
@@ -197,23 +226,43 @@ export function Timeline({
 		},
 		[segments],
 	);
-	// Banners in rows: each goes in the first row with room, so a row only starts where two overlap.
+	// Banners in their rows, then the Cutout layers in rows of their own under them.
 	const lane = useMemo(() => {
-		const ends: number[] = [];
-		return [...banners]
-			.sort((a, b) => a.start - b.start)
-			.map((b) => {
-				let row = ends.findIndex((end) => end <= b.start);
-				if (row === -1) row = ends.length;
-				ends[row] = b.end;
-				return { banner: b, row };
-			});
-	}, [banners]);
+		const bannerItems = banners.map((b): LaneItem => ({ id: b.id, kind: "banner", label: b.text, start: b.start, end: b.end }));
+		const cutoutItems = [
+			...cutoutLayers.texts.map((t): LaneItem => ({ id: t.id, kind: "text", label: t.text, start: t.start, end: t.end })),
+			...cutoutLayers.inserts.map((i): LaneItem => ({ id: i.id, kind: "insert", label: i.kind === "video" ? "Clip" : "Picture", start: i.start, end: i.end })),
+		];
+		const top = packRows(bannerItems, 0);
+		const bannerRows = top.length ? Math.max(...top.map((l) => l.row)) + 1 : 0;
+		return [...top, ...packRows(cutoutItems, bannerRows)];
+	}, [banners, cutoutLayers]);
 	const laneRows = lane.length ? Math.max(...lane.map((l) => l.row)) + 1 : 0;
 	const laneHeight = laneRows * LANE_ROW + (laneRows ? 2 : 0);
-	// The banner clicked on the timeline: highlighted, and Delete removes it (coach, 6 Nov: no trip back to the box's ×).
-	const [pickedBanner, setPickedBanner] = useState<string | null>(null);
-	const startBannerDrag = (e: PointerEvent<HTMLElement>, b: Banner, resize: false | "start" | "end") => {
+	// The strip clicked on the timeline: highlighted, and Delete removes it (coach, 6 Nov: no trip back to the box's ×).
+	const [pickedItem, setPickedItem] = useState<string | null>(null);
+	// patch null: remove it.
+	const changeItem = useCallback(
+		(item: LaneItem, patch: { start?: number; end?: number } | null) => {
+			const apply = <T extends { id: string }>(list: T[]) => (patch ? list.map((x) => (x.id === item.id ? { ...x, ...patch } : x)) : list.filter((x) => x.id !== item.id));
+			if (item.kind === "banner") onBannersChange(apply(banners));
+			else if (item.kind === "text") onCutoutChange({ ...cutoutLayers, texts: apply(cutoutLayers.texts) });
+			else onCutoutChange({ ...cutoutLayers, inserts: apply(cutoutLayers.inserts) });
+		},
+		[banners, cutoutLayers, onBannersChange, onCutoutChange],
+	);
+	// Text behind you, pictures and clips ask first (coach, 9 Nov).
+	const [removing, setRemoving] = useState<LaneItem | null>(null);
+	const closeRemoving = useCallback(() => setRemoving(null), []);
+	const removeItem = useCallback(
+		(item: LaneItem) => {
+			if (item.kind === "banner") changeItem(item, null);
+			else setRemoving(item);
+			setPickedItem(null);
+		},
+		[changeItem],
+	);
+	const startItemDrag = (e: PointerEvent<HTMLElement>, b: LaneItem, resize: false | "start" | "end") => {
 		e.stopPropagation();
 		e.preventDefault();
 		const outAt = (clientX: number) => toOutSeconds(timeAt(xAt(clientX)), segments);
@@ -232,16 +281,17 @@ export function Timeline({
 					: resize === "start"
 						? { start: tenths(Math.max(0, Math.min(b.end - 0.3, at))) }
 						: { start: tenths(Math.min(total - seconds, Math.max(0, at - grab))), end: tenths(Math.min(total - seconds, Math.max(0, at - grab)) + seconds) };
-			onBannersChange(banners.map((x) => (x.id === b.id ? { ...x, ...patch } : x)));
+			changeItem(b, patch);
 		};
 		const stop = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", stop);
 			window.removeEventListener("pointercancel", stop);
-			setPickedBanner(b.id);
+			setPickedItem(b.id);
 			setSelection(null);
 			if (moved) return;
-			onOpenBanners(b.id);
+			if (b.kind === "banner") onOpenBanners(b.id);
+			else onOpenCutout(b.id);
 			onSeek(toSource(b.start));
 		};
 		window.addEventListener("pointermove", move);
@@ -499,7 +549,7 @@ export function Timeline({
 		} catch {
 			// the pointer is already gone: the press still works while it stays over the timeline
 		}
-		setPickedBanner(null);
+		setPickedItem(null);
 		const x = xAt(e.clientX);
 		const y = e.clientY - el.getBoundingClientRect().top;
 		const onRuler = y < RULER + 2;
@@ -595,21 +645,21 @@ export function Timeline({
 		setSelection(null);
 	};
 
-	// Delete / Backspace removes the picked banner, Esc lets it go.
+	// Delete / Backspace removes the picked strip, Esc lets it go.
 	useEffect(() => {
-		if (!pickedBanner) return;
+		if (!pickedItem) return;
 		const onKey = (e: KeyboardEvent) => {
 			if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return;
-			if (e.key === "Escape") setPickedBanner(null);
+			const item = lane.find((l) => l.item.id === pickedItem)?.item;
+			if (e.key === "Escape" || !item) setPickedItem(null);
 			else if ((e.key === "Delete" || e.key === "Backspace") && window.getSelection()?.isCollapsed !== false) {
 				e.preventDefault();
-				onBannersChange(banners.filter((x) => x.id !== pickedBanner));
-				setPickedBanner(null);
+				removeItem(item);
 			}
 		};
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [pickedBanner, banners, onBannersChange]);
+	}, [pickedItem, lane, removeItem]);
 
 	// Delete / Backspace cuts the picked stretch, Esc lets it go (not while typing or with script words highlighted).
 	useEffect(() => {
@@ -802,7 +852,7 @@ export function Timeline({
 			<div
 				onPointerEnter={() => setOverWave(true)}
 				onPointerLeave={() => setOverWave(false)}
-				className={`absolute left-1/2 z-[3] -translate-x-1/2 items-center gap-0.5 rounded-full border border-foreground/15 bg-background/95 px-1 py-0.5 shadow ${smallWave ? "hidden" : "max-sm:flex [@media(hover:none)]:flex"} ${smallWave ? "" : overWave ? "flex" : "hidden"}`}
+				className={`absolute left-1/2 z-[3] -translate-x-1/2 items-center gap-0.5 rounded-full border border-foreground/15 bg-background/95 px-1 py-0.5 shadow ${smallWave ? "hidden" : `max-sm:flex [@media(hover:none)]:flex ${overWave ? "flex" : "hidden"}`}`}
 				style={{ top: WAVE_TOP + wave / 2 - 15 }}
 			>
 				{(
@@ -872,39 +922,37 @@ export function Timeline({
 							</div>
 						);
 					})}
-					{lane.map(({ banner: b, row }) => {
+					{lane.map(({ item: b, row }) => {
 						const x0 = xOf(toSource(b.start));
 						const x1 = Math.max(x0 + 24, xOf(toSource(b.end)));
-						const picked = pickedBanner === b.id;
+						const picked = pickedItem === b.id;
+						const look = LANE_LOOK[b.kind];
 						return (
 							<div
-								key={b.id}
-								className={`absolute z-[1] flex rounded ${picked ? "ring-2 ring-fuchsia-600 ring-offset-1 ring-offset-background" : ""}`}
+								key={`${b.kind}-${b.id}`}
+								className={`absolute z-[1] flex rounded ${picked ? `ring-2 ${look.ring} ring-offset-1 ring-offset-background` : ""}`}
 								style={{ left: x0, width: x1 - x0 - 1, top: height + row * LANE_ROW, height: LANE_ROW - 2 }}
 							>
-								<button onPointerDown={(e) => startBannerDrag(e, b, "start")} aria-label={`When ${b.text} starts`} title="Drag to change when it starts" className="w-1.5 shrink-0 cursor-ew-resize touch-none rounded-l bg-fuchsia-500/70" />
+								<button onPointerDown={(e) => startItemDrag(e, b, "start")} aria-label={`When ${b.label} starts`} title="Drag to change when it starts" className={`w-1.5 shrink-0 cursor-ew-resize touch-none rounded-l ${look.edge}`} />
 								<button
-									onPointerDown={(e) => startBannerDrag(e, b, false)}
-									title={`${b.text}: drag to change when it shows, click to pick it (Delete removes it)`}
-									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-[11px] leading-[18px] text-foreground ${picked ? "bg-fuchsia-500/55" : "bg-fuchsia-500/30 hover:bg-fuchsia-500/45"}`}
+									onPointerDown={(e) => startItemDrag(e, b, false)}
+									title={`${b.label} (${look.name}): drag to change when it shows, click to pick it (Delete removes it)`}
+									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-[11px] leading-[18px] text-foreground ${picked ? look.picked : look.body}`}
 								>
-									{b.text}
+									{b.label}
 								</button>
 								{picked && (
 									<button
 										onPointerDown={(e) => e.stopPropagation()}
-										onClick={() => {
-											onBannersChange(banners.filter((x) => x.id !== b.id));
-											setPickedBanner(null);
-										}}
-										aria-label={`Remove ${b.text}`}
-										title="Remove this banner (Delete)"
+										onClick={() => removeItem(b)}
+										aria-label={`Remove ${b.label}`}
+										title={`Remove this ${look.name} (Delete)`}
 										className="flex w-4 shrink-0 items-center justify-center bg-red-600 text-white hover:bg-red-700"
 									>
 										<X className="h-2.5 w-2.5" aria-hidden />
 									</button>
 								)}
-								<button onPointerDown={(e) => startBannerDrag(e, b, "end")} aria-label={`How long ${b.text} shows`} title="Drag to change how long it shows" className="w-2 shrink-0 cursor-ew-resize touch-none rounded-r bg-fuchsia-500/70" />
+								<button onPointerDown={(e) => startItemDrag(e, b, "end")} aria-label={`How long ${b.label} shows`} title="Drag to change how long it shows" className={`w-2 shrink-0 cursor-ew-resize touch-none rounded-r ${look.edge}`} />
 							</div>
 						);
 					})}
@@ -1017,6 +1065,16 @@ export function Timeline({
 					</ul>
 					<p className="mt-2 text-xs text-foreground/50">The takes you don&apos;t keep are cut. Ctrl+Z undoes.</p>
 				</div>
+			)}
+			{removing && (
+				<ConfirmDelete
+					name={removing.kind === "text" ? `"${removing.label}"` : `this ${removing.label.toLowerCase()}`}
+					onCancel={closeRemoving}
+					onConfirm={() => {
+						changeItem(removing, null);
+						closeRemoving();
+					}}
+				/>
 			)}
 		</div>
 	);

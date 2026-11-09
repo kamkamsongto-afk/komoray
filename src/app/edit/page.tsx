@@ -1,14 +1,17 @@
 "use client";
 
-import { Check, Download, Redo2, Sparkles, Undo2, X } from "lucide-react";
+import { Check, Download, Redo2, Scissors, Sparkles, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import type { BadTake } from "@/lib/bad-takes";
+import { HeaderMenu } from "@/components/HeaderMenu";
 import { ScriptView } from "@/components/ScriptView";
 import { VideoReady } from "@/components/VideoReady";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
+import { type CutoutLayers, NO_LAYERS } from "@/lib/behind";
+import { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { type Pace, PACES, PADDING } from "@/lib/silences";
 import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpans, type WordFix } from "@/lib/edit";
@@ -32,6 +35,7 @@ type Analysis = {
 	badTakesApplied?: boolean; // the AI's bad takes were cut once, as asked when uploading
 	style?: unknown;
 	banners?: Banner[];
+	cutout?: CutoutLayers; // text behind the speaker, pictures and clips behind them (lib/behind.ts)
 	manual?: Cut[]; // cut by hand on the timeline
 	keep?: Cut[]; // silences kept by hand on the timeline
 	noZoom?: Cut[]; // parts with Auto zoom turned off on the timeline
@@ -252,6 +256,7 @@ export default function EditPage() {
 			noZoom?: Cut[];
 			zoomParts?: ZoomPart[];
 			zoomMomentsApplied?: boolean;
+			cutout?: CutoutLayers;
 		}) => {
 			if (!key) return;
 			setSaveError("");
@@ -476,6 +481,23 @@ export default function EditPage() {
 		[save],
 	);
 
+	// Cutout layers: typed into and dragged like banners, so saved a moment after the last change. Then the
+	// links to their pictures and clips are fetched again (a new one is shown from this computer meanwhile).
+	const cutout = useCutout(key);
+	const cutoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const refreshCutout = cutout.refresh;
+	const changeCutout = useCallback(
+		(layers: CutoutLayers) => {
+			setAnalysis((a) => (a ? { ...a, cutout: layers } : a));
+			if (cutoutTimer.current) clearTimeout(cutoutTimer.current);
+			cutoutTimer.current = setTimeout(() => {
+				save({ cutout: layers });
+				void savingRef.current?.then(() => refreshCutout());
+			}, STYLE_SAVE_DELAY_MS);
+		},
+		[save, refreshCutout],
+	);
+
 	// Banners are typed into, so they are saved a moment after the last change too.
 	const bannersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const changeBanners = useCallback(
@@ -561,7 +583,8 @@ export default function EditPage() {
 		// failed (and a style change still waiting for its delay goes out now).
 		if (styleTimer.current) clearTimeout(styleTimer.current);
 		if (bannersTimer.current) clearTimeout(bannersTimer.current);
-		styleTimer.current = bannersTimer.current = null;
+		if (cutoutTimer.current) clearTimeout(cutoutTimer.current);
+		styleTimer.current = bannersTimer.current = cutoutTimer.current = null;
 		save({
 			deleted: analysis?.deleted ?? [],
 			fixes: analysis?.fixes ?? [],
@@ -571,6 +594,7 @@ export default function EditPage() {
 			keep: analysis?.keep ?? [],
 			noZoom: analysis?.noZoom ?? [],
 			zoomParts: analysis?.zoomParts ?? [],
+			...(analysis?.cutout && { cutout: analysis.cutout }),
 		});
 		setRender({ status: "processing" });
 		try {
@@ -661,6 +685,7 @@ export default function EditPage() {
 
 	return (
 		<main className="font-sans mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 sm:px-6">
+			{/* A few buttons only: the settings that go together sit in a menu (coach, 7 Nov: the top was crowded, not minimal). */}
 			<header className="flex flex-wrap items-center justify-between gap-3 border-b border-foreground/10 pb-3">
 				<div className="flex min-w-0 flex-col">
 					<Link href="/projects" className="text-xs text-foreground/60 hover:text-foreground">
@@ -673,73 +698,108 @@ export default function EditPage() {
 						{fixes.length > 0 && ` · ${fixes.length} fixed`}
 						{(analysis.manual?.length ?? 0) > 0 && ` · ${analysis.manual!.length} cut by hand`}
 					</p>
-					<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-					<div className="flex items-center gap-1 text-xs">
+				</div>
+				<div className="flex flex-wrap items-center justify-end gap-2">
+					<div className="flex items-center">
 						<button
 							onClick={() => restore("past")}
 							disabled={!historySize.past}
 							title="Undo (Ctrl+Z)"
-							className="inline-flex items-center gap-1 rounded border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-30"
+							aria-label="Undo"
+							className="rounded-l-lg border border-foreground/20 p-2 hover:bg-foreground/5 disabled:opacity-30"
 						>
-							<Undo2 className="h-3 w-3 shrink-0" aria-hidden />
-							Undo
+							<Undo2 className="h-3.5 w-3.5" aria-hidden />
 						</button>
 						<button
 							onClick={() => restore("future")}
 							disabled={!historySize.future}
 							title="Redo (Ctrl+Shift+Z)"
-							className="inline-flex items-center gap-1 rounded border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-30"
+							aria-label="Redo"
+							className="-ml-px rounded-r-lg border border-foreground/20 p-2 hover:bg-foreground/5 disabled:opacity-30"
 						>
-							<Redo2 className="h-3 w-3 shrink-0" aria-hidden />
-							Redo
+							<Redo2 className="h-3.5 w-3.5" aria-hidden />
 						</button>
 					</div>
-					<label className="flex items-center gap-2 text-xs text-foreground/60" title="How short a pause has to be to stay in the video">
-						Pace
+					<HeaderMenu
+						icon={Scissors}
+						label="Cuts"
+						title="Pace, bad takes, language"
+						badge={badTakes.status !== "failed" && readTakes && badTakes.takes.length && !badTakesCut ? badTakes.takes.length : undefined}
+					>
+						<label className="flex flex-col gap-1" title="How short a pause has to be to stay in the video">
+							<span className="text-xs font-medium text-foreground/60">Pace</span>
+							<select
+								value={analysis.pace ?? "natural"}
+								onChange={(e) => void changePace(e.target.value as Pace)}
+								disabled={paceBusy}
+								className="rounded-md border border-foreground/20 bg-background px-1.5 py-1 text-foreground disabled:opacity-50"
+							>
+								{(Object.keys(PACES) as Pace[]).map((p) => (
+									<option key={p} value={p}>
+										{PACES[p].name} (cuts pauses over {PACES[p].minSilence}s)
+									</option>
+								))}
+							</select>
+							{paceBusy && <span className="text-xs text-foreground/60">Finding silences…</span>}
+						</label>
+						{badTakes.status !== "failed" && (
+							<div className="flex flex-col gap-1">
+								<span className="text-xs font-medium text-foreground/60">Bad takes</span>
+								{!readTakes ? (
+									<button onClick={() => setFindTakes(true)} className="inline-flex items-center gap-1 self-start rounded border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
+										<Sparkles className="h-3 w-3 shrink-0" aria-hidden />
+										Find bad takes
+									</button>
+								) : badTakes.status === "checking" ? (
+									<span className="inline-flex items-center gap-1 text-foreground/60">
+										<Sparkles className="h-3 w-3 shrink-0 animate-pulse" aria-hidden />
+										Looking for bad takes…
+									</span>
+								) : !badTakes.takes.length ? (
+									<span className="text-foreground/60">No bad takes found</span>
+								) : (
+									<button
+										onClick={() => toggleBadTakes(!badTakesCut)}
+										aria-pressed={badTakesCut}
+										title={badTakesCut ? "Bring every bad take back" : "Cut every bad take the AI found. Press again to bring them back"}
+										className={`inline-flex items-center gap-1 self-start rounded border px-2 py-1 ${badTakesCut ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"}`}
+									>
+										{badTakesCut ? <Check className="h-3 w-3 shrink-0" aria-hidden /> : <Sparkles className="h-3 w-3 shrink-0" aria-hidden />}
+										{badTakesCut ? `Bad takes cut (${badTakes.takes.length})` : `Cut bad takes (${badTakes.takes.length})`}
+									</button>
+								)}
+							</div>
+						)}
+						<Link href={`/upload?key=${encodeURIComponent(key)}&again=1`} className="text-xs text-foreground/60 underline hover:text-foreground" title="Listen to this video again in another language">
+							Wrong language?
+						</Link>
+					</HeaderMenu>
+					<HeaderMenu icon={Download} label="Export" title="Subtitles files, translations, notifications">
+						<button onClick={downloadSrt} className="inline-flex items-center gap-1 self-start rounded border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
+							<Download className="h-3 w-3 shrink-0" aria-hidden />
+							Subtitles (.srt)
+						</button>
 						<select
-							value={analysis.pace ?? "natural"}
-							onChange={(e) => void changePace(e.target.value as Pace)}
-							disabled={paceBusy}
-							className="rounded-md border border-foreground/20 bg-background px-1.5 py-0.5 text-foreground disabled:opacity-50"
+							value=""
+							onChange={(e) => void translateSrt(e.target.value)}
+							disabled={translating !== null}
+							aria-label="Translate subtitles"
+							className="rounded-md border border-foreground/20 bg-background px-1.5 py-1 text-foreground/80 disabled:opacity-60"
 						>
-							{(Object.keys(PACES) as Pace[]).map((p) => (
-								<option key={p} value={p}>
-									{PACES[p].name} (cuts pauses over {PACES[p].minSilence}s)
+							<option value="" disabled>
+								{translating ?? "Translate subtitles (.srt)…"}
+							</option>
+							{TRANSLATIONS.map((l) => (
+								<option key={l.code} value={l.code}>
+									{l.name}
 								</option>
 							))}
 						</select>
-						{paceBusy && <span>Finding silences…</span>}
-					</label>
-					{badTakes.status !== "failed" &&
-						(!readTakes ? (
-							<button onClick={() => setFindTakes(true)} className="inline-flex items-center gap-1 rounded border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
-								<Sparkles className="h-3 w-3 shrink-0" aria-hidden />
-								Find bad takes
-							</button>
-						) : badTakes.status === "checking" ? (
-							<span className="inline-flex items-center gap-1 text-xs text-foreground/60">
-								<Sparkles className="h-3 w-3 shrink-0 animate-pulse" aria-hidden />
-								Looking for bad takes…
-							</span>
-						) : !badTakes.takes.length ? (
-							<span className="text-xs text-foreground/60">No bad takes found</span>
-						) : (
-							<button
-								onClick={() => toggleBadTakes(!badTakesCut)}
-								aria-pressed={badTakesCut}
-								title={badTakesCut ? "Bring every bad take back" : "Cut every bad take the AI found. Press again to bring them back"}
-								className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${badTakesCut ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"}`}
-							>
-								{badTakesCut ? <Check className="h-3 w-3 shrink-0" aria-hidden /> : <Sparkles className="h-3 w-3 shrink-0" aria-hidden />}
-								{badTakesCut ? `Bad takes cut (${badTakes.takes.length})` : `Cut bad takes (${badTakes.takes.length})`}
-							</button>
-						))}
-					<Link href={`/upload?key=${encodeURIComponent(key)}&again=1`} className="text-xs text-foreground/50 underline hover:text-foreground" title="Listen to this video again in another language">
-						Wrong language?
-					</Link>
-					</div>
-				</div>
-				<div className="flex flex-col items-end gap-1">
+						<label className="flex items-center gap-2 text-foreground/80">
+							<input type="checkbox" checked={desktopNotify} onChange={(e) => void toggleDesktopNotify(e.target.checked)} />
+							Notify me on my desktop
+						</label>
+					</HeaderMenu>
 					<button
 						onClick={makeVideo}
 						disabled={render.status === "processing"}
@@ -747,32 +807,6 @@ export default function EditPage() {
 					>
 						{render.status === "processing" ? "Making your video…" : render.status === "done" ? "Make video again" : "Make video"}
 					</button>
-					<div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
-					<button onClick={downloadSrt} className="inline-flex items-center gap-1 text-xs text-foreground/60 underline hover:text-foreground">
-						<Download className="h-3 w-3 shrink-0" aria-hidden />
-						Subtitles (.srt)
-					</button>
-					<select
-						value=""
-						onChange={(e) => void translateSrt(e.target.value)}
-						disabled={translating !== null}
-						aria-label="Translate subtitles"
-						className="max-w-56 rounded-md border border-foreground/20 bg-background px-1.5 py-0.5 text-xs text-foreground/60 disabled:opacity-60"
-					>
-						<option value="" disabled>
-							{translating ?? "Translate subtitles (.srt)…"}
-						</option>
-						{TRANSLATIONS.map((l) => (
-							<option key={l.code} value={l.code}>
-								{l.name}
-							</option>
-						))}
-					</select>
-					</div>
-					<label className="flex items-center gap-2 text-xs text-foreground/60">
-						<input type="checkbox" checked={desktopNotify} onChange={(e) => void toggleDesktopNotify(e.target.checked)} />
-						Notify me on my desktop
-					</label>
 				</div>
 			</header>
 
@@ -871,6 +905,9 @@ export default function EditPage() {
 				onSubtitleChange={changeSubtitle}
 				banners={analysis.banners ?? []}
 				onBannersChange={changeBanners}
+				cutoutLayers={analysis.cutout ?? NO_LAYERS}
+				onCutoutChange={changeCutout}
+				cutout={cutout}
 				faces={analysis.faces ?? null}
 				takesApplied={analysis.takesApplied ?? false}
 				onTakesApplied={takesApplied}

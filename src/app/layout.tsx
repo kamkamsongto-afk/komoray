@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { IS_STAGING } from "@/lib/supabase/config";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,6 +32,10 @@ export default function RootLayout({
 				<link rel="icon" href="/favicon.svg" type="image/svg+xml"></link>
 			</head>
 			<body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+				{IS_STAGING && (
+					// Never mistake the test site for the real one.
+					<div className="pointer-events-none fixed top-0 left-1/2 z-[9999] -translate-x-1/2 rounded-b-md bg-amber-500 px-3 py-0.5 text-xs font-bold tracking-wide text-black">STAGING · test data</div>
+				)}
 				<div className="flex justify-end px-4 pt-2">
 					<ThemeToggle />
 				</div>

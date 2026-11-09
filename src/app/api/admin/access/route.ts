@@ -1,9 +1,11 @@
-import { addPerson, listPeople, removePerson, sameOrigin } from "@/lib/access";
+import { addPerson, listPeople, removePerson, sameOrigin, setFeatures } from "@/lib/access";
+import { readFeatures } from "@/lib/features";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
 
 // The admin's list of invited people.
-//   GET                { people: [{ email, at, used }] }
+//   GET                { people: [{ email, at, used, features }] }
 //   POST { email }     invite
+//   PATCH { email, features }   turn extra features on or off for them (lib/features.ts)
 //   DELETE ?email=…    take the invite back (their videos and minutes stay)
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -26,6 +28,16 @@ export async function POST(request: Request) {
 	const clean = String(email ?? "").trim().toLowerCase();
 	if (clean.length > 254 || !EMAIL.test(clean)) return Response.json({ error: "Please enter a valid email address" }, { status: 400 });
 	await addPerson(clean);
+	return Response.json({ ok: true });
+}
+
+export async function PATCH(request: Request) {
+	const denied = await adminOnly();
+	if (denied) return denied;
+	if (!sameOrigin(request)) return Response.json({ error: "Not allowed" }, { status: 403 });
+	const { email, features } = (await request.json().catch(() => ({}))) as { email?: unknown; features?: unknown };
+	const clean = String(email ?? "").trim().toLowerCase();
+	if (!(await setFeatures(clean, readFeatures(features)))) return Response.json({ error: "Invite this email first" }, { status: 404 });
 	return Response.json({ ok: true });
 }
 
