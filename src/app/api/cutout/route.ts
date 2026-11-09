@@ -97,7 +97,8 @@ async function lockVideo(key: string) {
 	const lock = siblingKey(key, `cutout-lock-${minute}.json`);
 	if (!(await putIfAbsent(lock, "{}", "application/json"))) return null;
 	const unlock = () => deleteObject(lock).catch(() => {});
-	if (await exists(siblingKey(key, `cutout-lock-${minute - 1}.json`))) {
+	// Can't tell: treat as busy, so an error here doesn't leave this lock behind.
+	if (await exists(siblingKey(key, `cutout-lock-${minute - 1}.json`)).catch(() => true)) {
 		await unlock();
 		return null;
 	}
@@ -129,9 +130,12 @@ async function changeCutout(key: string, windows: Window[], tier: CutoutTier, re
 
 	if (!access.unlimited && now.localRuns >= LOCAL_RUNS_PER_VIDEO) return Response.json({ error: "This video has been cut out too many times today. Please email hello@komoray.com." }, { status: 429 });
 	const files = cutoutFiles(key);
-	// Another quality is about to be written over this one. Failing to keep it mustn't waste the work
-	// just done on this computer: going back then simply means cutting again.
-	if (now.status === "done" && now.tier !== tier) await keepCurrent(key, now).catch(() => {});
+	// Another quality is about to be written over this one. Fast and Balanced are free to cut again, so
+	// failing to keep them mustn't waste the work just done on this computer. Slow was paid for: stop.
+	if (now.status === "done" && now.tier !== tier) {
+		const kept = await keepCurrent(key, now).then(() => true, () => false);
+		if (!kept && now.tier === "best") return Response.json({ error: "Could not keep your Slow cutout, so nothing was changed. Please try again." }, { status: 502 });
+	}
 	await Promise.all([deleteObject(files.done), deleteObject(files.error), deleteObject(siblingKey(key, LOCAL_MATTE))]);
 	await putObject(files.job, JSON.stringify({ startedAt: new Date().toISOString(), windows, runs: now.runs, localRuns: now.localRuns + 1, local: tier } satisfies Job), "application/json");
 	return Response.json({ uploadUrl: await signedUrl(siblingKey(key, LOCAL_MATTE), "PUT", LINK_SECONDS, "video/h264") });
