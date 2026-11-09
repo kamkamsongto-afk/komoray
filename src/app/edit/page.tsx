@@ -176,8 +176,13 @@ export default function EditPage() {
 					if (thai && !fontMetrics(style).thai) style = { ...style, font: DEFAULT_STYLE.font };
 				}
 				const asked = data.options;
-				if (asked && (!asked.zoom || !asked.subtitles)) {
-					style = { ...(style ?? readStyle(null)), ...(!asked.zoom && { zoom: "off" as const }), ...(!asked.subtitles && { subtitles: false }) };
+				if (asked && (!asked.zoom || !asked.subtitles || asked.audio === false)) {
+					style = {
+						...(style ?? readStyle(null)),
+						...(!asked.zoom && { zoom: "off" as const }),
+						...(!asked.subtitles && { subtitles: false }),
+						...(asked.audio === false && { audio: false }),
+					};
 				}
 				if (style) {
 					setSubtitle(style);

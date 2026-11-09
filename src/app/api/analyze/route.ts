@@ -3,7 +3,7 @@ import { refundListen, settleDeadListen, startListening } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
 import { isLanguage } from "@/lib/languages";
-import { facesFor, mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
+import { CLEAN_SOUND, facesFor, mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
 import { startTranscription } from "@/lib/transcribe";
@@ -89,6 +89,7 @@ export async function GET(request: Request) {
 				? {
 						videoUrl: await mediaUrl(key, "proxy.mp4", env.RENDER_TOKEN, LINK_SECONDS),
 						audioUrl: await mediaUrl(key, "proxy-audio.pcm", env.RENDER_TOKEN, LINK_SECONDS),
+						cleanAudioUrl: await mediaUrl(key, CLEAN_SOUND, env.RENDER_TOKEN, LINK_SECONDS),
 					}
 				: null;
 		// Where the speaker's face is, once the preview copy exists (found in it).

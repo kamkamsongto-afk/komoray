@@ -1,6 +1,6 @@
 import { hmac } from "@/lib/callback";
 import type { Faces } from "@/lib/framing";
-import { exists, getJson, putObject, siblingKey, signedUrl } from "@/lib/r2";
+import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl } from "@/lib/r2";
 
 // The editor's preview copy lives next to the original video:
 //   proxy.json        written when we ask Modal to make it
@@ -10,7 +10,8 @@ import { exists, getJson, putObject, siblingKey, signedUrl } from "@/lib/r2";
 //   faces.json        written by Modal: where the speaker's face is, every half second (facesFor)
 //   thumb.jpg         written by Modal: the picture on My projects (/api/thumb)
 // The final video is still made from the original, so this only affects what the editor plays.
-// A proxy.mp4 without proxy-audio.pcm is from before the sound file existed and gets made again.
+//   proxy-audio-clean2.pcm written by Modal: the same sound, fully optimized (the Audio optimization slider mixes the two)
+// A proxy.mp4 without both sound files is from before they existed and gets made again.
 export type ProxyStatus = "done" | "processing" | "failed" | "none";
 
 export const PROXY_AUDIO_RATE = 24000;
@@ -20,18 +21,27 @@ const GIVE_UP_MS = 30 * 60 * 1000; // no proxy after this long: Modal died quiet
 type ProxyEnv = { RENDER_URL: string; RENDER_TOKEN: string };
 
 export async function proxyStatus(key: string): Promise<ProxyStatus> {
-	const [video, audio] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm"))]);
-	if (video && audio) return "done";
-	if (await exists(siblingKey(key, "proxy-error.json"))) return "failed";
-	const started = await getJson<{ startedAt?: string }>(siblingKey(key, "proxy.json"));
-	if (started?.startedAt && Date.now() - Date.parse(started.startedAt) < GIVE_UP_MS) return "processing";
-	return "none";
+	const [video, audio, clean] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm")), exists(siblingKey(key, CLEAN_SOUND))]);
+	if (video && audio && clean) return "done";
+	const started = await getJson<{ startedAt?: string; withClean?: boolean }>(siblingKey(key, "proxy.json"));
+	const running = Boolean(started?.startedAt && Date.now() - Date.parse(started.startedAt) < GIVE_UP_MS);
+	const failed = await exists(siblingKey(key, "proxy-error.json"));
+	// A preview from before the newer sound file gets one try at being made again. An error from an attempt
+	// before that doesn't count (withClean: startProxy cleared old errors and asked for the file), and a failed
+	// try isn't repeated: Modal costs money.
+	if (video && audio) {
+		if (failed && started?.withClean) return "failed";
+		return running ? "processing" : "none";
+	}
+	if (failed) return "failed";
+	return running ? "processing" : "none";
 }
 
 export const proxyUrl = (key: string, seconds = LINK_SECONDS) => signedUrl(siblingKey(key, "proxy.mp4"), "GET", seconds);
 
 // Links for the editor's own player, read through /api/media on our site (see there why).
-export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm", "proxy-cutout.mp4"]; // proxy-cutout.mp4: lib/cutout.ts
+export const CLEAN_SOUND = "proxy-audio-clean2.pcm"; // 2: previews made before the sound was put on the picture's clock lack it, so they are made again
+export const MEDIA_FILES = ["proxy.mp4", "proxy-audio.pcm", CLEAN_SOUND, "proxy-cutout.mp4"]; // proxy-cutout.mp4: lib/cutout.ts
 export const mediaMessage = (key: string, file: string, exp: number) => `media:${key}:${file}:${exp}`;
 export async function mediaUrl(key: string, file: string, secret: string, seconds = LINK_SECONDS) {
 	const exp = Math.floor(Date.now() / 1000) + seconds;
@@ -69,7 +79,8 @@ export async function facesFor(key: string, env: ProxyEnv): Promise<{ faces: Fac
 // Ask Modal to make the preview copy. Never throws: without it the editor just plays the original.
 export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatus> {
 	try {
-		await putObject(siblingKey(key, "proxy.json"), JSON.stringify({ startedAt: new Date().toISOString() }), "application/json");
+		await deleteObject(siblingKey(key, "proxy-error.json")).catch(() => {}); // from now on an error means this attempt failed
+		await putObject(siblingKey(key, "proxy.json"), JSON.stringify({ startedAt: new Date().toISOString(), withClean: true }), "application/json");
 		const res = await fetch(env.RENDER_URL, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
@@ -80,6 +91,7 @@ export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatu
 				videoUrl: await signedUrl(key, "GET", LINK_SECONDS),
 				outputUrl: await signedUrl(siblingKey(key, "proxy.mp4"), "PUT", LINK_SECONDS, "video/mp4"),
 				audioUrl: await signedUrl(siblingKey(key, "proxy-audio.pcm"), "PUT", LINK_SECONDS, "application/octet-stream"),
+				cleanAudioUrl: await signedUrl(siblingKey(key, CLEAN_SOUND), "PUT", LINK_SECONDS, "application/octet-stream"),
 				facesUrl: await signedUrl(siblingKey(key, "faces.json"), "PUT", LINK_SECONDS, "application/json"),
 				thumbUrl: await signedUrl(siblingKey(key, "thumb.jpg"), "PUT", LINK_SECONDS, "image/jpeg"),
 				errorUrl: await signedUrl(siblingKey(key, "proxy-error.json"), "PUT", LINK_SECONDS, "application/json"),

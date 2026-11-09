@@ -47,6 +47,8 @@ export type SubtitleStyle = {
 	format: Format;
 	motion: Motion; // lines pop in, words bounce (lib/motion.ts)
 	subtitles: boolean; // false: no subtitles on the video (banners and the logo stay)
+	audio: boolean; // Audio optimization on or off (false: the sound stays as recorded)
+	audioAmount: number; // 0 = as recorded .. 1 = fully optimized
 };
 
 export const DEFAULT_STYLE: SubtitleStyle = {
@@ -73,6 +75,8 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	format: "9:16",
 	motion: "none",
 	subtitles: true,
+	audio: true,
+	audioAmount: 1,
 };
 
 export const MAX_LOGO_LENGTH = 30;
@@ -93,6 +97,7 @@ export const LIMITS = {
 	lineSpacing: { min: 0, max: 80, step: 2 },
 	boxRadius: { min: 0, max: 60, step: 2 },
 	boxOpacity: { min: 0.05, max: 1, step: 0.05 },
+	audioAmount: { min: 0, max: 1, step: 0.05 },
 } as const;
 
 // The Smooth zoom speeds to pick from: seconds to glide in and back out.
@@ -181,5 +186,7 @@ export function readStyle(value: unknown): SubtitleStyle {
 		format: typeof v.format === "string" && v.format in FORMATS ? (v.format as Format) : DEFAULT_STYLE.format,
 		motion: typeof v.motion === "string" && v.motion in MOTIONS ? (v.motion as Motion) : DEFAULT_STYLE.motion,
 		subtitles: v.subtitles !== false,
+		audio: v.audio !== false,
+		audioAmount: Math.round(pick("audioAmount") * 100) / 100,
 	};
 }

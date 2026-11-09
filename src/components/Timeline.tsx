@@ -158,6 +158,9 @@ export function Timeline({
 	const [viewWidth, setViewWidth] = useState(800);
 	const [pps, setPps] = useState(START_PPS);
 	const [showCuts, setShowCuts] = useState(true);
+	const [smallWave, setSmallWave] = useState(false);
+	const wave = smallWave ? WAVE_SMALL : WAVE;
+	const height = WAVE_TOP + wave + 4;
 	const [peaks, setPeaks] = useState<{ data: Float32Array; version: number } | null>(null);
 	const [openGroup, setOpenGroup] = useState<number | null>(null);
 	// The stretch picked by dragging, in source seconds: cut it or keep it.
@@ -168,9 +171,6 @@ export function Timeline({
 	// Split: the first press marks this spot, the second picks from here to where the video is then.
 	const [mark, setMark] = useState<number | null>(null);
 	const [overWave, setOverWave] = useState(false);
-	const [smallWave, setSmallWave] = useState(false);
-	const wave = smallWave ? WAVE_SMALL : WAVE;
-	const height = WAVE_TOP + wave + 4;
 
 	useEffect(() => {
 		try {

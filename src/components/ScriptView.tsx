@@ -17,6 +17,7 @@ import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { type ControlSection, SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
 import { CutoutControls } from "./CutoutControls";
+import { AudioControls } from "./AudioControls";
 import { Timeline } from "./Timeline";
 import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
 
@@ -824,6 +825,7 @@ export function ScriptView({
 						</button>
 					</div>
 					</div>
+					{mode === "preview" && <AudioControls style={subtitle} onChange={onSubtitleChange} />}
 					{/* Floats over the script on big screens: the video keeps its size while you watch the change. */}
 					{mode === "preview" && panel && (
 						<div

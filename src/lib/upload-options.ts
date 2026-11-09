@@ -5,14 +5,15 @@
 //   badTakes   Claude reads the script and cuts what it thinks were bad takes (lib/bad-takes.ts)
 //   zoom       Auto zoom on (the Brand Kit's kind, else "in") or off
 //   subtitles  subtitles drawn on the video, or none
-export type UploadOptions = { silences: boolean; badTakes: boolean; zoom: boolean; subtitles: boolean };
+//   audio      Audio optimization on (polish_sound in render.py) or off
+export type UploadOptions = { silences: boolean; badTakes: boolean; zoom: boolean; subtitles: boolean; audio: boolean };
 
-export const DEFAULT_OPTIONS: UploadOptions = { silences: true, badTakes: true, zoom: true, subtitles: true };
+export const DEFAULT_OPTIONS: UploadOptions = { silences: true, badTakes: true, zoom: true, subtitles: true, audio: true };
 
 // Anything that isn't a yes or no takes the default, field by field.
 export function readOptions(value: unknown): UploadOptions | null {
 	if (!value || typeof value !== "object") return null;
 	const v = value as Partial<Record<keyof UploadOptions, unknown>>;
 	const pick = (k: keyof UploadOptions) => (typeof v[k] === "boolean" ? (v[k] as boolean) : DEFAULT_OPTIONS[k]);
-	return { silences: pick("silences"), badTakes: pick("badTakes"), zoom: pick("zoom"), subtitles: pick("subtitles") };
+	return { silences: pick("silences"), badTakes: pick("badTakes"), zoom: pick("zoom"), subtitles: pick("subtitles"), audio: pick("audio") };
 }
