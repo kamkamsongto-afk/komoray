@@ -131,6 +131,8 @@ export default function EditPage() {
 	const [translating, setTranslating] = useState<string | null>(null); // what the Translate menu shows while it works
 	const [render, setRender] = useState<RenderState>({ status: "none" });
 	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
+	// False from the press until the server has taken the job. Until then it still answers about the last video.
+	const renderAccepted = useRef(true);
 	const [showReady, setShowReady] = useState(false); // the finished-video window: opens by itself when a render finishes
 	const closeReady = useCallback(() => setShowReady(false), []);
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
@@ -223,6 +225,7 @@ export default function EditPage() {
 	useEffect(() => {
 		if (!key || render.status !== "processing") return;
 		const timer = setInterval(async () => {
+			if (!renderAccepted.current) return;
 			const run = renderRun.current;
 			const res = await fetch(`/api/render?key=${encodeURIComponent(key)}`);
 			const data = (await res.json()) as RenderState;
@@ -602,6 +605,7 @@ export default function EditPage() {
 			...(analysis?.cutout && { cutout: analysis.cutout }),
 		});
 		renderRun.current += 1;
+		renderAccepted.current = false;
 		setRender({ status: "processing" });
 		try {
 			if (!(await savingRef.current)) throw new Error("Your edits could not be saved. Please try again.");
@@ -612,6 +616,7 @@ export default function EditPage() {
 			});
 			const data = (await res.json()) as { error?: string };
 			if (!res.ok) throw new Error(data.error ?? "Could not start the render");
+			renderAccepted.current = true;
 		} catch (err) {
 			const error = err instanceof Error ? err.message : "Could not start the render";
 			setRender({ status: "failed", error });
