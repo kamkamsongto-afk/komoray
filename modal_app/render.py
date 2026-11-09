@@ -987,7 +987,9 @@ VOICE_CHAIN = (
     "highpass=f=80,equalizer=f=250:t=q:w=1.2:g=-2,equalizer=f=3500:t=q:w=1.0:g=2,"
     "deesser=i=0.3:m=0.5:f=0.5:s=o,acompressor=threshold=-22dB:ratio=2.5:attack=15:release=180:makeup=2"
 )
-LOUDNESS = "I=-14:TP=-1.5:LRA=11"  # what the big platforms play at, with room for their own encoding
+TARGET_LUFS, PEAK_LIMIT_DB = -14.0, -1.5  # what the big platforms play at, with room for their own encoding
+LOUDNESS = f"I={TARGET_LUFS}:TP={PEAK_LIMIT_DB}:LRA=11"  # for measuring
+MAX_GAIN_DB = 20  # a very quiet recording is brought up this much at most, or its noise comes up with it
 DEAD_SIDE_DB = 30  # one side this much quieter than the other: the mic only recorded on one side
 
 
@@ -1010,7 +1012,8 @@ def both_speakers(video: Path) -> str:
 
 def voice_filter(media: Path, before: str = "") -> str | None:
     """VOICE_CHAIN and the loudness of this file, as one ffmpeg filter. None when it is silent from start to end."""
-    # Loudness is measured first and then applied evenly: one pass alone makes the voice pump up and down.
+    # Measured once, then one fixed gain for the whole file. Not loudnorm itself: it changes its gain as the
+    # sound changes when loud and quiet parts differ a lot, so the cut video came out 4 dB off the preview.
     probe = subprocess.run(
         ["ffmpeg", "-hide_banner", "-i", str(media), "-vn", "-af", f"{before}{VOICE_CHAIN},loudnorm={LOUDNESS}:print_format=json", "-f", "null", "-"],
         capture_output=True,
@@ -1019,22 +1022,24 @@ def voice_filter(media: Path, before: str = "") -> str | None:
     m = json.loads(probe[probe.rindex("{") : probe.rindex("}") + 1])
     if not math.isfinite(float(m["input_i"])):
         return None
-    return (
-        f"{VOICE_CHAIN},loudnorm={LOUDNESS}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
-        f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true,aresample=48000"
-    )
+    # The limiter only touches the highest peaks. latency=1: without it the sound comes out late, and the slider mixes badly.
+    gain = min(MAX_GAIN_DB, TARGET_LUFS - float(m["input_i"]))
+    limit = 10 ** (PEAK_LIMIT_DB / 20)
+    return f"{VOICE_CHAIN},volume={gain:.2f}dB,alimiter=limit={limit:.4f}:attack=5:release=50:level=false:latency=1,aresample=48000"
 
 
-def polish_sound(video: Path, amount: float = 1) -> bool:
+def polish_sound(video: Path, amount: float = 1, source: Path | None = None) -> bool:
     """Audio optimization, in place. amount: 0 = as recorded (on both speakers) .. 1 = fully optimized, in
     between the two are mixed, the same way the editor's preview mixes them (setSound in lib/player/engine.ts).
+    source: the uncut video. Its loudness is the one used, like the preview (clean_preview), which can't know
+    the cuts: measured after cutting, the video came out at another level than the slider had let them hear.
     A video with its plain sound beats no video, so a failure here only logs."""
     try:
         if not has_audio(video):
             return False
         amount = min(1.0, max(0.0, amount))
         stereo = both_speakers(video)
-        voice = voice_filter(video, stereo) if amount > 0 else None
+        voice = voice_filter(source or video, stereo) if amount > 0 else None
         if amount > 0 and voice is None:  # silent from start to end: nothing to bring up
             return False
         recorded = f"{stereo}aresample=48000,asetpts=PTS-STARTPTS"  # starts at 0, like the optimized sound does
@@ -1119,7 +1124,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
 
-            sound = polish_sound(out, float(style.get("audioAmount", 1))) if style.get("audio", True) else False
+            sound = polish_sound(out, float(style.get("audioAmount", 1)), src) if style.get("audio", True) else False
             put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size, "sound": sound}
     except Exception as err:
@@ -1229,11 +1234,12 @@ def clean_preview(src: Path, pcm: Path, clean: Path) -> bytes:
     (pcm), so the player can mix the two. If it can't be made, the sound as recorded: never lose the preview."""
     plain = pcm.read_bytes()
     try:
-        voice = voice_filter(src) if has_audio(src) else None
+        stereo = both_speakers(src) if has_audio(src) else ""  # as in polish_sound: same loudness from a one-sided mic
+        voice = voice_filter(src, stereo) if has_audio(src) else None
         if voice is None:
             return plain
         result = subprocess.run(
-            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-vn", "-af", f"{voice},aresample={PROXY_AUDIO_RATE}", "-ac", "1", "-f", "s16le", str(clean)],
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-vn", "-af", f"{stereo}{voice},aresample={PROXY_AUDIO_RATE}", "-ac", "1", "-f", "s16le", str(clean)],
             capture_output=True,
             text=True,
         )

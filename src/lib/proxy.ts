@@ -23,7 +23,8 @@ type ProxyEnv = { RENDER_URL: string; RENDER_TOKEN: string };
 export async function proxyStatus(key: string): Promise<ProxyStatus> {
 	const [video, audio, clean] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm")), exists(siblingKey(key, "proxy-audio-clean.pcm"))]);
 	if (video && audio && clean) return "done";
-	if (await exists(siblingKey(key, "proxy-error.json"))) return "failed";
+	// A usable preview that only lacks the newer sound file is made again, even if an old attempt left an error behind.
+	if (!(video && audio) && (await exists(siblingKey(key, "proxy-error.json")))) return "failed";
 	const started = await getJson<{ startedAt?: string }>(siblingKey(key, "proxy.json"));
 	if (started?.startedAt && Date.now() - Date.parse(started.startedAt) < GIVE_UP_MS) return "processing";
 	return "none";
