@@ -3,7 +3,7 @@
 import { ChevronDown, ChevronRight, ImagePlus, Plus, Type, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, covered, type CutoutLayers, INSERT, type Insert, keptWindows } from "@/lib/behind";
-import { clock, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
+import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
@@ -25,7 +25,7 @@ const round = (n: number) => Math.round(n * 10) / 10;
 
 // Chosen before cutting out (coach, 9 Nov): Fast and Normal run on the customer's device and cost no GPU, Slow on ours.
 // In the code they stay fast, balanced and best; people see these names.
-const TIER_ORDER: CutoutTier[] = ["fast", "balanced", "best"];
+const oneQuality = CUTOUT_ON.length === 1; // nothing to choose: no cards, no Change quality
 const TIERS: Record<CutoutTier, { name: string; card: string; note: string }> = {
 	fast: { name: "Fast", card: "Fast", note: "Ready in about the length of the video" },
 	balanced: { name: "Normal", card: "Normal", note: "Cleaner edges. A few minutes for each minute" },
@@ -61,10 +61,10 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [notice, setNotice] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
 
-	const [choice, setPicked] = useState<CutoutTier>("balanced");
+	const [choice, setPicked] = useState<CutoutTier>(CUTOUT_ON[0]);
 	// A quality this device can't run is never the one picked.
-	const canRun = (id: CutoutTier) => id === "best" || cutout.support[id];
-	const picked: CutoutTier = canRun(choice) ? choice : canRun("balanced") ? "balanced" : canRun("fast") ? "fast" : "best";
+	const canRun = (id: CutoutTier) => CUTOUT_ON.includes(id) && (id === "best" || cutout.support[id]);
+	const picked: CutoutTier = canRun(choice) ? choice : (CUTOUT_ON.find(canRun) ?? CUTOUT_ON[0]);
 	const whole: Window[] = keptWindows(segments);
 	const cutOut = cutout.status === "done";
 	const ready = cutOut && covered(whole, cutout.windows);
@@ -200,10 +200,12 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					)
 				) : cutOut && ready && !changing ? (
 					<span className="flex items-center justify-between gap-2">
-						<span>You&apos;re cut out with {TIERS[cutout.tier ?? "best"].name}. Your text and pictures go behind you.</span>
-						<button onClick={() => setChanging(true)} className="shrink-0 rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
-							Change quality
-						</button>
+						<span>{oneQuality ? "You're cut out." : `You're cut out with ${TIERS[cutout.tier ?? "best"].name}.`} Your text and pictures go behind you.</span>
+						{!oneQuality && (
+							<button onClick={() => setChanging(true)} className="shrink-0 rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
+								Change quality
+							</button>
+						)}
 					</span>
 				) : (
 					<>
@@ -214,10 +216,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									? "Part of your video has changed since you were cut out. Cut me out again to cover it."
 									: cutout.status === "failed"
 										? (cutout.error ?? "The cutout failed. Please try again.")
-										: "Choose a quality, then press Cut me out. Your text stays in front of you until it finishes."}
+										: `${oneQuality ? "Press" : "Choose a quality, then press"} Cut me out. Your text stays in front of you until it finishes.`}
 						</span>
-						<div className="grid gap-1 sm:grid-cols-3" role="radiogroup" aria-label="Cutout quality">
-							{TIER_ORDER.map((id) => {
+						{!canRun(picked) && <span className="text-red-500">This device can&apos;t cut you out. Please use Chrome or Edge on a computer.</span>}
+						{!oneQuality && <div className="grid gap-1 sm:grid-cols-3" role="radiogroup" aria-label="Cutout quality">
+							{CUTOUT_ON.map((id) => {
 								const off = !canRun(id);
 								return (
 									<button
@@ -233,8 +236,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									</button>
 								);
 							})}
-						</div>
-						{pickedSaved && <span className="text-foreground/70">Your {TIERS[picked].name} cutout is saved. It comes back right away{picked === "best" ? " and uses none of your minutes" : ""}.</span>}
+						</div>}
+						{pickedSaved &&<span className="text-foreground/70">Your {TIERS[picked].name} cutout is saved. It comes back right away{picked === "best" ? " and uses none of your minutes" : ""}.</span>}
 						{picked === "best" && !pickedSaved && !same && !cutout.best.unlimited && (
 							<span className="text-foreground/70">
 								{tooMuch ? `Slow needs ${clock(bestCost)}, and you have ${clock(bestLeft)} left this month. Try Fast or Normal.` : `This will use ${clock(bestCost)} of your ${clock(bestLeft)} Slow left this month.`}
@@ -252,7 +255,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							<button
 								// A second Slow on this video that has to make something new costs minutes again: ask first.
 								onClick={() => (picked === "best" && (cutout.runs ?? 0) > 0 && bestCost > 0 ? setAskSlow(true) : go())}
-								disabled={same || tooMuch || !whole.length || (picked !== "best" && !videoUrl)}
+								disabled={same || tooMuch || !canRun(picked) || !whole.length || (picked !== "best" && !videoUrl)}
 								className="rounded-md bg-blue-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 							>
 								{pickedSaved ? `Switch to ${TIERS[picked].name}` : cutOut && ready ? "Cut me out again" : "Cut me out"}

@@ -1,7 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, bestSecondsUsed, chargeBest, lockBest, refundBest } from "@/lib/access";
 import { covered, type CutoutLayers } from "@/lib/behind";
-import { cleanWindows, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TIERS, CUTOUT_TOO_OLD_MS, type CutoutTier, LOCAL_MATTE, LOCAL_TOO_OLD_MS, LOCAL_RUNS_PER_VIDEO, newSeconds, savedFiles, type Window } from "@/lib/cutout";
+import { cleanWindows, CUTOUT_ON, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TIERS, CUTOUT_TOO_OLD_MS, type CutoutTier, LOCAL_MATTE, LOCAL_TOO_OLD_MS, LOCAL_RUNS_PER_VIDEO, newSeconds, savedFiles, type Window } from "@/lib/cutout";
 import { mediaUrl } from "@/lib/proxy";
 import { copyObject, deleteObject, exists, getJson, putIfAbsent, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
@@ -73,6 +73,8 @@ export async function POST(request: Request) {
 	const { user } = await currentUser();
 	const access = await accessFor(user?.email);
 	if (!access.allowed || !access.features.cutout.on) return Response.json({ error: "Cutout isn't turned on for your account yet." }, { status: 403 });
+	// Here too, not just hidden on the page: a forged request must not start a GPU.
+	if (!CUTOUT_ON.includes(tier)) return Response.json({ error: "That quality isn't available." }, { status: 403 });
 
 	const edit = await getJson<{ duration: number }>(siblingKey(key, "edit.json"));
 	if (!edit?.duration) return Response.json({ error: "Please wait until the script is ready." }, { status: 400 });

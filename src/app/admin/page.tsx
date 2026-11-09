@@ -5,6 +5,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ActivityTable } from "@/components/ActivityTable";
 import type { Activity } from "@/lib/admin-activity";
+import { CUTOUT_ON } from "@/lib/cutout";
 import { CUTOUT_SECONDS, type Features } from "@/lib/features";
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
@@ -229,7 +230,7 @@ export default function AdminPage() {
 											/>
 											Cutout
 										</label>
-										{p.features.cutout.on && (
+										{p.features.cutout.on && CUTOUT_ON.includes("best") && (
 											<select
 												aria-label={`Cutout Best minutes per month for ${p.email}`}
 												value={p.features.cutout.seconds}

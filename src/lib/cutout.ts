@@ -12,6 +12,9 @@
 
 export type Window = [number, number];
 export type CutoutTier = "fast" | "balanced" | "best";
+// Which qualities people can use. Coach compared them on 10 Nov and could hardly tell them apart, so only Fast
+// is on: fastest, runs on the most computers, no GPU to pay for. The others stay in the code; list them here to bring them back.
+export const CUTOUT_ON: CutoutTier[] = ["fast"];
 
 export const CUTOUT_RUNS_PER_VIDEO = 5; // each Best run is paid GPU time; the admin has no limit
 export const LOCAL_RUNS_PER_VIDEO = 30; // Fast and Balanced cost a moment of server time each to finish
