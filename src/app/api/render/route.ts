@@ -15,6 +15,7 @@ import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_
 //   render.json        written when the job starts (so we know it is in progress)
 //   final.mp4          written by Modal when the video is ready
 //   render-error.json  written by Modal if it failed
+//   render-progress.json  { percent }, written by Modal while it works
 const LINK_SECONDS = 3600;
 
 type RenderEnv = { RENDER_URL: string; RENDER_TOKEN: string };
@@ -61,7 +62,8 @@ export async function POST(request: Request) {
 	const finalKey = siblingKey(key, "final.mp4");
 	const errorKey = siblingKey(key, "render-error.json");
 	// Clear the previous attempt so the status check can't pick up an old result.
-	await Promise.all([deleteObject(finalKey), deleteObject(errorKey)]);
+	const progressKey = siblingKey(key, "render-progress.json");
+	await Promise.all([deleteObject(finalKey), deleteObject(errorKey), deleteObject(progressKey)]);
 	await putObject(siblingKey(key, "render.json"), JSON.stringify({ startedAt: new Date().toISOString() }), "application/json");
 
 	// The user's own font: Modal gets a short-lived link to the file and the name to ask for.
@@ -105,6 +107,7 @@ export async function POST(request: Request) {
 			videoUrl: await signedUrl(key, "GET", LINK_SECONDS),
 			outputUrl: await signedUrl(finalKey, "PUT", LINK_SECONDS, "video/mp4"),
 			errorUrl: await signedUrl(errorKey, "PUT", LINK_SECONDS, "application/json"),
+			progressUrl: await signedUrl(progressKey, "PUT", LINK_SECONDS, "application/json"),
 		}),
 	});
 	const data = (await res.json().catch(() => ({}))) as { callId?: string; error?: string };
@@ -134,5 +137,8 @@ export async function GET(request: Request) {
 	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Render failed" });
 
 	const started = await exists(siblingKey(key, "render.json"));
-	return Response.json({ status: started ? "processing" : "none" });
+	if (!started) return Response.json({ status: "none" });
+	// Only a number shown on the page: a problem reading it must never look like a failed video.
+	const progress = await getJson<{ percent?: number }>(siblingKey(key, "render-progress.json")).catch(() => null);
+	return Response.json({ status: "processing", percent: progress?.percent });
 }

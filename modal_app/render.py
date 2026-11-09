@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -1193,6 +1194,46 @@ def put(url: str, data: bytes, content_type: str) -> None:
             raise RuntimeError(f"upload failed ({res.status})")
 
 
+PROGRESS_EVERY = 3  # seconds between reports: the page looks about this often
+# Share of the whole job (percent) each step ends at. The picture is by far the longest part.
+PROGRESS_READY, PROGRESS_PICTURE, PROGRESS_SOUND = 10, 88, 96
+
+
+def progress_reporter(url: str | None):
+    """A function that tells the page how far the job is (0-99). It only ever goes up, and a report that
+    can't be sent is skipped: showing a number must never be what makes a video fail."""
+    last = {"at": 0.0, "percent": -1}
+
+    def report(percent: float, force: bool = False) -> None:
+        value = min(99, int(percent))
+        now = time.monotonic()
+        if not url or value <= last["percent"] or (not force and now - last["at"] < PROGRESS_EVERY):
+            return
+        last.update(at=now, percent=value)
+        try:
+            request = urllib.request.Request(url, data=json.dumps({"percent": value}).encode(), method="PUT", headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(request, timeout=5).close()
+        except Exception as err:
+            print("progress report skipped:", err)
+
+    return report
+
+
+def run_counting_frames(cmd: list[str], cwd: Path, frames: int, on_part) -> tuple[int, str]:
+    """Runs ffmpeg and calls on_part(0-1) as it makes the picture. Returns its exit code and error text.
+    The errors go to a file: nothing reads them while it runs, and a full pipe would stop ffmpeg."""
+    with tempfile.TemporaryFile("w+") as errors:
+        job = subprocess.Popen([cmd[0], "-progress", "pipe:1", "-nostats", *cmd[1:]], cwd=cwd, stdout=subprocess.PIPE, stderr=errors, text=True)
+        for line in job.stdout:
+            if line.startswith("frame="):
+                done = line[6:].strip()
+                if done.isdigit():
+                    on_part(int(done) / max(1, frames))
+        job.wait()
+        errors.seek(0)
+        return job.returncode, errors.read()
+
+
 # Studio sound on the final video, in this order: noise reduction (85%, all of it can sound hollow), cut the
 # low rumble and the muddy 250 Hz, lift the clarity at 3.5 kHz, soften the s sounds, even out quiet and loud
 # moments. Picked by ear on 9 Nov from five versions of a real clip.
@@ -1288,12 +1329,14 @@ def polish_sound(video: Path, amount: float = 1, source: Path | None = None) -> 
 
 
 @app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
-def render(video_url: str, edit: dict, output_url: str, error_url: str | None = None, style: dict | None = None) -> dict:
+def render(video_url: str, edit: dict, output_url: str, error_url: str | None = None, style: dict | None = None, progress_url: str | None = None) -> dict:
     style = {**DEFAULT_STYLE, **(style or {})}
     try:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
             src, subs, out = workdir / "source", workdir / "subs.ass", workdir / "final.mp4"
+            report = progress_reporter(progress_url)
+            report(1, force=True)
 
             urllib.request.urlretrieve(video_url, src)
 
@@ -1336,7 +1379,9 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 urllib.request.urlretrieve(style["logoUrl"], logo_path)
                 logo = {"path": logo_path, "size": style.get("logoSize", 180), "opacity": style.get("logoOpacity", 1), "at": style.get("logoAt", "top-left")}
 
-            result = subprocess.run(
+            report(PROGRESS_READY, force=True)
+            frames = sum(count for _, _, count in frame_segments(keeps))
+            code, errors = run_counting_frames(
                 ffmpeg_command(
                     src,
                     subs,
@@ -1354,14 +1399,16 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     edit.get("zoomParts"),
                     cutout,
                 ),
-                cwd=workdir,
-                capture_output=True,
-                text=True,
+                workdir,
+                frames,
+                lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY)),
             )
-            if result.returncode != 0:
-                raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
+            if code != 0:
+                raise RuntimeError(f"ffmpeg failed: {errors[-1500:]}")
 
+            report(PROGRESS_PICTURE, force=True)
             sound = polish_sound(out, float(style.get("audioAmount", 1)), src) if style.get("audio", True) else False
+            report(PROGRESS_SOUND, force=True)
             put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size, "sound": sound}
     except Exception as err:
@@ -1548,7 +1595,7 @@ def start(body: dict) -> dict:
     elif body.get("kind") == "faces":
         call = faces.spawn(body["videoUrl"], body["facesUrl"], body.get("thumbUrl"))
     else:
-        call = render.spawn(body["videoUrl"], body["edit"], body["outputUrl"], body.get("errorUrl"), body.get("style"))
+        call = render.spawn(body["videoUrl"], body["edit"], body["outputUrl"], body.get("errorUrl"), body.get("style"), body.get("progressUrl"))
     return {"callId": call.object_id}
 
 

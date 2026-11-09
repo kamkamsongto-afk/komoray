@@ -49,6 +49,7 @@ type Analysis = {
 	proxy?: "done" | "processing" | "failed" | "none";
 };
 type RenderState = {
+	percent?: number; // how far Modal is, while status is processing (not there until the machine has started)
 	status: "none" | "processing" | "done" | "failed";
 	videoUrl?: string;
 	downloadUrl?: string;
@@ -129,6 +130,9 @@ export default function EditPage() {
 	const [saveError, setSaveError] = useState("");
 	const [translating, setTranslating] = useState<string | null>(null); // what the Translate menu shows while it works
 	const [render, setRender] = useState<RenderState>({ status: "none" });
+	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
+	// False from the press until the server has taken the job. Until then it still answers about the last video.
+	const renderAccepted = useRef(true);
 	const [showReady, setShowReady] = useState(false); // the finished-video window: opens by itself when a render finishes
 	const closeReady = useCallback(() => setShowReady(false), []);
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
@@ -221,8 +225,12 @@ export default function EditPage() {
 	useEffect(() => {
 		if (!key || render.status !== "processing") return;
 		const timer = setInterval(async () => {
+			if (!renderAccepted.current) return;
+			const run = renderRun.current;
 			const res = await fetch(`/api/render?key=${encodeURIComponent(key)}`);
 			const data = (await res.json()) as RenderState;
+			if (run !== renderRun.current) return;
+			if (data.status === "processing" && data.percent !== undefined) setRender((s) => (s.status === "processing" ? { ...s, percent: Math.max(s.percent ?? 0, data.percent ?? 0) } : s));
 			if (data.status === "done" || data.status === "failed") {
 				setRender(data);
 				if (data.status === "done") setShowReady(true);
@@ -596,6 +604,8 @@ export default function EditPage() {
 			zoomParts: analysis?.zoomParts ?? [],
 			...(analysis?.cutout && { cutout: analysis.cutout }),
 		});
+		renderRun.current += 1;
+		renderAccepted.current = false;
 		setRender({ status: "processing" });
 		try {
 			if (!(await savingRef.current)) throw new Error("Your edits could not be saved. Please try again.");
@@ -606,6 +616,7 @@ export default function EditPage() {
 			});
 			const data = (await res.json()) as { error?: string };
 			if (!res.ok) throw new Error(data.error ?? "Could not start the render");
+			renderAccepted.current = true;
 		} catch (err) {
 			const error = err instanceof Error ? err.message : "Could not start the render";
 			setRender({ status: "failed", error });
@@ -805,7 +816,7 @@ export default function EditPage() {
 						disabled={render.status === "processing"}
 						className="rounded-lg bg-blue-600 px-5 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 					>
-						{render.status === "processing" ? "Making your video…" : render.status === "done" ? "Make video again" : "Make video"}
+						{render.status === "processing" ? `Making your video…${render.percent === undefined ? "" : ` ${render.percent}%`}` : render.status === "done" ? "Make video again" : "Make video"}
 					</button>
 				</div>
 			</header>
@@ -858,9 +869,11 @@ export default function EditPage() {
 			)}
 			{render.status === "processing" && (
 				<div className="flex flex-col gap-2">
-					<div className="h-2 w-full animate-pulse rounded-full bg-blue-600/60" />
+					<div className="h-2 w-full overflow-hidden rounded-full bg-foreground/10">
+						<div className="h-full rounded-full bg-blue-600 transition-[width] duration-500" style={{ width: `${render.percent ?? 0}%` }} />
+					</div>
 					<p className="text-sm text-foreground/70">
-						Making your video… usually 1–3 minutes. Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
+						{render.percent === undefined ? "Getting started…" : `Making your video… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
 					</p>
 				</div>
 			)}
