@@ -23,11 +23,17 @@ type ProxyEnv = { RENDER_URL: string; RENDER_TOKEN: string };
 export async function proxyStatus(key: string): Promise<ProxyStatus> {
 	const [video, audio, clean] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm")), exists(siblingKey(key, "proxy-audio-clean.pcm"))]);
 	if (video && audio && clean) return "done";
-	// A usable preview that only lacks the newer sound file is made again, even if an old attempt left an error behind.
-	if (!(video && audio) && (await exists(siblingKey(key, "proxy-error.json")))) return "failed";
-	const started = await getJson<{ startedAt?: string }>(siblingKey(key, "proxy.json"));
-	if (started?.startedAt && Date.now() - Date.parse(started.startedAt) < GIVE_UP_MS) return "processing";
-	return "none";
+	const started = await getJson<{ startedAt?: string; withClean?: boolean }>(siblingKey(key, "proxy.json"));
+	const running = Boolean(started?.startedAt && Date.now() - Date.parse(started.startedAt) < GIVE_UP_MS);
+	const failed = await exists(siblingKey(key, "proxy-error.json"));
+	// A preview from before the newer sound file gets one try at being made again. An error from an attempt
+	// before that doesn't count (withClean: this attempt asked for the file), and a failed try isn't repeated: Modal costs money.
+	if (video && audio) {
+		if (running) return "processing";
+		return failed && started?.withClean ? "failed" : "none";
+	}
+	if (failed) return "failed";
+	return running ? "processing" : "none";
 }
 
 export const proxyUrl = (key: string, seconds = LINK_SECONDS) => signedUrl(siblingKey(key, "proxy.mp4"), "GET", seconds);
@@ -71,7 +77,7 @@ export async function facesFor(key: string, env: ProxyEnv): Promise<{ faces: Fac
 // Ask Modal to make the preview copy. Never throws: without it the editor just plays the original.
 export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatus> {
 	try {
-		await putObject(siblingKey(key, "proxy.json"), JSON.stringify({ startedAt: new Date().toISOString() }), "application/json");
+		await putObject(siblingKey(key, "proxy.json"), JSON.stringify({ startedAt: new Date().toISOString(), withClean: true }), "application/json");
 		const res = await fetch(env.RENDER_URL, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
