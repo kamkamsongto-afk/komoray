@@ -12,7 +12,7 @@ import { framePiece, type Rect } from "../framing";
 import { WIDTH } from "../timeline";
 
 export type Piece = { start: number; end: number; out: number }; // play source [start, end) at final-video time `out`
-export type StudioMedia = { videoUrl: string; audioUrl: string };
+export type StudioMedia = { videoUrl: string; audioUrl: string; cleanAudioUrl?: string };
 
 export type EngineEvents = {
 	onTime: (out: number) => void; // every frame while playing, and after jumps
@@ -56,6 +56,12 @@ export class StudioEngine {
 	private pumping = false;
 
 	private ctx: AudioContext | null = null;
+	// Audio optimization: the sound as recorded and the optimized one play together, each through its own
+	// volume, so the slider is heard right away instead of after the sound already queued.
+	private clean: RangeSource | null = null;
+	private recorded: GainNode | null = null;
+	private optimized: GainNode | null = null;
+	private blend = 0; // 0 = as recorded .. 1 = fully optimized
 	private sources: AudioBufferSourceNode[] = [];
 	private queuedUntil = 0; // final-video time the sound is queued up to
 	private queueing = false;
@@ -77,6 +83,20 @@ export class StudioEngine {
 		const onFetch = (kind: string) => (info: { block: number; ms: number; bytes: number }) => events.log("fetch", { kind, ...info });
 		this.video = new RangeSource(media.videoUrl, onFetch("video"));
 		this.audio = new RangeSource(media.audioUrl, onFetch("audio"));
+		if (media.cleanAudioUrl) this.clean = new RangeSource(media.cleanAudioUrl, onFetch("clean"));
+	}
+
+	// Same mix as polish_sound in render.py.
+	setSound(blend: number) {
+		this.blend = blend;
+		this.applySound();
+	}
+
+	private applySound() {
+		if (!this.ctx || !this.recorded || !this.optimized) return;
+		const blend = this.clean ? this.blend : 0; // no optimized sound to play: the sound as recorded, at full volume
+		this.recorded.gain.setTargetAtTime(1 - blend, this.ctx.currentTime, 0.02);
+		this.optimized.gain.setTargetAtTime(blend, this.ctx.currentTime, 0.02);
 	}
 
 	async load(pieces: Piece[], at: number) {
@@ -124,6 +144,13 @@ export class StudioEngine {
 			const session = (navigator as { audioSession?: { type: string } }).audioSession;
 			if (session) session.type = "playback"; // play with the iPhone's silent switch on, like video does
 			this.ctx = new AudioContext({ latencyHint: "interactive" });
+			this.recorded = this.ctx.createGain();
+			this.optimized = this.ctx.createGain();
+			const blend = this.clean ? this.blend : 0;
+			this.recorded.gain.value = 1 - blend;
+			this.optimized.gain.value = blend;
+			this.recorded.connect(this.ctx.destination);
+			this.optimized.connect(this.ctx.destination);
 		}
 		void this.ctx.resume();
 		if (this.position >= this.total - 0.05) this.jump(0);
@@ -333,6 +360,33 @@ export class StudioEngine {
 			.catch((err: Error) => generation === this.generation && this.events.onError(err));
 	}
 
+	private playSlice(ctx: AudioContext, raw: Uint8Array, into: AudioNode, { out, sliceEnd, pieceStart, pieceEnd }: { out: number; sliceEnd: number; pieceStart: number; pieceEnd: number }) {
+		const samples = new Int16Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + (raw.byteLength & ~1)) as ArrayBuffer);
+		const sound = stretch(Float32Array.from(samples, (s) => s / 32768), this.rate);
+		const buffer = ctx.createBuffer(1, Math.max(1, sound.length), AUDIO_RATE);
+		const data = buffer.getChannelData(0);
+		data.set(sound);
+		// Fade in at the start of a piece and out at its end, so the cut doesn't click.
+		// (Also when starting in the middle of a piece, and at every slice when sped up: slices no longer meet exactly.)
+		const sped = this.rate !== 1;
+		if (sped || Math.abs(out - pieceStart) < EPS || Math.abs(out - this.startOut) < EPS) {
+			for (let i = 0; i < Math.min(FADE_SAMPLES, data.length); i++) data[i] *= i / FADE_SAMPLES;
+		}
+		if (sped || Math.abs(sliceEnd - pieceEnd) < EPS) {
+			for (let i = 0; i < Math.min(FADE_SAMPLES, data.length); i++) data[data.length - 1 - i] *= i / FADE_SAMPLES;
+		}
+		const source = ctx.createBufferSource();
+		source.buffer = buffer;
+		source.connect(into);
+		const when = this.startCtx + (out - this.startOut) / this.rate;
+		const late = ctx.currentTime - when;
+		if (late >= buffer.duration) return;
+		if (late > 0) this.events.log("audioLate", { at: round(out), ms: Math.round(late * 1000) });
+		source.start(Math.max(when, ctx.currentTime), Math.max(0, late));
+		this.sources.push(source);
+		source.onended = () => (this.sources = this.sources.filter((s) => s !== source));
+	}
+
 	private async queueAudio() {
 		if (this.queueing || !this.ctx || !this.running) return;
 		this.queueing = true;
@@ -350,32 +404,20 @@ export class StudioEngine {
 				const a1 = Math.round((p.start + sliceEnd - p.out) * AUDIO_RATE);
 				this.queuedUntil = sliceEnd;
 				if (a1 <= a0) continue;
-				const raw = await this.audio.read(a0 * 2, (a1 - a0) * 2);
+				const [raw, cleaned] = await Promise.all([
+					this.audio.read(a0 * 2, (a1 - a0) * 2),
+					// The optimized sound is an extra: if it can't be read, play on with the sound as recorded.
+					this.clean?.read(a0 * 2, (a1 - a0) * 2).catch((err: Error) => {
+						this.events.log("cleanFailed", { message: err.message });
+						this.clean = null;
+						this.applySound();
+						return null;
+					}),
+				]);
 				if (generation !== this.generation || !this.running) break;
-				const samples = new Int16Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + (raw.byteLength & ~1)));
-				const sound = stretch(Float32Array.from(samples, (s) => s / 32768), this.rate);
-				const buffer = ctx.createBuffer(1, Math.max(1, sound.length), AUDIO_RATE);
-				const data = buffer.getChannelData(0);
-				data.set(sound);
-				// Fade in at the start of a piece and out at its end, so the cut doesn't click.
-				// (Also when starting in the middle of a piece, and at every slice when sped up: slices no longer meet exactly.)
-				const sped = this.rate !== 1;
-				if (sped || Math.abs(out - p.out) < EPS || Math.abs(out - this.startOut) < EPS) {
-					for (let i = 0; i < Math.min(FADE_SAMPLES, data.length); i++) data[i] *= i / FADE_SAMPLES;
-				}
-				if (sped || Math.abs(sliceEnd - pieceEnd) < EPS) {
-					for (let i = 0; i < Math.min(FADE_SAMPLES, data.length); i++) data[data.length - 1 - i] *= i / FADE_SAMPLES;
-				}
-				const source = ctx.createBufferSource();
-				source.buffer = buffer;
-				source.connect(ctx.destination);
-				const when = this.startCtx + (out - this.startOut) / this.rate;
-				const late = ctx.currentTime - when;
-				if (late >= buffer.duration) continue;
-				if (late > 0) this.events.log("audioLate", { at: round(out), ms: Math.round(late * 1000) });
-				source.start(Math.max(when, ctx.currentTime), Math.max(0, late));
-				this.sources.push(source);
-				source.onended = () => (this.sources = this.sources.filter((s) => s !== source));
+				const place = { out, sliceEnd, pieceStart: p.out, pieceEnd };
+				this.playSlice(ctx, raw, this.recorded ?? ctx.destination, place);
+				if (cleaned && this.optimized) this.playSlice(ctx, cleaned, this.optimized, place);
 			}
 		} catch (err) {
 			if (generation === this.generation && !this.destroyed) this.events.onError(err instanceof Error ? err : new Error(String(err)));

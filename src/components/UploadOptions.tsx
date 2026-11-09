@@ -1,6 +1,6 @@
 "use client";
 
-import { Captions, Lock, Scissors, Sparkles, Sun, Users, Wand2, ZoomIn } from "lucide-react";
+import { AudioLines, Captions, Lock, Scissors, Sparkles, Sun, Users, Wand2, ZoomIn } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import type { UploadOptions as Options } from "@/lib/upload-options";
@@ -10,6 +10,7 @@ const READY: { id: keyof Options; name: string; hint: string; icon: typeof Sciss
 	{ id: "badTakes", name: "Bad takes", hint: "AI cuts the takes you said again. One click brings them all back", icon: Sparkles },
 	{ id: "zoom", name: "Auto zoom", hint: "Moves in slowly, so the video feels alive", icon: ZoomIn },
 	{ id: "subtitles", name: "Subtitles", hint: "Your words on the video as you speak", icon: Captions },
+	{ id: "audio", name: "Audio optimization", hint: "A clearer voice and less background noise, on both speakers", icon: AudioLines },
 ];
 // Shown so people know they are coming, but they can't be ticked: they don't exist yet.
 const SOON = [

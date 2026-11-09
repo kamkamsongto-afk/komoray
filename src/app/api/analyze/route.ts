@@ -89,6 +89,7 @@ export async function GET(request: Request) {
 				? {
 						videoUrl: await mediaUrl(key, "proxy.mp4", env.RENDER_TOKEN, LINK_SECONDS),
 						audioUrl: await mediaUrl(key, "proxy-audio.pcm", env.RENDER_TOKEN, LINK_SECONDS),
+						cleanAudioUrl: await mediaUrl(key, "proxy-audio-clean.pcm", env.RENDER_TOKEN, LINK_SECONDS),
 					}
 				: null;
 		// Where the speaker's face is, once the preview copy exists (found in it).
