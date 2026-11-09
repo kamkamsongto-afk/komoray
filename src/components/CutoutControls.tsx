@@ -7,7 +7,7 @@ import { clock, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
-import { ConfirmDelete } from "./ConfirmDelete";
+import { Confirm, ConfirmDelete } from "./ConfirmDelete";
 
 type Props = {
 	focus: string | null; // the layer just clicked on the timeline: open it here
@@ -54,6 +54,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	}
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
+	const [askSlow, setAskSlow] = useState(false);
+	const closeAskSlow = useCallback(() => setAskSlow(false), []);
 	const [changing, setChanging] = useState(false); // once cut out, the three qualities fold away until asked for
 	const [uploading, setUploading] = useState(false);
 	const [notice, setNotice] = useState("");
@@ -66,11 +68,17 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const whole: Window[] = keptWindows(segments);
 	const cutOut = cutout.status === "done";
 	const ready = cutOut && covered(whole, cutout.windows);
-	const bestCost = newSeconds(whole, cutOut && cutout.tier === "best" ? cutout.windows : []);
+	// covered, not newSeconds === 0: the kept video runs a tenth of a second past the end, the server's windows stop at it.
+	const bestCost = covered(whole, cutout.slowWindows) ? 0 : newSeconds(whole, cutout.slowWindows);
+	const slowIsSaved = cutout.tier !== "best" && cutout.slowWindows.length > 0 && bestCost === 0; // comes back at once, free
 	const bestLeft = Math.max(0, cutout.best.limit - cutout.best.used);
 	const tooMuch = picked === "best" && !cutout.best.unlimited && bestCost > bestLeft + 0.05;
 	const same = cutOut && ready && picked === cutout.tier; // the same quality over the same video gives the same result
 	const wait = waitLabel(cutout);
+	const go = () => {
+		setChanging(false);
+		cutout.start(whole, picked, videoUrl);
+	};
 	const slowPart = cutout.timeLeft !== null ? Math.min(0.95, Math.max(0, 1 - cutout.timeLeft / slowSeconds(cutout.windows))) : 0;
 
 	const setTexts = (texts: BehindText[]) => onChange({ ...layers, texts });
@@ -221,7 +229,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								);
 							})}
 						</div>
-						{picked === "best" && !cutout.best.unlimited && (
+						{picked === "best" && slowIsSaved && <span className="text-foreground/70">Your Slow cutout is saved. It comes back right away and uses none of your minutes.</span>}
+						{picked === "best" && !slowIsSaved && !cutout.best.unlimited && (
 							<span className="text-foreground/70">
 								{tooMuch ? `Slow needs ${clock(bestCost)}, and you have ${clock(bestLeft)} left this month. Try Fast or Normal.` : `This will use ${clock(bestCost)} of your ${clock(bestLeft)} Slow left this month.`}
 							</span>
@@ -231,15 +240,13 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						{cutOut && ready && !same && (
 							<span className="text-foreground/70">
 								This replaces your {TIERS[cutout.tier ?? "best"].name} cutout.
-								{cutout.tier === "best" ? " Going back to Slow means cutting again." : picked === "best" ? " Your text shows in front of you again until Slow finishes." : ""}
+								{cutout.tier === "best" ? " Your Slow cutout stays saved, so you can come back to it for free." : picked === "best" && !slowIsSaved ? " Your text shows in front of you again until Slow finishes." : ""}
 							</span>
 						)}
 						<span className="flex items-center gap-2">
 							<button
-								onClick={() => {
-									setChanging(false);
-									cutout.start(whole, picked, videoUrl);
-								}}
+								// A second Slow on this video that has to make something new costs minutes again: ask first.
+								onClick={() => (picked === "best" && (cutout.runs ?? 0) > 0 && bestCost > 0 ? setAskSlow(true) : go())}
 								disabled={same || tooMuch || !whole.length || (picked !== "best" && !videoUrl)}
 								className="rounded-md bg-blue-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 							>
@@ -401,6 +408,18 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						</div>
 					))}
 
+			{askSlow && (
+				<Confirm
+					title="Use Slow again?"
+					body={cutout.best.unlimited ? `Slow has to cut ${clock(bestCost)} of this video again.` : `Slow has to cut ${clock(bestCost)} of this video again. That uses ${clock(bestCost)} of your ${clock(bestLeft)} left this month.`}
+					action="Cut with Slow"
+					onCancel={closeAskSlow}
+					onConfirm={() => {
+						closeAskSlow();
+						go();
+					}}
+				/>
+			)}
 			{removing && (
 				<ConfirmDelete
 					name={removing.name}

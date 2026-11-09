@@ -19,6 +19,8 @@ export type CutoutState = {
 	support: Record<LocalTier, boolean>; // what this computer can run itself
 	local: { tier: LocalTier; phase: "cutting" | "sending"; part: number; left: number | null } | null; // being cut out on this computer now
 	startedAt?: string; // when the running job began
+	slowWindows: Window[]; // what Slow has already made for this video, kept even after Fast or Normal replaced it
+	runs?: number; // how many times Slow has run on this video
 };
 
 // The running number people watch, so "my text is still in front" reads as waiting and not as broken (coach, 9 Nov).
@@ -38,7 +40,7 @@ const SHOW_EVERY_MS = 250;
 const NO_BEST = { unlimited: false, limit: 0, used: 0 };
 
 export function useCutout(key: string | null) {
-	const [state, setState] = useState<CutoutState>({ on: false, status: "none", windows: [], files: {}, best: NO_BEST, support: { fast: false, balanced: false }, local: null });
+	const [state, setState] = useState<CutoutState>({ on: false, status: "none", windows: [], files: {}, best: NO_BEST, support: { fast: false, balanced: false }, local: null, slowWindows: [] });
 	const local = useRef<Record<string, string>>({}); // files just uploaded: shown from this computer at once
 	const stop = useRef<AbortController | null>(null);
 

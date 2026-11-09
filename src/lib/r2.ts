@@ -103,7 +103,15 @@ export async function deleteObject(key: string) {
 	if (!res.ok && res.status !== 404) throw new Error(`R2 delete failed (${res.status})`);
 }
 
-export type ObjectInfo = { key: string; size: number; lastModified: string };
+// Copies a file inside R2 without bringing its bytes through the Worker (mattes can be large).
+export async function copyObject(from: string, to: string) {
+	const { client, objectUrl } = r2();
+	const { R2_BUCKET } = getCloudflareContext().env as unknown as R2Env;
+	const res = await client.fetch(objectUrl(to), { method: "PUT", headers: { "x-amz-copy-source": `/${R2_BUCKET}/${from}` } });
+	if (!res.ok) throw new Error(`R2 copy failed (${res.status})`);
+}
+
+export type ObjectInfo ={ key: string; size: number; lastModified: string };
 
 // Every file under a prefix (R2 returns at most 1000 per page, so follow the pages).
 export async function listObjects(prefix: string) {

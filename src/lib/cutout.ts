@@ -6,6 +6,7 @@
 //   matte.mp4           the matte (white = person) for the whole video, 30 fps, for the final render
 //   proxy-cutout.mp4    the editor's preview copy: picture on top, matte below
 //   matte-local.h264    Fast and Balanced: the matte the customer's computer made (lib/cutout-local.ts)
+//   matte-slow.mp4, proxy-slow.mp4, cutout-slow.json    a Best cutout kept when Fast or Balanced replaces it (SLOW_SAVED)
 // Best is paid GPU time, so its seconds per month are per person (lib/features.ts, lib/access.ts).
 // Fast and Balanced run on the customer's own computer: they take none of those seconds.
 
@@ -16,6 +17,8 @@ export const CUTOUT_RUNS_PER_VIDEO = 5; // each Best run is paid GPU time; the a
 export const LOCAL_RUNS_PER_VIDEO = 30; // Fast and Balanced cost a moment of server time each to finish
 export const LOCAL_MATTE = "matte-local.h264";
 export const LOCAL_MATTE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+// Paid-for GPU work is never thrown away by trying Fast: going back to Slow is free and instant (coach, 9 Nov).
+export const SLOW_SAVED = { matte: "matte-slow.mp4", preview: "proxy-slow.mp4", done: "cutout-slow.json" };
 export const CUTOUT_TOO_OLD_MS = 95 * 60 * 1000; // a Best run still going after this has died (GPUs can queue a long time)
 export const LOCAL_TOO_OLD_MS = 15 * 60 * 1000; // a page that asked to upload its matte and never finished
 

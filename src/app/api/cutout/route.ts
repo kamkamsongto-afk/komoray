@@ -1,9 +1,9 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, bestSecondsUsed, chargeBest, lockBest, refundBest } from "@/lib/access";
-import type { CutoutLayers } from "@/lib/behind";
-import { cleanWindows, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TOO_OLD_MS, type CutoutTier, LOCAL_MATTE, LOCAL_TOO_OLD_MS, LOCAL_RUNS_PER_VIDEO, newSeconds, type Window } from "@/lib/cutout";
+import { covered, type CutoutLayers } from "@/lib/behind";
+import { cleanWindows, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TOO_OLD_MS, type CutoutTier, LOCAL_MATTE, LOCAL_TOO_OLD_MS, LOCAL_RUNS_PER_VIDEO, newSeconds, SLOW_SAVED, type Window } from "@/lib/cutout";
 import { mediaUrl } from "@/lib/proxy";
-import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { copyObject, deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // Cut the speaker out of the background for some windows of a video (lib/cutout.ts).
@@ -48,7 +48,9 @@ export async function GET(request: Request) {
 	const key = await readKey(new URL(request.url).searchParams.get("key"));
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const { user } = await currentUser();
-	const [now, edit, access] = await Promise.all([status(key), getJson<{ cutout?: CutoutLayers }>(siblingKey(key, "edit.json")), accessFor(user?.email)]);
+	const [now, edit, access, saved] = await Promise.all([status(key), getJson<{ cutout?: CutoutLayers }>(siblingKey(key, "edit.json")), accessFor(user?.email), getJson<Done>(siblingKey(key, SLOW_SAVED.done))]);
+	// What Slow would not have to make (or charge for) again.
+	const slowWindows = now.status === "done" && now.tier === "best" ? now.windows : (saved?.windows ?? []);
 	const best = {
 		unlimited: access.unlimited,
 		limit: access.features.cutout.seconds,
@@ -56,9 +58,9 @@ export async function GET(request: Request) {
 	};
 	const names = [...new Set((edit?.cutout?.inserts ?? []).map((i) => i.file))];
 	const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
-	if (now.status !== "done") return Response.json({ ...now, files, best });
+	if (now.status !== "done") return Response.json({ ...now, files, best, slowWindows });
 	const env = getCloudflareContext().env as unknown as CutoutEnv;
-	return Response.json({ ...now, files, best, previewUrl: await mediaUrl(key, "proxy-cutout.mp4", env.RENDER_TOKEN, PREVIEW_LINK_SECONDS) });
+	return Response.json({ ...now, files, best, slowWindows, previewUrl: await mediaUrl(key, "proxy-cutout.mp4", env.RENDER_TOKEN, PREVIEW_LINK_SECONDS) });
 }
 
 export async function POST(request: Request) {
@@ -92,6 +94,9 @@ export async function POST(request: Request) {
 
 	if (!access.unlimited && now.localRuns >= LOCAL_RUNS_PER_VIDEO) return Response.json({ error: "This video has been cut out too many times today. Please email hello@komoray.com." }, { status: 429 });
 	const files = cutoutFiles(key);
+	// Fast or Balanced is about to write over a Best cutout. Failing to keep it mustn't waste the work
+	// just done on this computer: going back to Slow then simply asks to pay again, and says so first.
+	if (now.status === "done" && now.tier === "best") await keepSlow(key, now.windows).catch(() => {});
 	await Promise.all([deleteObject(files.done), deleteObject(files.error), deleteObject(siblingKey(key, LOCAL_MATTE))]);
 	await putObject(files.job, JSON.stringify({ startedAt: new Date().toISOString(), windows, runs: now.runs, localRuns: now.localRuns + 1, local: tier } satisfies Job), "application/json");
 	return Response.json({ uploadUrl: await signedUrl(siblingKey(key, LOCAL_MATTE), "PUT", LINK_SECONDS, "video/h264") });
@@ -99,16 +104,47 @@ export async function POST(request: Request) {
 
 const cutoutFiles = (key: string) => ({ done: siblingKey(key, "cutout.json"), error: siblingKey(key, "cutout-error.json"), job: siblingKey(key, "cutout-job.json"), matte: siblingKey(key, "matte.mp4") });
 
+// The note is written last and removed first, so it only ever describes two complete files.
+async function keepSlow(key: string, windows: Window[]) {
+	const noteKey = siblingKey(key, SLOW_SAVED.done);
+	await deleteObject(noteKey);
+	await Promise.all([copyObject(siblingKey(key, "matte.mp4"), siblingKey(key, SLOW_SAVED.matte)), copyObject(siblingKey(key, "proxy-cutout.mp4"), siblingKey(key, SLOW_SAVED.preview))]);
+	await putObject(noteKey, JSON.stringify({ windows, tier: "best" } satisfies Done), "application/json");
+}
+
+async function savedSlow(key: string) {
+	const saved = await getJson<Done>(siblingKey(key, SLOW_SAVED.done));
+	if (!saved) return null;
+	const [matte, preview] = await Promise.all([exists(siblingKey(key, SLOW_SAVED.matte)), exists(siblingKey(key, SLOW_SAVED.preview))]);
+	return matte && preview ? saved : null;
+}
+
 async function startBest(key: string, windows: Window[], access: Awaited<ReturnType<typeof accessFor>>, email?: string | null) {
 	const now = await status(key);
 	if (now.status === "processing") return Response.json({ error: "The cutout is still being made. Please wait for it to finish." }, { status: 409 });
 	const files = cutoutFiles(key);
+	const current = now.status === "done" && now.tier === "best" && (await exists(files.matte));
+	const saved = current ? null : await savedSlow(key);
+
+	// Everything asked for is already in the kept Best cutout: put it back. No GPU, no seconds, no run used up.
+	if (saved && covered(windows, saved.windows)) {
+		try {
+			await Promise.all([copyObject(siblingKey(key, SLOW_SAVED.matte), files.matte), copyObject(siblingKey(key, SLOW_SAVED.preview), siblingKey(key, "proxy-cutout.mp4"))]);
+			await deleteObject(files.error);
+			await putObject(files.done, JSON.stringify({ windows: saved.windows, tier: "best", at: new Date().toISOString() } satisfies Done), "application/json");
+		} catch {
+			return Response.json({ error: "Could not bring back your Slow cutout. Please try again." }, { status: 502 });
+		}
+		return Response.json({ status: "done", windows: saved.windows });
+	}
+
 	if (!access.unlimited && now.runs >= CUTOUT_RUNS_PER_VIDEO) {
 		return Response.json({ error: `This video has been cut out ${CUTOUT_RUNS_PER_VIDEO} times with Slow. Please email hello@komoray.com for more.` }, { status: 429 });
 	}
 
-	// What the last Best cutout made is kept and not charged again. A Fast or Balanced matte is never reused.
-	const previous = now.status === "done" && now.tier === "best" && (await exists(files.matte)) ? now.windows : [];
+	// What an earlier Best cutout made is reused and not charged again. A Fast or Balanced matte is never reused.
+	const previous = current ? now.windows : (saved?.windows ?? []);
+	const previousFile = current ? files.matte : siblingKey(key, SLOW_SAVED.matte);
 	const charged = newSeconds(windows, previous);
 	let usageKey: string | undefined;
 	if (!access.unlimited && email) {
@@ -121,7 +157,7 @@ async function startBest(key: string, windows: Window[], access: Awaited<ReturnT
 	let payload: string;
 	try {
 		// The links first: if making them fails, nothing is deleted and the seconds go straight back.
-		const previousUrl = previous.length ? await signedUrl(files.matte, "GET", 2 * LINK_SECONDS) : undefined;
+		const previousUrl = previous.length ? await signedUrl(previousFile, "GET", 2 * LINK_SECONDS) : undefined;
 		payload = JSON.stringify({
 			token: env.RENDER_TOKEN,
 			windows,
