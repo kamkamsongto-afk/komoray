@@ -1,6 +1,6 @@
 "use client";
 
-import { Captions, Lock, Scissors, Sparkles, Sun, Users, Wand2, ZoomIn } from "lucide-react";
+import { AudioLines, Captions, Check, Film, Lock, Plus, Scissors, Sparkles, Sun, Users, Wand2, ZoomIn } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import type { UploadOptions as Options } from "@/lib/upload-options";
@@ -10,6 +10,7 @@ const READY: { id: keyof Options; name: string; hint: string; icon: typeof Sciss
 	{ id: "badTakes", name: "Bad takes", hint: "AI cuts the takes you said again. One click brings them all back", icon: Sparkles },
 	{ id: "zoom", name: "Auto zoom", hint: "Moves in slowly, so the video feels alive", icon: ZoomIn },
 	{ id: "subtitles", name: "Subtitles", hint: "Your words on the video as you speak", icon: Captions },
+	{ id: "audio", name: "Audio optimization", hint: "A clearer voice and less background noise, on both speakers", icon: AudioLines },
 ];
 // Shown so people know they are coming, but they can't be ticked: they don't exist yet.
 const SOON = [
@@ -19,8 +20,10 @@ const SOON = [
 ];
 
 // Opens when a video is dropped: what Komoray should do with it, and the language it is spoken in (we can't
-// tell by ourselves). The upload keeps going behind it. Start waits for the upload to finish if it hasn't.
+// tell by ourselves). The upload keeps going behind it, but nothing else happens until Start is pressed
+// (and Start waits for the upload to finish if it hasn't).
 export function UploadOptions({
+	fileName,
 	options,
 	onOptionsChange,
 	language,
@@ -31,25 +34,26 @@ export function UploadOptions({
 	onStart,
 	onClose,
 }: {
+	fileName: string;
 	options: Options;
 	onOptionsChange: (options: Options) => void;
 	language: string;
 	onLanguageChange: (code: string) => void;
 	defaultLanguage: string | null;
 	onSetDefaultLanguage: (code: string | null) => void;
-	upload: { status: "uploading" | "done" | "error"; progress: number; queued: boolean };
+	upload: { status: "uploading" | "done" | "error"; progress: number };
 	onStart: () => void;
 	onClose: () => void;
 }) {
 	const dialog = useRef<HTMLDivElement>(null);
-	const start = useRef<HTMLButtonElement>(null);
 	const close = useRef(onClose);
 	useEffect(() => {
 		close.current = onClose;
 	});
 
 	useEffect(() => {
-		start.current?.focus();
+		// The window itself, not Start: a stray Enter or Space must not begin the work before they have read this.
+		dialog.current?.focus();
 		const onKey = (e: KeyboardEvent) => {
 			if (e.defaultPrevented) return; // the language list closed itself
 			if (e.key === "Escape") close.current();
@@ -59,7 +63,7 @@ export function UploadOptions({
 			const first = stops[0];
 			const last = stops[stops.length - 1];
 			const here = document.activeElement;
-			if (e.shiftKey && (here === first || !dialog.current.contains(here))) {
+			if (e.shiftKey && (here === first || here === dialog.current || !dialog.current.contains(here))) {
 				e.preventDefault();
 				last?.focus();
 			} else if (!e.shiftKey && (here === last || !dialog.current.contains(here))) {
@@ -71,51 +75,69 @@ export function UploadOptions({
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
 
-	const waiting = upload.queued && upload.status === "uploading";
+	const picked = READY.filter(({ id }) => options[id]).length;
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center sm:p-4" role="presentation">
+		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center sm:p-6" role="presentation">
 			<div
 				ref={dialog}
+				tabIndex={-1}
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby="upload-options-title"
-				className="flex max-h-[92dvh] w-full max-w-md flex-col gap-4 overflow-y-auto rounded-t-2xl border border-foreground/15 bg-background p-5 text-foreground shadow-2xl sm:rounded-2xl sm:p-6"
+				className="flex max-h-[94dvh] w-full max-w-3xl flex-col gap-5 overflow-y-auto rounded-t-2xl border border-foreground/15 bg-background p-5 text-foreground shadow-2xl outline-none sm:rounded-2xl sm:p-8"
 			>
-				<div>
-					<h2 id="upload-options-title" className="text-2xl font-bold tracking-tight">
-						What should Komoray do?
+				<div className="text-center">
+					<h2 id="upload-options-title" className="text-2xl font-bold tracking-tight sm:text-3xl">
+						What should Komoray do with this video?
 					</h2>
-					<p className="mt-1 text-sm text-foreground/60">Your video keeps uploading meanwhile. You can change all of this later in the AI studio.</p>
+					<p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-foreground/60">
+						<Film className="h-4 w-4 shrink-0" aria-hidden />
+						<span className="min-w-0 truncate">{fileName}</span>
+						<span className="shrink-0">· {upload.status === "uploading" ? `uploading ${upload.progress}%` : upload.status === "done" ? "uploaded" : "upload stopped"}</span>
+					</p>
+					<p className="mt-1 text-sm text-foreground/60">Nothing starts until you press Start. You can change all of this later in the AI studio.</p>
 				</div>
 
-				<div className="flex flex-col gap-1.5">
+				<div className="mx-auto flex w-full max-w-md flex-col gap-1.5">
 					<span className="text-sm font-medium">Spoken language</span>
 					<LanguagePicker value={language} onChange={onLanguageChange} defaultCode={defaultLanguage} onSetDefault={onSetDefaultLanguage} />
 					<span className="text-xs text-foreground/60">Komoray listens in this language. Star one to make it your default.</span>
 				</div>
 
-				<fieldset className="flex flex-col gap-1">
-					<legend className="mb-1 text-sm font-medium">Do this for me</legend>
+				<fieldset className="grid gap-3 sm:grid-cols-2">
+					<legend className="mb-2 text-sm font-medium">Do this for me</legend>
 					{READY.map(({ id, name, hint, icon: Icon }) => (
-						<label key={id} className="flex cursor-pointer items-start gap-3 rounded-lg p-2 hover:bg-foreground/5">
-							<input type="checkbox" checked={options[id]} onChange={(e) => onOptionsChange({ ...options, [id]: e.target.checked })} className="mt-1 h-4 w-4 shrink-0 accent-blue-600" />
-							<Icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground/60" aria-hidden />
-							<span className="flex flex-col">
-								<span className="font-medium">{name}</span>
+						<label
+							key={id}
+							className={`flex min-h-20 cursor-pointer items-center gap-3 rounded-xl border-2 p-3 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-400 ${
+								options[id] ? "border-blue-500 bg-blue-500/10" : "border-foreground/15 hover:border-foreground/35"
+							}`}
+						>
+							<input type="checkbox" checked={options[id]} onChange={(e) => onOptionsChange({ ...options, [id]: e.target.checked })} className="sr-only" />
+							<Icon className={`h-5 w-5 shrink-0 ${options[id] ? "text-blue-500" : "text-foreground/60"}`} aria-hidden />
+							<span className="flex min-w-0 flex-1 flex-col">
+								<span className="font-semibold">{name}</span>
 								<span className="text-xs text-foreground/60">{hint}</span>
 							</span>
+							{options[id] ? (
+								<span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+									<Check className="h-4 w-4" aria-hidden />
+								</span>
+							) : (
+								<Plus className="mx-1 h-5 w-5 shrink-0 text-foreground/50" aria-hidden />
+							)}
 						</label>
 					))}
 					{SOON.map(({ name, hint, icon: Icon }) => (
-						<div key={name} className="flex items-start gap-3 rounded-lg p-2 text-foreground/40" aria-disabled="true">
-							<input type="checkbox" disabled aria-label={`${name}, coming soon`} className="mt-1 h-4 w-4 shrink-0" />
-							<Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-							<span className="flex flex-1 flex-col">
-								<span className="font-medium">{name}</span>
+						<div key={name} className="flex min-h-20 items-center gap-3 rounded-xl border-2 border-dashed border-foreground/10 p-3 text-foreground/40" aria-disabled="true">
+							<input type="checkbox" disabled aria-label={`${name}, coming soon`} className="sr-only" />
+							<Icon className="h-5 w-5 shrink-0" aria-hidden />
+							<span className="flex min-w-0 flex-1 flex-col">
+								<span className="font-semibold">{name}</span>
 								<span className="text-xs">{hint}</span>
 							</span>
-							<span className="flex items-center gap-1 rounded-full border border-foreground/15 px-2 py-0.5 text-xs">
+							<span className="flex shrink-0 items-center gap-1 rounded-full border border-foreground/15 px-2 py-0.5 text-xs">
 								<Lock className="h-3 w-3" aria-hidden />
 								Soon
 							</span>
@@ -123,22 +145,21 @@ export function UploadOptions({
 					))}
 				</fieldset>
 
-				{upload.status === "error" ? (
-					<p className="text-sm text-red-500">The upload stopped. Close this window to see why and try again.</p>
-				) : (
-					<button
-						ref={start}
-						type="button"
-						onClick={onStart}
-						disabled={waiting}
-						className="min-h-11 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-					>
-						{waiting ? `Starts when the upload is done · ${upload.progress}%` : upload.status === "uploading" ? `Start · uploading ${upload.progress}%` : "Start"}
+				{upload.status === "error" && <p className="text-center text-sm text-red-500">The upload stopped. Close this window to see why and try again.</p>}
+				<div className="flex flex-col-reverse items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-4">
+					<button type="button" onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm text-foreground/70 hover:bg-foreground/5 hover:text-foreground">
+						Close
 					</button>
-				)}
-				<button type="button" onClick={onClose} className="-mt-2 text-sm text-foreground/60 underline underline-offset-2 hover:text-foreground">
-					Close
-				</button>
+					{upload.status !== "error" && (
+						<button
+							type="button"
+							onClick={onStart}
+							className="min-h-12 rounded-xl bg-blue-600 px-8 py-2 font-semibold text-white hover:bg-blue-700"
+						>
+							{`Start · ${picked} ${picked === 1 ? "thing" : "things"} to do`}
+						</button>
+					)}
+				</div>
 			</div>
 		</div>
 	);

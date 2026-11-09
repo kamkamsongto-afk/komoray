@@ -46,6 +46,13 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 		onTimeRef.current = onTime;
 		onFailRef.current = onFail;
 	});
+	// Audio optimization: how much of the optimized sound to hear. Changes right away, also while playing.
+	const sound = subtitle.audio ? subtitle.audioAmount : 0;
+	const soundRef = useRef(sound);
+	useEffect(() => {
+		soundRef.current = sound;
+		engineRef.current?.setSound(sound);
+	}, [sound]);
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
@@ -71,6 +78,7 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 			},
 			log: (what, detail) => debug.log(what, detail),
 		});
+		engine.setSound(soundRef.current);
 		engineRef.current = engine;
 		engine
 			.load(piecesRef.current, engine.toOut(startAt.current, piecesRef.current))

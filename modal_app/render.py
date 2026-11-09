@@ -268,6 +268,8 @@ DEFAULT_STYLE = {
     "zoom": "off",  # Auto zoom: "in" / "out" = one way across the whole video, "smooth" = a slow glide in and out, "cuts" = every other kept piece a little closer
     "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
     "subtitles": True,  # False: no subtitles on the video (banners and the logo stay)
+    "audio": True,  # Audio optimization (polish_sound), False: the sound stays as recorded
+    "audioAmount": 1,  # 0 = as recorded .. 1 = fully optimized, in between the two are mixed
 }
 # Auto zoom: how close it gets, seconds to glide in and out (both picked by the user: zoomAmount and
 # zoomPeriod in src/lib/subtitle-style.ts), seconds to settle around a no-zoom part (src/lib/zoom.ts).
@@ -978,51 +980,82 @@ def put(url: str, data: bytes, content_type: str) -> None:
 # low rumble and the muddy 250 Hz, lift the clarity at 3.5 kHz, soften the s sounds, even out quiet and loud
 # moments. Picked by ear on 9 Nov from five versions of a real clip.
 VOICE_CHAIN = (
-    "aresample=48000,arnndn=m=/opt/rnnoise/cb.rnnn:mix=0.85,"
+    # arnndn comes out exactly 480 samples (10 ms) late, measured. The slider mixes this with the sound as
+    # recorded, and 10 ms apart the two cancel each other out, so the delay is taken out here. By samples,
+    # not seconds: phone files start a little after 0 (21 ms on our test clip) and start=0.01 cut nothing.
+    "aresample=48000,arnndn=m=/opt/rnnoise/cb.rnnn:mix=0.85,atrim=start_sample=480,asetpts=PTS-STARTPTS,apad=pad_len=480,"
     "highpass=f=80,equalizer=f=250:t=q:w=1.2:g=-2,equalizer=f=3500:t=q:w=1.0:g=2,"
     "deesser=i=0.3:m=0.5:f=0.5:s=o,acompressor=threshold=-22dB:ratio=2.5:attack=15:release=180:makeup=2"
 )
-LOUDNESS = "I=-14:TP=-1.5:LRA=11"  # what the big platforms play at, with room for their own encoding
+TARGET_LUFS, PEAK_LIMIT_DB = -14.0, -1.5  # what the big platforms play at, with room for their own encoding
+LOUDNESS = f"I={TARGET_LUFS}:TP={PEAK_LIMIT_DB}:LRA=11"  # for measuring
+MAX_GAIN_DB = 20  # a very quiet recording is brought up this much at most, or its noise comes up with it
 DEAD_SIDE_DB = 30  # one side this much quieter than the other: the mic only recorded on one side
 
 
-def one_sided_fix(video: Path) -> str:
-    """Some clip-on mics record on one side only, and the video would play in one ear: copy the live side."""
+def both_speakers(video: Path) -> str:
+    """Audio optimization always plays on both speakers: a mono file or a clip-on mic that recorded on one
+    side would otherwise come out of one ear. The ffmpeg filter that does it, ending in a comma."""
     stats = subprocess.run(
         ["ffmpeg", "-hide_banner", "-i", str(video), "-vn", "-af", "astats=measure_perchannel=RMS_level:measure_overall=none", "-f", "null", "-"],
         capture_output=True,
         text=True,
     ).stderr
     levels = [float(x) for x in re.findall(r"RMS level dB: (\S+)", stats)]
-    if len(levels) != 2 or abs(levels[0] - levels[1]) < DEAD_SIDE_DB:
-        return ""
-    live = 0 if levels[0] > levels[1] else 1
-    return f"pan=stereo|c0=c{live}|c1=c{live},"
+    if len(levels) == 1:
+        return "pan=stereo|c0=c0|c1=c0,"
+    if len(levels) == 2 and abs(levels[0] - levels[1]) >= DEAD_SIDE_DB:
+        live = 0 if levels[0] > levels[1] else 1
+        return f"pan=stereo|c0=c{live}|c1=c{live},"
+    return "aformat=channel_layouts=stereo,"
 
 
-def polish_sound(video: Path) -> bool:
-    """Studio sound, in place. A video with its plain sound beats no video, so a failure here only logs."""
+def voice_filter(media: Path, before: str = "") -> str | None:
+    """VOICE_CHAIN and the loudness of this file, as one ffmpeg filter. None when it is silent from start to end."""
+    # Measured once, then one fixed gain for the whole file. Not loudnorm itself: it changes its gain as the
+    # sound changes when loud and quiet parts differ a lot, so the cut video came out 4 dB off the preview.
+    probe = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(media), "-vn", "-af", f"{before}{VOICE_CHAIN},loudnorm={LOUDNESS}:print_format=json", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+    ).stderr
+    m = json.loads(probe[probe.rindex("{") : probe.rindex("}") + 1])
+    if not math.isfinite(float(m["input_i"])):
+        return None
+    # The limiter only touches the highest peaks. latency=1: without it the sound comes out late, and the slider mixes badly.
+    gain = min(MAX_GAIN_DB, TARGET_LUFS - float(m["input_i"]))
+    limit = 10 ** (PEAK_LIMIT_DB / 20)
+    return f"{VOICE_CHAIN},volume={gain:.2f}dB,alimiter=limit={limit:.4f}:attack=5:release=50:level=false:latency=1,aresample=48000"
+
+
+def polish_sound(video: Path, amount: float = 1, source: Path | None = None) -> bool:
+    """Audio optimization, in place. amount: 0 = as recorded (on both speakers) .. 1 = fully optimized, in
+    between the two are mixed, the same way the editor's preview mixes them (setSound in lib/player/engine.ts).
+    source: the uncut video. Its loudness is the one used, like the preview (clean_preview), which can't know
+    the cuts: measured after cutting, the video came out at another level than the slider had let them hear.
+    A video with its plain sound beats no video, so a failure here only logs."""
     try:
         if not has_audio(video):
             return False
-        chain = one_sided_fix(video) + VOICE_CHAIN
-        # Loudness is measured first and then applied evenly: one pass alone makes the voice pump up and down.
-        probe = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-i", str(video), "-vn", "-af", f"{chain},loudnorm={LOUDNESS}:print_format=json", "-f", "null", "-"],
-            capture_output=True,
-            text=True,
-        ).stderr
-        m = json.loads(probe[probe.rindex("{") : probe.rindex("}") + 1])
-        if not math.isfinite(float(m["input_i"])):  # silent from start to end: nothing to bring up
+        amount = min(1.0, max(0.0, amount))
+        stereo = both_speakers(video)
+        voice = voice_filter(source or video, stereo) if amount > 0 else None
+        if amount > 0 and voice is None:  # silent from start to end: nothing to bring up
             return False
-        level = (
-            f"loudnorm={LOUDNESS}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
-            f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true,aresample=48000"
-        )
+        recorded = f"{stereo}aresample=48000,asetpts=PTS-STARTPTS"  # starts at 0, like the optimized sound does
+        if voice is None:
+            graph = f"[0:a:0]{recorded}[s]"
+        elif amount >= 1:
+            graph = f"[0:a:0]{stereo}{voice}[s]"
+        else:
+            graph = (
+                f"[0:a:0]{recorded},asplit=2[d][w];[d]volume={1 - amount:.3f}[dry];[w]{voice},volume={amount:.3f}[wet];"
+                "[dry][wet]amix=inputs=2:normalize=0:duration=longest[s]"
+            )
         polished = video.with_name("polished.mp4")
         result = subprocess.run(
-            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video), "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy"]
-            + ["-af", f"{chain},{level}", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(polished)],
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video), "-filter_complex", graph, "-map", "0:v:0", "-map", "[s]", "-c:v", "copy"]
+            + ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(polished)],
             capture_output=True,
             text=True,
         )
@@ -1091,7 +1124,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
 
-            sound = polish_sound(out)
+            sound = polish_sound(out, float(style.get("audioAmount", 1)), src) if style.get("audio", True) else False
             put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size, "sound": sound}
     except Exception as err:
@@ -1196,6 +1229,28 @@ def faces(video_url: str, faces_url: str, thumb_url: str | None = None) -> dict:
         return {"ok": True, "faces": len(found["faces"])}
 
 
+def clean_preview(src: Path, pcm: Path, clean: Path) -> bytes:
+    """The fully optimized sound for the editor's slider, sample for sample as long as the sound as recorded
+    (pcm), so the player can mix the two. If it can't be made, the sound as recorded: never lose the preview."""
+    plain = pcm.read_bytes()
+    try:
+        stereo = both_speakers(src) if has_audio(src) else ""  # as in polish_sound: same loudness from a one-sided mic
+        voice = voice_filter(src, stereo) if has_audio(src) else None
+        if voice is None:
+            return plain
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-vn", "-af", f"{stereo}{voice},aresample={PROXY_AUDIO_RATE}", "-ac", "1", "-f", "s16le", str(clean)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-600:])
+        return clean.read_bytes()[: len(plain)].ljust(len(plain), b"\0")
+    except Exception as err:
+        print(f"clean preview failed: {err}")
+        return plain
+
+
 @app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
 def proxy(
     video_url: str,
@@ -1204,6 +1259,7 @@ def proxy(
     audio_url: str | None = None,
     faces_url: str | None = None,
     thumb_url: str | None = None,
+    clean_audio_url: str | None = None,
 ) -> dict:
     """The editor's preview copy: same timing as the original, just smaller and quick to jump around in."""
     try:
@@ -1227,6 +1283,8 @@ def proxy(
                 except Exception as err:
                     print("thumb failed:", err)
             # Sound first: the website takes proxy.mp4 existing to mean everything is there.
+            if clean_audio_url:
+                put(clean_audio_url, clean_preview(src, pcm, workdir / "proxy-audio-clean.pcm"), "application/octet-stream")
             if audio_url:
                 put(audio_url, pcm.read_bytes(), "application/octet-stream")
             put(output_url, out.read_bytes(), "video/mp4")
@@ -1244,7 +1302,7 @@ def start(body: dict) -> dict:
     if not hmac.compare_digest(str(body.get("token", "")), os.environ["RENDER_TOKEN"]):
         return {"error": "unauthorized"}
     if body.get("kind") == "proxy":
-        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"))
+        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"))
     elif body.get("kind") == "faces":
         call = faces.spawn(body["videoUrl"], body["facesUrl"], body.get("thumbUrl"))
     else:

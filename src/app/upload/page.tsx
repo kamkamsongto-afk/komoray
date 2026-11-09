@@ -6,6 +6,7 @@ import { BetaWelcome } from "@/components/BetaWelcome";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import { PhoneUpload } from "@/components/PhoneUpload";
 import { UploadOptions } from "@/components/UploadOptions";
+import { UploadWorking } from "@/components/UploadWorking";
 import { WaitingForInvite } from "@/components/WaitingForInvite";
 import type { AccessStatus } from "@/lib/access";
 import { browserLanguage, isLanguage } from "@/lib/languages";
@@ -101,6 +102,7 @@ export default function UploadPage() {
 		setQueued(on);
 	};
 	const [analyzing, setAnalyzing] = useState(false);
+	const [opening, setOpening] = useState(false); // the script is ready and the AI studio is loading
 	const [analysisError, setAnalysisError] = useState("");
 	const [dragging, setDragging] = useState(false);
 	const [again, setAgain] = useState(false); // from the editor: listen to this video again, in another language
@@ -238,7 +240,10 @@ export default function UploadPage() {
 				await wait(ANALYZE_POLL_MS);
 				const poll = await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`);
 				const data = (await poll.json()) as { status?: string; error?: string };
-				if (data.status === "done") return openEditor(videoKey);
+				if (data.status === "done") {
+					setOpening(true); // keeps the waiting screen up until the next page has loaded
+					return openEditor(videoKey);
+				}
 				if (data.status === "failed") throw new Error(data.error ?? "Analysis failed");
 			}
 			throw new Error("This is taking too long. Please try again.");
@@ -280,23 +285,31 @@ export default function UploadPage() {
 			{access && !access.unlimited && !showOptions && <BetaWelcome access={access} />}
 			{showOptions && status !== "idle" && (
 				<UploadOptions
+					fileName={message}
 					options={options}
 					onOptionsChange={setOptions}
 					language={language}
 					onLanguageChange={setLanguage}
 					defaultLanguage={defaultLanguage}
 					onSetDefaultLanguage={setDefaultLanguage}
-					upload={{ status: status === "done" ? "done" : status === "error" ? "error" : "uploading", progress, queued }}
+					upload={{ status: status === "done" ? "done" : status === "error" ? "error" : "uploading", progress }}
 					onStart={() => {
-						if (status === "done" && key) {
-							setShowOptions(false);
-							void findSilences(key);
-						} else queue(true);
+						setShowOptions(false);
+						if (status === "done" && key) void findSilences(key);
+						else queue(true);
 					}}
 					onClose={() => {
 						queue(false);
 						setShowOptions(false);
 					}}
+				/>
+			)}
+			{(analyzing || queued || opening) && (
+				<UploadWorking
+					stage={status === "uploading" ? "upload" : opening ? "open" : "listen"}
+					progress={progress}
+					fileName={message}
+					onCancel={queued ? () => queue(false) : undefined}
 				/>
 			)}
 
