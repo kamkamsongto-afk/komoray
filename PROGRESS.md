@@ -1,6 +1,6 @@
 # Komoray: บันทึกความคืบหน้า
 
-อัปเดตล่าสุด: **6 พ.ย. 2026 (ปิดงาน รอบบ่าย)** · แก้ 12 ข้อจากความเห็นโค้ช ขึ้นเว็บแล้ว (`2f8792e`, Modal deploy แล้ว, **ข้ามรีวิว Codex ตามที่โค้ชสั่ง**) · ใหม่: AI เลือกช่วงซูมเอง + เลือกแบบซูมทีละช่วง · ⏳ **ยังไม่ได้ลอง Make video ด้วยซูมใหม่** · มีคนขอใช้ 2 คนจากโพสต์เฟสส่วนตัว (ยังไม่ได้เพิ่มใน /admin) · ไม่มี branch ค้าง
+อัปเดตล่าสุด: **7 พ.ย. 2026 (ปิดงาน)** · ใหม่: **staging.komoray.com** (เว็บทดลองแยกทุกอย่าง) + **Cutout ตัดคนออกจากฉาก** (ตัวอักษรหลังตัวคน, รูป/คลิปแทรกหลังคนตัวเล็ก) อยู่บน staging เท่านั้น · Codex รีวิวแล้ว แก้ 1 ข้อ โต้แย้ง 1 ข้อ รอโค้ชตัดสิน · **ยังไม่รวมเข้า main ยังไม่ขึ้นเว็บจริง** · branch ค้าง 2 ตัว: `claude/staging`, `claude/cutout` (ต่อจาก staging)
 แผน 67 วัน: [Google Sheet](https://docs.google.com/spreadsheets/d/177tM1wyvNRYY82ykldY7aoKK9YSHDi8JJ1SKtCfR5v4/edit) (1 แถว = 1 วันในปฏิทิน, คอลัมน์ K = สถานะ)
 
 ---
@@ -256,6 +256,18 @@
 - ตรวจ: `tsc`/`lint` (0 error 28 warning)/`build`/`py_compile` ผ่าน · ⏳ **ยังไม่ได้ลอง**: หน้าจอจริงทั้งหมด, FFmpeg ทำคลิปด้วยสูตรซูมใหม่ (ในเครื่องไม่มี FFmpeg), Key moments กับคลิปจริง
 - ตาราง "โค้ดคู่" ใน `AGENTS.md` ยังไม่มีชื่อ `zoom_part_frames`, `part_zoom_expr` (แก้ไฟล์นั้นต้องให้โค้ชอนุมัติ)
 
+**7 พ.ย. (staging + Cutout)** — อยู่บน branch ยังไม่รวม: `claude/staging` (`2bc84b6`, `bf313be`, `95afed1`) · `claude/cutout` (`9d2c2e2`, `d393f45`, `131f697`, `b43e9cf`)
+- **Staging** https://staging.komoray.com: Worker `komoray-staging`, R2 `komoray-uploads-staging` (อัปโหลดลบเอง 7 วัน, logs 30 วัน), Supabase `komoray-staging`, Modal `komoray-render-staging` + `komoray-cutout-staging` · ป้าย STAGING สีเหลือง + noindex · ขึ้นด้วย `npm run deploy:staging` (ขึ้น branch ปัจจุบัน) · กุญแจ staging อยู่ใน `.dev.vars` ชื่อขึ้นต้น `STAGING_` / `R2_STAGING_` · ✅ โค้ชลองแล้ว: login, อัปโหลด, Make video, เว็บจริงไม่เห็นคลิป staging
+- กติกาใหม่ใน `AGENTS.md`: งานเสี่ยงต้องขึ้น staging ให้โค้ชลองก่อนรวม · วิธี Rollback Worker ใน Cloudflare · staging ไว้ทดสอบเท่านั้น ไม่ใช่ที่หนีตอนเว็บจริงพัง
+- **ผูกบัตร Modal แล้ว** (ใช้ GPU ได้)
+- **Cutout ส่วน 1** (`modal_app/cutout.py`): โมเดล BiRefNet-matting (MIT, ล็อกรุ่น `eccde0a8…`) บน GPU L4 ตัดคนเฉพาะช่วงที่มีชั้น Cutout · ได้ `matte.mp4` (คลิปจริง) + `proxy-cutout.mp4` (ภาพบน matte ล่าง ให้ตัวเล่นในเว็บ) + `cutout.json` · ผมและแว่นตาเนียน ใช้ขอบของโมเดลตรง ๆ ดีที่สุด (ทดสอบ 3 รอบ)
+- **เปิดฟีเจอร์ทีละคน** ใน `/admin`: ติ๊ก `Cutout` + เลือก 10 หรือ 50 วิต่อคลิป (เก็บใน R2 `access/people/<hash>.json` → `features`) · แอดมินเปิดเสมอ · ตัดได้ 5 ครั้งต่อคลิป · เซิร์ฟเวอร์ตรวจสิทธิ์เอง
+- **Cutout ส่วน 2+3** (`src/lib/behind.ts` ↔ `behind_motion`, `build_behind`, `cutout_filters` ใน `render.py`): `Text behind you` 6 แบบ (Fade in, Burst, Drop and slam, Heartbeat, วิ่งซ้าย/ขวา + ความเร็ว) ฟอนต์ ขนาด สี ขอบ ความสูง · `Picture or clip` เต็มจอหลังคน คนย่อ/ย้าย/ซ่อนได้ ขอบไหล่จางนุ่ม · สูตรเคลื่อนไหวเว็บ = คลิปจริง (เทียบ 9,900 ค่า) · ✅ คลิปจริงบน staging ออกครบ · ✅ โค้ชลองตัวอักษรหลังตัวคนแล้ว "เจ๋งมาก"
+- **ความเห็นโค้ช (แก้แล้ว `131f697`)**: แถบ Cutout บน Timeline (ฟ้า = ตัวอักษร, ส้ม = รูป/คลิป) ลาก/ยืด/ลบได้ · ปุ่มยุบคลื่นเสียงข้าง `Fit` · ลากขีดเหนือ Timeline ให้กล่องสคริปต์สูงขึ้น · หัวหน้าจอเหลือ Undo/Redo + เมนู `Cuts` (Pace, Bad takes, Wrong language?) + เมนู `Export` (.srt, แปล, แจ้งเตือน) + `Make video`
+- **Codex รีวิว**: (1) ตัวตัดคน staging ใช้ Modal secret `komoray-render` ชุดเดียวกับเว็บจริง → Claude โต้แย้ง: ใช้ได้จริง (โค้ชตัดคนบน staging สำเร็จ) ตั้งใจใช้ token เดียวกัน แยกได้ภายหลังถ้าโค้ชสั่ง · (2) Make video ก่อน Cut me out → ตัวอักษรขึ้นหน้าคน → **แก้แล้ว `b43e9cf`**: ขึ้นข้อความให้กด Cut me out ก่อน + แถวใหม่ในตารางกันบั๊ก
+- ต้นทุน GPU (คิดจากราคาประกาศ ยังไม่ได้ดูบิล): ~$0.02–0.03 ต่อ 10 วิ, ~$0.10 ต่อ 50 วิ · รอ ~5 นาทีถ้าเครื่องเย็น, ~1.5–2.5 นาทีถ้าเครื่องอุ่น
+- ตรวจ: `tsc` 0 · `lint` 0 error 28 warning · `build` · `py_compile` ผ่าน · ⏳ ยังไม่ได้ลอง: หน้าใหม่ของ 131f697 และ b43e9cf ในเบราว์เซอร์จริง, Safari/iPad/มือถือ, ผมยาว/มือใกล้หน้า
+
 ---
 
 ## ⚠️ ติดอยู่ / เรื่องที่ต้องรู้
@@ -273,7 +285,8 @@
 | 🗃️ **ไฟล์เก่าใน R2** | `logs/test/` 12 ไฟล์ ~155 MB เป็นไฟล์ทดสอบของ Claude 31 ต.ค. ไม่ได้ถูกเจาะ ลบเองภายใน 90 วัน · วิดีโอ banner รุ่นแรกใน `site/` ไม่ใช้แล้ว (ใช้ `site/hero-manta-v2-*`) · **โค้ชบอก 5 พ.ย. ว่าจะทยอยลบเอง Claude ห้ามลบ** | โค้ชลบเอง |
 | 🖼️ ไฟล์ในโปรเจกต์ที่ไม่ใช้แล้ว | `public/landing/clouds.webp` ไม่มีโค้ดเรียกใช้ (เช็ก 6 พ.ย.) | ลบเมื่อโค้ชบอก |
 | 🚀 **ลำดับขึ้นเว็บ** | `python -m modal deploy modal_app/render.py` **ก่อน** แล้วค่อย `git push origin main` (Modal เฉพาะเมื่อแก้ `render.py`) · ตั้งแต่ 5 พ.ย. Claude รันเองได้เมื่อโค้ชสั่ง · บน Windows ต้องใส่ `PYTHONIOENCODING=utf-8 PYTHONUTF8=1` หน้าคำสั่ง Modal ไม่งั้นพังที่เครื่องหมาย ✓ (6 พ.ย.) | ทุกครั้งที่จะขึ้นเว็บ |
-| 💳 Modal GPU | ใช้ GPU ไม่ได้จนกว่าจะผูกบัตร ("Please add a payment method") · ผูกแล้วได้เครดิต $30/เดือน | ก่อนทำ Scene Swap ต่อ |
+| 💳 Modal GPU | ✅ ผูกบัตรแล้ว 7 พ.ย. · ยังไม่ได้ดูค่า GPU จริงในบิล | ดู Modal → Usage หลังมีคนใช้ Cutout |
+| ✂️ **Cutout รอขึ้นเว็บจริง (7 พ.ย.)** | อยู่บน staging เท่านั้น · branch `claude/staging` + `claude/cutout` ยังไม่รวม · Codex ข้อ 1 (secret ร่วมกับเว็บจริง) รอโค้ชตัดสิน · ยังไม่ได้เช็กสิทธิ์ข้อมูลที่ใช้ฝึกโมเดล BiRefNet · เสียงของคลิปแทรกถูกปิดไว้ | โค้ชลองบน staging ผ่าน → สั่ง "รวมเข้า main แล้วขึ้นเว็บจริงได้เลย" (deploy `render.py` + `cutout.py` ตัวจริงก่อน push) |
 
 | 🖼️ Google consent screen | **ห้ามอัปโหลดโลโก้** ในหน้า Branding (ต้องรอ Google ตรวจหลายวัน) · หน้าเลือกบัญชีจะโชว์ `icjjeinussbapihdjiym.supabase.co` (แก้ได้ด้วย Supabase custom domain แบบเสียเงิน) | ภายหลัง |
 | 🇹🇭 Deepgram ภาษาไทย | ตกตัวอักษรบางตัว (เช่น "จุดเด่คือ", "โค้", บางครั้ง "ผูหญิง" ไม่มีไม้โท) · แก้ได้ด้วยดับเบิลคลิกคำ + คัมภีร์จำไว้ · ชิ้นคำประกอบเป็นคำจริงแล้ว (31 ต.ค. เย็น) | ทดสอบกับคลิปไทยจริง |
@@ -295,6 +308,7 @@
 ## ⏭️ ขั้นต่อไป
 
 **แชทหน้าเริ่มตรงนี้:**
+0. **Cutout บน staging.komoray.com** (Ctrl + Shift + R ก่อน): หัวหน้าจอใหม่ (`Cuts`, `Export`) · แถบฟ้า/ส้มบน Timeline ลาก/ยืด/คลิก · ปุ่มคลื่นเสียงข้าง `Fit` · ลากขีดเหนือ Timeline · ใส่ตัวอักษรช่วงที่ยังไม่ตัดคน → `Make video` ต้องขึ้นข้อความแดงให้กด `Cut me out` → กด `Cut me out` รอเขียว → `Make video` อีกครั้ง · ลอง `Picture or clip` · ผ่านแล้วตัดสิน Codex ข้อ 1 แล้วสั่งรวมขึ้นเว็บจริง
 1. **โค้ชลอง 12 ข้อที่แก้บ่าย 6 พ.ย.** บน komoray.com (/edit): อัปคลิปใหม่ติ๊ก Auto zoom → แผง Zoom → รอ `Finding key moments…` → แถบม่วงบน Timeline มีชื่อเป็นช่วง ๆ ช่วงอื่นไม่ซูม → **Make video แล้วดูว่าซูมตรงกับตัวอย่าง** · ลากคลุมช่วง → `Zoom out` · popup ปิดเมื่อคลิกสคริปต์ + ลากมุมยืด · Banner: Top → `Where you dragged it` กลับที่เดิม, คลิกบน Timeline → Delete, x ใน My banners ถามก่อน · Shape 3 รูป · `Back to editing` · สี popup ทั้ง 2 Theme
 2. ทดสอบระบบเชิญด้วย Gmail อีกบัญชี (บัญชี admin ไม่ถูกนับโควตา): หน้ารอคำเชิญ → `Add email` ใน /admin → นาทีเหลือ 60 → อัปคลิปจริงจากมือถือ → popup → `Start` → นาทีลดตรงไหม · **ผ่านแล้วค่อยเพิ่มอีเมล 2 คนที่ขอใช้**
 3. ดูวิดีโอ banner บน iPhone/iPad จริง · คลิปไทยที่ไล่รายการ: Bad takes ตัดเนื้อหาจริงผิดไหม
