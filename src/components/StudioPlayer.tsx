@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { CutoutLayers } from "@/lib/behind";
+import { type CutoutLayers, insertShown } from "@/lib/behind";
 import { createDebugLog, type DebugLog } from "@/lib/debug-log";
 import { StudioEngine, type StudioMedia } from "@/lib/player/engine";
 import { focusFor, framePiece } from "@/lib/framing";
@@ -127,6 +127,12 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 		() => engineRef.current?.setFraming((piece, aspect, out) => framePiece(aspect, focuses[piece] ?? null, zoomAt(Math.round(out * FPS)), size), size.width),
 		[focuses, zoomAt, size, loaded],
 	);
+
+	// The speaker is only drawn apart while a layer is showing: every other frame costs nothing extra.
+	const layers = cutout?.layers;
+	useEffect(() => {
+		engineRef.current?.setPersonWanted((out) => Boolean(layers && (layers.texts.some((t) => out >= t.start && out < t.end) || layers.inserts.some((i) => insertShown(i, out) > 0))));
+	}, [layers, loaded]);
 
 	useImperativeHandle(
 		ref,

@@ -9,6 +9,7 @@ import { type ByteSource, RangeSource } from "./bytes";
 import { type Frame, readVideoTrack, type VideoTrack } from "./mp4";
 import { stretch } from "./stretch";
 import { framePiece, type Rect } from "../framing";
+import { type PersonPainter, personPainter } from "./person";
 import { WIDTH } from "../timeline";
 
 export type Piece = { start: number; end: number; out: number }; // play source [start, end) at final-video time `out`
@@ -58,6 +59,9 @@ export class StudioEngine {
 	private stacked = false;
 	private person: HTMLCanvasElement | null = null;
 	private scratch: HTMLCanvasElement | null = null;
+	private painter: PersonPainter | null | undefined; // undefined: not tried yet; null: this browser can't
+	private personWanted: (out: number) => boolean = () => true;
+	private personShown = false;
 	private pumping = false;
 
 	private ctx: AudioContext | null = null;
@@ -518,6 +522,12 @@ export class StudioEngine {
 		if (this.shownFrame) this.paint(this.shownFrame, this.shownOut);
 	}
 
+	// When the speaker has to be drawn apart at all: only while a text, picture or clip is showing.
+	setPersonWanted(wanted: (out: number) => boolean) {
+		this.personWanted = wanted;
+		if (this.shownFrame) this.paint(this.shownFrame, this.shownOut);
+	}
+
 	private paint(frame: VideoFrame, out: number) {
 		const ctx2d = this.canvas.getContext("2d");
 		if (!ctx2d) return false;
@@ -544,7 +554,15 @@ export class StudioEngine {
 		}
 		// Stacked: drawn twice as tall, the picture fills the box and its matte falls off the bottom edge.
 		ctx2d.drawImage(frame, rect.x * k, rect.y * k, rect.w * k, rect.h * k * (this.stacked ? 2 : 1));
-		if (this.stacked && this.person) this.paintPerson(frame, rect);
+		if (this.stacked && this.person) {
+			if (this.personWanted(out)) {
+				this.personShown = true;
+				this.paintPerson(frame, rect);
+			} else if (this.personShown) {
+				this.personShown = false;
+				this.clearPerson();
+			}
+		}
 		return true;
 	}
 
@@ -553,6 +571,9 @@ export class StudioEngine {
 	// see-through by itself. Like paint, never a source rectangle in drawImage (Safari squashes then).
 	private paintPerson(frame: VideoFrame, rect: Rect) {
 		const person = this.person as HTMLCanvasElement;
+		if (this.painter === undefined) this.painter = personPainter(person, frame);
+		if (this.painter?.draw(frame, rect, this.outWidth)) return;
+		if (this.painter) return; // the graphics card went away for a moment: this canvas can't be drawn the other way
 		const w = Math.round(person.clientWidth);
 		const h = Math.round(person.clientHeight);
 		if (!w || !h) return;
@@ -580,6 +601,12 @@ export class StudioEngine {
 		const px = picture.data;
 		for (let i = 3; i < px.length; i += 4) px[i] = matte[i - 3];
 		pctx.putImageData(picture, 0, 0);
+	}
+
+	private clearPerson() {
+		if (this.painter) return this.painter.clear();
+		const person = this.person;
+		person?.getContext("2d")?.clearRect(0, 0, person.width, person.height);
 	}
 
 	private emitState() {
