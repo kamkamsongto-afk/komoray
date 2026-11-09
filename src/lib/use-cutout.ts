@@ -157,7 +157,11 @@ export function useCutout(key: string | null) {
 			// previewUrl off: proxy-cutout.mp4 is about to be replaced, and a player halfway through reading it would get the other file's bytes.
 			setState((s) => ({ ...s, restoring: tier, previewUrl: undefined, error: undefined }));
 			const res = await fetch("/api/cutout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, windows, tier, restore: true }) }).catch(() => null);
-			if (res?.ok) return void refresh();
+			if (res?.ok) {
+				await refresh();
+				// The look failed: keep looking, or "Switching…" would stay with no preview (Codex review, 10 Nov).
+				return setState((s) => (s.restoring ? { ...s, restoring: undefined, status: "processing" } : s));
+			}
 			setState((s) => ({ ...s, restoring: undefined }));
 			if (tier === "best") return failed("Could not switch to your Slow cutout. Please try again.");
 			if (videoUrl) void startLocal(windows, tier, videoUrl);

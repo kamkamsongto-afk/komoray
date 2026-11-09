@@ -3,7 +3,7 @@ import { accessFor, bestSecondsUsed, chargeBest, lockBest, refundBest } from "@/
 import { covered, type CutoutLayers } from "@/lib/behind";
 import { cleanWindows, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TIERS, CUTOUT_TOO_OLD_MS, type CutoutTier, LOCAL_MATTE, LOCAL_TOO_OLD_MS, LOCAL_RUNS_PER_VIDEO, newSeconds, savedFiles, type Window } from "@/lib/cutout";
 import { mediaUrl } from "@/lib/proxy";
-import { copyObject, deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { copyObject, deleteObject, exists, getJson, putIfAbsent, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // Cut the speaker out of the background for some windows of a video (lib/cutout.ts).
@@ -79,8 +79,34 @@ export async function POST(request: Request) {
 	const windows = cleanWindows(body.windows, edit.duration);
 	if (windows.length === 0) return Response.json({ error: "Pick at least half a second to cut out." }, { status: 400 });
 
+	// One change at a time per video: matte, preview and cutout.json are written in steps, and two changes
+	// interleaving would leave one quality's label on another's files (Codex review, 10 Nov).
+	const unlockVideo = await lockVideo(key);
+	if (!unlockVideo) return Response.json({ error: "Your cutout is changing. Please wait a moment and try again." }, { status: 409 });
+	try {
+		return await changeCutout(key, windows, tier, body.restore === true, access, user?.email);
+	} finally {
+		await unlockVideo();
+	}
+}
+
+// Named by the minute, and the minute before also counts: a lock left by a crash clears itself, and two
+// requests either side of a new minute still can't both get in. null = busy.
+async function lockVideo(key: string) {
+	const minute = Math.floor(Date.now() / 60000);
+	const lock = siblingKey(key, `cutout-lock-${minute}.json`);
+	if (!(await putIfAbsent(lock, "{}", "application/json"))) return null;
+	const unlock = () => deleteObject(lock).catch(() => {});
+	if (await exists(siblingKey(key, `cutout-lock-${minute - 1}.json`))) {
+		await unlock();
+		return null;
+	}
+	return unlock;
+}
+
+async function changeCutout(key: string, windows: Window[], tier: CutoutTier, restore: boolean, access: Awaited<ReturnType<typeof accessFor>>, email?: string | null) {
 	// Switching to a quality already made: no GPU, no seconds, no run used up.
-	if (body.restore === true) {
+	if (restore) {
 		const now = await status(key);
 		if (now.status === "processing") return Response.json({ error: "The cutout is still being made. Please wait for it to finish." }, { status: 409 });
 		const note = await savedCutout(key, tier);
@@ -89,10 +115,10 @@ export async function POST(request: Request) {
 	}
 
 	if (tier === "best") {
-		const unlock = user?.email ? await lockBest(user.email) : null;
+		const unlock = email ? await lockBest(email) : null;
 		if (!unlock) return Response.json({ error: "A cutout is already starting. Please wait a moment." }, { status: 409 });
 		try {
-			return await startBest(key, windows, access, user?.email);
+			return await startBest(key, windows, access, email);
 		} finally {
 			await unlock();
 		}
@@ -137,8 +163,9 @@ async function savedCutout(key: string, tier: CutoutTier) {
 async function bringBack(key: string, tier: CutoutTier, note: Done, now: Awaited<ReturnType<typeof status>>) {
 	const files = cutoutFiles(key);
 	const names = savedFiles(tier);
-	if (now.status === "done" && now.tier !== tier) await keepCurrent(key, now).catch(() => {});
 	try {
+		// Inside the try: if the one in use can't be kept, stop here rather than copy over the only good copy.
+		if (now.status === "done" && now.tier !== tier) await keepCurrent(key, now);
 		await deleteObject(files.done);
 		await Promise.all([copyObject(siblingKey(key, names.matte), files.matte), copyObject(siblingKey(key, names.preview), siblingKey(key, "proxy-cutout.mp4"))]);
 		await deleteObject(files.error);
@@ -158,6 +185,8 @@ async function startBest(key: string, windows: Window[], access: Awaited<ReturnT
 
 	// Everything asked for is already in the kept Best cutout: put it back.
 	if (saved && covered(windows, saved.windows)) return bringBack(key, "best", saved, now);
+	// Already there. Without this it would start a GPU that nobody pays for (the button is off, a forged request isn't).
+	if (current && covered(windows, now.windows)) return Response.json({ status: "done", windows: now.windows });
 
 	if (!access.unlimited && now.runs >= CUTOUT_RUNS_PER_VIDEO) {
 		return Response.json({ error: `This video has been cut out ${CUTOUT_RUNS_PER_VIDEO} times with Slow. Please email hello@komoray.com for more.` }, { status: 429 });

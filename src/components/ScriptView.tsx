@@ -1226,7 +1226,6 @@ export function ScriptView({
 					cutoutLayers={cutoutLayers}
 					onCutoutChange={onCutoutChange}
 					onOpenCutout={(id) => {
-						markCutoutSeen();
 						setFocusCutout(id);
 						openPanel("cutout");
 					}}

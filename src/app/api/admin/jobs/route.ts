@@ -1,3 +1,4 @@
+import { CUTOUT_TIERS, savedFiles } from "@/lib/cutout";
 import { getJson, listObjects, signedUrl, type ObjectInfo } from "@/lib/r2";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
 
@@ -7,7 +8,7 @@ const SHOW_JOBS = 100;
 const SHOW_REPORTS = 100;
 const STUCK_MS = 30 * 60 * 1000; // a step still "working" after 30 minutes has silently died
 const LINK_SECONDS = 3600;
-const OUR_VIDEOS = ["final.mp4", "proxy.mp4"]; // made by us; the folder's other .mp4 or .mov is the upload
+const OUR_VIDEOS = ["final.mp4", "proxy.mp4", "matte.mp4", "proxy-cutout.mp4", ...CUTOUT_TIERS.flatMap((tier) => [savedFiles(tier).matte, savedFiles(tier).preview])]; // made by us; the folder's other .mp4 or .mov is the upload
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
 
