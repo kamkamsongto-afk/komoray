@@ -130,6 +130,7 @@ export default function EditPage() {
 	const [saveError, setSaveError] = useState("");
 	const [translating, setTranslating] = useState<string | null>(null); // what the Translate menu shows while it works
 	const [render, setRender] = useState<RenderState>({ status: "none" });
+	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
 	const [showReady, setShowReady] = useState(false); // the finished-video window: opens by itself when a render finishes
 	const closeReady = useCallback(() => setShowReady(false), []);
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
@@ -222,8 +223,10 @@ export default function EditPage() {
 	useEffect(() => {
 		if (!key || render.status !== "processing") return;
 		const timer = setInterval(async () => {
+			const run = renderRun.current;
 			const res = await fetch(`/api/render?key=${encodeURIComponent(key)}`);
 			const data = (await res.json()) as RenderState;
+			if (run !== renderRun.current) return;
 			if (data.status === "processing" && data.percent !== undefined) setRender((s) => (s.status === "processing" ? { ...s, percent: Math.max(s.percent ?? 0, data.percent ?? 0) } : s));
 			if (data.status === "done" || data.status === "failed") {
 				setRender(data);
@@ -598,6 +601,7 @@ export default function EditPage() {
 			zoomParts: analysis?.zoomParts ?? [],
 			...(analysis?.cutout && { cutout: analysis.cutout }),
 		});
+		renderRun.current += 1;
 		setRender({ status: "processing" });
 		try {
 			if (!(await savingRef.current)) throw new Error("Your edits could not be saved. Please try again.");
