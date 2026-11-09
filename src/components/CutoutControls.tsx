@@ -2,7 +2,7 @@
 
 import { ChevronDown, ChevronRight, ImagePlus, Type, X } from "lucide-react";
 import { useRef, useState } from "react";
-import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, covered, cutoutWindows, type CutoutLayers, INSERT, type Insert, keptWindows } from "@/lib/behind";
+import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, covered, type CutoutLayers, INSERT, type Insert, keptWindows } from "@/lib/behind";
 import { type CutoutTier, newSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
@@ -52,7 +52,6 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const fileRef = useRef<HTMLInputElement>(null);
 
 	const [picked, setPicked] = useState<CutoutTier>("balanced");
-	const need = cutoutWindows(layers, segments);
 	const whole: Window[] = keptWindows(segments);
 	const cutOut = cutout.status === "done";
 	const ready = cutOut && covered(whole, cutout.windows);
