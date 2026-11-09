@@ -388,9 +388,16 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
             parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{fades}")
         else:
             # Moved, turned or resized: the whole picture on black. Same as picturePlace in behind.ts.
+            # Only what can land on the screen is kept, around the picture's middle so its place doesn't change.
+            # At 2.5x and turned, the whole picture took 4.3 GB for three clips, more than this machine has (10 Nov).
+            half_w, half_h = W / 2 + abs(dx), H / 2 + abs(dy)
+            reach = math.ceil(2 * math.hypot(half_w, half_h) / grow) + 2
             angle = f"{turn}*PI/180"
-            rotate = f",rotate={angle}:ow=rotw({angle}):oh=roth({angle}):c=none" if turn else ""
-            parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,scale=iw*{grow}:ih*{grow},format=rgba{rotate}[ipic{j}]")
+            rotate = f",rotate={angle}:ow={2 * math.ceil(half_w)}:oh={2 * math.ceil(half_h)}:c=none" if turn else ""
+            parts.append(
+                f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,format=rgba,"
+                f"crop=w='min(iw,{reach})':h='min(ih,{reach})':exact=1,scale=iw*{grow}:ih*{grow}{rotate}[ipic{j}]"
+            )
             parts.append(f"color=c=black:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[ibg{j}]")
             parts.append(f"[ibg{j}][ipic{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1,{fades}")
         parts.append(f"{base}[ins{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[cbi{j}]")
