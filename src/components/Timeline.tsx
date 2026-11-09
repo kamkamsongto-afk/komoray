@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
+import { AudioWaveform, ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Banner } from "@/lib/banners";
 import type { TakeGroup } from "@/lib/takes";
@@ -51,7 +51,7 @@ const WAVE_TOP = CHIPS_TOP + CHIPS + 6;
 const ZOOM_TOP = WAVE_TOP;
 const ZOOM_STRIP = 16;
 const WAVE = 58;
-const HEIGHT = WAVE_TOP + WAVE + 4;
+const WAVE_SMALL = 16; // the waveform folded away, so the script above has more room (coach, 7 Nov)
 const LANE_ROW = 20; // one row of things shown over the video (banners, later graphics): all in this one lane, stacked only where they overlap
 
 const CHIP_GAP = 0.7; // a pause this long (seconds) starts a new chip
@@ -60,6 +60,7 @@ const MAX_PPS = 300; // most zoomed in: pixels per second
 const START_PPS = 40;
 const TICK_STEPS = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 const SHOW_CUTS = "komoray.timelineCuts"; // remembers the Show cuts switch in this browser
+const SMALL_WAVE = "komoray.timelineSmallWave"; // and whether the waveform is folded away
 const DRAG_PX = 4; // the mouse has to move this far before a press becomes a drag (else it is a click)
 const EDGE_PX = 6; // how close to a picked stretch's edge grabs the edge
 const MIN_PICK = 0.05; // seconds
@@ -129,6 +130,9 @@ export function Timeline({
 	const [viewWidth, setViewWidth] = useState(800);
 	const [pps, setPps] = useState(START_PPS);
 	const [showCuts, setShowCuts] = useState(true);
+	const [smallWave, setSmallWave] = useState(false);
+	const wave = smallWave ? WAVE_SMALL : WAVE;
+	const height = WAVE_TOP + wave + 4;
 	const [peaks, setPeaks] = useState<{ data: Float32Array; version: number } | null>(null);
 	const [openGroup, setOpenGroup] = useState<number | null>(null);
 	// The stretch picked by dragging, in source seconds: cut it or keep it.
@@ -143,10 +147,19 @@ export function Timeline({
 	useEffect(() => {
 		try {
 			if (localStorage.getItem(SHOW_CUTS) === "0") setShowCuts(false);
+			if (localStorage.getItem(SMALL_WAVE) === "1") setSmallWave(true);
 		} catch {
 			// no storage: the switch starts on
 		}
 	}, []);
+	const toggleWave = () => {
+		setSmallWave(!smallWave);
+		try {
+			localStorage.setItem(SMALL_WAVE, smallWave ? "0" : "1");
+		} catch {
+			// not remembered, that's fine
+		}
+	};
 	const toggleCuts = (on: boolean) => {
 		setShowCuts(on);
 		try {
@@ -302,15 +315,15 @@ export function Timeline({
 		if (!canvas || !el) return;
 		const dpr = window.devicePixelRatio || 1;
 		const w = el.clientWidth;
-		if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(HEIGHT * dpr)) {
+		if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(height * dpr)) {
 			canvas.width = Math.round(w * dpr);
-			canvas.height = Math.round(HEIGHT * dpr);
+			canvas.height = Math.round(height * dpr);
 			canvas.style.width = `${w}px`;
 		}
 		const ctx = canvas.getContext("2d");
 		if (!ctx) return;
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-		ctx.clearRect(0, 0, w, HEIGHT);
+		ctx.clearRect(0, 0, w, height);
 		const left = el.scrollLeft;
 		const ink = getComputedStyle(canvas).color;
 
@@ -343,7 +356,7 @@ export function Timeline({
 				const x0 = a * scale - left;
 				const x1 = b * scale - left;
 				if (x1 < 0 || x0 > w) continue;
-				ctx.fillRect(x0, CHIPS_TOP - 2, Math.max(1, x1 - x0), HEIGHT - CHIPS_TOP);
+				ctx.fillRect(x0, CHIPS_TOP - 2, Math.max(1, x1 - x0), height - CHIPS_TOP);
 			}
 			// Cuts changed by hand: a thin amber bar along the bottom.
 			ctx.fillStyle = "rgba(245, 158, 11, 0.9)";
@@ -351,7 +364,7 @@ export function Timeline({
 				const x0 = h.start * scale - left;
 				const x1 = h.end * scale - left;
 				if (x1 < 0 || x0 > w) continue;
-				ctx.fillRect(x0, HEIGHT - 3, Math.max(2, x1 - x0), 3);
+				ctx.fillRect(x0, height - 3, Math.max(2, x1 - x0), 3);
 			}
 		} else {
 			// The joins between kept pieces.
@@ -359,7 +372,7 @@ export function Timeline({
 			ctx.globalAlpha = 0.25;
 			for (const s of segments) {
 				const x = (s.from / FPS) * scale - left;
-				if (x > 0 && x < w) ctx.fillRect(Math.round(x), WAVE_TOP, 1, WAVE);
+				if (x > 0 && x < w) ctx.fillRect(Math.round(x), WAVE_TOP, 1, wave);
 			}
 			ctx.globalAlpha = 1;
 		}
@@ -369,7 +382,7 @@ export function Timeline({
 		if (data) {
 			let loudest = 0.05;
 			for (let i = 0; i < data.length; i += 7) loudest = Math.max(loudest, data[i]);
-			const mid = WAVE_TOP + WAVE / 2;
+			const mid = WAVE_TOP + wave / 2;
 			const keptAt = (t: number) => segments.some((s) => t * FPS >= s.trim && t * FPS < s.trim + s.frames);
 			for (let px = 0; px < w; px++) {
 				const t0 = timeAt(left + px);
@@ -378,14 +391,14 @@ export function Timeline({
 				const b = Math.max(a + 1, Math.floor(Math.max(t0, t1) * PEAKS_PER_SECOND));
 				let v = 0;
 				for (let i = a; i < b && i < data.length; i++) v = Math.max(v, data[i]);
-				const h = Math.max(1, Math.min(1, v / loudest) * (WAVE / 2 - 2));
+				const h = Math.max(1, Math.min(1, v / loudest) * (wave / 2 - 2));
 				ctx.fillStyle = showCuts && !keptAt(t0) ? "rgba(239, 68, 68, 0.45)" : "rgba(37, 99, 235, 0.75)";
 				ctx.fillRect(px, mid - h, 1, h * 2);
 			}
 		} else {
 			ctx.fillStyle = ink;
 			ctx.globalAlpha = 0.08;
-			ctx.fillRect(0, WAVE_TOP, w, WAVE);
+			ctx.fillRect(0, WAVE_TOP, w, wave);
 			ctx.globalAlpha = 1;
 		}
 
@@ -399,7 +412,7 @@ export function Timeline({
 				ctx.fillRect(px, ZOOM_TOP, 1, ZOOM_STRIP);
 			}
 		}
-	}, [scale, showCuts, cutSpans, segments, peaks, timeAt, handSpans, zoomOn, zoomAmount, zoomAt, noZoom]);
+	}, [scale, showCuts, cutSpans, segments, peaks, timeAt, handSpans, zoomOn, zoomAmount, zoomAt, noZoom, wave, height]);
 
 	// Zooming keeps the moment under the mouse (or the playhead) where it was.
 	useLayoutEffect(() => {
@@ -501,7 +514,7 @@ export function Timeline({
 		if (!p) {
 			const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
 			e.currentTarget.style.cursor = y < RULER + 2 ? "default" : nearEdge(x) || cutEdgeAt(x) ? "ew-resize" : "";
-			setOverWave(y >= WAVE_TOP && y <= WAVE_TOP + WAVE);
+			setOverWave(y >= WAVE_TOP && y <= WAVE_TOP + wave);
 			return;
 		}
 		if (!p.moved && Math.abs(x - p.x) < DRAG_PX) return;
@@ -772,6 +785,15 @@ export function Timeline({
 					<button onClick={() => zoomTo(fit)} className="rounded border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5" title="See the whole video">
 						Fit
 					</button>
+					<button
+						onClick={toggleWave}
+						aria-pressed={!smallWave}
+						aria-label={smallWave ? "Show the sound wave" : "Fold the sound wave"}
+						title={smallWave ? "Show the sound wave" : "Fold the sound wave away: more room for the script"}
+						className={`rounded p-1 ${smallWave ? "text-foreground/50 hover:bg-foreground/5 hover:text-foreground" : "bg-foreground/10 text-foreground"}`}
+					>
+						<AudioWaveform className="h-3.5 w-3.5" aria-hidden />
+					</button>
 				</div>
 			</div>
 
@@ -780,8 +802,8 @@ export function Timeline({
 			<div
 				onPointerEnter={() => setOverWave(true)}
 				onPointerLeave={() => setOverWave(false)}
-				className={`absolute left-1/2 z-[3] -translate-x-1/2 items-center gap-0.5 rounded-full border border-foreground/15 bg-background/95 px-1 py-0.5 shadow max-sm:flex [@media(hover:none)]:flex ${overWave ? "flex" : "hidden"}`}
-				style={{ top: WAVE_TOP + WAVE / 2 - 15 }}
+				className={`absolute left-1/2 z-[3] -translate-x-1/2 items-center gap-0.5 rounded-full border border-foreground/15 bg-background/95 px-1 py-0.5 shadow ${smallWave ? "hidden" : "max-sm:flex [@media(hover:none)]:flex"} ${smallWave ? "" : overWave ? "flex" : "hidden"}`}
+				style={{ top: WAVE_TOP + wave / 2 - 15 }}
 			>
 				{(
 					[
@@ -796,6 +818,7 @@ export function Timeline({
 					</button>
 				))}
 			</div>
+			{!smallWave && (
 			<button
 				onClick={onOpenZoom}
 				title="Zoom"
@@ -804,10 +827,11 @@ export function Timeline({
 				className={`absolute left-1 z-[3] flex h-6 w-6 items-center justify-center rounded-full text-xs shadow transition-opacity ${
 					zoomEditing ? "bg-purple-600 text-white" : "bg-background/90 opacity-60 hover:opacity-100"
 				}`}
-				style={{ top: WAVE_TOP + WAVE - 26 }}
+				style={{ top: WAVE_TOP + wave - 26 }}
 			>
 				<ZoomIn className="h-3 w-3 shrink-0" aria-hidden />
 			</button>
+			)}
 			<div
 				ref={scrollRef}
 				onScroll={() => {
@@ -826,10 +850,10 @@ export function Timeline({
 					if (chip) setSelection({ start: chip.start, end: chip.end });
 				}}
 				className="relative cursor-text overflow-x-auto overflow-y-hidden text-foreground select-none"
-				style={{ height: HEIGHT + laneHeight + 12, touchAction: "pan-x" }}
+				style={{ height: height + laneHeight + 12, touchAction: "pan-x" }}
 			>
-				<div className="relative" style={{ width, height: HEIGHT + laneHeight }}>
-					<canvas ref={canvasRef} className="sticky left-0 block" style={{ height: HEIGHT }} />
+				<div className="relative" style={{ width, height: height + laneHeight }}>
+					<canvas ref={canvasRef} className="sticky left-0 block" style={{ height: height }} />
 					{chips.map((c, i) => {
 						if (c.gone && !showCuts) return null;
 						const x0 = xOf(c.start);
@@ -856,7 +880,7 @@ export function Timeline({
 							<div
 								key={b.id}
 								className={`absolute z-[1] flex rounded ${picked ? "ring-2 ring-fuchsia-600 ring-offset-1 ring-offset-background" : ""}`}
-								style={{ left: x0, width: x1 - x0 - 1, top: HEIGHT + row * LANE_ROW, height: LANE_ROW - 2 }}
+								style={{ left: x0, width: x1 - x0 - 1, top: height + row * LANE_ROW, height: LANE_ROW - 2 }}
 							>
 								<button onPointerDown={(e) => startBannerDrag(e, b, "start")} aria-label={`When ${b.text} starts`} title="Drag to change when it starts" className="w-1.5 shrink-0 cursor-ew-resize touch-none rounded-l bg-fuchsia-500/70" />
 								<button
@@ -900,7 +924,7 @@ export function Timeline({
 								</div>
 							);
 						})}
-					{mark !== null && <div className="pointer-events-none absolute top-0 z-[1] w-0.5 bg-amber-500" style={{ left: xOf(mark), height: HEIGHT }} />}
+					{mark !== null && <div className="pointer-events-none absolute top-0 z-[1] w-0.5 bg-amber-500" style={{ left: xOf(mark), height: height }} />}
 					{groups.map((g, i) => {
 						const kept = g.takes.find(isKept) ?? g.takes[g.takes.length - 1];
 						const x = xOf(words[kept.from].start);
@@ -927,7 +951,7 @@ export function Timeline({
 								left: Math.min(edge.to, edge.side === "start" ? edge.cut[0] : edge.cut[1]) * scale,
 								width: Math.max(2, Math.abs(edge.to - (edge.side === "start" ? edge.cut[0] : edge.cut[1])) * scale),
 								top: CHIPS_TOP - 3,
-								height: HEIGHT - CHIPS_TOP + 3,
+								height: height - CHIPS_TOP + 3,
 							}}
 						/>
 					)}
@@ -938,11 +962,11 @@ export function Timeline({
 								left: xOf(selection.start),
 								width: Math.max(2, xOf(selection.end) - xOf(selection.start)),
 								top: CHIPS_TOP - 3,
-								height: HEIGHT - CHIPS_TOP + 3,
+								height: height - CHIPS_TOP + 3,
 							}}
 						/>
 					)}
-					<div ref={headRef} className="pointer-events-none absolute top-0 left-0 z-[2]" style={{ height: HEIGHT }}>
+					<div ref={headRef} className="pointer-events-none absolute top-0 left-0 z-[2]" style={{ height: height }}>
 						<div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[5px] border-t-[7px] border-x-transparent border-t-blue-600" />
 						<div className="absolute -left-px top-0 h-full w-0.5 bg-blue-600" />
 					</div>
