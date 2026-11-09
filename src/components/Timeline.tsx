@@ -8,6 +8,7 @@ import type { TakeGroup } from "@/lib/takes";
 import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
 import { PART_ZOOMS, type PartZoom, ZOOM_NAMES, type ZoomPart, type ZoomStyle, zoomTrack } from "@/lib/zoom";
+import { ConfirmDelete } from "./ConfirmDelete";
 
 type Word = { text: string; start: number; end: number };
 // A word as the script draws it (a fixed run of words is one item, with the new text).
@@ -249,6 +250,17 @@ export function Timeline({
 			else onCutoutChange({ ...cutoutLayers, inserts: apply(cutoutLayers.inserts) });
 		},
 		[banners, cutoutLayers, onBannersChange, onCutoutChange],
+	);
+	// Text behind you, pictures and clips ask first (coach, 9 Nov).
+	const [removing, setRemoving] = useState<LaneItem | null>(null);
+	const closeRemoving = useCallback(() => setRemoving(null), []);
+	const removeItem = useCallback(
+		(item: LaneItem) => {
+			if (item.kind === "banner") changeItem(item, null);
+			else setRemoving(item);
+			setPickedItem(null);
+		},
+		[changeItem],
 	);
 	const startItemDrag = (e: PointerEvent<HTMLElement>, b: LaneItem, resize: false | "start" | "end") => {
 		e.stopPropagation();
@@ -642,13 +654,12 @@ export function Timeline({
 			if (e.key === "Escape" || !item) setPickedItem(null);
 			else if ((e.key === "Delete" || e.key === "Backspace") && window.getSelection()?.isCollapsed !== false) {
 				e.preventDefault();
-				changeItem(item, null);
-				setPickedItem(null);
+				removeItem(item);
 			}
 		};
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [pickedItem, lane, changeItem]);
+	}, [pickedItem, lane, removeItem]);
 
 	// Delete / Backspace cuts the picked stretch, Esc lets it go (not while typing or with script words highlighted).
 	useEffect(() => {
@@ -933,10 +944,7 @@ export function Timeline({
 								{picked && (
 									<button
 										onPointerDown={(e) => e.stopPropagation()}
-										onClick={() => {
-											changeItem(b, null);
-											setPickedItem(null);
-										}}
+										onClick={() => removeItem(b)}
 										aria-label={`Remove ${b.label}`}
 										title={`Remove this ${look.name} (Delete)`}
 										className="flex w-4 shrink-0 items-center justify-center bg-red-600 text-white hover:bg-red-700"
@@ -1057,6 +1065,16 @@ export function Timeline({
 					</ul>
 					<p className="mt-2 text-xs text-foreground/50">The takes you don&apos;t keep are cut. Ctrl+Z undoes.</p>
 				</div>
+			)}
+			{removing && (
+				<ConfirmDelete
+					name={removing.kind === "text" ? `"${removing.label}"` : `this ${removing.label.toLowerCase()}`}
+					onCancel={closeRemoving}
+					onConfirm={() => {
+						changeItem(removing, null);
+						closeRemoving();
+					}}
+				/>
 			)}
 		</div>
 	);

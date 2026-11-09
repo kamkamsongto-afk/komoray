@@ -208,7 +208,7 @@ async function matteEncoder(w: number, h: number, bitrate: number, fail: (error:
 			};
 		}
 	}
-	throw new Error("This browser can't save the cutout. Please choose Best.");
+	throw new Error("This browser can't save the cutout. Please choose Slow.");
 }
 
 // The runs of frames inside the windows: [first, past the last).

@@ -17,6 +17,8 @@ import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { type ControlSection, SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
 import { CutoutControls } from "./CutoutControls";
+import { clock } from "@/lib/cutout";
+import { waitLabel } from "@/lib/use-cutout";
 import { AudioControls } from "./AudioControls";
 import { Timeline } from "./Timeline";
 import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
@@ -279,22 +281,27 @@ export function ScriptView({
 	// The dot on the Cutout button: a finished cutout nobody has looked at yet, also after coming back to the page.
 	const cutoutBusy = cutout.status === "processing" || Boolean(cutout.local);
 	const seenKey = `komoray.cutoutSeen.${cutout.version ?? ""}`;
-	useEffect(() => {
-		if (panel !== "cutout" || !cutout.version) return;
+	const [seenNow, setSeenNow] = useState<string | null>(null);
+	// Only a press on the button counts as seen. Counting an open box hid the dot from everyone who
+	// waited with the box open, which is nearly everyone (coach, 9 Nov).
+	const markCutoutSeen = () => {
+		if (!cutout.version || cutout.status !== "done") return;
+		setSeenNow(cutout.version);
 		try {
 			localStorage.setItem(seenKey, "1");
 		} catch {
-			// no storage: the dot comes back after closing the panel
+			// no storage: the dot comes back on the next visit
 		}
-	}, [panel, cutout.version, seenKey]);
+	};
 	const cutoutNews = useMemo(() => {
-		if (cutout.status !== "done" || !cutout.version || panel === "cutout") return false;
+		if (cutout.status !== "done" || !cutout.version || seenNow === cutout.version) return false;
 		try {
 			return !localStorage.getItem(seenKey);
 		} catch {
 			return true;
 		}
-	}, [cutout.status, cutout.version, panel, seenKey]);
+	}, [cutout.status, cutout.version, seenNow, seenKey]);
+	const cutoutWait = waitLabel(cutout);
 	// Don't start the <video> player for a moment only to swap it for ours.
 	const deciding = Boolean(studio) && canStudio === null;
 	const segments = useMemo(
@@ -745,7 +752,13 @@ export function ScriptView({
 					className="flex flex-col gap-3 [--player-h:42vh] lg:sticky lg:top-4 lg:z-30 lg:order-3 lg:[--player-h:max(15rem,calc(100vh-14rem))]"
 				>
 					<div className="flex flex-col gap-2 lg:flex-row lg:items-start">
-					<div ref={playerAreaRef} className="min-w-0 flex-1">
+					<div ref={playerAreaRef} className="relative min-w-0 flex-1">
+					{/* Over the video, where people look when their text is still in front. */}
+					{mode === "preview" && cutoutWait && (
+						<div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center px-2">
+							<span className="rounded-full bg-black/75 px-3 py-1 text-xs text-white tabular-nums">Cutting you out · {cutoutWait}</span>
+						</div>
+					)}
 					{mode === "preview" && deciding ? (
 						<div
 							className="mx-auto w-full rounded-lg bg-black"
@@ -824,7 +837,10 @@ export function ScriptView({
 									role="tab"
 									aria-selected={panel === p.id}
 									title={p.name}
-									onClick={() => setPanel(panel === p.id ? null : p.id)}
+									onClick={() => {
+										if (p.id === "cutout") markCutoutSeen();
+										setPanel(panel === p.id ? null : p.id);
+									}}
 									className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-3 ${
 										panel === p.id ? "bg-foreground text-background" : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
 									}`}
@@ -832,9 +848,9 @@ export function ScriptView({
 									<span className="relative">
 										<p.icon className="h-[18px] w-[18px]" aria-hidden />
 										{p.id === "cutout" && cutoutBusy && <span title="Cutting you out" className="absolute -top-1 -right-1 h-2 w-2 animate-pulse rounded-full bg-blue-500" />}
-										{p.id === "cutout" && cutoutNews && <span title="Your cutout is ready" className="absolute -top-1 -right-1 h-2.5 w-2.5 animate-pulse rounded-full bg-green-500 ring-2 ring-background" />}
+										{p.id === "cutout" && cutoutNews && <span title="Your cutout is ready" className="absolute -top-1.5 -right-1.5 h-3 w-3 animate-pulse rounded-full bg-green-500 ring-2 ring-background" />}
 									</span>
-									{p.name}
+									{p.id === "cutout" && cutout.timeLeft !== null && cutout.timeLeft > 0 ? <span className="tabular-nums">{clock(cutout.timeLeft)}</span> : p.name}
 								</button>
 							))}
 						<button
@@ -1210,6 +1226,7 @@ export function ScriptView({
 					cutoutLayers={cutoutLayers}
 					onCutoutChange={onCutoutChange}
 					onOpenCutout={(id) => {
+						markCutoutSeen();
 						setFocusCutout(id);
 						openPanel("cutout");
 					}}

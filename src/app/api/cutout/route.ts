@@ -40,7 +40,7 @@ async function status(key: string) {
 		await putObject(jobKey, JSON.stringify({ ...job, settled: true } satisfies Job), "application/json");
 	}
 	if (failure) return { status: "failed" as const, windows: job?.windows ?? [], runs, localRuns, error: failure.error ?? "The cutout failed" };
-	if (running) return { status: "processing" as const, windows: job.windows, runs, localRuns, tier: job.local ?? ("best" as const) };
+	if (running) return { status: "processing" as const, windows: job.windows, runs, localRuns, tier: job.local ?? ("best" as const), startedAt: job.startedAt };
 	return { status: "none" as const, windows: [] as Window[], runs, localRuns };
 }
 
@@ -104,7 +104,7 @@ async function startBest(key: string, windows: Window[], access: Awaited<ReturnT
 	if (now.status === "processing") return Response.json({ error: "The cutout is still being made. Please wait for it to finish." }, { status: 409 });
 	const files = cutoutFiles(key);
 	if (!access.unlimited && now.runs >= CUTOUT_RUNS_PER_VIDEO) {
-		return Response.json({ error: `This video has been cut out ${CUTOUT_RUNS_PER_VIDEO} times with Best. Please email hello@komoray.com for more.` }, { status: 429 });
+		return Response.json({ error: `This video has been cut out ${CUTOUT_RUNS_PER_VIDEO} times with Slow. Please email hello@komoray.com for more.` }, { status: 429 });
 	}
 
 	// What the last Best cutout made is kept and not charged again. A Fast or Balanced matte is never reused.
@@ -113,7 +113,7 @@ async function startBest(key: string, windows: Window[], access: Awaited<ReturnT
 	let usageKey: string | undefined;
 	if (!access.unlimited && email) {
 		const left = access.features.cutout.seconds - (await bestSecondsUsed(email));
-		if (charged > left + 0.05) return Response.json({ error: `Best needs ${charged} seconds and you have ${Math.max(0, Math.floor(left))} left this month. Try Fast or Balanced.` }, { status: 402 });
+		if (charged > left + 0.05) return Response.json({ error: `Slow needs ${charged} seconds and you have ${Math.max(0, Math.floor(left))} left this month. Try Fast or Normal.` }, { status: 402 });
 		usageKey = await chargeBest(email, key, charged);
 	}
 
@@ -136,7 +136,7 @@ async function startBest(key: string, windows: Window[], access: Awaited<ReturnT
 		await putObject(files.job, JSON.stringify({ startedAt: new Date().toISOString(), windows, runs: now.runs + 1, localRuns: now.localRuns, usageKey, charged } satisfies Job), "application/json");
 	} catch {
 		if (usageKey) await refundBest(usageKey, charged).catch(() => {});
-		return Response.json({ error: "Could not start the cutout. Your Best seconds are back. Please try again." }, { status: 502 });
+		return Response.json({ error: "Could not start the cutout. Your Slow seconds are back. Please try again." }, { status: 502 });
 	}
 	await Promise.all([deleteObject(files.done), deleteObject(files.error)]);
 

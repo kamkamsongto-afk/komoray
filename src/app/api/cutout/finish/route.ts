@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 	const size = Number(head?.headers.get("Content-Range")?.split("/")[1] ?? 0);
 	await head?.body?.cancel().catch(() => {});
 	if (!size) return Response.json({ error: "The cutout didn't reach us. Please try again." }, { status: 400 });
-	if (size > LOCAL_MATTE_MAX_BYTES) return Response.json({ error: "The cutout is too big. Please try Fast or Best." }, { status: 400 });
+	if (size > LOCAL_MATTE_MAX_BYTES) return Response.json({ error: "The cutout is too big. Please try Fast or Slow." }, { status: 400 });
 
 	await putObject(jobKey, JSON.stringify({ ...job, startedAt: new Date().toISOString() }), "application/json");
 	const env = getCloudflareContext().env as unknown as FinishEnv;

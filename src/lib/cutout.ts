@@ -57,3 +57,17 @@ export function newSeconds(wins: Window[], before: Window[]) {
 }
 
 export const windowSeconds = (wins: Window[]) => Math.round(wins.reduce((sum, [a, b]) => sum + (b - a), 0) * 10) / 10;
+
+export function clock(seconds: number) {
+	const whole = Math.ceil(Math.max(0, seconds));
+	return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+// Roughly how long Slow (tier "best") takes, for the countdown: the GPU reports no progress, so this is an
+// estimate. Machine start + 4.5 s of model time per second of video (measured 9 Nov: 0.144 s a frame at 30 fps),
+// shared like split_parts in modal_app/cutout.py (PART_SECONDS, MAX_PARTS) + putting the files together.
+export function slowSeconds(wins: Window[]) {
+	const seconds = windowSeconds(wins);
+	const machines = Math.min(4, Math.max(1, Math.ceil(seconds / 45)));
+	return 180 + (4.5 * seconds) / machines + 30;
+}

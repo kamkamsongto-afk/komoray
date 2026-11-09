@@ -238,7 +238,7 @@ export default function AdminPage() {
 											>
 												{CUTOUT_SECONDS.map((s) => (
 													<option key={s} value={s}>
-														{s / 60} min Best / month
+														{s / 60} min Slow / month
 													</option>
 												))}
 											</select>
