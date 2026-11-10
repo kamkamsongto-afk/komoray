@@ -78,8 +78,8 @@ export function BetaWelcome({ access }: { access: AccessStatus }) {
 	}
 
 	const limits = [
-		[`${access.limit} minutes a month`, `Counted from your original video's length. You have ${access.left} left, renewing on ${access.resets}.`],
-		[`Up to ${access.perVideo} minutes per video`, "MP4 or MOV, up to 500 MB."],
+		[`${access.limit} minutes for the whole beta`, `Counted from your original video's length. You have ${access.left} left.`],
+		[`Up to ${access.perVideo} minutes per video`, `MP4 or MOV, up to ${access.maxGb} GB.`],
 		["Videos are deleted after 14 days", "Download what you want to keep."],
 		["If Find silences fails on a new video, your minutes come back", "Deleting a video doesn't give its minutes back."],
 	];

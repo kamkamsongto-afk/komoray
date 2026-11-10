@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MAX_FILE_GB } from "@/lib/limits";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
 
@@ -54,7 +55,7 @@ export default function PhonePage() {
 				</div>
 			) : (
 				<>
-					<p className="text-foreground/70">Pick a video from your phone. MP4 or MOV, up to 500 MB. It goes straight to your computer.</p>
+					<p className="text-foreground/70">Pick a video from your phone. MP4 or MOV, up to {MAX_FILE_GB} GB. It goes straight to your computer.</p>
 					<label
 						className={`flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-foreground/20 p-10 text-center ${
 							status === "uploading" ? "opacity-50" : "cursor-pointer active:bg-foreground/5"

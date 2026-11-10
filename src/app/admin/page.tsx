@@ -7,6 +7,7 @@ import { ActivityTable } from "@/components/ActivityTable";
 import type { Activity } from "@/lib/admin-activity";
 import { CUTOUT_ON } from "@/lib/cutout";
 import { CUTOUT_SECONDS, type Features } from "@/lib/features";
+import { BETA_MINUTES } from "@/lib/limits";
 
 type Step = { status: "not started" | "working" | "done" | "failed" | "stuck"; at?: string; error?: string };
 type Job = {
@@ -33,7 +34,6 @@ const BADGE: Record<Step["status"], string> = {
 	failed: "bg-red-600/15 text-red-600",
 	stuck: "bg-orange-500/15 text-orange-600",
 };
-const MINUTES_PER_MONTH = 60; // shown next to each person; the rule itself is in lib/access.ts
 
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : "");
 const mb = (bytes = 0) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -244,7 +244,7 @@ export default function AdminPage() {
 												))}
 											</select>
 										)}
-										{p.used} of {MINUTES_PER_MONTH} min this month
+										{p.used} of {BETA_MINUTES} beta min used
 										<DeleteButton label={`Take the invite back from ${p.email}`} onClick={() => removeInvite(p.email)} />
 									</span>
 								</li>

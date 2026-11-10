@@ -10,6 +10,7 @@ import { UploadWorking } from "@/components/UploadWorking";
 import { WaitingForInvite } from "@/components/WaitingForInvite";
 import type { AccessStatus } from "@/lib/access";
 import { browserLanguage, isLanguage } from "@/lib/languages";
+import { MAX_FILE_GB } from "@/lib/limits";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
 import { DEFAULT_OPTIONS, type UploadOptions as Options } from "@/lib/upload-options";
@@ -42,7 +43,7 @@ function minutesIn(file: File) {
 function tooLongFor(minutes: number | null, access: Access) {
 	if (minutes === null) return null;
 	if (minutes > access.perVideo) return `This video is ${minutes} minutes long. During the beta, each video can be up to ${access.perVideo} minutes.`;
-	if (minutes > access.left) return `This video needs ${minutes} minutes and you have ${access.left} left this month. Your minutes renew on ${access.resets}.`;
+	if (minutes > access.left) return `This video needs ${minutes} minutes and you have ${access.left} of your beta minutes left.`;
 	return null;
 }
 
@@ -274,11 +275,10 @@ export default function UploadPage() {
 			<AccountBar user={user} />
 			<h1 className="text-3xl font-bold tracking-tight">Upload a video</h1>
 			<p className="text-foreground/70">
-				MP4 or MOV, up to 500 MB{access && !access.unlimited && ` and ${access.perVideo} minutes`}.
+				MP4 or MOV, up to {MAX_FILE_GB} GB{access && !access.unlimited && ` and ${access.perVideo} minutes`}.
 				{access && !access.unlimited && (
 					<span className="mt-1 block font-medium text-foreground">
-						{access.left} of {access.limit} minutes left this month
-						<span className="font-normal text-foreground/60"> · renews {access.resets}</span>
+						{access.left} of {access.limit} beta minutes left
 					</span>
 				)}
 			</p>
