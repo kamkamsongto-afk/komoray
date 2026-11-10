@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, ImagePlus, Plus, Type, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ImagePlus, Plus, Sparkles, Type, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, covered, type CutoutLayers, INSERT, type Insert, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
@@ -45,7 +45,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
 	// Two lists instead of one long mixed one (coach, 9 Nov).
-	const [tab, setTab] = useState<"text" | "inserts">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
+	const [tab, setTab] = useState<"text" | "inserts" | "motion">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
 	if (focus !== focused) {
 		setFocused(focus);
 		setOpen(focus);
@@ -271,20 +271,24 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				)}
 			</div>
 
-			<div role="tablist" aria-label="Cutout layers" className="grid grid-cols-2 gap-1 rounded-lg bg-foreground/5 p-0.5">
+			<div role="tablist" aria-label="Cutout layers" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
 				{(
 					[
-						["text", Type, "Text behind you", layers.texts.length],
-						["inserts", ImagePlus, "Picture or clip", layers.inserts.length],
+						["text", Type, "Text behind", layers.texts.length],
+						["inserts", ImagePlus, "Pic/Clip", layers.inserts.length],
+						["motion", Sparkles, "Motion", 0],
 					] as const
 				).map(([id, Icon, name, count]) => (
-					<button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-sm ${tab === id ? "bg-background font-medium shadow-sm" : "text-foreground/70 hover:text-foreground"}`}>
+					// A light blue frame says which one is open, in both themes (coach, 10 Nov).
+					<button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`inline-flex items-center justify-center gap-1 rounded-md px-1.5 py-1 text-sm whitespace-nowrap ${tab === id ? "bg-blue-400/15 font-medium text-foreground ring-1 ring-inset ring-blue-400" : "text-foreground/70 hover:text-foreground"}`}>
 						<Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /> {name}
 						{count > 0 && <span className="text-xs text-foreground/50 tabular-nums">{count}</span>}
 					</button>
 				))}
 			</div>
 			{notice && <p className="text-xs text-red-500">{notice}</p>}
+
+			{tab === "motion" && <p className="rounded-lg border border-dashed border-foreground/20 p-3 text-center text-xs text-foreground/60">Motion templates are coming soon.</p>}
 
 			{tab === "text" && (
 				<button onClick={addText} disabled={layers.texts.length >= BEHIND.maxItems} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
