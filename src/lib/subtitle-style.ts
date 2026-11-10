@@ -1,7 +1,7 @@
 // How the subtitles look. Saved in edit.json as "style" and sent to Modal, which reads the same
 // names (DEFAULT_STYLE, FONTS and LOOKS in modal_app/render.py). Sizes are px on the 1080x1920 frame.
 export type Look = "clean" | "box" | "highlight" | "big" | "two";
-export type FontId = "kanit" | "prompt" | "mitr" | "sarabun" | "chakra" | "poppins" | "anton" | "bebas";
+export type FontId = "kanit" | "prompt" | "mitr" | "sarabun" | "chakra" | "poppins" | "anton" | "bebas" | "itim" | "sriracha" | "pattaya" | "chonburi" | "charm" | "mali" | "baijam" | "k2d" | "krub" | "kodchasan" | "trirong" | "maitree" | "bangers" | "pacifico" | "lobster" | "abril" | "alfaslab" | "righteous" | "archivo" | "titan";
 import type { OwnFont } from "./font-info";
 import { type Motion, MOTIONS } from "./motion";
 
@@ -116,7 +116,7 @@ export const LIMITS = {
 	zoomAmount: { min: 1.04, max: 1.3, step: 0.01 },
 	zoomPeriod: { min: 6, max: 24, step: 1 },
 	letterSpacing: { min: 0, max: 30, step: 1 },
-	lineSpacing: { min: 0, max: 80, step: 2 },
+	lineSpacing: { min: -40, max: 80, step: 2 }, // below 0: the two rows closer than usual
 	boxRadius: { min: 0, max: 60, step: 2 },
 	boxOpacity: { min: 0.05, max: 1, step: 0.05 },
 	audioAmount: { min: 0, max: 1, step: 0.05 },
@@ -152,6 +152,26 @@ export const FONTS: Record<FontId, { name: string; thai: boolean; height: number
 	poppins: { name: "Poppins", thai: false, height: 1.762 },
 	anton: { name: "Anton", thai: false, height: 1.733 },
 	bebas: { name: "Bebas Neue", thai: false, height: 1.3 },
+	itim: { name: "Itim", thai: true, height: 1.2 },
+	sriracha: { name: "Sriracha", thai: true, height: 1.77 },
+	pattaya: { name: "Pattaya", thai: true, height: 1.388 },
+	chonburi: { name: "Chonburi", thai: true, height: 1.2 },
+	charm: { name: "Charm", thai: true, height: 2.353 },
+	mali: { name: "Mali", thai: true, height: 2.122 },
+	baijam: { name: "Bai Jamjuree", thai: true, height: 1.786 },
+	k2d: { name: "K2D", thai: true, height: 1.916 },
+	krub: { name: "Krub", thai: true, height: 1.739 },
+	kodchasan: { name: "Kodchasan", thai: true, height: 1.788 },
+	trirong: { name: "Trirong", thai: true, height: 1.734 },
+	maitree: { name: "Maitree", thai: true, height: 1.65 },
+	bangers: { name: "Bangers", thai: false, height: 1.757 },
+	pacifico: { name: "Pacifico", thai: false, height: 1.935 },
+	lobster: { name: "Lobster", thai: false, height: 1.49 },
+	abril: { name: "Abril Fatface", thai: false, height: 1.349 },
+	alfaslab: { name: "Alfa Slab One", thai: false, height: 1.565 },
+	righteous: { name: "Righteous", thai: false, height: 1.242 },
+	archivo: { name: "Archivo Black", thai: false, height: 1.347 },
+	titan: { name: "Titan One", thai: false, height: 1.145 },
 };
 
 // None of FONTS has Russian-style letters, so text with them is drawn in this one instead of a system

@@ -1,7 +1,9 @@
 // Deepgram writes Thai in pieces of words, sometimes single letters or tone marks ("ผู" "้" "หญิง").
-// Here the pieces are joined back into real Thai words with the dictionary every browser and
-// Cloudflare already have (Intl.Segmenter), so the script, word fixes and subtitles work on words.
+// Here the pieces are joined back into real Thai words with newmm (lib/newmm.ts), so the script, word fixes
+// and subtitles work on words. Not Intl.Segmenter: it cut spoken Thai too small ("วัน|นี้", "ผู้|หญิง").
 // Pieces are only ever joined, never split, and each word keeps its first piece's start and last piece's end.
+
+import { cutThaiWords } from "./newmm";
 
 type Word = { text: string; start: number; end: number };
 
@@ -10,27 +12,14 @@ const RUN_GAP = 0.3; // pieces further apart than this (seconds) are never one w
 
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
-let segmenter: Intl.Segmenter | null | undefined;
-function thaiSegmenter() {
-	if (segmenter === undefined) {
-		try {
-			segmenter = new Intl.Segmenter("th", { granularity: "word" });
-		} catch {
-			segmenter = null; // no Thai dictionary here: leave the pieces as they are
-		}
-	}
-	return segmenter;
-}
-
 // For each word: the positions (in `words`) of the pieces it was made from.
 export function thaiWordGroups(words: Word[]): number[][] {
 	const groups: number[][] = [];
-	const seg = thaiSegmenter();
 	let i = 0;
 	while (i < words.length) {
 		// A run: Thai pieces right after one another.
 		let j = i;
-		if (seg && THAI.test(words[i].text)) {
+		if (THAI.test(words[i].text)) {
 			while (j + 1 < words.length && THAI.test(words[j + 1].text) && words[j + 1].start - words[j].end <= RUN_GAP) j++;
 		}
 		if (j === i) {
@@ -40,7 +29,8 @@ export function thaiWordGroups(words: Word[]): number[][] {
 		const texts = words.slice(i, j + 1).map((w) => fixThai(w.text));
 		const text = texts.join("");
 		const cuts = new Set<number>();
-		for (const s of seg!.segment(text)) cuts.add(s.index);
+		let end = 0;
+		for (const word of cutThaiWords(text)) cuts.add((end += word.length));
 		// Keep a break between two pieces only where the dictionary also puts one.
 		let group = [i];
 		let offset = 0;

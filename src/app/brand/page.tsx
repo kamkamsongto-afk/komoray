@@ -122,7 +122,7 @@ export default function BrandPage() {
 							{status === "failed" && <span className="text-sm text-red-600">Could not save. Please try again.</span>}
 						</div>
 						<p className="text-xs text-foreground/60">
-							English-only fonts (Poppins, Anton, Bebas Neue) are skipped for Thai videos, which use Kanit instead.
+							English-only fonts are skipped for Thai videos, which use Kanit instead.
 						</p>
 					</div>
 				</div>

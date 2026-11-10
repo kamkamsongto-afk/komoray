@@ -49,6 +49,26 @@ image = (
                 ("poppins", "Poppins-SemiBold.ttf"),
                 ("anton", "Anton-Regular.ttf"),
                 ("bebasneue", "BebasNeue-Regular.ttf"),
+                ("itim", "Itim-Regular.ttf"),
+                ("sriracha", "Sriracha-Regular.ttf"),
+                ("pattaya", "Pattaya-Regular.ttf"),
+                ("chonburi", "Chonburi-Regular.ttf"),
+                ("charm", "Charm-Bold.ttf"),
+                ("mali", "Mali-SemiBold.ttf"),
+                ("baijamjuree", "BaiJamjuree-SemiBold.ttf"),
+                ("k2d", "K2D-SemiBold.ttf"),
+                ("krub", "Krub-SemiBold.ttf"),
+                ("kodchasan", "Kodchasan-SemiBold.ttf"),
+                ("trirong", "Trirong-SemiBold.ttf"),
+                ("maitree", "Maitree-SemiBold.ttf"),
+                ("bangers", "Bangers-Regular.ttf"),
+                ("pacifico", "Pacifico-Regular.ttf"),
+                ("lobster", "Lobster-Regular.ttf"),
+                ("abrilfatface", "AbrilFatface-Regular.ttf"),
+                ("alfaslabone", "AlfaSlabOne-Regular.ttf"),
+                ("righteous", "Righteous-Regular.ttf"),
+                ("archivoblack", "ArchivoBlack-Regular.ttf"),
+                ("titanone", "TitanOne-Regular.ttf"),
                 ("firasans", "FiraSans-Medium.ttf"),
             ]
         ],
@@ -82,6 +102,26 @@ FONTS = {
     "poppins": "Poppins SemiBold",
     "anton": "Anton",
     "bebas": "Bebas Neue",
+    "itim": "Itim",
+    "sriracha": "Sriracha",
+    "pattaya": "Pattaya",
+    "chonburi": "Chonburi",
+    "charm": "Charm",
+    "mali": "Mali SemiBold",
+    "baijam": "Bai Jamjuree SemiBold",
+    "k2d": "K2D SemiBold",
+    "krub": "Krub SemiBold",
+    "kodchasan": "Kodchasan SemiBold",
+    "trirong": "Trirong SemiBold",
+    "maitree": "Maitree SemiBold",
+    "bangers": "Bangers",
+    "pacifico": "Pacifico",
+    "lobster": "Lobster",
+    "abril": "Abril Fatface",
+    "alfaslab": "Alfa Slab One",
+    "righteous": "Righteous",
+    "archivo": "Archivo Black",
+    "titan": "Titan One",
 }
 # None of FONTS has Russian-style letters: text with them uses this one, or libass picks a system font
 # (too big, words nearly touching). Same as CYRILLIC_FONT in src/lib/subtitle-style.ts.
@@ -101,6 +141,26 @@ FONT_FILES = {
     "poppins": ("Poppins-SemiBold.ttf", 1.762),
     "anton": ("Anton-Regular.ttf", 1.733),
     "bebas": ("BebasNeue-Regular.ttf", 1.3),
+    "itim": ("Itim-Regular.ttf", 1.2),
+    "sriracha": ("Sriracha-Regular.ttf", 1.77),
+    "pattaya": ("Pattaya-Regular.ttf", 1.388),
+    "chonburi": ("Chonburi-Regular.ttf", 1.2),
+    "charm": ("Charm-Bold.ttf", 2.353),
+    "mali": ("Mali-SemiBold.ttf", 2.122),
+    "baijam": ("BaiJamjuree-SemiBold.ttf", 1.786),
+    "k2d": ("K2D-SemiBold.ttf", 1.916),
+    "krub": ("Krub-SemiBold.ttf", 1.739),
+    "kodchasan": ("Kodchasan-SemiBold.ttf", 1.788),
+    "trirong": ("Trirong-SemiBold.ttf", 1.734),
+    "maitree": ("Maitree-SemiBold.ttf", 1.65),
+    "bangers": ("Bangers-Regular.ttf", 1.757),
+    "pacifico": ("Pacifico-Regular.ttf", 1.935),
+    "lobster": ("Lobster-Regular.ttf", 1.49),
+    "abril": ("AbrilFatface-Regular.ttf", 1.349),
+    "alfaslab": ("AlfaSlabOne-Regular.ttf", 1.565),
+    "righteous": ("Righteous-Regular.ttf", 1.242),
+    "archivo": ("ArchivoBlack-Regular.ttf", 1.347),
+    "titan": ("TitanOne-Regular.ttf", 1.145),
 }
 LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or logo in a corner (LOGO in PlayerFrame.tsx)
 
@@ -254,6 +314,7 @@ RUN_SPEED = {"slow": 150, "normal": 300, "fast": 600}
 ARRIVE_TIME = {"slow": 1.6, "normal": 1, "fast": 0.6}
 RUN_GAP = "   •   "
 INSERT_FADE = 0.25
+INSERT_ZOOM = 0.2  # how much bigger a picture with Zoom in / Zoom out gets, when its video has no Zoom speed (INSERT.zoom.start in behind.ts)
 INSERT_EDGE_FADE = 0  # how far a smaller speaker fades out at the left and right, 0 = a sharp cut (INSERT.edgeFade in behind.ts)
 
 
@@ -366,6 +427,23 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
     )
 
 
+def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a picture growing or shrinking around the screen's middle while it shows. Same as pictureZoom in behind.ts.
+    Scale and crop only move in whole pixels, which shakes a slow zoom, so `perspective` does it (smooth_filter)."""
+    motion = ins.get("picMotion")
+    if ins.get("kind") == "video" or motion not in ("in", "out"):
+        return ""
+    W, H = size
+    p = f"clip((in-1)/{seconds * FPS:.3f},0,1)"
+    amount = float(ins.get("picZoom", INSERT_ZOOM))
+    z = f"(1+{amount:.3f}*{p})" if motion == "in" else f"(1+{amount:.3f}*(1-{p}))"
+    x, y = f"({W}/2*(1-1/{z}))", f"({H}/2*(1-1/{z}))"
+    return (
+        f"format=yuva420p,perspective=x0='{x}':y0='{y}':x1='{W}-{x}':y1='{y}':x2='{x}':y2='{H}-{y}':x3='{W}-{x}':y3='{H}-{y}'"
+        ":interpolation=linear:eval=frame,"
+    )
+
+
 def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: dict, inputs: dict) -> str:
     """Puts the cutout layers on the joined video `base`, in the preview's order (PlayerFrame): text behind
     the speaker, then each picture or clip fading in over the whole picture, then the speaker cut out
@@ -384,15 +462,17 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     for j, ins in enumerate(inserts):
         a, b = float(ins["start"]), float(ins["end"])
         d = b - a
-        hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if ins.get("kind") == "video" else ""
+        # A clip or a GIF that ends early stays on its last frame, as a browser shows it.
+        hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if ins.get("kind") == "video" or str(ins.get("file", "")).endswith(".gif") else ""
         fades = (
             f"format=yuva420p,fade=t=in:st=0:d={INSERT_FADE}:alpha=1,fade=t=out:st={max(0.0, d - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1,"
             f"setpts=PTS-STARTPTS+{a:.3f}/TB[ins{j}]"
         )
+        zoom = picture_zoom(ins, d, size)
         grow, turn = float(ins.get("picScale", 1)), float(ins.get("picRotate", 0))
         dx, dy = float(ins.get("picX", 0)) * W, float(ins.get("picY", 0)) * H
         if grow == 1 and turn == 0 and dx == 0 and dy == 0:
-            parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{fades}")
+            parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{zoom}{fades}")
         else:
             # Moved, turned or resized: the whole picture on black. Same as picturePlace in behind.ts.
             # Only what can land on the screen is kept, around the picture's middle so its place doesn't change.
@@ -405,8 +485,9 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
                 f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,format=rgba,"
                 f"crop=w='min(iw,{reach})':h='min(ih,{reach})':exact=1,scale=iw*{grow}:ih*{grow}{rotate}[ipic{j}]"
             )
-            parts.append(f"color=c=black:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[ibg{j}]")
-            parts.append(f"[ibg{j}][ipic{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1,{fades}")
+            # A picture with clear parts keeps them around it too, so the normal video shows there.
+            parts.append(f"color=c=black{'@0' if ins.get('seeThrough') else ''}:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[ibg{j}]")
+            parts.append(f"[ibg{j}][ipic{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1:format=rgb,{zoom}{fades}")
         parts.append(f"{base}[ins{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[cbi{j}]")
         base = f"[cbi{j}]"
     if not person:
@@ -620,7 +701,7 @@ def join_thai(words: list[dict]) -> list[str]:
             prev = words[i - 1]
             a, b = char_kind(out[-1]), char_kind(t[0])
             ending = (prev["text"] in THAI_ENDINGS and t not in THAI_ENDINGS) or prev["text"].endswith("ๆ")
-            if (a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE * FPS:
+            if w.get("space") or (a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE * FPS:
                 space = " "
         out += space + t
         parts.append(space + t)
@@ -773,7 +854,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         if mid is None:
             continue
         half = (w["end"] - w["start"]) / 2 * FPS
-        placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half})
+        placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half, "space": w.get("space")})
 
     # Group words into short lines.
     gap_frames = LINE_BREAK_GAP * FPS
@@ -852,6 +933,13 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             events += bounce_events(line, start, end, words, places, line_font, text_layer, highlight if look == "highlight" else None)
             continue
         line_font = f"{{{line_font}}}" if line_font else ""
+        if row2 is not None and int(style.get("lineSpacing") or 0) < 0:
+            # Rows closer than usual: ASS can't pull rows together, so each row is its own event, row_step apart like Bounce.
+            step = size + int(style.get("lineSpacing") or 0)
+            rows = [("".join(parts[:row2]), step), (parts[row2].removeprefix("\\N") + "".join(parts[row2 + 1:]), 0)]
+            for row, lift in rows:
+                events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin + lift},,{line_font}{pop_tags(motion, 0)}{row}")
+            continue
         if look != "highlight":
             events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue
@@ -1206,7 +1294,9 @@ def ffmpeg_command(
             cmd += ["-i", str(cutout["matte"])]
         for ins in cutout.get("inserts") or []:
             # A picture is one frame: repeated for as long as it shows (trimmed in cutout_filters).
-            cmd += (["-loop", "1", "-framerate", str(FPS)] if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
+            # A GIF has its own frames: played as its file says. -stream_loop froze it on the first frame (test 11 Nov).
+            still = ["-ignore_loop", "0"] if str(ins.get("file", "")).endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]
+            cmd += (still if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         # High on purpose: polish_sound encodes this sound a second time, at the bitrate people get.

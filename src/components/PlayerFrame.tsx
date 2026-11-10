@@ -1,10 +1,10 @@
 "use client";
 
 import { Pause, Play } from "lucide-react";
-import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
+import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerMotion, cleanBannerText } from "@/lib/banners";
-import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, runText, speakerTransform } from "@/lib/behind";
+import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -20,6 +20,27 @@ const chakra = Chakra_Petch({ weight: "600", subsets: ["thai", "latin", "latin-e
 const poppins = Poppins({ weight: "600", subsets: ["latin", "latin-ext"] });
 const anton = Anton({ weight: "400", subsets: ["latin", "latin-ext"] });
 const bebas = Bebas_Neue({ weight: "400", subsets: ["latin", "latin-ext"] });
+// Downloaded only when picked: 20 fonts on every page that has a player would be slow.
+const itim = Itim({ weight: "400", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const sriracha = Sriracha({ weight: "400", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const pattaya = Pattaya({ weight: "400", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const chonburi = Chonburi({ weight: "400", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const charm = Charm({ weight: "700", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const mali = Mali({ weight: "600", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const baijam = Bai_Jamjuree({ weight: "600", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const k2d = K2D({ weight: "600", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const krub = Krub({ weight: "600", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const kodchasan = Kodchasan({ weight: "600", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const trirong = Trirong({ weight: "600", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const maitree = Maitree({ weight: "600", subsets: ["thai", "latin", "latin-ext"], preload: false });
+const bangers = Bangers({ weight: "400", subsets: ["latin", "latin-ext"], preload: false });
+const pacifico = Pacifico({ weight: "400", subsets: ["latin", "latin-ext"], preload: false });
+const lobster = Lobster({ weight: "400", subsets: ["latin", "latin-ext"], preload: false });
+const abril = Abril_Fatface({ weight: "400", subsets: ["latin", "latin-ext"], preload: false });
+const alfaslab = Alfa_Slab_One({ weight: "400", subsets: ["latin", "latin-ext"], preload: false });
+const righteous = Righteous({ weight: "400", subsets: ["latin", "latin-ext"], preload: false });
+const archivo = Archivo_Black({ weight: "400", subsets: ["latin", "latin-ext"], preload: false });
+const titan = Titan_One({ weight: "400", subsets: ["latin", "latin-ext"], preload: false });
 const fira = Fira_Sans({ weight: "500", subsets: ["cyrillic", "latin", "latin-ext"] }); // for Russian and the like (CYRILLIC_FONT)
 const FONT_FACES: Record<FontId, { family: string; weight: number }> = {
 	kanit: { family: kanit.style.fontFamily, weight: 500 },
@@ -30,6 +51,26 @@ const FONT_FACES: Record<FontId, { family: string; weight: number }> = {
 	poppins: { family: poppins.style.fontFamily, weight: 600 },
 	anton: { family: anton.style.fontFamily, weight: 400 },
 	bebas: { family: bebas.style.fontFamily, weight: 400 },
+	itim: { family: itim.style.fontFamily, weight: 400 },
+	sriracha: { family: sriracha.style.fontFamily, weight: 400 },
+	pattaya: { family: pattaya.style.fontFamily, weight: 400 },
+	chonburi: { family: chonburi.style.fontFamily, weight: 400 },
+	charm: { family: charm.style.fontFamily, weight: 700 },
+	mali: { family: mali.style.fontFamily, weight: 600 },
+	baijam: { family: baijam.style.fontFamily, weight: 600 },
+	k2d: { family: k2d.style.fontFamily, weight: 600 },
+	krub: { family: krub.style.fontFamily, weight: 600 },
+	kodchasan: { family: kodchasan.style.fontFamily, weight: 600 },
+	trirong: { family: trirong.style.fontFamily, weight: 600 },
+	maitree: { family: maitree.style.fontFamily, weight: 600 },
+	bangers: { family: bangers.style.fontFamily, weight: 400 },
+	pacifico: { family: pacifico.style.fontFamily, weight: 400 },
+	lobster: { family: lobster.style.fontFamily, weight: 400 },
+	abril: { family: abril.style.fontFamily, weight: 400 },
+	alfaslab: { family: alfaslab.style.fontFamily, weight: 400 },
+	righteous: { family: righteous.style.fontFamily, weight: 400 },
+	archivo: { family: archivo.style.fontFamily, weight: 400 },
+	titan: { family: titan.style.fontFamily, weight: 400 },
 };
 // The user's own font: loaded once per upload (version) from /api/font, under its own name.
 const ownFamily = (version: number) => `komoray-own-${version}`;
@@ -325,13 +366,15 @@ export function PlayerFrame({
 					const seen = (r: number) => setRatios((all) => (all[i.file] === r ? all : { ...all, [i.file]: r }));
 					const fill: CSSProperties = moved && ratio ? { position: "absolute", maxWidth: "none", objectFit: "fill", ...picturePlace(i, ratio, W / H) } : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 					return (
-						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved ? "#000" : undefined }}>
-							{i.kind === "video" ? (
-								<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} />
-							) : (
-								// eslint-disable-next-line @next/next/no-img-element
-								<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
-							)}
+						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
+							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
+								{i.kind === "video" ? (
+									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} />
+								) : (
+									// eslint-disable-next-line @next/next/no-img-element
+									<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
+								)}
+							</div>
 						</div>
 					);
 				})}
@@ -339,7 +382,7 @@ export function PlayerFrame({
 					{person}
 				</div>
 				{/* While paused: drag the speaker to move them, a top corner to resize them. Writes the same numbers as the sliders. */}
-				{insert && !insert.hidden && !playing && onInsert && (
+				{insert && !insert.hidden && !insert.seeThrough && !playing && onInsert && (
 					<div
 						title="Drag to move yourself. Drag a corner to resize."
 						onClick={(e) => speakerMoved.current && e.stopPropagation()}
