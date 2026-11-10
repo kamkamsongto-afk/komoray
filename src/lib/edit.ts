@@ -148,6 +148,41 @@ export function cutSeconds(cuts: Span[]): number {
 		const start = Math.max(c.start, reach);
 		if (c.end > start) total += c.end - start;
 		reach = Math.max(reach, c.end);
+// Find inside words: Thai has no spaces, so a misheard part often sits in the middle of a word
+// ("ฉนั้น" inside "ราะฉนั้น") and looking only at word starts missed it. keep = the text around each
+// hit, so joining it with the replacement gives the word's new text. Thai searches only: in
+// English, "the" must not hit "there". Fix all and the dictionary stay on whole words, for the same reason.
+export function findInside(words: { index: number; last: number; text: string; space: boolean }[], target: string) {
+	const matches: { from: number; to: number; trail: string; keep: string[] }[] = [];
+	const starts: number[] = [];
+	let joined = "";
+	words.forEach((w, k) => {
+		if (k && w.space) joined += " ";
+		starts.push(joined.length);
+		joined += w.text.toLowerCase();
+	});
+	let item = 0; // the word the search has reached
+	let doneWord = -1; // the word the previous hit ended in, and where in it
+	let doneAt = 0;
+	for (let hit = joined.indexOf(target); hit !== -1; hit = joined.indexOf(target, hit + target.length)) {
+		while (item + 1 < words.length && starts[item + 1] <= hit) item++;
+		let end = item;
+		while (end + 1 < words.length && starts[end + 1] < hit + target.length) end++;
+		const head = hit - starts[item];
+		const tail = hit + target.length - starts[end];
+		const last = matches[matches.length - 1];
+		if (last && doneWord === item) {
+			// A second hit in the word the last one ended in: both are one fix of that word.
+			last.keep[last.keep.length - 1] = words[item].text.slice(doneAt, head);
+			last.keep.push(words[end].text.slice(tail));
+			last.to = words[end].last;
+		} else matches.push({ from: words[item].index, to: words[end].last, trail: "", keep: [words[item].text.slice(0, head), words[end].text.slice(tail)] });
+		doneWord = end;
+		doneAt = tail;
+	}
+	return matches;
+}
+
 	}
 	return total;
 }
