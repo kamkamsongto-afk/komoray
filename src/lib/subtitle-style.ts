@@ -81,9 +81,10 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 
 export const MAX_LOGO_LENGTH = 30;
 // Brand colours to pick from in one click (any other colour works too).
-export const COLORS = ["#FFE600", "#22D3EE", "#4ADE80", "#FB7185", "#F97316", "#A78BFA"];
-export const TEXT_COLORS = ["#FFFFFF", "#111111", ...COLORS];
-export const EDGE_COLORS = ["#000000", "#FFFFFF", ...COLORS]; // the outline and the Box look's box
+// Four quick colours in every menu, then the rectangle for any other (coach, 10 Nov).
+export const COLORS = ["#FFE600", "#22D3EE", "#4ADE80", "#FB7185"];
+export const TEXT_COLORS = ["#FFFFFF", "#111111", "#FFE600", "#22D3EE"];
+export const EDGE_COLORS = ["#000000", "#FFFFFF", "#FFE600", "#22D3EE"]; // the outline and the Box look's box
 
 export const LIMITS = {
 	size: { min: 50, max: 180, step: 2 },
