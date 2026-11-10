@@ -2,6 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, canUseStudio, NO_INVITE } from "@/lib/access";
 import { OWNER_FILE } from "@/lib/admin-activity";
 import { hmac, verifyCallback } from "@/lib/callback";
+import { FILE_TOO_BIG, MAX_FILE_BYTES, OUT_OF_MINUTES } from "@/lib/limits";
 import { exists, getJson, putObject, signedUrl } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
 import { uploadLimitReached } from "@/lib/upload-limit";
@@ -17,7 +18,6 @@ import { uploadLimitReached } from "@/lib/upload-limit";
 
 const LINK_MINUTES = 15;
 const ALLOWED_TYPES = ["video/mp4", "video/quicktime"]; // same as /api/upload-url
-const MAX_SIZE = 500 * 1024 * 1024;
 const UPLOAD_LINK_SECONDS = 3600; // a big file over mobile data can take a while
 
 type Handoff = {
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
 		if (!user) return Response.json({ error: "Please sign in first" }, { status: 401 });
 		const access = await accessFor(user.email);
 		if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
-		if (!access.left) return Response.json({ error: `You've used your ${access.limit} minutes this month. They renew on ${access.resets}.` }, { status: 429 });
+		if (!access.left) return Response.json({ error: OUT_OF_MINUTES }, { status: 429 });
 		const limit = await uploadLimitReached(supabase, user);
 		if (limit) return Response.json({ error: limit }, { status: 429 });
 		const id = crypto.randomUUID();
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
 			const contentType = String(body.contentType ?? "");
 			const size = Number(body.size);
 			if (!ALLOWED_TYPES.includes(contentType)) return Response.json({ error: "Only .mp4 and .mov videos are allowed" }, { status: 400 });
-			if (!Number.isInteger(size) || size <= 0 || size > MAX_SIZE) return Response.json({ error: "File must be 500 MB or smaller" }, { status: 400 });
+			if (!Number.isInteger(size) || size <= 0 || size > MAX_FILE_BYTES) return Response.json({ error: FILE_TOO_BIG }, { status: 400 });
 			const filename = String(body.filename ?? "video");
 			const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "video";
 			const key = `uploads/${id}/${safeName}`;
