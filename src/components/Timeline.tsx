@@ -3,9 +3,9 @@
 import { AudioWaveform, ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Banner } from "@/lib/banners";
-import type { CutoutLayers } from "@/lib/behind";
+import { type CutoutLayers, insertName } from "@/lib/behind";
 import type { TakeGroup } from "@/lib/takes";
-import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
+import { FPS, pieceAt, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
 import { PART_ZOOMS, type PartZoom, ZOOM_NAMES, type ZoomPart, type ZoomStyle, zoomTrack } from "@/lib/zoom";
 import { ConfirmDelete } from "./ConfirmDelete";
@@ -46,6 +46,8 @@ type Props = {
 	cutoutLayers: CutoutLayers; // text behind the speaker, pictures or clips: their own rows under the banners
 	onCutoutChange: (layers: CutoutLayers) => void;
 	onOpenCutout: (id: string) => void;
+	splits: number[]; // where Split divided the sound and the words, seconds of the original video
+	onSplitsChange: (splits: number[]) => void;
 };
 
 // Things shown over the video, as strips under the waveform: banners first, then the Cutout layers in rows of their own.
@@ -151,6 +153,8 @@ export function Timeline({
 	cutoutLayers,
 	onCutoutChange,
 	onOpenCutout,
+	splits,
+	onSplitsChange,
 }: Props) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -169,8 +173,6 @@ export function Timeline({
 	// A cut's edge being dragged (Show cuts on): which cut, which side, and where it is now.
 	const [edge, setEdge] = useState<{ cut: [number, number]; side: "start" | "end"; to: number } | null>(null);
 	const anchor = useRef<{ time: number; at: number } | null>(null); // keep this moment under this x after zooming
-	// Split: the first press marks this spot, the second picks from here to where the video is then.
-	const [mark, setMark] = useState<number | null>(null);
 	const [overWave, setOverWave] = useState(false);
 
 	useEffect(() => {
@@ -231,7 +233,7 @@ export function Timeline({
 		const bannerItems = banners.map((b): LaneItem => ({ id: b.id, kind: "banner", label: b.text, start: b.start, end: b.end }));
 		const cutoutItems = [
 			...cutoutLayers.texts.map((t): LaneItem => ({ id: t.id, kind: "text", label: t.text, start: t.start, end: t.end })),
-			...cutoutLayers.inserts.map((i): LaneItem => ({ id: i.id, kind: "insert", label: i.kind === "video" ? "Clip" : "Picture", start: i.start, end: i.end })),
+			...cutoutLayers.inserts.map((i): LaneItem => ({ id: i.id, kind: "insert", label: insertName(i), start: i.start, end: i.end })),
 		];
 		const top = packRows(bannerItems, 0);
 		const bannerRows = top.length ? Math.max(...top.map((l) => l.row)) + 1 : 0;
@@ -314,15 +316,15 @@ export function Timeline({
 		},
 		end: () => lastSegment && onSeek(Math.max(0, (lastSegment.trim + lastSegment.frames) / FPS - 0.05)),
 	};
+	// One press divides the sound and the words here. Inside a word it moves to that word's nearer edge, so no
+	// word is cut in two. Pressed again on the same spot, the split goes away.
 	const split = () => {
 		const t = timeRef.current ?? 0;
-		if (mark === null) {
-			setSelection(null);
-			setMark(t);
-		} else if (Math.abs(t - mark) >= MIN_PICK) {
-			setSelection({ start: Math.min(t, mark), end: Math.max(t, mark) });
-			setMark(null);
-		}
+		const word = words.find((w) => t > w.start && t < w.end);
+		const at = Math.round((word ? (t - word.start < word.end - t ? word.start : word.end) : t) * 1000) / 1000;
+		setSelection(null);
+		const near = splits.find((s) => Math.abs(s - at) < MIN_PICK);
+		onSplitsChange(near !== undefined ? splits.filter((s) => s !== near) : [...splits, at].sort((a, b) => a - b));
 	};
 
 	const chips = useMemo(() => makeChips(words, scriptWords, gone), [words, scriptWords, gone]);
@@ -604,7 +606,9 @@ export function Timeline({
 		const cut = showCuts ? cutSpans.find(([a, b]) => p.at >= a && p.at < b) : undefined;
 		if (cut) setSelection({ start: cut[0], end: cut[1] });
 		else {
-			setSelection(null);
+			// Once there are Splits, a click picks the whole piece, ready to Cut.
+			const piece = splits.length ? pieceAt(splits, p.at, duration) : null;
+			setSelection(piece ? { start: piece[0], end: piece[1] } : null);
 			onSeek(p.at);
 		}
 	};
@@ -723,20 +727,12 @@ export function Timeline({
 				</label>
 				<button
 					onClick={split}
-					title={mark === null ? "Mark this spot. Then move to where the part ends and press again, to cut or keep what's between." : "Pick everything from the mark to here"}
-					className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium ${mark === null ? "border border-foreground/25 hover:bg-foreground/5" : "bg-amber-500 text-black hover:bg-amber-400"}`}
+					title="Divide the sound and words here. Then click a piece to pick it, or drag its subtitle to move only that piece."
+					className="inline-flex items-center gap-1 rounded-md border border-foreground/25 px-2 py-0.5 text-xs font-medium hover:bg-foreground/5"
 				>
 					<Scissors className="h-3 w-3 shrink-0" aria-hidden />
-					{mark === null ? "Split" : "Split here"}
+					Split
 				</button>
-				{mark !== null && (
-					<span className="flex items-center gap-1 text-xs text-foreground/60">
-						Now move to where the part ends
-						<button onClick={() => setMark(null)} className="text-foreground/50 hover:text-foreground" aria-label="Cancel split" title="Cancel">
-							<X className="h-3 w-3 shrink-0" aria-hidden />
-						</button>
-					</span>
-				)}
 				{selection && picked ? (
 					<span className="flex items-center gap-1.5">
 						<span className="text-xs tabular-nums text-foreground/60">{picked.seconds.toFixed(1)}s picked</span>
@@ -972,7 +968,13 @@ export function Timeline({
 								</div>
 							);
 						})}
-					{mark !== null && <div className="pointer-events-none absolute top-0 z-[1] w-0.5 bg-amber-500" style={{ left: xOf(mark), height: height }} />}
+					{splits.map((s) => (
+						<div key={s} className="pointer-events-none absolute top-0 z-[1] w-0.5 bg-amber-500" style={{ left: xOf(s), height }}>
+							<button onClick={() => onSplitsChange(splits.filter((x) => x !== s))} aria-label="Remove this split" title="Remove this split" className="pointer-events-auto absolute top-0 -left-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-500 text-black hover:bg-amber-400">
+								<X className="h-2.5 w-2.5" aria-hidden />
+							</button>
+						</div>
+					))}
 					{groups.map((g, i) => {
 						const kept = g.takes.find(isKept) ?? g.takes[g.takes.length - 1];
 						const x = xOf(words[kept.from].start);
@@ -1068,7 +1070,7 @@ export function Timeline({
 			)}
 			{removing && (
 				<ConfirmDelete
-					name={removing.kind === "text" ? `"${removing.label}"` : `this ${removing.label.toLowerCase()}`}
+					name={`"${removing.label}"`}
 					onCancel={closeRemoving}
 					onConfirm={() => {
 						changeItem(removing, null);

@@ -36,6 +36,7 @@ export type BehindText = {
 	fx: BehindFx;
 	speed: BehindSpeed;
 	y: number;
+	lineGap?: number; // extra px between lines, on the 1080-wide video. Older videos have none = 0
 };
 
 // A picture or clip (uploaded next to the video as insert-<id>.<ext>) filling the screen behind the speaker,
@@ -49,6 +50,8 @@ export type Insert = {
 	speakerScale: number;
 	speakerX: number;
 	hidden: boolean;
+	soft?: number; // the speaker's edges melt away at the sides and the bottom over this share, 0 = a sharp cut (INSERT.soft)
+	name?: string; // what the Timeline calls it. Starts as the uploaded file's name; older videos have none (insertName)
 	// Added 10 Nov, so videos saved before may not have them: read with ?? (picMoved, picturePlace, speakerTransform).
 	speakerLift?: number; // how far the speaker's bottom edge is raised, share of the height
 	picScale?: number; // 1 = just fills the screen
@@ -60,11 +63,12 @@ export type Insert = {
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
 export const NO_LAYERS: CutoutLayers = { texts: [], inserts: [] };
 
-export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 24 }, maxText: 40, maxItems: 10, seconds: 3, fade: 0.25, y: 0.16 };
-// edgeFade: a smaller speaker fades out over this share of their width at the left and right. The camera
-// often cuts the shoulders off at the frame's side, which else ends in a hard straight line (7 Nov test).
-// Same as INSERT_EDGE_FADE in render.py.
-export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0.12, maxBytes: { image: 10_000_000, video: 150_000_000 } };
+export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 24 }, maxText: 40, maxLines: 3, lineGap: { min: -60, max: 160 }, maxName: 40, maxItems: 10, seconds: 3, fade: 0.25, y: 0.16 };
+// edgeFade: how much a smaller speaker's edges melt away when the customer hasn't chosen (Soft edges, Insert.soft).
+// 0 since 10 Nov: Yoshi saw the fade eat the shoulders (VID20261028143211 at 0:23) and wants a sharp cut, with a
+// slider for anyone who likes it soft. The price of 0: if the camera cut a shoulder off at the frame's side, it
+// ends in a straight line (7 Nov test). Same as INSERT_EDGE_FADE in render.py.
+export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0, soft: { max: 0.3 }, maxBytes: { image: 10_000_000, video: 150_000_000 } };
 // Running text: the words, again and again, so the screen stays full for as long as it runs. Counted the
 // same way here and in render.py (run_repeats), so both draw the same string.
 export const RUN_GAP = "   •   ";
@@ -74,7 +78,8 @@ export function runRepeats(t: BehindText, width: number) {
 	const each = 0.4 * t.size * Array.from(t.text + RUN_GAP).length; // a low guess of its width: never too few
 	return Math.min(40, Math.ceil(reach / Math.max(1, each)) + 1);
 }
-export const runText = (t: BehindText, width: number) => Array(runRepeats(t, width)).fill(t.text).join(RUN_GAP);
+// Running text is one long line, so the words' line breaks become spaces. Same in build_behind in render.py.
+export const runText = (t: BehindText, width: number) => Array(runRepeats(t, width)).fill(t.text.replace(/\n/g, " ")).join(RUN_GAP);
 
 const smooth = (p: number) => {
 	const q = Math.min(1, Math.max(0, p));
@@ -144,6 +149,8 @@ export function picturePlace(i: Insert, ratio: number, frame: number) {
 		transform: `translate(-50%, -50%) rotate(${i.picRotate ?? 0}deg) scale(${i.picScale ?? 1})`,
 	};
 }
+export const insertName = (i: Insert) => i.name || (i.kind === "video" ? "Clip" : "Picture");
+export const cleanInsertName = (name: unknown) => String(name ?? "").replace(/[\n\r\t]/g, " ").trim().slice(0, BEHIND.maxName);
 export const speakerTransform = (i: Insert, boxWidth: number) => `translate(${(i.speakerX - 0.5) * boxWidth}px, ${-(i.speakerLift ?? 0) * 100}%) scale(${i.speakerScale})`;
 
 // The parts of the source video the speaker must be cut out for: every layer's time on the final video,
@@ -191,9 +198,14 @@ const round = (n: number, by = 100) => Math.round(n * by) / by;
 export const cleanBehindText = (text: string) =>
 	text
 		.replace(/\p{Extended_Pictographic}|‍|️/gu, "")
-		.replace(/[\\{}\n\r]/g, "")
-		.trim()
-		.slice(0, BEHIND.maxText);
+		.replace(/[\\{}\r]/g, "")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.slice(0, BEHIND.maxLines)
+		.join("\n")
+		.slice(0, BEHIND.maxText)
+		.trim();
 const id = (v: unknown) => String(v ?? "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || crypto.randomUUID();
 const INSERT_FILE = /^insert-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|mp4|mov)$/;
 
@@ -219,6 +231,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			fx: typeof t.fx === "string" && t.fx in BEHIND_FX ? (t.fx as BehindFx) : "fade",
 			speed: t.speed === "slow" || t.speed === "fast" ? t.speed : "normal",
 			y: round(num(t.y, 0.03, 0.97, BEHIND.y), 1000),
+			lineGap: Math.round(num(t.lineGap, BEHIND.lineGap.min, BEHIND.lineGap.max, 0)),
 		});
 	}
 	const inserts: Insert[] = [];
@@ -235,6 +248,8 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			speakerScale: round(num(i.speakerScale, INSERT.scale.min, INSERT.scale.max, INSERT.scale.start)),
 			speakerX: round(num(i.speakerX, 0, 1, 0.25), 1000),
 			hidden: i.hidden === true,
+			name: cleanInsertName(i.name) || undefined,
+			soft: round(num(i.soft, 0, INSERT.soft.max, INSERT.edgeFade)),
 			speakerLift: round(num(i.speakerLift, 0, INSERT.lift.max, 0), 1000),
 			picScale: round(num(i.picScale, INSERT.picture.scale.min, INSERT.picture.scale.max, 1)),
 			picX: round(num(i.picX, -INSERT.picture.move, INSERT.picture.move, 0), 1000),

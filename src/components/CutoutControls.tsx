@@ -1,8 +1,8 @@
 "use client";
 
-import { ChevronDown, ChevronRight, ImagePlus, Plus, Type, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ImagePlus, Plus, Sparkles, Type, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, covered, type CutoutLayers, INSERT, type Insert, keptWindows } from "@/lib/behind";
+import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
@@ -45,7 +45,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
 	// Two lists instead of one long mixed one (coach, 9 Nov).
-	const [tab, setTab] = useState<"text" | "inserts">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
+	const [tab, setTab] = useState<"text" | "inserts" | "motion">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
 	if (focus !== focused) {
 		setFocused(focus);
 		setOpen(focus);
@@ -120,7 +120,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		if ("error" in done) return setNotice(done.error);
 		const start = startAt();
 		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
-		const insert: Insert = { id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: INSERT.scale.start, speakerX: 0.25, hidden: false };
+		const insert: Insert = { id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: INSERT.scale.start, speakerX: 0.25, hidden: false, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
 		setOpen(insert.id);
 		setTab("inserts");
 		setInserts([...layers.inserts, insert].sort((a, b) => a.start - b.start));
@@ -271,20 +271,24 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				)}
 			</div>
 
-			<div role="tablist" aria-label="Cutout layers" className="grid grid-cols-2 gap-1 rounded-lg bg-foreground/5 p-0.5">
+			<div role="tablist" aria-label="Cutout layers" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
 				{(
 					[
-						["text", Type, "Text behind you", layers.texts.length],
-						["inserts", ImagePlus, "Picture or clip", layers.inserts.length],
+						["text", Type, "Text behind", layers.texts.length],
+						["inserts", ImagePlus, "Pic/Clip", layers.inserts.length],
+						["motion", Sparkles, "Motion", 0],
 					] as const
 				).map(([id, Icon, name, count]) => (
-					<button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-sm ${tab === id ? "bg-background font-medium shadow-sm" : "text-foreground/70 hover:text-foreground"}`}>
+					// A light blue frame says which one is open, in both themes (coach, 10 Nov).
+					<button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`inline-flex items-center justify-center gap-1 rounded-md px-1.5 py-1 text-sm whitespace-nowrap ${tab === id ? "bg-blue-400/15 font-medium text-foreground ring-1 ring-inset ring-blue-400" : "text-foreground/70 hover:text-foreground"}`}>
 						<Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /> {name}
 						{count > 0 && <span className="text-xs text-foreground/50 tabular-nums">{count}</span>}
 					</button>
 				))}
 			</div>
 			{notice && <p className="text-xs text-red-500">{notice}</p>}
+
+			{tab === "motion" && <p className="rounded-lg border border-dashed border-foreground/20 p-3 text-center text-xs text-foreground/60">Motion templates are coming soon.</p>}
 
 			{tab === "text" && (
 				<button onClick={addText} disabled={layers.texts.length >= BEHIND.maxItems} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
@@ -327,7 +331,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					</div>
 					{open === t.id && (
 						<div className="flex flex-col gap-1.5 border-t border-foreground/10 p-2">
-							{row("Words", <input value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
+							{row("Words", <textarea rows={BEHIND.maxLines} value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value.split("\n").slice(0, BEHIND.maxLines).join("\n") })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} className="min-w-0 flex-1 resize-none rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							{row(
 								"Effect",
 								<select value={t.fx} onChange={(e) => updateText(t.id, { fx: e.target.value as BehindFx })} className="rounded border border-foreground/20 bg-background px-1 py-0.5">
@@ -363,6 +367,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								</select>,
 							)}
 							{row("Size", range(t.size, BEHIND.size.min, BEHIND.size.max, 10, `${t.size}px`, (size) => updateText(t.id, { size })))}
+							{t.text.includes("\n") && row("Line gap", range(t.lineGap ?? 0, BEHIND.lineGap.min, BEHIND.lineGap.max, 5, `${t.lineGap ?? 0}px`, (lineGap) => updateText(t.id, { lineGap })))}
 							{row("Color", swatches(TEXT_COLORS, t.color, (color) => updateText(t.id, { color }), "Text color"))}
 							{row("Outline", range(t.stroke, 0, BEHIND.stroke.max, 1, `${t.stroke}px`, (stroke) => updateText(t.id, { stroke })))}
 							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}
@@ -392,7 +397,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										)}
 									</span>
 									<span className="block truncate px-1 py-0.5 text-[11px] text-foreground/60 tabular-nums">
-										{name} {i.start}–{i.end}s
+										{insertName(i)} {i.start}–{i.end}s
 									</span>
 								</button>
 								<button onClick={() => setRemoving({ name: `this ${name.toLowerCase()}`, remove: () => setInserts(layers.inserts.filter((x) => x.id !== i.id)) })} aria-label={`Delete this ${name.toLowerCase()}`} className="absolute top-0.5 right-0.5 rounded-full bg-black/70 p-0.5 text-white hover:bg-red-600">
@@ -408,6 +413,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					.filter((i) => i.id === open)
 					.map((i) => (
 						<div key={i.id} className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+							{row("Name", <input value={i.name ?? ""} maxLength={BEHIND.maxName} placeholder={i.kind === "video" ? "Clip" : "Picture"} onChange={(e) => updateInsert(i.id, { name: e.target.value })} onBlur={(e) => updateInsert(i.id, { name: cleanInsertName(e.target.value) || undefined })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							<label className="flex items-center gap-2 text-xs">
 								<input type="checkbox" checked={i.hidden} onChange={(e) => updateInsert(i.id, { hidden: e.target.checked })} />
 								Hide me while it shows
@@ -415,6 +421,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{!i.hidden && row("Your size", range(i.speakerScale, INSERT.scale.min, INSERT.scale.max, 0.05, `${Math.round(i.speakerScale * 100)}%`, (speakerScale) => updateInsert(i.id, { speakerScale })))}
 							{!i.hidden && row("You stand", range(i.speakerX, 0, 1, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
 							{!i.hidden && row("You rise", range(i.speakerLift ?? 0, 0, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
+							{!i.hidden && row("Soft edges", range(i.soft ?? INSERT.edgeFade, 0, INSERT.soft.max, 0.01, `${Math.round((i.soft ?? INSERT.edgeFade) * 100)}%`, (soft) => updateInsert(i.id, { soft })))}
 							<span className="mt-1 text-xs font-medium text-foreground/70">{i.kind === "video" ? "The clip" : "The picture"}</span>
 							{row("Size", range(i.picScale ?? 1, INSERT.picture.scale.min, INSERT.picture.scale.max, 0.05, `${Math.round((i.picScale ?? 1) * 100)}%`, (picScale) => updateInsert(i.id, { picScale })))}
 							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}

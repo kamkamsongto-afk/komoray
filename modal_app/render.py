@@ -102,7 +102,7 @@ FONT_FILES = {
     "anton": ("Anton-Regular.ttf", 1.733),
     "bebas": ("BebasNeue-Regular.ttf", 1.3),
 }
-LOGO = {"size": 52, "outline": 4, "side": 60, "top": 110}  # the channel name in a corner (LOGO in PlayerFrame.tsx)
+LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or logo in a corner (LOGO in PlayerFrame.tsx)
 
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
@@ -254,7 +254,7 @@ RUN_SPEED = {"slow": 150, "normal": 300, "fast": 600}
 ARRIVE_TIME = {"slow": 1.6, "normal": 1, "fast": 0.6}
 RUN_GAP = "   •   "
 INSERT_FADE = 0.25
-INSERT_EDGE_FADE = 0.12  # a smaller speaker fades out at the left and right (INSERT.edgeFade in behind.ts)
+INSERT_EDGE_FADE = 0  # how far a smaller speaker fades out at the left and right, 0 = a sharp cut (INSERT.edgeFade in behind.ts)
 
 
 def run_repeats(t: dict, width: int) -> int:
@@ -323,7 +323,11 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
         if not text:
             continue
         if b.get("fx") in ("runLeft", "runRight"):
-            text = RUN_GAP.join([text] * run_repeats(b, width))
+            rows = [RUN_GAP.join([text.replace("\n", " ")] * run_repeats(b, width))]  # one long line (runText in behind.ts)
+        else:
+            rows = text.split("\n")
+        # Each row is its own event: subtitles have no line spacing of their own. Rows sit around the text's middle.
+        row_step = float(b["size"]) + float(b.get("lineGap") or 0)
         font = FONTS.get(b.get("font"), FONTS["kanit"])
         stroke = int(b.get("stroke") or 0)
         look = f"\\fn{font}\\fs{int(b['size'])}\\1c{ass_colour(b.get('color', '#FFFFFF'))}\\3c{ass_colour(b.get('strokeColor', '#000000'))}\\bord{stroke}\\shad2\\4c&H000000&"
@@ -332,12 +336,14 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
                 if pose["opacity"] <= 0.004:
                     continue
                 an = {"center": 5, "left": 4, "right": 6}[pose["align"]]
-                # The soft shadow under the letters, as in the preview (roundOutline in PlayerFrame): 40% black.
-                tags = (
-                    f"\\an{an}\\pos({pose['x']:.1f},{pose['y']:.1f})\\fscx{pose['sx'] * 100:.2f}\\fscy{pose['sy'] * 100:.2f}"
-                    f"\\alpha{alpha_of(pose['opacity'])}\\4a{alpha_of(0.4 * pose['opacity'])}"
-                )
-                events.append(f"Dialogue: 0,{ass_time(f / FPS)},{ass_time((f + 1) / FPS)},Behind,,0,0,0,,{{{look}{tags}}}{text}")
+                for r, row in enumerate(rows):
+                    y = pose["y"] + (r - (len(rows) - 1) / 2) * row_step * pose["sy"]
+                    # The soft shadow under the letters, as in the preview (roundOutline in PlayerFrame): 40% black.
+                    tags = (
+                        f"\\an{an}\\pos({pose['x']:.1f},{y:.1f})\\fscx{pose['sx'] * 100:.2f}\\fscy{pose['sy'] * 100:.2f}"
+                        f"\\alpha{alpha_of(pose['opacity'])}\\4a{alpha_of(0.4 * pose['opacity'])}"
+                    )
+                    events.append(f"Dialogue: 0,{ass_time(f / FPS)},{ass_time((f + 1) / FPS)},Behind,,0,0,0,,{{{look}{tags}}}{row}")
     return "\n".join(
         [
             "[Script Info]",
@@ -406,13 +412,6 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     if not person:
         return base
     parts.append(f"[cpic][cm]alphamerge,split={1 + len(smalls)}[cper]{''.join(f'[cps{j}]' for j in range(len(smalls)))}")
-    if smalls:
-        # The fade at a smaller speaker's sides: a still left-to-right ramp (made once, then repeated),
-        # multiplied into each one's see-through. Same as the mask in PlayerFrame.
-        parts.append(
-            f"color=c=black:s={W}x{H}:r={FPS}:d=1,format=gray,geq=lum='255*min(1,min(X+0.5,W-X-0.5)/({INSERT_EDGE_FADE}*W))',"
-            f"loop=loop=-1:size=1:start=0,split={len(smalls)}{''.join(f'[cg{j}]' for j in range(len(smalls)))}"
-        )
     away = "+".join(f"between(t,{float(i['start']):.3f},{float(i['end']):.3f})" for i in inserts) or "0"
     parts.append(f"{base}[cper]overlay=enable='not({away})'[cfull]")
     base = "[cfull]"
@@ -420,11 +419,21 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
         a, b, k = float(ins["start"]), float(ins["end"]), float(ins["speakerScale"])
         w = max(2, round(W * k / 2) * 2)
         x = float(ins["speakerX"]) * W - w / 2
-        parts.append(f"[cps{j}]split[cpa{j}][cpb{j}]")
-        parts.append(f"[cpa{j}]alphaextract[cpe{j}]")
-        parts.append(f"[cpe{j}][cg{j}]blend=all_mode=multiply:shortest=1[cpf{j}]")
+        speaker = f"[cps{j}]"
+        soft = float(ins.get("soft", INSERT_EDGE_FADE) or 0)
+        if soft > 0:
+            # Soft edges: a still picture of how see-through each spot is (made once, then repeated), melting at the
+            # sides and the bottom, multiplied into the speaker's see-through. Same as the mask in PlayerFrame.
+            parts.append(
+                f"color=c=black:s={W}x{H}:r={FPS}:d=1,format=gray,geq=lum='255*min(1,min(X+0.5,W-X-0.5)/({soft}*W))*min(1,(H-Y-0.5)/({soft}*H))',"
+                f"loop=loop=-1:size=1:start=0[cg{j}]"
+            )
+            parts.append(f"[cps{j}]split[cpa{j}][cpb{j}]")
+            parts.append(f"[cpa{j}]alphaextract[cpe{j}]")
+            parts.append(f"[cpe{j}][cg{j}]blend=all_mode=multiply:shortest=1[cpf{j}]")
+            speaker = f"[cpb{j}][cpf{j}]alphamerge,"
         parts.append(
-            f"[cpb{j}][cpf{j}]alphamerge,scale={w}:-2,format=yuva420p,fade=t=in:st={a:.3f}:d={INSERT_FADE}:alpha=1,"
+            f"{speaker}scale={w}:-2,format=yuva420p,fade=t=in:st={a:.3f}:d={INSERT_FADE}:alpha=1,"
             f"fade=t=out:st={max(a, b - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1[csm{j}]"
         )
         lift = float(ins.get("speakerLift", 0)) * H
@@ -511,6 +520,20 @@ def place_frame(t: float, segments: list[tuple[int, int, int]]) -> float | None:
     return None
 
 
+def break_frame(t: float, segments: list[tuple[int, int, int]]) -> float | None:
+    """The output frame a Split breaks subtitle lines at (the breaks in subtitleLines, timeline.ts)."""
+    placed = place_frame(t, segments)
+    return placed if placed is not None else next((start for start, trim, _ in segments if trim / FPS > t), None)
+
+
+def source_at(frame: float, segments: list[tuple[int, int, int]]) -> float | None:
+    """The second of the original video at this output frame, a hundredth in (lineSource in timeline.ts)."""
+    for start, trim, frames in reversed(segments):  # right after a cut, the piece that starts there
+        if start <= frame <= start + frames:
+            return (trim + frame - start) / FPS + 0.01
+    return None
+
+
 def is_thai(text: str) -> bool:
     return any("฀" <= ch <= "๿" for ch in text)
 
@@ -547,8 +570,8 @@ START_BONUS = 8  # frames: a phrase start or a polite ending is worth a pause th
 THAI_LETTER_EM = 0.44  # how wide a Thai letter is, in text sizes: to work out what letter spacing costs (timeline.ts)
 
 
-def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float, max_letters: int, gap_frames: float) -> list[list[dict]]:
-    """Words into short subtitle lines. Same as the grouping in subtitleLines (timeline.ts)."""
+def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float, max_letters: int, gap_frames: float, breaks: list[float] | None = None) -> list[list[dict]]:
+    """Words into short subtitle lines. Same as the grouping in subtitleLines (timeline.ts). breaks: frames of the Splits."""
     letters_of = lambda run: sum(thai_letters(w["text"]) for w in run)
 
     def fits(run: list[dict]) -> bool:
@@ -571,7 +594,8 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
 
     lines, current = [], []
     for w in placed:
-        if current and w["start"] - current[-1]["end"] > gap_frames:
+        crosses_split = bool(current) and any(current[-1]["start"] < b <= w["start"] + 0.01 for b in (breaks or []))
+        if crosses_split or (current and w["start"] - current[-1]["end"] > gap_frames):
             lines.append(current)
             current = []
         elif current and not fits(current + [w]):
@@ -756,7 +780,10 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     # The line's width in letters at the limit's size, shared out among bigger or more spaced-out letters.
     spacing = int(style.get("letterSpacing") or 0)
     max_letters = math.floor(limits["thai_letters"] * limits["size"] * THAI_LETTER_EM / (max(size, limits["size"]) * THAI_LETTER_EM + spacing) + 1e-9)
-    lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames)
+    # A Split inside a cut part breaks where the video picks up again, or the pieces on either side would join.
+    breaks = [f for f in (break_frame(float(s), segments) for s in (style.get("splits") or [])) if f is not None]
+    spots = style.get("spots") or []
+    lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames, breaks)
     if style.get("subtitles") is False:  # turned off: same as the preview (PlayerFrame shows no line)
         lines = []
 
@@ -779,6 +806,10 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     text_layer = 1 if draw_box else 0
     for i, line in enumerate(lines):
         start = line[0]["start"]
+        # A piece moved on its own (spots, dragged in the preview): this line's distance from the bottom.
+        source = source_at(start, segments)
+        spot = next((s for s in spots if source is not None and s["start"] <= source < s["end"]), None)
+        line_margin = js_round(video_h * float(spot["position"])) if spot else margin_v
         # Hold each line until the next one starts (if close), so subtitles don't flicker.
         end = line[-1]["end"]
         if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < gap_frames:
@@ -799,7 +830,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             line_font += "\\bord0\\shad0"
             rows = ["".join(plain)] if row2 is None else ["".join(plain[:row2]).strip(), "".join(plain[row2:]).strip()]
             gap = int(style.get("lineSpacing") or 0)
-            bottom = video_h - margin_v
+            bottom = video_h - line_margin
             for r, row in enumerate(rows):
                 row_bottom = bottom - (size + gap) * (len(rows) - 1 - r)
                 # Two rows meet with no space, so a see-through box doesn't get darker where they overlap.
@@ -816,13 +847,13 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{head}\\p1}}{pop_tags(motion, 0)}{box}{{\\p0}}")
         if motion == "bounce":
             row_step = size + int(style.get("lineSpacing") or 0)
-            places = word_places(plain, row2, style, size, spacing, video_w, video_h - margin_v, row_step, letters_height, cyrillic_line)
+            places = word_places(plain, row2, style, size, spacing, video_w, video_h - line_margin, row_step, letters_height, cyrillic_line)
             words = [spaced_marks(p.strip(), spacing) for p in plain]
             events += bounce_events(line, start, end, words, places, line_font, text_layer, highlight if look == "highlight" else None)
             continue
         line_font = f"{{{line_font}}}" if line_font else ""
         if look != "highlight":
-            events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
+            events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue
         # Highlight: one event per word, that word in the brand colour until the next one starts.
         for k in range(len(line)):
@@ -837,7 +868,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 on = f"\\1c{highlight}" if coloured else ""
                 off = f"\\1c{ass_colour(style.get('textColor', '#FFFFFF'))}" if coloured else ""
                 text += f"{{{on}}}{p}{{{off}}}" if on else p
-            events.append(f"Dialogue: {text_layer},{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,0,,{line_font}{pop_tags(motion, since)}{text}")
+            events.append(f"Dialogue: {text_layer},{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, since)}{text}")
 
     # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
     boxed = look == "box"

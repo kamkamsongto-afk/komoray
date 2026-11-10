@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { type CutoutLayers, insertShown } from "@/lib/behind";
+import { type CutoutLayers, type Insert, insertShown } from "@/lib/behind";
 import { createDebugLog, type DebugLog } from "@/lib/debug-log";
 import { StudioEngine, type StudioMedia } from "@/lib/player/engine";
 import { focusFor, framePiece } from "@/lib/framing";
@@ -18,7 +18,7 @@ type Props = Omit<PreviewProps, "src"> & {
 	onFail: (error: Error) => void; // can't play here: the page switches to the <video> player
 	// Cutout layers (lib/behind.ts) and links to their pictures and clips. The speaker is only cut out
 	// when media is the stacked preview copy (proxy-cutout.mp4).
-	cutout?: { layers: CutoutLayers; files: Record<string, string> };
+	cutout?: { layers: CutoutLayers; files: Record<string, string>; onInsert?: (id: string, patch: Partial<Insert>) => void };
 };
 
 const SAMPLE_MS = 250; // debug mode: how often the engine's state is written down

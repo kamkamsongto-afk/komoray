@@ -21,6 +21,9 @@ export async function PUT(request: Request) {
 	const body = (await request.json().catch(() => ({}))) as { style?: unknown };
 	if (!body.style || typeof body.style !== "object") return Response.json({ error: "No style" }, { status: 400 });
 	const style = readStyle(body.style);
+	// These belong to one video, never to the look every new video starts from.
+	delete style.splits;
+	delete style.spots;
 	await putObject(brandKey(user.id), JSON.stringify({ style, updatedAt: new Date().toISOString() }), "application/json");
 	return Response.json({ style });
 }

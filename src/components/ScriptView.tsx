@@ -309,8 +309,8 @@ export function ScriptView({
 		[duration, words, cuts, deleted, manual, keep],
 	);
 	const lines = useMemo(
-		() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look, subtitle.size, subtitle.letterSpacing),
-		[words, fixes, segments, subtitle.look, subtitle.size],
+		() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots),
+		[words, fixes, segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots],
 	);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);
@@ -769,7 +769,7 @@ export function ScriptView({
 							key={playerKey}
 							ref={playerRef}
 							media={stackedPreview ? { ...studio, videoUrl: stackedPreview, stacked: true } : studio}
-							cutout={{ layers: cutoutLayers, files: cutout.files }}
+							cutout={{ layers: cutoutLayers, files: cutout.files, onInsert: (id, patch) => onCutoutChange({ ...cutoutLayers, inserts: cutoutLayers.inserts.map((i) => (i.id === id ? { ...i, ...patch } : i)) }) }}
 							segments={segments}
 							lines={lines}
 							subtitle={subtitle}
@@ -1225,6 +1225,8 @@ export function ScriptView({
 					}}
 					cutoutLayers={cutoutLayers}
 					onCutoutChange={onCutoutChange}
+					splits={subtitle.splits ?? []}
+					onSplitsChange={(splits) => onSubtitleChange({ ...subtitle, splits })}
 					onOpenCutout={(id) => {
 						setFocusCutout(id);
 						openPanel("cutout");
