@@ -520,9 +520,15 @@ def place_frame(t: float, segments: list[tuple[int, int, int]]) -> float | None:
     return None
 
 
+def break_frame(t: float, segments: list[tuple[int, int, int]]) -> float | None:
+    """The output frame a Split breaks subtitle lines at (the breaks in subtitleLines, timeline.ts)."""
+    placed = place_frame(t, segments)
+    return placed if placed is not None else next((start for start, trim, _ in segments if trim / FPS > t), None)
+
+
 def source_at(frame: float, segments: list[tuple[int, int, int]]) -> float | None:
     """The second of the original video at this output frame, a hundredth in (lineSource in timeline.ts)."""
-    for start, trim, frames in segments:
+    for start, trim, frames in reversed(segments):  # right after a cut, the piece that starts there
         if start <= frame <= start + frames:
             return (trim + frame - start) / FPS + 0.01
     return None
@@ -774,7 +780,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     # The line's width in letters at the limit's size, shared out among bigger or more spaced-out letters.
     spacing = int(style.get("letterSpacing") or 0)
     max_letters = math.floor(limits["thai_letters"] * limits["size"] * THAI_LETTER_EM / (max(size, limits["size"]) * THAI_LETTER_EM + spacing) + 1e-9)
-    breaks = [f for f in (place_frame(float(s), segments) for s in (style.get("splits") or [])) if f is not None]
+    # A Split inside a cut part breaks where the video picks up again, or the pieces on either side would join.
+    breaks = [f for f in (break_frame(float(s), segments) for s in (style.get("splits") or [])) if f is not None]
     spots = style.get("spots") or []
     lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames, breaks)
     if style.get("subtitles") is False:  # turned off: same as the preview (PlayerFrame shows no line)

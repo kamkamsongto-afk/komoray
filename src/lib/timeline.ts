@@ -55,7 +55,7 @@ export function setSpot(spots: SubtitleSpot[] | undefined, start: number, end: n
 }
 // A hundredth of a second in, so a line starting exactly on a Split counts as after it. Same as source_at in render.py.
 function lineSource(frame: number, segments: Segment[]) {
-	const seg = segments.find((s) => s.from <= frame && frame <= s.from + s.frames);
+	const seg = segments.findLast((s) => s.from <= frame && frame <= s.from + s.frames); // the last: right after a cut, the piece that starts there
 	return seg ? (seg.trim + frame - seg.from) / FPS + 0.01 : null;
 }
 
@@ -169,7 +169,8 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	const lastSegment = segments[segments.length - 1];
 	const videoEnd = lastSegment ? (lastSegment.trim + lastSegment.frames) / FPS : 0;
 	// A line never runs across a Split, so each piece has its own words.
-	const breaks = splits.map((s) => placeFrame(s, segments)).filter((f): f is number => f !== null);
+	// A Split inside a cut part breaks where the video picks up again, or the pieces on either side would join.
+	const breaks = splits.map((s) => placeFrame(s, segments) ?? segments.find((g) => g.trim / FPS > s)?.from ?? null).filter((f): f is number => f !== null);
 	const limits = look === "big" || look === "two" ? LINE_LIMITS[look] : LINE_LIMITS.normal;
 	// The line's width in letters at the limit's size, shared out among bigger or more spaced-out letters.
 	const maxLetters = Math.floor((limits.thaiLetters * limits.size * THAI_LETTER_EM) / (Math.max(size, limits.size) * THAI_LETTER_EM + spacing) + 1e-9);
