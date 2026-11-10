@@ -852,6 +852,13 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             events += bounce_events(line, start, end, words, places, line_font, text_layer, highlight if look == "highlight" else None)
             continue
         line_font = f"{{{line_font}}}" if line_font else ""
+        if row2 is not None and int(style.get("lineSpacing") or 0) < 0:
+            # Rows closer than usual: ASS can't pull rows together, so each row is its own event, row_step apart like Bounce.
+            step = size + int(style.get("lineSpacing") or 0)
+            rows = [("".join(parts[:row2]), step), (parts[row2].removeprefix("\\N") + "".join(parts[row2 + 1:]), 0)]
+            for row, lift in rows:
+                events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin + lift},,{line_font}{pop_tags(motion, 0)}{row}")
+            continue
         if look != "highlight":
             events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue

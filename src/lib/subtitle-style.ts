@@ -116,7 +116,7 @@ export const LIMITS = {
 	zoomAmount: { min: 1.04, max: 1.3, step: 0.01 },
 	zoomPeriod: { min: 6, max: 24, step: 1 },
 	letterSpacing: { min: 0, max: 30, step: 1 },
-	lineSpacing: { min: 0, max: 80, step: 2 },
+	lineSpacing: { min: -40, max: 80, step: 2 }, // below 0: the two rows closer than usual
 	boxRadius: { min: 0, max: 60, step: 2 },
 	boxOpacity: { min: 0.05, max: 1, step: 0.05 },
 	audioAmount: { min: 0, max: 1, step: 0.05 },
