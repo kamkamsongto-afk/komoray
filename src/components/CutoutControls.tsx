@@ -2,7 +2,7 @@
 
 import { ChevronDown, ChevronRight, ImagePlus, Plus, Sparkles, Type, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, covered, type CutoutLayers, INSERT, type Insert, keptWindows } from "@/lib/behind";
+import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
@@ -120,7 +120,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		if ("error" in done) return setNotice(done.error);
 		const start = startAt();
 		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
-		const insert: Insert = { id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: INSERT.scale.start, speakerX: 0.25, hidden: false };
+		const insert: Insert = { id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: INSERT.scale.start, speakerX: 0.25, hidden: false, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
 		setOpen(insert.id);
 		setTab("inserts");
 		setInserts([...layers.inserts, insert].sort((a, b) => a.start - b.start));
@@ -396,7 +396,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										)}
 									</span>
 									<span className="block truncate px-1 py-0.5 text-[11px] text-foreground/60 tabular-nums">
-										{name} {i.start}–{i.end}s
+										{insertName(i)} {i.start}–{i.end}s
 									</span>
 								</button>
 								<button onClick={() => setRemoving({ name: `this ${name.toLowerCase()}`, remove: () => setInserts(layers.inserts.filter((x) => x.id !== i.id)) })} aria-label={`Delete this ${name.toLowerCase()}`} className="absolute top-0.5 right-0.5 rounded-full bg-black/70 p-0.5 text-white hover:bg-red-600">
@@ -412,6 +412,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					.filter((i) => i.id === open)
 					.map((i) => (
 						<div key={i.id} className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+							{row("Name", <input value={i.name ?? ""} maxLength={BEHIND.maxName} placeholder={i.kind === "video" ? "Clip" : "Picture"} onChange={(e) => updateInsert(i.id, { name: e.target.value })} onBlur={(e) => updateInsert(i.id, { name: cleanInsertName(e.target.value) || undefined })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							<label className="flex items-center gap-2 text-xs">
 								<input type="checkbox" checked={i.hidden} onChange={(e) => updateInsert(i.id, { hidden: e.target.checked })} />
 								Hide me while it shows

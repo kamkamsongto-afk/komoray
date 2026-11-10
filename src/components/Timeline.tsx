@@ -3,7 +3,7 @@
 import { AudioWaveform, ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Banner } from "@/lib/banners";
-import type { CutoutLayers } from "@/lib/behind";
+import { type CutoutLayers, insertName } from "@/lib/behind";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
@@ -231,7 +231,7 @@ export function Timeline({
 		const bannerItems = banners.map((b): LaneItem => ({ id: b.id, kind: "banner", label: b.text, start: b.start, end: b.end }));
 		const cutoutItems = [
 			...cutoutLayers.texts.map((t): LaneItem => ({ id: t.id, kind: "text", label: t.text, start: t.start, end: t.end })),
-			...cutoutLayers.inserts.map((i): LaneItem => ({ id: i.id, kind: "insert", label: i.kind === "video" ? "Clip" : "Picture", start: i.start, end: i.end })),
+			...cutoutLayers.inserts.map((i): LaneItem => ({ id: i.id, kind: "insert", label: insertName(i), start: i.start, end: i.end })),
 		];
 		const top = packRows(bannerItems, 0);
 		const bannerRows = top.length ? Math.max(...top.map((l) => l.row)) + 1 : 0;
@@ -1068,7 +1068,7 @@ export function Timeline({
 			)}
 			{removing && (
 				<ConfirmDelete
-					name={removing.kind === "text" ? `"${removing.label}"` : `this ${removing.label.toLowerCase()}`}
+					name={`"${removing.label}"`}
 					onCancel={closeRemoving}
 					onConfirm={() => {
 						changeItem(removing, null);

@@ -49,6 +49,7 @@ export type Insert = {
 	speakerScale: number;
 	speakerX: number;
 	hidden: boolean;
+	name?: string; // what the Timeline calls it. Starts as the uploaded file's name; older videos have none (insertName)
 	// Added 10 Nov, so videos saved before may not have them: read with ?? (picMoved, picturePlace, speakerTransform).
 	speakerLift?: number; // how far the speaker's bottom edge is raised, share of the height
 	picScale?: number; // 1 = just fills the screen
@@ -60,7 +61,7 @@ export type Insert = {
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
 export const NO_LAYERS: CutoutLayers = { texts: [], inserts: [] };
 
-export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 24 }, maxText: 40, maxLines: 3, maxItems: 10, seconds: 3, fade: 0.25, y: 0.16 };
+export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 24 }, maxText: 40, maxLines: 3, maxName: 40, maxItems: 10, seconds: 3, fade: 0.25, y: 0.16 };
 // edgeFade: a smaller speaker fades out over this share of their width at the left and right. The camera
 // often cuts the shoulders off at the frame's side, which else ends in a hard straight line (7 Nov test).
 // Same as INSERT_EDGE_FADE in render.py.
@@ -145,6 +146,8 @@ export function picturePlace(i: Insert, ratio: number, frame: number) {
 		transform: `translate(-50%, -50%) rotate(${i.picRotate ?? 0}deg) scale(${i.picScale ?? 1})`,
 	};
 }
+export const insertName = (i: Insert) => i.name || (i.kind === "video" ? "Clip" : "Picture");
+export const cleanInsertName = (name: unknown) => String(name ?? "").replace(/[\n\r\t]/g, " ").trim().slice(0, BEHIND.maxName);
 export const speakerTransform = (i: Insert, boxWidth: number) => `translate(${(i.speakerX - 0.5) * boxWidth}px, ${-(i.speakerLift ?? 0) * 100}%) scale(${i.speakerScale})`;
 
 // The parts of the source video the speaker must be cut out for: every layer's time on the final video,
@@ -241,6 +244,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			speakerScale: round(num(i.speakerScale, INSERT.scale.min, INSERT.scale.max, INSERT.scale.start)),
 			speakerX: round(num(i.speakerX, 0, 1, 0.25), 1000),
 			hidden: i.hidden === true,
+			name: cleanInsertName(i.name) || undefined,
 			speakerLift: round(num(i.speakerLift, 0, INSERT.lift.max, 0), 1000),
 			picScale: round(num(i.picScale, INSERT.picture.scale.min, INSERT.picture.scale.max, 1)),
 			picX: round(num(i.picX, -INSERT.picture.move, INSERT.picture.move, 0), 1000),
