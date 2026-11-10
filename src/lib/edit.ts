@@ -88,7 +88,7 @@ export function readSpans(value: unknown, duration: number): Span[] | null {
 // Deepgram's own words stay untouched, so cuts and deleted words keep working on the same positions.
 export type Fix = { from: number; to: number; text: string };
 
-export const MAX_FIX_LENGTH = 200;
+export const MAX_FIX_LENGTH = 2000;
 
 // Words compared the way people read them: ignore capitals, spacing and punctuation at the ends
 // ("People," = "people"). Used to find words in the script and as the personal dictionary's key.
@@ -193,7 +193,9 @@ export function findInside(words: { index: number; last: number; text: string; s
 // Put a fix on words from..to, replacing any fix it overlaps. The original text (or nothing) removes it.
 export function setFix(fixes: Fix[], from: number, to: number, text: string, original: string): Fix[] {
 	const kept = fixes.filter((f) => f.to < from || f.from > to);
-	const clean = text.trim().slice(0, MAX_FIX_LENGTH);
+	const clean = text.trim();
+	// Too long: nothing changes, and the box says so. Cutting it here made the end of the text vanish from the script and the subtitles.
+	if (clean.length > MAX_FIX_LENGTH) return fixes;
 	if (clean && clean !== original) kept.push({ from, to, text: clean });
 	return kept.sort((a, b) => a.from - b.from);
 }

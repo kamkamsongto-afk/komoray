@@ -2,7 +2,7 @@
 
 import { Crop, Film, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { allCuts, findInside, type Fix, fixedWords, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
+import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
 import type { Banner } from "@/lib/banners";
 import type { CutoutLayers } from "@/lib/behind";
 import type { useCutout } from "@/lib/use-cutout";
@@ -373,7 +373,7 @@ export function ScriptView({
 	}
 
 	function saveEdit(text: string) {
-		if (!editing) return;
+		if (!editing || text.trim().length > MAX_FIX_LENGTH) return;
 		onFixesChange(setFix(fixes, editing.from, editing.to, text, editing.original));
 		learn(editing.original, text);
 		setEditing(null);
@@ -415,6 +415,7 @@ export function ScriptView({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [dictionary]);
 
+	const editTooLong = Boolean(editing && editing.text.trim().length > MAX_FIX_LENGTH);
 	const editingFixed = editing && fixes.some((f) => f.to >= editing.from && f.from <= editing.to);
 	const sameElsewhere = editing ? findMatches(wordItems, editing.before).filter((m) => m.from !== editing.from).length : 0;
 	const findCount = finding ? findMatches(wordItems, finding.find, true).reduce((sum, m) => sum + (m.keep ? m.keep.length - 1 : 1), 0) : 0;
@@ -1022,10 +1023,10 @@ export function ScriptView({
 								aria-label="Fixed text"
 								className="min-w-40 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
 							/>
-							<button type="submit" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+							<button type="submit" disabled={editTooLong} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
 								Save
 							</button>
-							{sameElsewhere > 0 && (
+							{sameElsewhere > 0 && !editTooLong && (
 								<button
 									type="button"
 									onClick={() => {
@@ -1051,6 +1052,7 @@ export function ScriptView({
 									Original
 								</button>
 							)}
+							{editTooLong && <span className="w-full text-xs font-medium text-red-600">That is too much text to fix at once. Select a shorter part, up to {MAX_FIX_LENGTH} letters.</span>}
 							<span className="w-full text-xs text-foreground/60">
 								Heard as: {editing.original} · The subtitles show what you type. Enter to save, Esc to cancel.
 							</span>
