@@ -452,6 +452,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										))}
 									</span>,
 								)}
+							{i.kind === "image" && (i.picMotion === "in" || i.picMotion === "out") && row("Zoom speed", range(i.picZoom ?? INSERT.zoom.start, INSERT.zoom.min, INSERT.zoom.max, 0.05, `${Math.round((i.picZoom ?? INSERT.zoom.start) * 100)}%`, (picZoom) => updateInsert(i.id, { picZoom })))}
 							{row("Size", range(i.picScale ?? 1, INSERT.picture.scale.min, INSERT.picture.scale.max, 0.05, `${Math.round((i.picScale ?? 1) * 100)}%`, (picScale) => updateInsert(i.id, { picScale })))}
 							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
 							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}

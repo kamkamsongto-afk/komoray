@@ -314,7 +314,7 @@ RUN_SPEED = {"slow": 150, "normal": 300, "fast": 600}
 ARRIVE_TIME = {"slow": 1.6, "normal": 1, "fast": 0.6}
 RUN_GAP = "   •   "
 INSERT_FADE = 0.25
-INSERT_ZOOM = 0.2  # how much bigger a picture with Zoom in / Zoom out gets (INSERT.zoom in behind.ts)
+INSERT_ZOOM = 0.2  # how much bigger a picture with Zoom in / Zoom out gets, when its video has no Zoom speed (INSERT.zoom.start in behind.ts)
 INSERT_EDGE_FADE = 0  # how far a smaller speaker fades out at the left and right, 0 = a sharp cut (INSERT.edgeFade in behind.ts)
 
 
@@ -435,7 +435,8 @@ def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
         return ""
     W, H = size
     p = f"clip((in-1)/{seconds * FPS:.3f},0,1)"
-    z = f"(1+{INSERT_ZOOM}*{p})" if motion == "in" else f"(1+{INSERT_ZOOM}*(1-{p}))"
+    amount = float(ins.get("picZoom", INSERT_ZOOM))
+    z = f"(1+{amount:.3f}*{p})" if motion == "in" else f"(1+{amount:.3f}*(1-{p}))"
     x, y = f"({W}/2*(1-1/{z}))", f"({H}/2*(1-1/{z}))"
     return (
         f"format=yuva420p,perspective=x0='{x}':y0='{y}':x1='{W}-{x}':y1='{y}':x2='{x}':y2='{H}-{y}':x3='{W}-{x}':y3='{H}-{y}'"
