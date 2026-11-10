@@ -105,6 +105,8 @@ export type WordFix = { heard: string; fixed: string };
 // A retyped word is only as long as its letters; marks above and below a Thai letter take no time.
 const spokenLetters = (text: string) => Math.max(1, text.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, "").length);
 
+const PAUSE_INSIDE_FIX = 0.05; // seconds between two words that counts as a pause, not words said in a row
+
 // A fix with spaces in it is several words, each with its own time, or the Highlight look and Bounce
 // treat the whole phrase as one word. The time is shared by letters over when the words were really
 // said (never the pauses between them, which may be cut). space: the user typed a space before it.
@@ -123,12 +125,17 @@ function splitFix<W extends Span & { text: string }>(run: W[], text: string): W[
 		const last = run[run.length - 1];
 		return { word: last, time: last.end };
 	};
+	// The end of a piece: where its letters run out, or the first real pause on the way there,
+	// since a piece over a pause that gets cut would land in the cut and vanish.
+	const endOf = (from: W, to: { word: W; time: number }) => {
+		for (let k = run.indexOf(from); k < run.indexOf(to.word); k++) if (run[k + 1].start - run[k].end > PAUSE_INSIDE_FIX) return run[k].end;
+		return to.time;
+	};
 	let done = 0;
 	return pieces.map((piece, k) => {
 		const from = at((spoken * done) / letters);
 		done += spokenLetters(piece);
-		// Ends inside the word it starts in: a piece over a cut pause would land in the cut and vanish.
-		return { ...run[0], text: piece, start: from.time, end: Math.min(at((spoken * done) / letters).time, from.word.end), ...(k ? { space: true } : {}) };
+		return { ...run[0], text: piece, start: from.time, end: endOf(from.word, at((spoken * done) / letters)), ...(k ? { space: true } : {}) };
 	});
 }
 
