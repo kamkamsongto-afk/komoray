@@ -2,7 +2,7 @@
 
 import { ChevronDown, ChevronRight, ImagePlus, Plus, Sparkles, Type, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
+import { PIC_MOTION, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
@@ -40,6 +40,23 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
+// Does this picture really have clear parts? A PNG or GIF can be solid too, and a solid one works like a JPG.
+async function hasClearParts(file: File) {
+	if (!/^image\/(png|webp|gif)$/.test(file.type)) return false;
+	try {
+		const picture = await createImageBitmap(file);
+		const canvas = document.createElement("canvas");
+		canvas.width = canvas.height = 64;
+		const draw = canvas.getContext("2d", { willReadFrequently: true });
+		if (!draw) return false;
+		draw.drawImage(picture, 0, 0, 64, 64);
+		picture.close();
+		const { data } = draw.getImageData(0, 0, 64, 64);
+		for (let k = 3; k < data.length; k += 4) if (data[k] < 250) return true;
+	} catch {}
+	return false;
+}
+
 export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
@@ -115,12 +132,13 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		setUploading(true);
 		// A clip shows for as long as it plays (within what may be cut out); a picture for a few seconds.
 		const clipSeconds = file.type.startsWith("video/") ? await clipLength(file) : null;
+		const seeThrough = await hasClearParts(file);
 		const done = await cutout.upload(file);
 		setUploading(false);
 		if ("error" in done) return setNotice(done.error);
 		const start = startAt();
 		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
-		const insert: Insert = { id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: INSERT.scale.start, speakerX: 0.25, hidden: false, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
+		const insert: Insert = { id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
 		setOpen(insert.id);
 		setTab("inserts");
 		setInserts([...layers.inserts, insert].sort((a, b) => a.start - b.start));
@@ -303,7 +321,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					<input
 						ref={fileRef}
 						type="file"
-						accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime"
+						accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime"
 						className="hidden"
 						onChange={(e) => {
 							const file = e.target.files?.[0];
@@ -416,13 +434,24 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{row("Name", <input value={i.name ?? ""} maxLength={BEHIND.maxName} placeholder={i.kind === "video" ? "Clip" : "Picture"} onChange={(e) => updateInsert(i.id, { name: e.target.value })} onBlur={(e) => updateInsert(i.id, { name: cleanInsertName(e.target.value) || undefined })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							<label className="flex items-center gap-2 text-xs">
 								<input type="checkbox" checked={i.hidden} onChange={(e) => updateInsert(i.id, { hidden: e.target.checked })} />
-								Hide me while it shows
+								{i.seeThrough ? "Put it in front of me" : "Hide me while it shows"}
 							</label>
-							{!i.hidden && row("Your size", range(i.speakerScale, INSERT.scale.min, INSERT.scale.max, 0.05, `${Math.round(i.speakerScale * 100)}%`, (speakerScale) => updateInsert(i.id, { speakerScale })))}
-							{!i.hidden && row("You stand", range(i.speakerX, 0, 1, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
-							{!i.hidden && row("You rise", range(i.speakerLift ?? 0, 0, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
-							{!i.hidden && row("Soft edges", range(i.soft ?? INSERT.edgeFade, 0, INSERT.soft.max, 0.01, `${Math.round((i.soft ?? INSERT.edgeFade) * 100)}%`, (soft) => updateInsert(i.id, { soft })))}
+							{!i.hidden && !i.seeThrough && row("Your size", range(i.speakerScale, INSERT.scale.min, INSERT.scale.max, 0.05, `${Math.round(i.speakerScale * 100)}%`, (speakerScale) => updateInsert(i.id, { speakerScale })))}
+							{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, 0, 1, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
+							{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, 0, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
+							{!i.hidden && !i.seeThrough && row("Soft edges", range(i.soft ?? INSERT.edgeFade, 0, INSERT.soft.max, 0.01, `${Math.round((i.soft ?? INSERT.edgeFade) * 100)}%`, (soft) => updateInsert(i.id, { soft })))}
 							<span className="mt-1 text-xs font-medium text-foreground/70">{i.kind === "video" ? "The clip" : "The picture"}</span>
+							{i.kind === "image" &&
+								row(
+									"Movement",
+									<span className="flex gap-1">
+										{PIC_MOTION.map(([id, name]) => (
+											<button key={id} onClick={() => updateInsert(i.id, { picMotion: id })} className={`rounded border px-1.5 py-0.5 ${(i.picMotion ?? "still") === id ? "border-blue-600 bg-blue-600/10" : "border-foreground/20"}`}>
+												{name}
+											</button>
+										))}
+									</span>,
+								)}
 							{row("Size", range(i.picScale ?? 1, INSERT.picture.scale.min, INSERT.picture.scale.max, 0.05, `${Math.round((i.picScale ?? 1) * 100)}%`, (picScale) => updateInsert(i.id, { picScale })))}
 							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
 							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}

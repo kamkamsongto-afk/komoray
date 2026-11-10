@@ -4,7 +4,7 @@ import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerMotion, cleanBannerText } from "@/lib/banners";
-import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, runText, speakerTransform } from "@/lib/behind";
+import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -325,13 +325,15 @@ export function PlayerFrame({
 					const seen = (r: number) => setRatios((all) => (all[i.file] === r ? all : { ...all, [i.file]: r }));
 					const fill: CSSProperties = moved && ratio ? { position: "absolute", maxWidth: "none", objectFit: "fill", ...picturePlace(i, ratio, W / H) } : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 					return (
-						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved ? "#000" : undefined }}>
-							{i.kind === "video" ? (
-								<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} />
-							) : (
-								// eslint-disable-next-line @next/next/no-img-element
-								<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
-							)}
+						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
+							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
+								{i.kind === "video" ? (
+									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} />
+								) : (
+									// eslint-disable-next-line @next/next/no-img-element
+									<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
+								)}
+							</div>
 						</div>
 					);
 				})}
@@ -339,7 +341,7 @@ export function PlayerFrame({
 					{person}
 				</div>
 				{/* While paused: drag the speaker to move them, a top corner to resize them. Writes the same numbers as the sliders. */}
-				{insert && !insert.hidden && !playing && onInsert && (
+				{insert && !insert.hidden && !insert.seeThrough && !playing && onInsert && (
 					<div
 						title="Drag to move yourself. Drag a corner to resize."
 						onClick={(e) => speakerMoved.current && e.stopPropagation()}

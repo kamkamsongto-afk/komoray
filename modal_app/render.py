@@ -254,6 +254,7 @@ RUN_SPEED = {"slow": 150, "normal": 300, "fast": 600}
 ARRIVE_TIME = {"slow": 1.6, "normal": 1, "fast": 0.6}
 RUN_GAP = "   •   "
 INSERT_FADE = 0.25
+INSERT_ZOOM = 0.2  # how much bigger a picture with Zoom in / Zoom out gets (INSERT.zoom in behind.ts)
 INSERT_EDGE_FADE = 0  # how far a smaller speaker fades out at the left and right, 0 = a sharp cut (INSERT.edgeFade in behind.ts)
 
 
@@ -366,6 +367,22 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
     )
 
 
+def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a picture growing or shrinking around the screen's middle while it shows. Same as pictureZoom in behind.ts.
+    Scale and crop only move in whole pixels, which shakes a slow zoom, so `perspective` does it (smooth_filter)."""
+    motion = ins.get("picMotion")
+    if ins.get("kind") == "video" or motion not in ("in", "out"):
+        return ""
+    W, H = size
+    p = f"clip((in-1)/{seconds * FPS:.3f},0,1)"
+    z = f"(1+{INSERT_ZOOM}*{p})" if motion == "in" else f"(1+{INSERT_ZOOM}*(1-{p}))"
+    x, y = f"({W}/2*(1-1/{z}))", f"({H}/2*(1-1/{z}))"
+    return (
+        f"format=yuva420p,perspective=x0='{x}':y0='{y}':x1='{W}-{x}':y1='{y}':x2='{x}':y2='{H}-{y}':x3='{W}-{x}':y3='{H}-{y}'"
+        ":interpolation=linear:eval=frame,"
+    )
+
+
 def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: dict, inputs: dict) -> str:
     """Puts the cutout layers on the joined video `base`, in the preview's order (PlayerFrame): text behind
     the speaker, then each picture or clip fading in over the whole picture, then the speaker cut out
@@ -389,10 +406,11 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
             f"format=yuva420p,fade=t=in:st=0:d={INSERT_FADE}:alpha=1,fade=t=out:st={max(0.0, d - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1,"
             f"setpts=PTS-STARTPTS+{a:.3f}/TB[ins{j}]"
         )
+        zoom = picture_zoom(ins, d, size)
         grow, turn = float(ins.get("picScale", 1)), float(ins.get("picRotate", 0))
         dx, dy = float(ins.get("picX", 0)) * W, float(ins.get("picY", 0)) * H
         if grow == 1 and turn == 0 and dx == 0 and dy == 0:
-            parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{fades}")
+            parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{zoom}{fades}")
         else:
             # Moved, turned or resized: the whole picture on black. Same as picturePlace in behind.ts.
             # Only what can land on the screen is kept, around the picture's middle so its place doesn't change.
@@ -405,8 +423,9 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
                 f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,format=rgba,"
                 f"crop=w='min(iw,{reach})':h='min(ih,{reach})':exact=1,scale=iw*{grow}:ih*{grow}{rotate}[ipic{j}]"
             )
-            parts.append(f"color=c=black:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[ibg{j}]")
-            parts.append(f"[ibg{j}][ipic{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1,{fades}")
+            # A picture with clear parts keeps them around it too, so the normal video shows there.
+            parts.append(f"color=c=black{'@0' if ins.get('seeThrough') else ''}:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[ibg{j}]")
+            parts.append(f"[ibg{j}][ipic{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1:format=rgb,{zoom}{fades}")
         parts.append(f"{base}[ins{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[cbi{j}]")
         base = f"[cbi{j}]"
     if not person:
@@ -1213,7 +1232,9 @@ def ffmpeg_command(
             cmd += ["-i", str(cutout["matte"])]
         for ins in cutout.get("inserts") or []:
             # A picture is one frame: repeated for as long as it shows (trimmed in cutout_filters).
-            cmd += (["-loop", "1", "-framerate", str(FPS)] if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
+            # A GIF has its own frames: played again and again instead.
+            still = ["-stream_loop", "-1"] if str(ins.get("file", "")).endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]
+            cmd += (still if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         # High on purpose: polish_sound encodes this sound a second time, at the bitrate people get.

@@ -18,6 +18,8 @@ export const BEHIND_FX: Record<BehindFx, string> = {
 	runRight: "Run left to right",
 };
 export type BehindSpeed = "slow" | "normal" | "fast";
+export type PicMotion = "still" | "in" | "out";
+export const PIC_MOTION: [PicMotion, string][] = [["still", "Still"], ["in", "Zoom in"], ["out", "Zoom out"]];
 // Running text: px per second. The other kinds: how long their arrival takes, 1 = normal.
 export const RUN_SPEED: Record<BehindSpeed, number> = { slow: 150, normal: 300, fast: 600 };
 export const ARRIVE_TIME: Record<BehindSpeed, number> = { slow: 1.6, normal: 1, fast: 0.6 };
@@ -58,6 +60,10 @@ export type Insert = {
 	picX?: number; // the picture's middle, away from the screen's, share of the width
 	picY?: number; // same, share of the height
 	picRotate?: number; // degrees, clockwise
+	// Added 11 Nov, read with ??. seeThrough: the picture has clear parts, so the normal video shows through them. Only the
+	// real speaker can be there (nothing else was filmed), so the speaker stays where they are, in front of it or (hidden) behind it.
+	seeThrough?: boolean;
+	picMotion?: PicMotion; // pictures only: grows or shrinks slowly while it shows
 };
 
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
@@ -68,7 +74,7 @@ export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 
 // 0 since 10 Nov: Yoshi saw the fade eat the shoulders (VID20261028143211 at 0:23) and wants a sharp cut, with a
 // slider for anyone who likes it soft. The price of 0: if the camera cut a shoulder off at the frame's side, it
 // ends in a straight line (7 Nov test). Same as INSERT_EDGE_FADE in render.py.
-export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0, soft: { max: 0.3 }, maxBytes: { image: 10_000_000, video: 150_000_000 } };
+export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0, soft: { max: 0.3 }, zoom: 0.2, maxBytes: { image: 10_000_000, video: 150_000_000 } };
 // Running text: the words, again and again, so the screen stays full for as long as it runs. Counted the
 // same way here and in render.py (run_repeats), so both draw the same string.
 export const RUN_GAP = "   •   ";
@@ -149,6 +155,13 @@ export function picturePlace(i: Insert, ratio: number, frame: number) {
 		transform: `translate(-50%, -50%) rotate(${i.picRotate ?? 0}deg) scale(${i.picScale ?? 1})`,
 	};
 }
+// How much bigger the picture is at second t. Grows around the screen's middle, on top of Size, Left / right and Rotate.
+// Same as picture_zoom in render.py.
+export function pictureZoom(i: Insert, t: number) {
+	if (i.kind === "video" || !i.picMotion || i.picMotion === "still") return 1;
+	const p = Math.min(1, Math.max(0, (t - i.start) / (i.end - i.start)));
+	return 1 + INSERT.zoom * (i.picMotion === "in" ? p : 1 - p);
+}
 export const insertName = (i: Insert) => i.name || (i.kind === "video" ? "Clip" : "Picture");
 export const cleanInsertName = (name: unknown) => String(name ?? "").replace(/[\n\r\t]/g, " ").trim().slice(0, BEHIND.maxName);
 export const speakerTransform = (i: Insert, boxWidth: number) => `translate(${(i.speakerX - 0.5) * boxWidth}px, ${-(i.speakerLift ?? 0) * 100}%) scale(${i.speakerScale})`;
@@ -207,7 +220,7 @@ export const cleanBehindText = (text: string) =>
 		.slice(0, BEHIND.maxText)
 		.trim();
 const id = (v: unknown) => String(v ?? "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || crypto.randomUUID();
-const INSERT_FILE = /^insert-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|mp4|mov)$/;
+const INSERT_FILE = /^insert-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4|mov)$/;
 
 export function readCutout(value: unknown): CutoutLayers | null {
 	if (!value || typeof value !== "object") return null;
@@ -255,6 +268,8 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			picX: round(num(i.picX, -INSERT.picture.move, INSERT.picture.move, 0), 1000),
 			picY: round(num(i.picY, -INSERT.picture.move, INSERT.picture.move, 0), 1000),
 			picRotate: Math.round(num(i.picRotate, -INSERT.picture.rotate, INSERT.picture.rotate, 0)),
+			seeThrough: i.seeThrough === true && !/\.(mp4|mov)$/.test(i.file),
+			picMotion: i.picMotion === "in" || i.picMotion === "out" ? i.picMotion : "still",
 		});
 	}
 	return { texts, inserts };
