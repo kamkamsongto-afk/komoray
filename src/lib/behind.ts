@@ -50,6 +50,7 @@ export type Insert = {
 	speakerScale: number;
 	speakerX: number;
 	hidden: boolean;
+	soft?: number; // the speaker's edges melt away at the sides and the bottom over this share, 0 = a sharp cut (INSERT.soft)
 	name?: string; // what the Timeline calls it. Starts as the uploaded file's name; older videos have none (insertName)
 	// Added 10 Nov, so videos saved before may not have them: read with ?? (picMoved, picturePlace, speakerTransform).
 	speakerLift?: number; // how far the speaker's bottom edge is raised, share of the height
@@ -63,11 +64,11 @@ export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
 export const NO_LAYERS: CutoutLayers = { texts: [], inserts: [] };
 
 export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 24 }, maxText: 40, maxLines: 3, lineGap: { min: -60, max: 160 }, maxName: 40, maxItems: 10, seconds: 3, fade: 0.25, y: 0.16 };
-// edgeFade: a smaller speaker fades out over this share of their width at the left and right; 0 = no fade.
-// Off since 10 Nov: Yoshi saw the fade eat the shoulders (VID20261028143211 at 0:23) and wants a sharp cut.
-// The price: if the camera cut a shoulder off at the frame's side, it ends in a straight line (7 Nov test).
-// Same as INSERT_EDGE_FADE in render.py.
-export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0, maxBytes: { image: 10_000_000, video: 150_000_000 } };
+// edgeFade: how much a smaller speaker's edges melt away when the customer hasn't chosen (Soft edges, Insert.soft).
+// 0 since 10 Nov: Yoshi saw the fade eat the shoulders (VID20261028143211 at 0:23) and wants a sharp cut, with a
+// slider for anyone who likes it soft. The price of 0: if the camera cut a shoulder off at the frame's side, it
+// ends in a straight line (7 Nov test). Same as INSERT_EDGE_FADE in render.py.
+export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0, soft: { max: 0.3 }, maxBytes: { image: 10_000_000, video: 150_000_000 } };
 // Running text: the words, again and again, so the screen stays full for as long as it runs. Counted the
 // same way here and in render.py (run_repeats), so both draw the same string.
 export const RUN_GAP = "   •   ";
@@ -248,6 +249,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			speakerX: round(num(i.speakerX, 0, 1, 0.25), 1000),
 			hidden: i.hidden === true,
 			name: cleanInsertName(i.name) || undefined,
+			soft: round(num(i.soft, 0, INSERT.soft.max, INSERT.edgeFade)),
 			speakerLift: round(num(i.speakerLift, 0, INSERT.lift.max, 0), 1000),
 			picScale: round(num(i.picScale, INSERT.picture.scale.min, INSERT.picture.scale.max, 1)),
 			picX: round(num(i.picX, -INSERT.picture.move, INSERT.picture.move, 0), 1000),

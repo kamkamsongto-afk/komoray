@@ -49,7 +49,28 @@ export type SubtitleStyle = {
 	subtitles: boolean; // false: no subtitles on the video (banners and the logo stay)
 	audio: boolean; // Audio optimization on or off (false: the sound stays as recorded)
 	audioAmount: number; // 0 = as recorded .. 1 = fully optimized
+	// This video only, never in the Brand Kit. Seconds of the original video, so they survive new cuts.
+	splits?: number[]; // where Split divided the sound and the words into pieces
+	spots?: SubtitleSpot[]; // pieces whose subtitles were moved on their own
 };
+
+export type SubtitleSpot = { start: number; end: number; position: number };
+const MAX_SPLITS = 200;
+function readSplits(value: unknown) {
+	if (!Array.isArray(value)) return [];
+	const times = value.filter((t): t is number => typeof t === "number" && Number.isFinite(t) && t >= 0).map((t) => Math.round(t * 1000) / 1000);
+	return [...new Set(times)].sort((a, b) => a - b).slice(0, MAX_SPLITS);
+}
+function readSpots(value: unknown): SubtitleSpot[] {
+	if (!Array.isArray(value)) return [];
+	const spots: SubtitleSpot[] = [];
+	for (const s of value.slice(0, MAX_SPLITS) as Partial<SubtitleSpot>[]) {
+		const { start, end, position } = s ?? {};
+		if (typeof start !== "number" || typeof end !== "number" || typeof position !== "number" || !Number.isFinite(start + end + position) || start < 0 || end <= start) continue;
+		spots.push({ start: Math.round(start * 1000) / 1000, end: Math.round(end * 1000) / 1000, position: Math.round(Math.min(LIMITS.position.max, Math.max(LIMITS.position.min, position)) * 1000) / 1000 });
+	}
+	return spots;
+}
 
 export const DEFAULT_STYLE: SubtitleStyle = {
 	size: 100,
@@ -161,7 +182,11 @@ export function fontMetrics(style: Pick<SubtitleStyle, "font" | "ownFont">) {
 export function readStyle(value: unknown): SubtitleStyle {
 	const v = (value ?? {}) as Partial<Record<keyof SubtitleStyle, unknown>>;
 	const pick = (k: keyof typeof LIMITS) => (typeof v[k] === "number" && Number.isFinite(v[k]) ? clamp(v[k] as number, LIMITS[k]) : DEFAULT_STYLE[k]);
+	const splits = readSplits(v.splits);
+	const spots = readSpots(v.spots);
 	return {
+		...(splits.length && { splits }),
+		...(spots.length && { spots }),
 		size: Math.round(pick("size")),
 		logoSize: Math.round(pick("logoSize")),
 		logoOpacity: Math.round(pick("logoOpacity") * 100) / 100,

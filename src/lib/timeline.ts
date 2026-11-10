@@ -1,6 +1,7 @@
 // The final video's timeline, worked out in the browser for the preview.
 // Mirrors modal_app/render.py (keep_segments + build_subtitles): change one, change the other,
 // or the preview stops matching the video people download.
+import type { SubtitleSpot } from "./subtitle-style";
 
 type Span = { start: number; end: number };
 type Word = { text: string; start: number; end: number };
@@ -36,7 +37,27 @@ export const ZOOM_ORIGIN = { x: 0.5, y: 0.4 };
 export type Segment = { from: number; trim: number; frames: number };
 // A subtitle line; parts = its words as shown (with the space before them) and when each is said.
 // row2 = the part that starts the second row (Two lines look), if the line is split.
-export type Line = { from: number; to: number; text: string; parts: { text: string; from: number }[]; row2?: number };
+// piece = the stretch of the original video this line is in, once the video has been Split: dragging the line
+// moves that stretch's subtitles only. position = where that stretch's subtitles were moved to, if they were.
+export type Line = { from: number; to: number; text: string; parts: { text: string; from: number }[]; row2?: number; piece?: [number, number]; position?: number };
+
+// The stretch between the Splits around second t of the original video.
+export function pieceAt(splits: number[], t: number, end: number): [number, number] {
+	return [splits.findLast((s) => s <= t) ?? 0, splits.find((s) => s > t) ?? end];
+}
+// One stretch moved on its own: other spots keep what lies outside it.
+export function setSpot(spots: SubtitleSpot[] | undefined, start: number, end: number, position: number): SubtitleSpot[] {
+	const kept = (spots ?? []).flatMap((s) => {
+		if (s.end <= start || s.start >= end) return [s];
+		return [...(s.start < start ? [{ ...s, end: start }] : []), ...(s.end > end ? [{ ...s, start: end }] : [])];
+	});
+	return [...kept, { start, end, position }];
+}
+// A hundredth of a second in, so a line starting exactly on a Split counts as after it. Same as source_at in render.py.
+function lineSource(frame: number, segments: Segment[]) {
+	const seg = segments.find((s) => s.from <= frame && frame <= s.from + s.frames);
+	return seg ? (seg.trim + frame - seg.from) / FPS + 0.01 : null;
+}
 
 const TWO_ROWS_FROM = 14; // Two lines look: a line with more letters than this is split in two rows
 
@@ -143,8 +164,12 @@ function joinThai(words: { text: string; start: number; end: number }[]) {
 }
 
 // Short subtitle lines on the output timeline, grouped the same way as the final video.
-export function subtitleLines(words: Word[], segments: Segment[], look = "clean", size = 100, spacing = 0): Line[] {
+export function subtitleLines(words: Word[], segments: Segment[], look = "clean", size = 100, spacing = 0, splits: number[] = [], spots: SubtitleSpot[] = []): Line[] {
 	const thai = words.some((w) => isThai(w.text));
+	const lastSegment = segments[segments.length - 1];
+	const videoEnd = lastSegment ? (lastSegment.trim + lastSegment.frames) / FPS : 0;
+	// A line never runs across a Split, so each piece has its own words.
+	const breaks = splits.map((s) => placeFrame(s, segments)).filter((f): f is number => f !== null);
 	const limits = look === "big" || look === "two" ? LINE_LIMITS[look] : LINE_LIMITS.normal;
 	// The line's width in letters at the limit's size, shared out among bigger or more spaced-out letters.
 	const maxLetters = Math.floor((limits.thaiLetters * limits.size * THAI_LETTER_EM) / (Math.max(size, limits.size) * THAI_LETTER_EM + spacing) + 1e-9);
@@ -184,7 +209,8 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	const groups: Placed[][] = [];
 	let current: Placed[] = [];
 	for (const w of placed) {
-		if (current.length && w.start - current[current.length - 1].end > gapFrames) {
+		const crossesSplit = current.length > 0 && breaks.some((b) => current[current.length - 1].start < b && b <= w.start + 0.01);
+		if (crossesSplit || (current.length && w.start - current[current.length - 1].end > gapFrames)) {
 			groups.push(current);
 			current = [];
 		} else if (current.length && !fits([...current, w])) {
@@ -204,6 +230,9 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		const texts = thai ? joinThai(line) : line.map((w, k) => (k ? " " : "") + w.text);
 		const row2 = look === "two" ? secondRow(texts) : undefined;
 		if (row2 !== undefined) texts[row2] = texts[row2].trimStart();
-		return { from: line[0].start, to, text: texts.join(""), parts: texts.map((text, k) => ({ text, from: line[k].start })), row2 };
+		const source = lineSource(line[0].start, segments);
+		const position = source === null ? undefined : spots.find((s) => source >= s.start && source < s.end)?.position;
+		const piece = source !== null && splits.length ? pieceAt(splits, source, videoEnd) : undefined;
+		return { from: line[0].start, to, text: texts.join(""), parts: texts.map((text, k) => ({ text, from: line[k].start })), row2, piece, position };
 	});
 }

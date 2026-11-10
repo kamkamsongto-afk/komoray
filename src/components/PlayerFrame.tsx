@@ -8,7 +8,7 @@ import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picM
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
-import { FPS, type Line, ZOOM_ORIGIN } from "@/lib/timeline";
+import { FPS, type Line, setSpot, ZOOM_ORIGIN } from "@/lib/timeline";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
 // latin-ext: the letters of Polish, Norwegian and the like. Only downloaded when a page uses them.
@@ -94,7 +94,8 @@ type Props = {
 	onSpeedChange?: (speed: number) => void; // left out: this player can't change speed
 	// Cutout (lib/behind.ts): text behind the speaker, pictures and clips behind a smaller speaker.
 	// person: the canvas the cut-out speaker is drawn on; files: a link to each inserted picture or clip.
-	cutout?: { layers: CutoutLayers; files: Record<string, string>; person: ReactNode };
+	// onInsert: the speaker dragged or resized on the video, while paused.
+	cutout?: { layers: CutoutLayers; files: Record<string, string>; person: ReactNode; onInsert?: (id: string, patch: Partial<Insert>) => void };
 };
 
 // An inserted clip, kept at the final video's time: it plays with the preview, and jumps when it is far off.
@@ -184,7 +185,9 @@ export function PlayerFrame({
 	}, [banners]);
 	const [boxWidth, setBoxWidth] = useState(324);
 	const [ratios, setRatios] = useState<Record<string, number>>({}); // each inserted picture or clip's width / height
-	const dragRef = useRef<{ y: number; position: number } | null>(null);
+	const dragRef = useRef<{ y: number; position: number; piece?: [number, number] } | null>(null);
+	const speakerDrag = useRef<{ corner: boolean; x: number; y: number; ax: number; ay: number; from: number; scale: number; speakerX: number; lift: number } | null>(null);
+	const speakerMoved = useRef(false); // a drag that ends on the speaker must not also press play
 	// The final video's size (9:16, 1:1 or 16:9); everything on it is laid out at full size and shrunk.
 	const { width: W, height: H } = outputSize(subtitle);
 	const scale = boxWidth / W;
@@ -267,13 +270,15 @@ export function PlayerFrame({
 	// Under the subtitles, in this order: text behind the speaker, an inserted picture or clip (fading in
 	// over the whole picture), then the cut-out speaker: full size over the text, or smaller in front of an
 	// insert (or hidden). Same order and sizes as the final video (render.py).
-	function cutoutLayers({ layers, files, person }: NonNullable<Props["cutout"]>) {
+	function cutoutLayers({ layers, files, person, onInsert }: NonNullable<Props["cutout"]>) {
 		const insert = layers.inserts.find((i) => insertShown(i, outTime) > 0) as Insert | undefined;
 		const shown = insert ? insertShown(insert, outTime) : 0;
-		const edges = `linear-gradient(to right, transparent 0%, #000 ${INSERT.edgeFade * 100}%, #000 ${100 - INSERT.edgeFade * 100}%, transparent 100%)`;
+		const soft = (insert?.soft ?? INSERT.edgeFade) * 100;
+		// Soft edges: melting at the left, right and bottom, clear towards the top. Same as cutout_filters in render.py.
+		const edges = `linear-gradient(to right, transparent 0%, #000 ${soft}%, #000 ${100 - soft}%, transparent 100%), linear-gradient(to top, transparent 0%, #000 ${soft}%)`;
 		const personStyle: CSSProperties = insert
 			? {
-					...(INSERT.edgeFade > 0 ? { maskImage: edges, WebkitMaskImage: edges } : {}),
+					...(soft > 0 ? { maskImage: edges, WebkitMaskImage: edges, maskComposite: "intersect", WebkitMaskComposite: "source-in" } : {}),
 					transformOrigin: "50% 100%",
 					transform: speakerTransform(insert, boxWidth),
 					opacity: insert.hidden ? 0 : shown,
@@ -333,6 +338,43 @@ export function PlayerFrame({
 				<div className="pointer-events-none absolute inset-0" style={{ zIndex: 1, ...personStyle }}>
 					{person}
 				</div>
+				{/* While paused: drag the speaker to move them, a top corner to resize them. Writes the same numbers as the sliders. */}
+				{insert && !insert.hidden && !playing && onInsert && (
+					<div
+						title="Drag to move yourself. Drag a corner to resize."
+						onClick={(e) => speakerMoved.current && e.stopPropagation()}
+						onPointerDown={(e) => {
+							e.stopPropagation();
+							e.currentTarget.setPointerCapture(e.pointerId);
+							speakerMoved.current = false;
+							const r = e.currentTarget.getBoundingClientRect();
+							const corner = (e.target as HTMLElement).dataset.corner !== undefined;
+							const ax = r.left + r.width / 2;
+							speakerDrag.current = { corner, x: e.clientX, y: e.clientY, ax, ay: r.bottom, from: Math.hypot(e.clientX - ax, e.clientY - r.bottom), scale: insert.speakerScale, speakerX: insert.speakerX, lift: insert.speakerLift ?? 0 };
+						}}
+						onPointerMove={(e) => {
+							const d = speakerDrag.current;
+							const box = boxRef.current;
+							if (!d || !box) return;
+							speakerMoved.current = true;
+							if (d.corner) {
+								const scale = d.scale * (Math.hypot(e.clientX - d.ax, e.clientY - d.ay) / Math.max(1, d.from));
+								onInsert(insert.id, { speakerScale: Math.round(Math.min(INSERT.scale.max, Math.max(INSERT.scale.min, scale)) * 100) / 100 });
+							} else {
+								const speakerX = d.speakerX + (e.clientX - d.x) / box.clientWidth;
+								const speakerLift = d.lift - (e.clientY - d.y) / box.clientHeight;
+								onInsert(insert.id, { speakerX: Math.round(Math.min(1, Math.max(0, speakerX)) * 1000) / 1000, speakerLift: Math.round(Math.min(INSERT.lift.max, Math.max(0, speakerLift)) * 1000) / 1000 });
+							}
+						}}
+						onPointerUp={() => (speakerDrag.current = null)}
+						className="absolute inset-0 cursor-move outline-2 -outline-offset-2 outline-blue-400 outline-dashed"
+						style={{ zIndex: 1, touchAction: "none", transformOrigin: "50% 100%", transform: speakerTransform(insert, boxWidth) }}
+					>
+						{["top-0 left-0", "top-0 right-0"].map((at) => (
+							<span key={at} data-corner="" className={`absolute ${at} h-4 w-4 cursor-nwse-resize rounded-sm bg-blue-400`} style={{ transform: `scale(${1 / insert.speakerScale})` }} />
+						))}
+					</div>
+				)}
 			</>
 		);
 	}
@@ -365,15 +407,17 @@ export function PlayerFrame({
 							onPointerDown={(e) => {
 								e.stopPropagation();
 								e.currentTarget.setPointerCapture(e.pointerId);
-								dragRef.current = { y: e.clientY, position: subtitle.position };
+								dragRef.current = { y: e.clientY, position: line?.position ?? subtitle.position, piece: line?.piece };
 							}}
 							onPointerMove={(e) => {
 								const drag = dragRef.current;
 								const box = boxRef.current;
 								if (!drag || !box) return;
 								const { min, max } = LIMITS.position;
-								const position = drag.position - (e.clientY - drag.y) / box.clientHeight;
-								onSubtitleChange({ ...subtitle, position: Math.round(Math.min(max, Math.max(min, position)) * 1000) / 1000 });
+								const moved = drag.position - (e.clientY - drag.y) / box.clientHeight;
+								const position = Math.round(Math.min(max, Math.max(min, moved)) * 1000) / 1000;
+								// Once the video is Split, a drag moves only the piece this line is in (coach, 10 Nov).
+								onSubtitleChange(drag.piece ? { ...subtitle, spots: setSpot(subtitle.spots, drag.piece[0], drag.piece[1], position) } : { ...subtitle, position });
 							}}
 							onPointerUp={() => (dragRef.current = null)}
 							title="Drag to move the subtitles"
@@ -382,7 +426,7 @@ export function PlayerFrame({
 								left: SIDE_MARGIN,
 								right: SIDE_MARGIN,
 								// The extra row gap goes half under the last row in a browser: the bottom row stays put, as in the final video.
-								bottom: H * subtitle.position - rowGap / 2,
+								bottom: H * (line?.position ?? subtitle.position) - rowGap / 2,
 								textAlign: "center",
 								fontFamily: lineFace.family,
 								fontWeight: lineFace.weight,
