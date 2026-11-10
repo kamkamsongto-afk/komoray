@@ -53,7 +53,7 @@ function useOwnFont(font: OwnFont | undefined) {
 const SIDE_MARGIN = 80;
 const BOX_PADDING = 20; // the Box look: space around the letters (Outline of the box in render.py)
 // The channel name in a corner (the Logo style in render.py).
-const LOGO = { size: 52, outline: 4, side: 60, top: 110 };
+const LOGO = { size: 52, outline: 4, side: 40, top: 40 }; // the same small gap from both edges of a corner (coach, 10 Nov). Same in render.py
 
 // A black outline with round corners, like the final video's (a text stroke gives sharp spikes at
 // thick sizes): copies of the letters shifted in a circle, plus the soft shadow under them.

@@ -102,7 +102,7 @@ FONT_FILES = {
     "anton": ("Anton-Regular.ttf", 1.733),
     "bebas": ("BebasNeue-Regular.ttf", 1.3),
 }
-LOGO = {"size": 52, "outline": 4, "side": 60, "top": 110}  # the channel name in a corner (LOGO in PlayerFrame.tsx)
+LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or logo in a corner (LOGO in PlayerFrame.tsx)
 
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
