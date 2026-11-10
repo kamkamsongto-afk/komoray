@@ -331,7 +331,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					</div>
 					{open === t.id && (
 						<div className="flex flex-col gap-1.5 border-t border-foreground/10 p-2">
-							{row("Words", <input value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
+							{row("Words", <textarea rows={BEHIND.maxLines} value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value.split("\n").slice(0, BEHIND.maxLines).join("\n") })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} className="min-w-0 flex-1 resize-none rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							{row(
 								"Effect",
 								<select value={t.fx} onChange={(e) => updateText(t.id, { fx: e.target.value as BehindFx })} className="rounded border border-foreground/20 bg-background px-1 py-0.5">

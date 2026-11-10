@@ -60,7 +60,7 @@ export type Insert = {
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
 export const NO_LAYERS: CutoutLayers = { texts: [], inserts: [] };
 
-export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 24 }, maxText: 40, maxItems: 10, seconds: 3, fade: 0.25, y: 0.16 };
+export const BEHIND = { size: { min: 80, max: 420, start: 260 }, stroke: { max: 24 }, maxText: 40, maxLines: 3, maxItems: 10, seconds: 3, fade: 0.25, y: 0.16 };
 // edgeFade: a smaller speaker fades out over this share of their width at the left and right. The camera
 // often cuts the shoulders off at the frame's side, which else ends in a hard straight line (7 Nov test).
 // Same as INSERT_EDGE_FADE in render.py.
@@ -74,7 +74,8 @@ export function runRepeats(t: BehindText, width: number) {
 	const each = 0.4 * t.size * Array.from(t.text + RUN_GAP).length; // a low guess of its width: never too few
 	return Math.min(40, Math.ceil(reach / Math.max(1, each)) + 1);
 }
-export const runText = (t: BehindText, width: number) => Array(runRepeats(t, width)).fill(t.text).join(RUN_GAP);
+// Running text is one long line, so the words' line breaks become spaces. Same in build_behind in render.py.
+export const runText = (t: BehindText, width: number) => Array(runRepeats(t, width)).fill(t.text.replace(/\n/g, " ")).join(RUN_GAP);
 
 const smooth = (p: number) => {
 	const q = Math.min(1, Math.max(0, p));
@@ -191,9 +192,14 @@ const round = (n: number, by = 100) => Math.round(n * by) / by;
 export const cleanBehindText = (text: string) =>
 	text
 		.replace(/\p{Extended_Pictographic}|‍|️/gu, "")
-		.replace(/[\\{}\n\r]/g, "")
-		.trim()
-		.slice(0, BEHIND.maxText);
+		.replace(/[\\{}\r]/g, "")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.slice(0, BEHIND.maxLines)
+		.join("\n")
+		.slice(0, BEHIND.maxText)
+		.trim();
 const id = (v: unknown) => String(v ?? "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || crypto.randomUUID();
 const INSERT_FILE = /^insert-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|mp4|mov)$/;
 

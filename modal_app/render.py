@@ -323,7 +323,8 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
         if not text:
             continue
         if b.get("fx") in ("runLeft", "runRight"):
-            text = RUN_GAP.join([text] * run_repeats(b, width))
+            text = RUN_GAP.join([text.replace("\n", " ")] * run_repeats(b, width))  # one long line (runText in behind.ts)
+        text = text.replace("\n", "\\N")  # after ass_text, which removes backslashes. A raw line break would end the event
         font = FONTS.get(b.get("font"), FONTS["kanit"])
         stroke = int(b.get("stroke") or 0)
         look = f"\\fn{font}\\fs{int(b['size'])}\\1c{ass_colour(b.get('color', '#FFFFFF'))}\\3c{ass_colour(b.get('strokeColor', '#000000'))}\\bord{stroke}\\shad2\\4c&H000000&"

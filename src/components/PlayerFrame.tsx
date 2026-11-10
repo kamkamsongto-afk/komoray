@@ -297,6 +297,7 @@ export function PlayerFrame({
 									transform: `translate(${pose.align === "center" ? "-50%" : pose.align === "right" ? "-100%" : "0"}, -50%) scale(${pose.sx}, ${pose.sy})`,
 									transformOrigin: pose.align === "center" ? "50% 50%" : pose.align === "right" ? "100% 50%" : "0 50%",
 									whiteSpace: "pre",
+									textAlign: "center",
 									fontFamily: face.family,
 									fontWeight: face.weight,
 									fontSize: t.size / em,
