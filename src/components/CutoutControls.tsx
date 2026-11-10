@@ -367,6 +367,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								</select>,
 							)}
 							{row("Size", range(t.size, BEHIND.size.min, BEHIND.size.max, 10, `${t.size}px`, (size) => updateText(t.id, { size })))}
+							{t.text.includes("\n") && row("Line gap", range(t.lineGap ?? 0, BEHIND.lineGap.min, BEHIND.lineGap.max, 5, `${t.lineGap ?? 0}px`, (lineGap) => updateText(t.id, { lineGap })))}
 							{row("Color", swatches(TEXT_COLORS, t.color, (color) => updateText(t.id, { color }), "Text color"))}
 							{row("Outline", range(t.stroke, 0, BEHIND.stroke.max, 1, `${t.stroke}px`, (stroke) => updateText(t.id, { stroke })))}
 							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}

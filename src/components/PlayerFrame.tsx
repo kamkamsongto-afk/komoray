@@ -273,8 +273,7 @@ export function PlayerFrame({
 		const edges = `linear-gradient(to right, transparent 0%, #000 ${INSERT.edgeFade * 100}%, #000 ${100 - INSERT.edgeFade * 100}%, transparent 100%)`;
 		const personStyle: CSSProperties = insert
 			? {
-					maskImage: edges,
-					WebkitMaskImage: edges,
+					...(INSERT.edgeFade > 0 ? { maskImage: edges, WebkitMaskImage: edges } : {}),
 					transformOrigin: "50% 100%",
 					transform: speakerTransform(insert, boxWidth),
 					opacity: insert.hidden ? 0 : shown,
@@ -301,7 +300,7 @@ export function PlayerFrame({
 									fontFamily: face.family,
 									fontWeight: face.weight,
 									fontSize: t.size / em,
-									lineHeight: em,
+									lineHeight: `${t.size + (t.lineGap ?? 0)}px`, // rows as far apart as build_behind in render.py puts them
 									color: t.color,
 									textShadow: roundOutline(t.stroke, t.strokeColor),
 									opacity: pose.opacity,

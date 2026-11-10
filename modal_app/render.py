@@ -254,7 +254,7 @@ RUN_SPEED = {"slow": 150, "normal": 300, "fast": 600}
 ARRIVE_TIME = {"slow": 1.6, "normal": 1, "fast": 0.6}
 RUN_GAP = "   •   "
 INSERT_FADE = 0.25
-INSERT_EDGE_FADE = 0.12  # a smaller speaker fades out at the left and right (INSERT.edgeFade in behind.ts)
+INSERT_EDGE_FADE = 0  # how far a smaller speaker fades out at the left and right, 0 = a sharp cut (INSERT.edgeFade in behind.ts)
 
 
 def run_repeats(t: dict, width: int) -> int:
@@ -323,8 +323,11 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
         if not text:
             continue
         if b.get("fx") in ("runLeft", "runRight"):
-            text = RUN_GAP.join([text.replace("\n", " ")] * run_repeats(b, width))  # one long line (runText in behind.ts)
-        text = text.replace("\n", "\\N")  # after ass_text, which removes backslashes. A raw line break would end the event
+            rows = [RUN_GAP.join([text.replace("\n", " ")] * run_repeats(b, width))]  # one long line (runText in behind.ts)
+        else:
+            rows = text.split("\n")
+        # Each row is its own event: subtitles have no line spacing of their own. Rows sit around the text's middle.
+        row_step = float(b["size"]) + float(b.get("lineGap") or 0)
         font = FONTS.get(b.get("font"), FONTS["kanit"])
         stroke = int(b.get("stroke") or 0)
         look = f"\\fn{font}\\fs{int(b['size'])}\\1c{ass_colour(b.get('color', '#FFFFFF'))}\\3c{ass_colour(b.get('strokeColor', '#000000'))}\\bord{stroke}\\shad2\\4c&H000000&"
@@ -333,12 +336,14 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
                 if pose["opacity"] <= 0.004:
                     continue
                 an = {"center": 5, "left": 4, "right": 6}[pose["align"]]
-                # The soft shadow under the letters, as in the preview (roundOutline in PlayerFrame): 40% black.
-                tags = (
-                    f"\\an{an}\\pos({pose['x']:.1f},{pose['y']:.1f})\\fscx{pose['sx'] * 100:.2f}\\fscy{pose['sy'] * 100:.2f}"
-                    f"\\alpha{alpha_of(pose['opacity'])}\\4a{alpha_of(0.4 * pose['opacity'])}"
-                )
-                events.append(f"Dialogue: 0,{ass_time(f / FPS)},{ass_time((f + 1) / FPS)},Behind,,0,0,0,,{{{look}{tags}}}{text}")
+                for r, row in enumerate(rows):
+                    y = pose["y"] + (r - (len(rows) - 1) / 2) * row_step * pose["sy"]
+                    # The soft shadow under the letters, as in the preview (roundOutline in PlayerFrame): 40% black.
+                    tags = (
+                        f"\\an{an}\\pos({pose['x']:.1f},{y:.1f})\\fscx{pose['sx'] * 100:.2f}\\fscy{pose['sy'] * 100:.2f}"
+                        f"\\alpha{alpha_of(pose['opacity'])}\\4a{alpha_of(0.4 * pose['opacity'])}"
+                    )
+                    events.append(f"Dialogue: 0,{ass_time(f / FPS)},{ass_time((f + 1) / FPS)},Behind,,0,0,0,,{{{look}{tags}}}{row}")
     return "\n".join(
         [
             "[Script Info]",
@@ -407,7 +412,7 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     if not person:
         return base
     parts.append(f"[cpic][cm]alphamerge,split={1 + len(smalls)}[cper]{''.join(f'[cps{j}]' for j in range(len(smalls)))}")
-    if smalls:
+    if smalls and INSERT_EDGE_FADE > 0:
         # The fade at a smaller speaker's sides: a still left-to-right ramp (made once, then repeated),
         # multiplied into each one's see-through. Same as the mask in PlayerFrame.
         parts.append(
@@ -421,11 +426,14 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
         a, b, k = float(ins["start"]), float(ins["end"]), float(ins["speakerScale"])
         w = max(2, round(W * k / 2) * 2)
         x = float(ins["speakerX"]) * W - w / 2
-        parts.append(f"[cps{j}]split[cpa{j}][cpb{j}]")
-        parts.append(f"[cpa{j}]alphaextract[cpe{j}]")
-        parts.append(f"[cpe{j}][cg{j}]blend=all_mode=multiply:shortest=1[cpf{j}]")
+        speaker = f"[cps{j}]"
+        if INSERT_EDGE_FADE > 0:
+            parts.append(f"[cps{j}]split[cpa{j}][cpb{j}]")
+            parts.append(f"[cpa{j}]alphaextract[cpe{j}]")
+            parts.append(f"[cpe{j}][cg{j}]blend=all_mode=multiply:shortest=1[cpf{j}]")
+            speaker = f"[cpb{j}][cpf{j}]alphamerge,"
         parts.append(
-            f"[cpb{j}][cpf{j}]alphamerge,scale={w}:-2,format=yuva420p,fade=t=in:st={a:.3f}:d={INSERT_FADE}:alpha=1,"
+            f"{speaker}scale={w}:-2,format=yuva420p,fade=t=in:st={a:.3f}:d={INSERT_FADE}:alpha=1,"
             f"fade=t=out:st={max(a, b - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1[csm{j}]"
         )
         lift = float(ins.get("speakerLift", 0)) * H
