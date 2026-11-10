@@ -2,23 +2,22 @@ import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, sib
 import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
 import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/features";
+import { BETA_MINUTES, MAX_FILE_GB, MINUTES_PER_VIDEO } from "@/lib/limits";
 import { videoDuration } from "@/lib/video-duration";
 
 // Who may use the studio during the beta, and how much. All kept in R2, away from uploads/ so it stays:
 //   access/people/<hash of email>.json                   invited by the admin: { email, at, features? } (lib/features.ts)
-//   access/usage/<hash>/<YYYY-MM>/<video id>.json        minutes this video took from that month: { minutes }
+//   access/usage/<hash>/<YYYY-MM>/<video id>.json        minutes this video took, added up across every month of the beta: { minutes }
 //   access/best/<hash>/<YYYY-MM>/<video id>.json         Cutout Best seconds this video took from that month: { seconds }
 //   uploads/<id>/access.json                             how many times this video was listened to
 // Minutes count the length of the original video, once, when Find silences is pressed. Deleting the
 // video gives nothing back; a failed job does (refundListen).
-export const MINUTES_PER_MONTH = 60;
-export const MINUTES_PER_VIDEO = 30;
 const LISTENS_PER_VIDEO = 3; // the first, and Wrong language? twice. Each one pays speech-to-text again
 const JOB_TOO_OLD_MS = 30 * 60 * 1000; // a job still running after this has died (same as the admin page)
 
 export const NO_INVITE = "Komoray is invite-only for now. Your invite will come by email.";
 
-export type AccessStatus = { allowed: boolean; unlimited: boolean; used: number; limit: number; left: number; perVideo: number; resets: string; features: Features };
+export type AccessStatus = { allowed: boolean; unlimited: boolean; used: number; limit: number; left: number; perVideo: number; maxGb: number; features: Features };
 type PersonRecord = { email: string; at: string; features?: unknown };
 
 export async function hashEmail(email: string) {
@@ -29,27 +28,22 @@ export async function hashEmail(email: string) {
 const personKey = async (email: string) => `access/people/${await hashEmail(email)}.json`;
 const month = () => new Date().toISOString().slice(0, 7);
 
-// The first day of next month, in UTC like the month above.
-function nextMonth() {
-	const now = new Date();
-	return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
-}
-
+// Everything this person has used since the beta began: the limit never renews, so no month in the path.
 async function minutesUsed(email: string) {
-	const files = await listObjects(`access/usage/${await hashEmail(email)}/${month()}/`);
+	const files = await listObjects(`access/usage/${await hashEmail(email)}/`);
 	const used = await Promise.all(files.map((file) => getJson<{ minutes: number }>(file.key).catch(() => null)));
 	return used.reduce((sum, item) => sum + (item?.minutes ?? 0), 0);
 }
 
 export async function accessFor(email?: string | null): Promise<AccessStatus> {
-	const base = { limit: MINUTES_PER_MONTH, perVideo: MINUTES_PER_VIDEO, resets: nextMonth() };
+	const base = { limit: BETA_MINUTES, perVideo: MINUTES_PER_VIDEO, maxGb: MAX_FILE_GB };
 	const none = { ...base, allowed: false, unlimited: false, used: 0, left: 0, features: NO_FEATURES };
 	if (!email) return none;
-	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, used: 0, left: MINUTES_PER_MONTH, features: ALL_FEATURES };
+	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, used: 0, left: BETA_MINUTES, features: ALL_FEATURES };
 	const person = await getJson<PersonRecord>(await personKey(email));
 	if (!person) return none;
 	const used = await minutesUsed(email);
-	return { ...base, allowed: true, unlimited: false, used, left: Math.max(0, MINUTES_PER_MONTH - used), features: readFeatures(person.features) };
+	return { ...base, allowed: true, unlimited: false, used, left: Math.max(0, BETA_MINUTES - used), features: readFeatures(person.features) };
 }
 
 export async function canUseStudio(email?: string | null) {
@@ -109,7 +103,7 @@ export async function startListening(key: string, email?: string | null): Promis
 	if (!seconds) return { error: "We could not read this video's length. Please try exporting it again as MP4.", status: 400 };
 	const minutes = Math.ceil(seconds / 60);
 	if (minutes > MINUTES_PER_VIDEO) return { error: `This video is ${minutes} minutes long. During the beta, each video can be up to ${MINUTES_PER_VIDEO} minutes. Please trim it and upload it again.`, status: 400 };
-	if (minutes > status.left) return { error: `This video needs ${minutes} minutes and you have ${status.left} left this month. Your minutes renew on ${status.resets}. Need more? Email hello@komoray.com.`, status: 429 };
+	if (minutes > status.left) return { error: `This video needs ${minutes} minutes and you have ${status.left} of your beta minutes left. Need more? Email hello@komoray.com.`, status: 429 };
 
 	// The same video sent twice at once: only one request gets past here, so speech-to-text is paid for once.
 	if (!(await putIfAbsent(recordKey, JSON.stringify({ listens: 1, at: new Date().toISOString() }), "application/json"))) {

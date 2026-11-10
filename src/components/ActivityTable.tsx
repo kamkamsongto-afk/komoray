@@ -37,7 +37,7 @@ export function ActivityTable({ rows, shown, total }: { rows: ActivityRow[]; sho
 						<tr className="border-b border-foreground/15">
 							<th scope="col" className="p-2.5 font-medium">Person</th>
 							<th scope="col" className="p-2.5 font-medium">Where they are</th>
-							<th scope="col" className="p-2.5 text-right font-medium">Minutes this month</th>
+							<th scope="col" className="p-2.5 text-right font-medium">Beta minutes used</th>
 							<th scope="col" className="p-2.5 text-right font-medium">Uploaded</th>
 							<th scope="col" className="p-2.5 text-right font-medium">Find silences</th>
 							<th scope="col" className="p-2.5 text-right font-medium">Make video</th>
