@@ -461,7 +461,8 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     for j, ins in enumerate(inserts):
         a, b = float(ins["start"]), float(ins["end"])
         d = b - a
-        hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if ins.get("kind") == "video" else ""
+        # A clip or a GIF that ends early stays on its last frame, as a browser shows it.
+        hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if ins.get("kind") == "video" or str(ins.get("file", "")).endswith(".gif") else ""
         fades = (
             f"format=yuva420p,fade=t=in:st=0:d={INSERT_FADE}:alpha=1,fade=t=out:st={max(0.0, d - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1,"
             f"setpts=PTS-STARTPTS+{a:.3f}/TB[ins{j}]"
@@ -1292,8 +1293,8 @@ def ffmpeg_command(
             cmd += ["-i", str(cutout["matte"])]
         for ins in cutout.get("inserts") or []:
             # A picture is one frame: repeated for as long as it shows (trimmed in cutout_filters).
-            # A GIF has its own frames: played again and again instead.
-            still = ["-stream_loop", "-1"] if str(ins.get("file", "")).endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]
+            # A GIF has its own frames: played as its file says. -stream_loop froze it on the first frame (test 11 Nov).
+            still = ["-ignore_loop", "0"] if str(ins.get("file", "")).endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]
             cmd += (still if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
