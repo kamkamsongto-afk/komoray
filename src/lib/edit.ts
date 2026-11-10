@@ -102,7 +102,37 @@ export const normText = (text: string) =>
 // One entry of the personal dictionary (table word_fixes): the script showed `heard`, the user wants `fixed`.
 export type WordFix = { heard: string; fixed: string };
 
-// The words as they should read in subtitles: each fix becomes one word spanning its words' time.
+// A retyped word is only as long as its letters; marks above and below a Thai letter take no time.
+const spokenLetters = (text: string) => Math.max(1, text.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, "").length);
+
+// A fix with spaces in it is several words, each with its own time, or the Highlight look and Bounce
+// treat the whole phrase as one word. The time is shared by letters over when the words were really
+// said (never the pauses between them, which may be cut). space: the user typed a space before it.
+function splitFix<W extends Span & { text: string }>(run: W[], text: string): W[] {
+	const pieces = text.trim().split(/\s+/);
+	if (pieces.length === 1) return [{ ...run[0], text, end: run[run.length - 1].end }];
+	const spoken = run.reduce((sum, w) => sum + w.end - w.start, 0);
+	const letters = pieces.reduce((sum, p) => sum + spokenLetters(p), 0);
+	// Which word is being said after `gone` seconds of speech, and when.
+	const at = (gone: number) => {
+		let left = gone;
+		for (const w of run) {
+			if (left < w.end - w.start) return { word: w, time: w.start + left };
+			left -= w.end - w.start;
+		}
+		const last = run[run.length - 1];
+		return { word: last, time: last.end };
+	};
+	let done = 0;
+	return pieces.map((piece, k) => {
+		const from = at((spoken * done) / letters);
+		done += spokenLetters(piece);
+		// Ends inside the word it starts in: a piece over a cut pause would land in the cut and vanish.
+		return { ...run[0], text: piece, start: from.time, end: Math.min(at((spoken * done) / letters).time, from.word.end), ...(k ? { space: true } : {}) };
+	});
+}
+
+// The words as they should read in subtitles: a fix takes the place of the words it covers.
 export function fixedWords<W extends Span & { text: string }>(words: W[], fixes: Fix[] = []): W[] {
 	const byStart = new Map(fixes.map((f) => [f.from, f]));
 	const out: W[] = [];
@@ -112,42 +142,12 @@ export function fixedWords<W extends Span & { text: string }>(words: W[], fixes:
 			out.push(words[i]);
 			continue;
 		}
-		out.push({ ...words[i], text: fix.text, end: words[fix.to].end });
+		out.push(...splitFix(words.slice(fix.from, fix.to + 1), fix.text));
 		i = fix.to;
 	}
 	return out;
 }
 
-// Put a fix on words from..to, replacing any fix it overlaps. The original text (or nothing) removes it.
-export function setFix(fixes: Fix[], from: number, to: number, text: string, original: string): Fix[] {
-	const kept = fixes.filter((f) => f.to < from || f.from > to);
-	const clean = text.trim().slice(0, MAX_FIX_LENGTH);
-	if (clean && clean !== original) kept.push({ from, to, text: clean });
-	return kept.sort((a, b) => a.from - b.from);
-}
-
-// Fixes sent by the browser, checked: whole numbers inside the transcript, no overlaps. Null if bad.
-export function readFixes(value: unknown, count: number): Fix[] | null {
-	if (!Array.isArray(value)) return null;
-	const fixes: Fix[] = [];
-	for (const f of value as Partial<Fix>[]) {
-		const { from, to, text } = f ?? {};
-		if (!Number.isInteger(from) || !Number.isInteger(to) || typeof text !== "string") return null;
-		if (from! < 0 || to! < from! || to! >= count || !text.trim() || text.length > MAX_FIX_LENGTH) return null;
-		fixes.push({ from: from!, to: to!, text: text.trim() });
-	}
-	fixes.sort((a, b) => a.from - b.from);
-	return fixes.every((f, i) => i === 0 || f.from > fixes[i - 1].to) ? fixes : null;
-}
-
-// Seconds removed in total (cuts can overlap, so merge them first).
-export function cutSeconds(cuts: Span[]): number {
-	let total = 0;
-	let reach = 0;
-	for (const c of [...cuts].sort((a, b) => a.start - b.start)) {
-		const start = Math.max(c.start, reach);
-		if (c.end > start) total += c.end - start;
-		reach = Math.max(reach, c.end);
 // Find inside words: Thai has no spaces, so a misheard part often sits in the middle of a word
 // ("ฉนั้น" inside "ราะฉนั้น") and looking only at word starts missed it. keep = the text around each
 // hit, so joining it with the replacement gives the word's new text. Thai searches only: in
@@ -183,6 +183,36 @@ export function findInside(words: { index: number; last: number; text: string; s
 	return matches;
 }
 
+// Put a fix on words from..to, replacing any fix it overlaps. The original text (or nothing) removes it.
+export function setFix(fixes: Fix[], from: number, to: number, text: string, original: string): Fix[] {
+	const kept = fixes.filter((f) => f.to < from || f.from > to);
+	const clean = text.trim().slice(0, MAX_FIX_LENGTH);
+	if (clean && clean !== original) kept.push({ from, to, text: clean });
+	return kept.sort((a, b) => a.from - b.from);
+}
+
+// Fixes sent by the browser, checked: whole numbers inside the transcript, no overlaps. Null if bad.
+export function readFixes(value: unknown, count: number): Fix[] | null {
+	if (!Array.isArray(value)) return null;
+	const fixes: Fix[] = [];
+	for (const f of value as Partial<Fix>[]) {
+		const { from, to, text } = f ?? {};
+		if (!Number.isInteger(from) || !Number.isInteger(to) || typeof text !== "string") return null;
+		if (from! < 0 || to! < from! || to! >= count || !text.trim() || text.length > MAX_FIX_LENGTH) return null;
+		fixes.push({ from: from!, to: to!, text: text.trim() });
+	}
+	fixes.sort((a, b) => a.from - b.from);
+	return fixes.every((f, i) => i === 0 || f.from > fixes[i - 1].to) ? fixes : null;
+}
+
+// Seconds removed in total (cuts can overlap, so merge them first).
+export function cutSeconds(cuts: Span[]): number {
+	let total = 0;
+	let reach = 0;
+	for (const c of [...cuts].sort((a, b) => a.start - b.start)) {
+		const start = Math.max(c.start, reach);
+		if (c.end > start) total += c.end - start;
+		reach = Math.max(reach, c.end);
 	}
 	return total;
 }

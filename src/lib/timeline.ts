@@ -4,7 +4,7 @@
 import type { SubtitleSpot } from "./subtitle-style";
 
 type Span = { start: number; end: number };
-type Word = { text: string; start: number; end: number };
+type Word = { text: string; start: number; end: number; space?: boolean }; // space: typed by the user (fixedWords)
 
 export const FPS = 30;
 export const WIDTH = 1080;
@@ -147,7 +147,7 @@ const thaiLetters = (text: string) => text.replace(THAI_MARKS, "").length;
 // Thai doesn't put spaces between words, only between phrases. A Thai line gets one where Thai,
 // numbers and English letters meet ("5 นาที", "ราคา Komoray"), after a polite ending or ๆ, and
 // where the speaker pauses. Returns each word with the space before it. Same as join_thai in render.py.
-function joinThai(words: { text: string; start: number; end: number }[]) {
+function joinThai(words: { text: string; start: number; end: number; space?: boolean }[]) {
 	let out = "";
 	return words.map((w, i) => {
 		const prev = words[i - 1];
@@ -156,7 +156,7 @@ function joinThai(words: { text: string; start: number; end: number }[]) {
 			const a = charKind(out[out.length - 1]);
 			const b = charKind(w.text[0]);
 			const ending = (THAI_ENDINGS.has(prev.text) && !THAI_ENDINGS.has(w.text)) || prev.text.endsWith("ๆ");
-			if ((a && b && a !== b) || ending || w.start - prev.end >= THAI_PAUSE * FPS) space = " ";
+			if (w.space || (a && b && a !== b) || ending || w.start - prev.end >= THAI_PAUSE * FPS) space = " ";
 		}
 		out += space + w.text;
 		return space + w.text;
@@ -178,12 +178,12 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	const maxFrames = (thai ? limits.thaiSeconds : limits.seconds) * FPS;
 	const gapFrames = LINE_BREAK_GAP * FPS;
 
-	const placed: { text: string; start: number; end: number }[] = [];
+	const placed: { text: string; start: number; end: number; space?: boolean }[] = [];
 	for (const w of words) {
 		const mid = placeFrame((w.start + w.end) / 2, segments);
 		if (mid === null) continue;
 		const half = ((w.end - w.start) / 2) * FPS;
-		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half });
+		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half, space: w.space });
 	}
 
 	type Placed = (typeof placed)[number];

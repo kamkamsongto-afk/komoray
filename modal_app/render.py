@@ -620,7 +620,7 @@ def join_thai(words: list[dict]) -> list[str]:
             prev = words[i - 1]
             a, b = char_kind(out[-1]), char_kind(t[0])
             ending = (prev["text"] in THAI_ENDINGS and t not in THAI_ENDINGS) or prev["text"].endswith("ๆ")
-            if (a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE * FPS:
+            if w.get("space") or (a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE * FPS:
                 space = " "
         out += space + t
         parts.append(space + t)
@@ -773,7 +773,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         if mid is None:
             continue
         half = (w["end"] - w["start"]) / 2 * FPS
-        placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half})
+        placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half, "space": w.get("space")})
 
     # Group words into short lines.
     gap_frames = LINE_BREAK_GAP * FPS
