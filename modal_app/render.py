@@ -1334,8 +1334,12 @@ def ffmpeg_command(
     zoom_parts: list[dict] | None = None,
     cutout: dict | None = None,
     banner_files: list[dict] | None = None,
+    part: tuple[int, int] | None = None,
 ) -> list[str]:
-    """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles.
+    """part: only these frames of the final video [from, to), without sound, for picture_parts (made side
+    by side, then joined). Every layer goes by the time on the picture, so the part is moved to its place
+    in the whole video and comes out exactly like that stretch of the whole one.
+    logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles.
     no_zoom: parts with Auto zoom turned off (source seconds). zoom_parts: parts with their own kind of zoom.
     cutout: {"behind": subtitles file, "matte": path, "inserts": [{"path", "kind", "start", ...}]} (cutout_filters).
     banner_files: uploaded banners, each a banner with "path" (banner_file_filters)."""
@@ -1360,7 +1364,14 @@ def ffmpeg_command(
     matte_labels = []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
-    for k, (i, out_frame, trim, frames, level, run) in enumerate(zoom_shots(pieces, off, zoom, zoom_amount, runs)):
+    shots = zoom_shots(pieces, off, zoom, zoom_amount, runs)
+    if part:
+        # The shots inside the part, the ones at its edges shortened. A zoom goes by the frame number in the
+        # whole video (out_frame), so a shortened shot zooms exactly as that stretch of the whole one.
+        lo, hi = part
+        shots = [(i, max(o, lo), t + max(o, lo) - o, min(o + n, hi) - max(o, lo), lv, rn) for i, o, t, n, lv, rn in shots if o < hi and o + n > lo]
+        audio = False
+    for k, (i, out_frame, trim, frames, level, run) in enumerate(shots):
         a, b = trim / FPS, (trim + frames) / FPS
         # Framed on its own (face crop, Auto zoom), so parts can differ before they are joined. The face
         # is found per whole piece, so it doesn't move at a no-zoom edge.
@@ -1388,10 +1399,16 @@ def ffmpeg_command(
             matte_labels.append(f"[m{k}]")
     if audio:
         parts += cut_sound_parts(pieces)
-    parts.append(f"{''.join(video_labels)}concat=n={len(video_labels)}:v=1:a=0[cv]")
+    # A part starts at its own time in the whole video, so subtitles, banners and cutout layers land where they do there.
+    # One spare frame at the end, cut off by -frames:v: an overlay of an uploaded banner or a cutout picture drops
+    # the last frame, so the video came out a frame short, and in parts the sound slid a frame per part (11 Nov).
+    # Counted in whole frames (1/FPS), not microseconds: 1/30 s rounded to microseconds put every third frame of a
+    # fading cutout picture next to the neighbouring frame of the picture, and a part's start made it a different one.
+    shift = f",settb=1/{FPS}" + (f",setpts=PTS+{part[0]}" if part and part[0] else "") + ",tpad=stop=1:stop_mode=clone"
+    parts.append(f"{''.join(video_labels)}concat=n={len(video_labels)}:v=1:a=0{shift}[cv]")
     base = "[cv]"
     if matte_labels:
-        parts.append(f"{''.join(matte_labels)}concat=n={len(matte_labels)}:v=1:a=0[cm]")
+        parts.append(f"{''.join(matte_labels)}concat=n={len(matte_labels)}:v=1:a=0{shift}[cm]")
     if cutout:
         base = cutout_filters(parts, base, size, cutout, inputs)
     if banner_files:
@@ -1408,7 +1425,7 @@ def ffmpeg_command(
     parts.append(
         f"{base}fps={FPS},"
         # shaping=complex: Thai tone marks sit above the vowels (simple shaping draws them on top of each other).
-        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}[outv]"
+        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}[outv]"
     )
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
@@ -1430,7 +1447,10 @@ def ffmpeg_command(
         cmd += ["-map", "[ca]", "-c:a", "aac", "-b:a", "320k"]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
     # The last fps filter can add a frame at the very end: exactly as many frames as the pieces have.
-    cmd += ["-frames:v", str(sum(frames for _, _, frames in pieces))]
+    cmd += ["-frames:v", str(part[1] - part[0] if part else sum(frames for _, _, frames in pieces))]
+    if part:
+        # The parts share the machine: each encoder on its own share of it, not on every CPU (each one held ~1.9 GB).
+        cmd += ["-threads", str(PART_THREADS)]
     cmd += ["-movflags", "+faststart", str(out)]
     return cmd
 
@@ -1577,6 +1597,76 @@ def polish_sound(source: Path, keeps: list[tuple[float, float]], sound: Path, am
         return None
 
 
+def plain_sound(source: Path, keeps: list[tuple[float, float]], sound: Path) -> Path | None:
+    """The cut video's sound as recorded, for a picture made in parts (they have none). The same sound and
+    bitrate the whole picture's own pass gives it (ffmpeg_command). None when the source has no sound."""
+    if not has_audio(source):
+        return None
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(source), "-filter_complex", ";".join(cut_sound_parts(frame_segments(keeps)))]
+        + ["-map", "[ca]", "-vn", "-c:a", "aac", "-b:a", "320k", str(sound)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed on the sound: {result.stderr[-600:]}")
+    return sound
+
+
+def parts_sound(source: Path, keeps: list[tuple[float, float]], folder: Path, polish: bool, amount: float) -> tuple[Path | None, bool]:
+    """The sound for a picture made in parts: polished (polish_sound) or, when it is off or failed, as recorded."""
+    polished = polish_sound(source, keeps, folder / "sound.m4a", amount) if polish else None
+    if polished:
+        return polished, True
+    return plain_sound(source, keeps, folder / "plain.m4a"), False
+
+
+# Made in parts side by side: one ffmpeg makes the picture on about one CPU (Auto zoom's perspective most of all,
+# 8 CPUs were no faster than 4), so a 60 s clip with Auto zoom took 27 s. Parts shorter than this aren't worth it.
+PICTURE_PARTS = 4
+PART_MIN_SECONDS = 15
+PART_THREADS = 2
+
+
+def picture_parts(frames: int) -> list[tuple[int, int]]:
+    """The final video's frames split into nearly equal parts [from, to) made at the same time."""
+    count = max(1, min(PICTURE_PARTS, frames // (PART_MIN_SECONDS * FPS)))
+    edges = [round(frames * n / count) for n in range(count + 1)]
+    return list(zip(edges, edges[1:]))
+
+
+def run_parts(cmds: list[list[str]], cwd: Path, frames: list[int], on_part) -> tuple[int, str]:
+    """Runs the parts' ffmpegs at the same time, on_part(0-1) for all of them together. Returns the first
+    failure's exit code and error text (0, "" when all made it)."""
+    done = [0.0] * len(cmds)
+
+    def one(n: int) -> tuple[int, str]:
+        def seen(share: float) -> None:
+            done[n] = share * frames[n]
+            on_part(sum(done) / max(1, sum(frames)))
+
+        return run_counting_frames(cmds[n], cwd, frames[n], seen)
+
+    with ThreadPoolExecutor(max_workers=len(cmds)) as pool:
+        results = list(pool.map(one, range(len(cmds))))
+    return next((r for r in results if r[0] != 0), (0, ""))
+
+
+def join_parts(parts: list[Path], sound: Path | None, out: Path, frames: int) -> None:
+    """The parts one after the other, and the sound, into the final video. Copied: nothing is encoded again."""
+    listing = out.with_name("parts.txt")
+    listing.write_text("".join(f"file '{p.name}'\n" for p in parts), encoding="utf-8")
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(listing)]
+    if sound:
+        cmd += ["-i", str(sound), "-map", "0:v:0", "-map", "1:a:0"]
+    cmd += ["-c", "copy", "-movflags", "+faststart", str(out)]
+    result = subprocess.run(cmd, cwd=out.parent, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed joining the parts: {result.stderr[-600:]}")
+    if abs(duration_of(out) - frames / FPS) > 0.1:
+        raise RuntimeError("the joined video came out at another length")
+
+
 def add_sound(video: Path, sound: Path) -> bool:
     """Puts polish_sound's sound on the finished video in place of its plain one. Nothing is encoded again."""
     try:
@@ -1598,7 +1688,8 @@ def add_sound(video: Path, sound: Path) -> bool:
         return False
 
 
-@app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
+# 8 GB: the picture is made in parts side by side (picture_parts), ~4 GB together on a 5 min clip, more with cutout pictures.
+@app.function(image=image, cpu=4, memory=8192, timeout=30 * 60)
 def render(video_url: str, edit: dict, output_url: str, error_url: str | None = None, style: dict | None = None, progress_url: str | None = None) -> dict:
     style = {**DEFAULT_STYLE, **(style or {})}
     sound_worker = ThreadPoolExecutor(max_workers=1)
@@ -1616,9 +1707,14 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 raise RuntimeError("nothing left after cutting")
             # The sound is polished next to the picture: it only needs the source and the cuts. The picture
             # uses most of the machine but not all of it (8 CPUs made it no faster than 4, measured 11 Nov).
+            frames = sum(count for _, _, count in frame_segments(keeps))
+            spans = picture_parts(frames)
+            amount, polish = float(style.get("audioAmount", 1)), bool(style.get("audio", True))
             polishing = None
-            if style.get("audio", True):
-                polishing = sound_worker.submit(polish_sound, src, keeps, workdir / "sound.m4a", float(style.get("audioAmount", 1)))
+            if len(spans) > 1:  # the parts have no sound: this makes it, polished or not
+                polishing = sound_worker.submit(parts_sound, src, keeps, workdir, polish, amount)
+            elif polish:
+                polishing = sound_worker.submit(polish_sound, src, keeps, workdir / "sound.m4a", amount)
 
             # The user's own font: libass also looks in this folder. Sent for the subtitles or a banner's font.
             fonts_dir = None
@@ -1667,36 +1763,41 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 logo = {"path": logo_path, "size": style.get("logoSize", 180), "opacity": style.get("logoOpacity", 1), "at": style.get("logoAt", "top-left")}
 
             report(PROGRESS_READY, force=True)
-            frames = sum(count for _, _, count in frame_segments(keeps))
-            code, errors = run_counting_frames(
-                ffmpeg_command(
-                    src,
-                    subs,
-                    out,
-                    keeps,
-                    has_audio(src),
-                    style.get("zoom", "off"),
-                    fonts_dir,
-                    edit.get("faces"),
-                    FORMATS.get(style.get("format"), (WIDTH, HEIGHT)),
-                    logo,
-                    edit.get("noZoom"),
-                    float(style.get("zoomAmount") or ZOOM),
-                    float(style.get("zoomPeriod") or SMOOTH_PERIOD),
-                    edit.get("zoomParts"),
-                    cutout,
-                    banner_files,
-                ),
-                workdir,
-                frames,
-                lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY)),
+            command = lambda path, part=None: ffmpeg_command(
+                src,
+                subs,
+                path,
+                keeps,
+                has_audio(src),
+                style.get("zoom", "off"),
+                fonts_dir,
+                edit.get("faces"),
+                FORMATS.get(style.get("format"), (WIDTH, HEIGHT)),
+                logo,
+                edit.get("noZoom"),
+                float(style.get("zoomAmount") or ZOOM),
+                float(style.get("zoomPeriod") or SMOOTH_PERIOD),
+                edit.get("zoomParts"),
+                cutout,
+                banner_files,
+                part,
             )
+            picture = lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY))
+            if len(spans) > 1:
+                files = [workdir / f"part-{n}.mp4" for n in range(len(spans))]
+                code, errors = run_parts([command(f, span) for f, span in zip(files, spans)], workdir, [b - a for a, b in spans], picture)
+            else:
+                code, errors = run_counting_frames(command(out), workdir, frames, picture)
             if code != 0:
                 raise RuntimeError(f"ffmpeg failed: {errors[-1500:]}")
 
             report(PROGRESS_PICTURE, force=True)
-            polished = polishing.result() if polishing else None
-            sound = add_sound(out, polished) if polished else False
+            if len(spans) > 1:
+                track, sound = polishing.result()
+                join_parts(files, track, out, frames)
+            else:
+                polished = polishing.result() if polishing else None
+                sound = add_sound(out, polished) if polished else False
             report(PROGRESS_SOUND, force=True)
             put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size, "sound": sound}
