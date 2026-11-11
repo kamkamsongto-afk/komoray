@@ -169,9 +169,9 @@ LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or 
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
 BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
-BANNER_SCALE = (0.5, 2.5)  # smallest and biggest size (BANNER_SCALE in banners.ts)
+BANNER_SCALE = (0.5, 5)  # smallest and biggest size (BANNER_SCALE in banners.ts)
 BANNER_MAX_LINES = 3  # lines of a banner's text (BANNER.maxLines in banners.ts)
-BANNER_LINE_GAP = (-20, 80)  # extra px between its rows, at normal size (BANNER_LINE_GAP in banners.ts)
+BANNER_LINE_GAP = (-60, 80)  # extra px between its rows, at normal size (BANNER_LINE_GAP in banners.ts)
 # An uploaded banner (BANNER_FILE in banners.ts): its width at size 100%, share of the video's; where it starts.
 BANNER_FILE = {"width": 0.5, "x": 0.5, "y": 0.3}
 # How a banner arrives (BANNER_ANIMS in banners.ts): size keyframes (ms, %), fades in, starts this far off (px).
@@ -278,6 +278,59 @@ def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float) 
     return tags + (f"\\fscx{factor * 100:g}\\fscy{factor * 100:g}" if factor != 1 else "")
 
 
+def banner_pose(b: dict, t: float) -> tuple[float, float, float, float]:
+    """Where the animation has a banner at final-video second t: opacity, size (1 = its size), x and y off in px.
+    Same as bannerMotion in banners.ts."""
+    start, end = float(b.get("start", 0)), float(b.get("end", 0))
+    if t < start or t >= end:
+        return 0.0, 1.0, 0.0, 0.0
+    anim = b.get("anim") or "fade"
+    spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
+    ms = (t - start) * 1000
+    fade_in = (t - start) / BANNER["fade"] if spec["fade_in"] else 1.0
+    left = max(0.0, 1 - ms / SLIDE_MS)
+    swing = (ms % PULSE_MS) / (PULSE_MS / 2)
+    keys = spec.get("keys")
+    scale = scale_at(keys, ms) / 100 if keys else (1 + 0.08 * (swing if swing <= 1 else 2 - swing) if anim == "pulse" else 1.0)
+    slide = spec.get("slide") or (0, 0)
+    return min(1.0, fade_in, (end - t) / BANNER["fade"]), scale, slide[0] * left, slide[1] * left
+
+
+def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity) -> list[str]:
+    """A banner of several rows that grows as it arrives (Pop, Bounce, Pulse), frame by frame: the box and every row
+    grow around the box's middle, as in the preview. Once it stops growing (Pop, Bounce), one plain event each."""
+    start, end = float(b.get("start", 0)), float(b.get("end", 0))
+    anim = b.get("anim") or "fade"
+    keys = BANNER_ANIMS.get(anim, {}).get("keys")
+    # Frames until it settles (Pulse never does), but at least up to where the fade out begins.
+    settle = start + keys[-1][0] / 1000 if keys else end
+    if settle >= end - BANNER["fade"]:
+        settle = end
+    colour = fill_colour.split("\\1a")[0]
+    events = []
+    first, last = math.ceil(start * FPS), math.ceil(settle * FPS)
+    for f in range(first, last):
+        opacity, scale, dx, dy = banner_pose(b, f / FPS)
+        if opacity <= 0.004:
+            continue
+        when = f"{ass_time(f / FPS)},{ass_time((f + 1) / FPS)}"
+        if not b.get("noBox"):
+            events.append(f"Dialogue: 2,{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{colour}\\1a{alpha_of(fill_opacity * opacity)}\\pos({centre + dx:.1f},{box_middle + dy:.1f})\\fscx{scale * 100:.2f}\\fscy{scale * 100:.2f}\\p1}}{box}{{\\p0}}")
+        for (row_text, _), middle, look in zip(rows, middles, looks):
+            y = box_middle + (middle - box_middle) * scale + dy
+            grow = size * scale * 100
+            events.append(f"Dialogue: 3,{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
+    if last / FPS < end:
+        # Settled: still until the end, then the fade out, as banner_motion does it.
+        rest = f"{ass_time(last / FPS)},{ass_time(end)}"
+        fade = int(BANNER["fade"] * 1000)
+        if not b.get("noBox"):
+            events.append(f"Dialogue: 2,{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
+        for (row_text, _), middle, look in zip(rows, middles, looks):
+            events.append(f"Dialogue: 3,{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}\\pos({centre:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
+    return events
+
+
 def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16", own_font: bool = False, style: dict | None = None) -> list[str]:
     """Each banner's rows, as a box and its letters: in its place, or with its middle where it was dragged
     (x, y: share of the width / height), at its size (scale), arriving as picked (anim). Everything was
@@ -310,9 +363,12 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         fill = f"\\1c{ass_colour(background)}\\1a{alpha_of(float(b.get('opacity') or 1))}"
         radius = float(b.get("radius") or 0) * size
         rows = [(line, BANNER["size"]) for line in lines] + ([(sub, BANNER["sub_size"])] if sub else [])
-        heights = [row_size * size + 2 * pad_y for _, row_size in rows]
+        # One box around all the rows (coach, 11 Nov: two lines were two boxes), as the preview draws it (PlayerFrame):
+        # rows row-size tall, lineGap apart, inside the padding; never shorter than its tallest row.
+        heights = [row_size * size for _, row_size in rows]
         gap = min(BANNER_LINE_GAP[1], max(BANNER_LINE_GAP[0], float(b.get("lineGap") or 0))) * size
-        tall = sum(heights) + gap * (len(rows) - 1)
+        inside = max(sum(heights) + gap * (len(rows) - 1), max(heights))
+        tall = inside + 2 * pad_y
         places = BANNER_TOP.get(shape, BANNER_TOP["9:16"])
         x, y = b.get("x"), b.get("y")
         if x is not None and y is not None:
@@ -320,16 +376,29 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         else:
             # A place is where the first row's letters start; the box reaches a little above them.
             centre, top = width / 2, places.get(b.get("place"), places["top"]) * height - pad_y
-        anim, seconds = b.get("anim") or "fade", end - start
-        for (row_text, row_size), row_height in zip(rows, heights):
-            middle = top + row_height / 2
-            top += row_height + gap
-            box = rounded_box(text_width(row_text, row_style, row_size * size) + 2 * pad_x, row_height, radius)
+        box_middle = top + tall / 2
+        middles, at = [], top + pad_y
+        for row_height in heights:
+            middles.append(at + row_height / 2)
+            at += row_height + gap
+        box_width = max(text_width(row_text, row_style, row_size * size) for row_text, row_size in rows) + 2 * pad_x
+        box = rounded_box(box_width, tall, radius)
+        named = f"\\fn{name}" if name else ""
+        looks = []
+        for row_text, row_size in rows:
             font = font_tag(row_text, row_own, row_size)
-            named = f"\\fn{name}" if name else ""
-            fs = "" if font else f"{named}\\fs{row_size}"
-            events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
-            events.append(f"Dialogue: 3,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{font or fs}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
+            looks.append(font or f"{named}\\fs{row_size}")
+        anim, seconds = b.get("anim") or "fade", end - start
+        grows = anim in ("pop", "bounce", "pulse")
+        if len(rows) > 1 and grows:
+            # Growing as one piece: libass grows each line around its own middle, so the rows would come apart
+            # from the box. Here every frame puts them where the box's growth takes them (banner_pose).
+            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1))
+            continue
+        if not b.get("noBox"):
+            events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
+        for (row_text, _), middle, look in zip(rows, middles, looks):
+            events.append(f"Dialogue: 3,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
     return events
 
 

@@ -547,12 +547,17 @@ export function PlayerFrame({
 						if (!opacity) return null;
 						const size = b.scale ?? 1;
 						const padY = (BANNER.padding / 2) * size;
-						// Each row is its own box, as tall as banner_events draws it (its letters + padding), lineGap apart.
-						// Each arrives around its own middle, as each row's tags do in render.py.
+						const rows = bannerRows(b);
+						// One box around all its rows (coach, 11 Nov: two lines were two boxes), as banner_events draws it: rows
+						// row-size tall, lineGap apart, inside the padding; never shorter than its tallest row. It arrives as one
+						// piece, around the box's middle (render.py works that out frame by frame for the growing kinds).
 						const box: CSSProperties = {
-							display: "block",
-							whiteSpace: "pre",
-							background: `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,
+							display: "flex",
+							flexDirection: "column",
+							alignItems: "center",
+							boxSizing: "content-box",
+							minHeight: Math.max(...rows.map((row) => row.size)) * size,
+							background: b.noBox ? "transparent" : `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,
 							borderRadius: (b.radius ?? 0) * size,
 							padding: `${padY}px ${BANNER.padding * size}px`,
 							transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
@@ -583,24 +588,29 @@ export function PlayerFrame({
 									style={movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : undefined}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
-									{bannerRows(b).map((row, r) => {
-										const rowFace = bannerFace(b, row.text);
-										return (
-											<span
-												key={r}
-												style={{
-													...box,
-													marginTop: r ? (b.lineGap ?? 0) * size : 0,
-													fontFamily: rowFace.family,
-													fontWeight: rowFace.weight,
-													fontSize: (row.size / rowFace.em) * size,
-													lineHeight: `${row.size * size}px`,
-												}}
-											>
-												{row.text}
-											</span>
-										);
-									})}
+									<span style={box}>
+										{rows.map((row, r) => {
+											const rowFace = bannerFace(b, row.text);
+											return (
+												<span
+													key={r}
+													style={{
+														display: "block",
+														whiteSpace: "pre",
+														flexShrink: 0,
+														marginTop: r ? (b.lineGap ?? 0) * size : 0,
+														height: row.size * size,
+														fontFamily: rowFace.family,
+														fontWeight: rowFace.weight,
+														fontSize: (row.size / rowFace.em) * size,
+														lineHeight: `${row.size * size}px`,
+													}}
+												>
+													{row.text}
+												</span>
+											);
+										})}
+									</span>
 									{movable && (
 										<span
 											onPointerDown={(e) => startBannerDrag(e, b, "size")}

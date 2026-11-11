@@ -39,11 +39,16 @@ export async function GET(request: Request) {
 	// Files added before Import (as a banner or in Pic/Clip), and an Import file library.json lost (two uploads
 	// listed at the same moment, Codex review 12 Nov): shown anyway, named as the video names them, so none gets stuck.
 	const names = new Map<string, string>();
-	for (const b of edit?.banners ?? []) if (b.kind === "file" && b.file) names.set(b.file, b.text);
+	const lengths = new Map<string, number>(); // a clip used as a banner: as long as it was shown, its own length unknown here
+	for (const b of edit?.banners ?? []) {
+		if (b.kind !== "file" || !b.file) continue;
+		names.set(b.file, b.text);
+		if (b.media === "video") lengths.set(b.file, Math.max(lengths.get(b.file) ?? 0, Math.round((b.end - b.start) * 100) / 100));
+	}
 	for (const i of edit?.cutout?.inserts ?? []) names.set(i.file, i.name ?? "");
 	for (const [file, info] of there) {
 		if (!PROJECT_FILE.test(file) || items.some((i) => i.file === file)) continue;
-		items.push({ file, name: names.get(file) || (mediaOf(file) === "video" ? "Clip" : "Picture"), media: mediaOf(file), size: info.size, at: info.lastModified });
+		items.push({ file, name: names.get(file) || (mediaOf(file) === "video" ? "Clip" : "Picture"), media: mediaOf(file), size: info.size, at: info.lastModified, ...(lengths.get(file) && { seconds: lengths.get(file) }) });
 	}
 	items.sort((a, b) => b.at.localeCompare(a.at));
 	return Response.json({ items: items.map((i) => ({ ...i, used: used.has(i.file) })) });
