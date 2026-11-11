@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -1471,13 +1472,20 @@ def progress_reporter(url: str | None):
     """A function that tells the page how far the job is (0-99). It only ever goes up, and a report that
     can't be sent is skipped: showing a number must never be what makes a video fail."""
     last = {"at": 0.0, "percent": -1}
+    turn = threading.Lock()  # the picture's parts report at the same time: one at a time, so it never goes back
 
     def report(percent: float, force: bool = False) -> None:
         value = min(99, int(percent))
-        now = time.monotonic()
-        if not url or value <= last["percent"] or (not force and now - last["at"] < PROGRESS_EVERY):
+        if not url:
             return
-        last.update(at=now, percent=value)
+        with turn:
+            now = time.monotonic()
+            if value <= last["percent"] or (not force and now - last["at"] < PROGRESS_EVERY):
+                return
+            last.update(at=now, percent=value)
+            send(value)  # inside the lock: two sends could otherwise arrive in the wrong order
+
+    def send(value: int) -> None:
         try:
             request = urllib.request.Request(url, data=json.dumps({"percent": value}).encode(), method="PUT", headers={"Content-Type": "application/json"})
             urllib.request.urlopen(request, timeout=5).close()
