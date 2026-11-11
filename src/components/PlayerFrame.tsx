@@ -3,7 +3,7 @@
 import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_SCALE, BANNER_TOP, type Banner, bannerInk, bannerMotion, cleanBannerText } from "@/lib/banners";
+import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
 import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -253,6 +253,16 @@ export function PlayerFrame({
 		subtitle.font !== "own" && hasCyrillic(value)
 			? { family: fira.style.fontFamily, weight: 500, em: CYRILLIC_FONT.height }
 			: { ...face, em: ownEm };
+	// A banner with its own font (banner_events in render.py): Russian-style letters still use the font that has them,
+	// except in the user's own font. Its own font that isn't there falls back to Kanit, on both sides.
+	const bannerOwn = banners.find((b) => b.font === "own" && b.ownFont)?.ownFont;
+	useOwnFont(bannerOwn);
+	const bannerFace = (b: Banner, value: string) => {
+		if (!b.font) return textFace(value);
+		if (b.font === "own") return b.ownFont ? { family: `"${ownFamily(b.ownFont.version)}", ${kanit.style.fontFamily}`, weight: 400, em: b.ownFont.height } : { ...FONT_FACES.kanit, em: FONTS.kanit.height };
+		if (hasCyrillic(value)) return { family: fira.style.fontFamily, weight: 500, em: CYRILLIC_FONT.height };
+		return { ...(FONT_FACES[b.font] ?? FONT_FACES.kanit), em: (FONTS[b.font] ?? FONTS.kanit).height };
+	};
 	const lineFace = textFace(line?.text ?? "");
 	const em = lineFace.em;
 	const rowGap = line?.row2 !== undefined ? subtitle.lineSpacing : 0; // only a line split in two rows has a gap
@@ -442,6 +452,44 @@ export function PlayerFrame({
 					className="pointer-events-none absolute top-0 left-0"
 					style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}
 				>
+					{/* Uploaded banners (a picture, GIF or clip): over the speaker, under the subtitles, word banners and logo.
+					    Same place, size and fades as banner_file_filters in render.py. */}
+					{banners.map((b) => {
+						if (b.kind !== "file" || !b.file) return null;
+						const opacity = bannerMotion(b, outTime).opacity * (b.opacity ?? 1);
+						const src = bannerFileSrc(b.file);
+						if (!opacity || !src) return null;
+						const movable = Boolean(onBannersChange) && !playing;
+						const fit: CSSProperties = { display: "block", width: "100%", height: "auto" };
+						return (
+							<div
+								key={b.id}
+								style={{ position: "absolute", left: (b.x ?? BANNER_FILE.x) * W, top: (b.y ?? BANNER_FILE.y) * H, width: W * BANNER_FILE.width * (b.scale ?? 1), transform: "translate(-50%, -50%)", opacity }}
+							>
+								<span
+									className="relative block"
+									onClick={(e) => movable && e.stopPropagation()}
+									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
+									style={movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : undefined}
+									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
+								>
+									{b.media === "video" ? (
+										<InsertClip src={src} at={outTime - b.start} playing={playing} style={fit} onRatio={() => {}} />
+									) : (
+										// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+										<img src={src} alt="" draggable={false} style={fit} />
+									)}
+									{movable && (
+										<span
+											onPointerDown={(e) => startBannerDrag(e, b, "size")}
+											className="absolute rounded-full border-4 border-black bg-white"
+											style={{ width: 44, height: 44, right: -30, bottom: -30, cursor: "nwse-resize" }}
+										/>
+									)}
+								</span>
+							</div>
+						);
+					})}
 					{(line || !playing) && (
 						// Drag the subtitle up or down to move it. While paused with nothing being said,
 						// a faded sample shows where subtitles will sit.
@@ -488,56 +536,66 @@ export function PlayerFrame({
 						</div>
 					)}
 					{banners.map((b) => {
+						if (b.kind === "file") return null; // drawn under the subtitles, above
 						const move = bannerMotion(b, outTime);
 						const opacity = move.opacity;
 						if (!opacity) return null;
 						const size = b.scale ?? 1;
-						const bannerFace = textFace(`${b.text} ${b.sub}`);
+						const padY = (BANNER.padding / 2) * size;
+						// Each row is its own box, as tall as banner_events draws it (its letters + padding), lineGap apart.
+						// Each arrives around its own middle, as each row's tags do in render.py.
 						const box: CSSProperties = {
+							display: "block",
+							whiteSpace: "pre",
 							background: `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,
 							borderRadius: (b.radius ?? 0) * size,
-							padding: `${(BANNER.padding / 2) * size}px ${BANNER.padding * size}px`,
-							boxDecorationBreak: "clone",
-							WebkitBoxDecorationBreak: "clone",
+							padding: `${padY}px ${BANNER.padding * size}px`,
+							transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
 						};
 						const movable = Boolean(onBannersChange) && !playing;
-						// Dragged somewhere: its middle sits there. Else the top of its place (top, middle, bottom).
+						// Dragged somewhere: its middle sits there. Else its first row's letters start at the top of its place.
 						const spot: CSSProperties =
 							b.x !== undefined && b.y !== undefined
 								? { left: b.x * W, top: b.y * H, width: W - 2 * SIDE_MARGIN, transform: "translate(-50%, -50%)" }
-								: { left: SIDE_MARGIN, right: SIDE_MARGIN, top: Math.round(BANNER_TOP[subtitle.format][b.place] * H) };
+								: { left: SIDE_MARGIN, right: SIDE_MARGIN, top: Math.round(BANNER_TOP[subtitle.format][b.place] * H) - padY };
 						return (
 							<div
 								key={b.id}
 								style={{
 									position: "absolute",
 									...spot,
-									textAlign: "center",
-									fontFamily: bannerFace.family,
-									fontWeight: bannerFace.weight,
-									fontSize: (BANNER.size / bannerFace.em) * size,
-									lineHeight: bannerFace.em,
+									display: "flex",
+									flexDirection: "column",
+									alignItems: "center",
 									color: b.ink ?? bannerInk(b.color ?? subtitle.color),
 									opacity,
 								}}
 							>
 								<span
-									className="relative inline-block"
+									className="relative flex flex-col items-center"
 									onClick={(e) => movable && e.stopPropagation()}
 									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
-									style={{
-										transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
-										...(movable && { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 }),
-									}}
+									style={movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : undefined}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
-									<span style={box}>{cleanBannerText(b.text)}</span>
-									{cleanBannerText(b.sub) && (
-										<>
-											<br />
-											<span style={{ ...box, fontSize: (BANNER.subSize / bannerFace.em) * size }}>{cleanBannerText(b.sub)}</span>
-										</>
-									)}
+									{bannerRows(b).map((row, r) => {
+										const rowFace = bannerFace(b, row.text);
+										return (
+											<span
+												key={r}
+												style={{
+													...box,
+													marginTop: r ? (b.lineGap ?? 0) * size : 0,
+													fontFamily: rowFace.family,
+													fontWeight: rowFace.weight,
+													fontSize: (row.size / rowFace.em) * size,
+													lineHeight: `${row.size * size}px`,
+												}}
+											>
+												{row.text}
+											</span>
+										);
+									})}
 									{movable && (
 										<span
 											onPointerDown={(e) => startBannerDrag(e, b, "size")}

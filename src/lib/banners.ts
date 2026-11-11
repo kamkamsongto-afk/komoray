@@ -1,9 +1,12 @@
 // Banners: a price tag, a call to action or "follow me", shown for a few seconds of the final video
 // in the brand colour. Saved in edit.json as "banners"; drawn by PlayerFrame in the preview and by
-// build_banners in modal_app/render.py for the final video (same sizes, places and fades).
-import type { Format } from "./subtitle-style";
+// banner_events (words) and banner_file_filters (an uploaded picture or clip) in modal_app/render.py
+// for the final video (same sizes, places and fades).
+import type { OwnFont } from "./font-info";
+import { type FontId, type Format, readFont } from "./subtitle-style";
 
-export type BannerKind = "price" | "cta" | "follow";
+// file: the customer's own finished banner, a picture or clip uploaded next to the video (12 Nov).
+export type BannerKind = "price" | "cta" | "follow" | "file";
 export type BannerPlace = "top" | "middle" | "bottom";
 // start / end: seconds of the final video. sub: the small second line (price tag only).
 // x / y: where its middle is once dragged on the preview (share of the video's width / height);
@@ -24,6 +27,15 @@ export type Banner = {
 	radius?: number; // how round its corners are, px at normal size
 	opacity?: number; // how solid its background is, 0.05..1
 	anim?: BannerAnim;
+	// Added 12 Nov, read with ??. font: without it, the subtitles' font. lineGap: extra px between its rows
+	// (text lines and the small line), at normal size. text can have up to BANNER.maxLines lines.
+	font?: FontId | "own";
+	ownFont?: OwnFont; // font "own": the account's uploaded font when it was picked (its name and height)
+	lineGap?: number;
+	// kind "file": banner-<id>.<ext> next to the video. text is then only its name (the Timeline shows it).
+	// Always placed by x / y; scale 1 = BANNER_FILE.width of the video's width.
+	file?: string;
+	media?: "image" | "video";
 };
 
 // How a banner arrives. Same keyframes as BANNER_ANIMS in render.py, which writes them as ASS tags.
@@ -64,12 +76,29 @@ export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub:
 	price: { name: "Price", text: "$29", sub: "Today only" },
 	cta: { name: "Call to action", text: "Link in bio", sub: "" },
 	follow: { name: "Follow", text: "Follow for more", sub: "" },
+	file: { name: "Upload", text: "My banner", sub: "" },
 };
 
 // Sizes in px of the final video; where each place starts, as a share of its height, for each video
 // shape, clear of the subtitles' usual place (bottom is under the subtitles on
 // 9:16, over them on the wider shapes). Same as BANNER and BANNER_TOP in render.py.
-export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxBanners: 20 };
+export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxLines: 3, maxBanners: 20 };
+export const BANNER_LINE_GAP = { min: -20, max: 80 };
+// An uploaded banner: how wide it is at size 100%, share of the video's width; where it starts; biggest files.
+// Same as BANNER_FILE in render.py.
+export const BANNER_FILE = { width: 0.5, x: 0.5, y: 0.3, maxBytes: { image: 10_000_000, video: 150_000_000 } };
+export const BANNER_FILE_NAME = /^banner-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4|mov|webm)$/;
+
+// Where the preview gets an uploaded banner: the file just picked on this page (no waiting for it to come back),
+// else through /api/banner-file for the video this page edits (/edit?key=…). "" off that page.
+const pickedFiles = new Map<string, string>();
+export const keepBannerFile = (file: string, url: string) => pickedFiles.set(file, url);
+export function bannerFileSrc(file: string) {
+	const picked = pickedFiles.get(file);
+	if (picked) return picked;
+	const key = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("key");
+	return key ? `/api/banner-file?key=${encodeURIComponent(key)}&file=${encodeURIComponent(file)}` : "";
+}
 export const BANNER_SCALE = { min: 0.5, max: 2.5 };
 export const BANNER_RADIUS = { min: 0, max: 60 };
 export const BANNER_OPACITY = { min: 0.05, max: 1 };
@@ -80,12 +109,25 @@ export const BANNER_TOP: Record<Format, Record<BannerPlace, number>> = {
 };
 
 // Emoji can't be drawn in the final video (its fonts have none), so they are left out everywhere.
-export const cleanBannerText = (text: string) =>
+// lines: how many lines it may keep (the main text: up to BANNER.maxLines, each up to maxText letters).
+export const cleanBannerText = (text: string, lines = 1) =>
 	text
 		.replace(/\p{Extended_Pictographic}|‍|️/gu, "")
-		.replace(/[\\{}\n\r]/g, "")
-		.trim()
-		.slice(0, BANNER.maxText);
+		.replace(/[\\{}\r]/g, "")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.slice(0, lines)
+		.map((line) => line.slice(0, BANNER.maxText).trim())
+		.join(lines > 1 ? "\n" : " ")
+		.slice(0, lines > 1 ? undefined : BANNER.maxText)
+		.trim();
+// The rows a word banner draws, each on its own box: its lines, then the small line. size: px at normal size.
+// Same rows as banner_events in render.py.
+export const bannerRows = (b: Pick<Banner, "text" | "sub">) => [
+	...cleanBannerText(b.text, BANNER.maxLines).split("\n").filter(Boolean).map((text) => ({ text, size: BANNER.size })),
+	...(cleanBannerText(b.sub) ? [{ text: cleanBannerText(b.sub), size: BANNER.subSize }] : []),
+];
 
 // Dark letters on a light brand colour, white letters on a dark one.
 export function bannerInk(color: string) {
@@ -112,12 +154,17 @@ export function readBanners(value: unknown): Banner[] | null {
 	const out: Banner[] = [];
 	for (const raw of value.slice(0, BANNER.maxBanners) as Partial<Record<keyof Banner, unknown>>[]) {
 		const kind = raw?.kind;
-		if (kind !== "price" && kind !== "cta" && kind !== "follow") continue;
+		if (kind !== "price" && kind !== "cta" && kind !== "follow" && kind !== "file") continue;
 		const start = Number(raw.start);
 		const end = Number(raw.end);
 		if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
-		const text = cleanBannerText(String(raw.text ?? ""));
+		const file = kind === "file" && typeof raw.file === "string" && BANNER_FILE_NAME.test(raw.file) ? raw.file : undefined;
+		if (kind === "file" && !file) continue;
+		const text = cleanBannerText(String(raw.text ?? ""), file ? 1 : BANNER.maxLines) || (file ? BANNER_KINDS.file.text : "");
 		if (!text) continue;
+		// No font sent = the subtitles' font. readFont turns one it can't use into Kanit.
+		const font = !file && raw.font !== undefined ? readFont(raw.font, raw.ownFont) : null;
+		const gap = Number(raw.lineGap);
 		out.push({
 			id: String(raw.id ?? "").slice(0, 40) || crypto.randomUUID(),
 			kind,
@@ -132,7 +179,11 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(typeof raw.ink === "string" && HEX.test(raw.ink) && { ink: raw.ink.toUpperCase() }),
 			...(typeof raw.radius === "number" && raw.radius > 0 && { radius: Math.round(Math.min(BANNER_RADIUS.max, raw.radius)) }),
 			...(typeof raw.opacity === "number" && raw.opacity < 1 && { opacity: round(Math.max(BANNER_OPACITY.min, raw.opacity)) }),
-			...(typeof raw.anim === "string" && raw.anim in BANNER_ANIMS && raw.anim !== "fade" && { anim: raw.anim as BannerAnim }),
+			...(typeof raw.anim === "string" && raw.anim in BANNER_ANIMS && raw.anim !== "fade" && !file && { anim: raw.anim as BannerAnim }),
+			...(font && { font: font.font, ...(font.ownFont && { ownFont: font.ownFont }) }),
+			...(!file && Number.isFinite(gap) && gap !== 0 && { lineGap: Math.round(Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, gap))) }),
+			// An uploaded banner always sits where it was put (at first: the middle, near the top).
+			...(file && { file, media: /\.(mp4|mov|webm)$/.test(file) ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),
 		});
 	}
 	return out;
