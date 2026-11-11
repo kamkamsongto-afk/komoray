@@ -4,11 +4,12 @@ import type { SharedPair } from "./shared-words";
 
 // The only file that asks Claude to fix speech-to-text spelling. It reads the whole script, a part at a time, and
 // only gives fixes: the AI studio puts them on once, underlined in green, and Undo takes them all off.
-// Test 11 Nov 2026 on a real Thai clip (339 words, about 15 wrong): Opus at medium effort fixed 12-13 each time with no
-// wrong fix, about $0.03 (about $0.13 for 10 minutes). At low effort it found 15 once and 10 the next time. Haiku 5.5
-// missed แค่ and ลายเซ็น, and at low effort made up a word. Sending only the lines the dictionary flags saved under a
-// cent but missed 6 of 14: wrong words are often real words (แค, กด, โค้ด).
-const MODEL = "claude-opus-5-5";
+// Test 11 Nov 2026 on a real Thai clip (339 words, about 15 wrong): Haiku 5.5 at medium effort fixed 11-12 each time and
+// never made a right word wrong, about $0.01 for 10 minutes. It misses some (แค่, ลายเซ็น) that Opus at medium found
+// (12-13, about $0.13 for 10 minutes). Coach, 11 Nov: Haiku for now, while our own Thai word list (lib/shared-words.ts)
+// grows; it is shown those words, so it catches more of them. Haiku at low effort made up a word (ระแวดระวัง): keep medium.
+// Sending only the lines the dictionary flags saved under a cent but missed 6 of 14: wrong words are often real words.
+const MODEL = "claude-haiku-5-5";
 const REQUEST_MS = 90_000; // Cloudflare gives up on a silent request after 100 seconds
 export const CHUNK_WORDS = 1500; // about 8 minutes of speech
 const END_SEARCH_WORDS = 200; // a part ends at the longest pause among its last this many words
@@ -100,11 +101,10 @@ export async function askForSpelling(words: Word[], from: number, apiKey: string
 	const transcript = lines.map((line, n) => `${n}: ${line.map((i) => words[i].text).join(" ")}`).join("\n");
 	const known = [...new Set(hints.map((h) => h.fixed.trim()).filter(Boolean))].slice(0, MAX_HINTS);
 	const client = new Anthropic({ apiKey, timeout: REQUEST_MS, maxRetries: 0 });
-	const response = await client.beta.messages.create({
+	// No refusal fallback: Haiku has none on the server. A refusal stops here (stop_reason below) and the page offers Try again.
+	const response = await client.messages.create({
 		model: MODEL,
 		max_tokens: 16000,
-		betas: ["server-side-fallback-2026-07-01"],
-		fallbacks: "default",
 		output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
 		system: INSTRUCTIONS,
 		messages: [
