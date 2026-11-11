@@ -589,13 +589,22 @@ def banner_file_filters(parts: list[str], base: str, size: tuple[int, int], bann
                 ":interpolation=linear:eval=frame,"
             )
         fade_in = f"fade=t=in:st=0:d={fade}:alpha=1," if spec["fade_in"] else ""
+        fades = f"{fade_in}fade=t=out:st={max(0.0, d - fade):.3f}:d={fade}:alpha=1,"
+        shown = ""
+        if d < 2 * fade:
+            # Shorter than both fades: the preview takes the smaller of the two (bannerMotion), two fades in a row
+            # multiply them (Codex review, 12 Nov). So the preview's rule, on these few frames only.
+            fall = f"({d:.3f}-T)/{fade}"
+            level = f"min(1,min(T/{fade},{fall}))" if spec["fade_in"] else f"min(1,{fall})"
+            shown = f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*{level}',"
+            fades = ""
         # A clip or a GIF that ends early stays on its last frame, as the preview shows it (same as an insert).
         moving = b.get("media") == "video" or str(b.get("file", "")).endswith(".gif")
         hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
         parts.append(
             f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},setpts=PTS-STARTPTS,format=rgba,scale={w}:-2,setsar=1,"
-            f"colorchannelmixer=aa={opacity:.2f},pad=iw+4:ih+4:2:2:color=black@0,{motion}"
-            f"format=yuva420p,{fade_in}fade=t=out:st={max(0.0, d - fade):.3f}:d={fade}:alpha=1,"
+            f"colorchannelmixer=aa={opacity:.2f},{shown}pad=iw+4:ih+4:2:2:color=black@0,{motion}"
+            f"format=yuva420p,{fades}"
             f"setpts=PTS-STARTPTS+{a:.3f}/TB[bf{j}]"
         )
         # Slide: starts this far off and glides into place in SLIDE_MS (whole pixels are fine for a fast move).
