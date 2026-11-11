@@ -426,13 +426,18 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						</label>
 						{fontNote && <span className="text-red-500">{fontNote}</span>}
 					</div>
-					{swatches(b, "Background", "color", b.color ?? brand)}
+					<label className="flex items-center gap-2 text-xs text-foreground/70">
+						<span className="w-16 shrink-0">Background</span>
+						<input type="checkbox" checked={!b.noBox} onChange={(e) => update(b.id, { noBox: e.target.checked ? undefined : true })} className="accent-blue-600" />
+						<span>{b.noBox ? "Off: letters only" : "On"}</span>
+					</label>
+					{!b.noBox && swatches(b, "Box colour", "color", b.color ?? brand)}
 					{swatches(b, "Text", "ink", b.ink ?? bannerInk(b.color ?? brand))}
 					{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 					{(b.text.includes("\n") || (b.kind === "price" && cleanBannerText(b.sub))) &&
 						range(b, "Line gap", b.lineGap ?? 0, BANNER_LINE_GAP.min, BANNER_LINE_GAP.max, 2, String(b.lineGap ?? 0), (n) => update(b.id, { lineGap: n }))}
-					{range(b, "Corners", b.radius ?? 0, BANNER_RADIUS.min, BANNER_RADIUS.max, 2, String(b.radius ?? 0), (n) => update(b.id, { radius: n }))}
-					{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
+					{!b.noBox && range(b, "Corners", b.radius ?? 0, BANNER_RADIUS.min, BANNER_RADIUS.max, 2, String(b.radius ?? 0), (n) => update(b.id, { radius: n }))}
+					{!b.noBox && range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
 					</>}
 				</div>
 			))}

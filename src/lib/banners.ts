@@ -33,6 +33,7 @@ export type Banner = {
 	font?: FontId | "own";
 	ownFont?: OwnFont; // font "own": the account's uploaded font when it was picked (its name and height)
 	lineGap?: number;
+	noBox?: boolean; // letters only, no background (coach, 11 Nov). Added 11 Nov
 	// kind "file": banner-<id>.<ext> next to the video. text is then only its name (the Timeline shows it).
 	// Always placed by x / y; scale 1 = BANNER_FILE.width of the video's width.
 	file?: string;
@@ -84,7 +85,7 @@ export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub:
 // shape, clear of the subtitles' usual place (bottom is under the subtitles on
 // 9:16, over them on the wider shapes). Same as BANNER and BANNER_TOP in render.py.
 export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxLines: 3, maxBanners: 20 };
-export const BANNER_LINE_GAP = { min: -20, max: 80 };
+export const BANNER_LINE_GAP = { min: -60, max: 80 }; // -60: rows can touch (coach, 11 Nov)
 // An uploaded banner: how wide it is at size 100%, share of the video's width; where it starts; biggest files.
 // Same as BANNER_FILE in render.py.
 export const BANNER_FILE = { width: 0.5, x: 0.5, y: 0.3, maxBytes: { image: 10_000_000, video: 150_000_000 } };
@@ -97,7 +98,7 @@ export const keepBannerFile = (file: string, url: string) => pickedFiles.set(fil
 export function bannerFileSrc(file: string) {
 	return pickedFiles.get(file) ?? projectFileSrc(file);
 }
-export const BANNER_SCALE = { min: 0.5, max: 2.5 };
+export const BANNER_SCALE = { min: 0.5, max: 5 }; // up to 500% (coach, 11 Nov)
 export const BANNER_RADIUS = { min: 0, max: 60 };
 export const BANNER_OPACITY = { min: 0.05, max: 1 };
 export const BANNER_TOP: Record<Format, Record<BannerPlace, number>> = {
@@ -120,8 +121,9 @@ export const cleanBannerText = (text: string, lines = 1) =>
 		.join(lines > 1 ? "\n" : " ")
 		.slice(0, lines > 1 ? undefined : BANNER.maxText)
 		.trim();
-// The rows a word banner draws, each on its own box: its lines, then the small line. size: px at normal size.
-// Same rows as banner_events in render.py.
+// The rows a word banner draws, all on one box: its lines, then the small line. size: px at normal size.
+// Same rows as banner_events in render.py. Rows are row size tall, lineGap apart, inside the box's padding; the box is
+// never shorter than its tallest row (PlayerFrame, banner_events).
 export const bannerRows = (b: Pick<Banner, "text" | "sub">) => [
 	...cleanBannerText(b.text, BANNER.maxLines).split("\n").filter(Boolean).map((text) => ({ text, size: BANNER.size })),
 	...(cleanBannerText(b.sub) ? [{ text: cleanBannerText(b.sub), size: BANNER.subSize }] : []),
@@ -179,6 +181,7 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(typeof raw.opacity === "number" && raw.opacity < 1 && { opacity: round(Math.max(BANNER_OPACITY.min, raw.opacity)) }),
 			...(typeof raw.anim === "string" && raw.anim in BANNER_ANIMS && raw.anim !== "fade" && { anim: raw.anim as BannerAnim }),
 			...(font && { font: font.font, ...(font.ownFont && { ownFont: font.ownFont }) }),
+			...(!file && raw.noBox === true && { noBox: true }),
 			...(!file && Number.isFinite(gap) && gap !== 0 && { lineGap: Math.round(Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, gap))) }),
 			// An uploaded banner always sits where it was put (at first: the middle, near the top).
 			...(file && { file, media: file.endsWith(".mp4") ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),
