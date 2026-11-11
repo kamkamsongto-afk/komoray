@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import modal
@@ -1301,6 +1302,21 @@ def display_aspect(path: Path) -> float:
     return h / w if abs(int(float(rotation))) % 180 == 90 else w / h
 
 
+def cut_sound_parts(pieces: list[tuple[int, int, int]]) -> list[str]:
+    """The sound of the pieces (frame_segments), joined as [ca]. Shared by the final video and cut_sound,
+    so the sound polished next to the picture is cut sample for sample like the picture's own."""
+    parts, labels = [], []
+    for i, (_, trim, frames) in enumerate(pieces):
+        a, b, length = trim / FPS, (trim + frames) / FPS, frames / FPS
+        # A few ms fade in and out at every cut, so the sound doesn't click (FADE_SAMPLES in the preview).
+        parts.append(
+            f"[0:a]atrim=start={a:.6f}:end={b:.6f},asetpts=PTS-STARTPTS,apad=whole_dur={length:.6f},atrim=end={length:.6f},"
+            f"afade=t=in:d={CUT_FADE},afade=t=out:st={max(0.0, length - CUT_FADE):.6f}:d={CUT_FADE}[a{i}]"
+        )
+        labels.append(f"[a{i}]")
+    return parts + [f"{''.join(labels)}concat=n={len(labels)}:v=0:a=1[ca]"]
+
+
 def ffmpeg_command(
     src: Path,
     subs: Path,
@@ -1331,7 +1347,7 @@ def ffmpeg_command(
     off = no_zoom_frames(pieces, no_zoom)
     ramps = zoom_ramps(pieces, zoom_period)
     runs = zoom_part_frames(pieces, zoom_parts)
-    parts, video_labels, audio_labels = [], [], []
+    parts, video_labels = [], []
     inputs: dict = {}
     extra = 1 + (1 if logo else 0)
     if cutout and cutout.get("matte"):
@@ -1371,15 +1387,7 @@ def ffmpeg_command(
             )
             matte_labels.append(f"[m{k}]")
     if audio:
-        for i, (_, trim, frames) in enumerate(pieces):
-            a, b, length = trim / FPS, (trim + frames) / FPS, frames / FPS
-            # A few ms fade in and out at every cut, so the sound doesn't click (FADE_SAMPLES in the preview).
-            parts.append(
-                f"[0:a]atrim=start={a:.6f}:end={b:.6f},asetpts=PTS-STARTPTS,apad=whole_dur={length:.6f},atrim=end={length:.6f},"
-                f"afade=t=in:d={CUT_FADE},afade=t=out:st={max(0.0, length - CUT_FADE):.6f}:d={CUT_FADE}[a{i}]"
-            )
-            audio_labels.append(f"[a{i}]")
-        parts.append(f"{''.join(audio_labels)}concat=n={len(audio_labels)}:v=0:a=1[ca]")
+        parts += cut_sound_parts(pieces)
     parts.append(f"{''.join(video_labels)}concat=n={len(video_labels)}:v=1:a=0[cv]")
     base = "[cv]"
     if matte_labels:
@@ -1418,7 +1426,7 @@ def ffmpeg_command(
         cmd += banner_file_input(b)
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
-        # High on purpose: polish_sound encodes this sound a second time, at the bitrate people get.
+        # The sound people get when Audio optimization is off or polish_sound failed.
         cmd += ["-map", "[ca]", "-c:a", "aac", "-b:a", "320k"]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
     # The last fps filter can add a frame at the very end: exactly as many frames as the pieces have.
@@ -1526,34 +1534,56 @@ def voice_filter(media: Path, before: str = "") -> str | None:
     return f"{VOICE_CHAIN},volume={gain:.2f}dB,alimiter=limit={limit:.4f}:attack=5:release=50:level=false:latency=1,aresample=48000"
 
 
-def polish_sound(video: Path, amount: float = 1, source: Path | None = None) -> bool:
-    """Audio optimization, in place. amount: 0 = as recorded (on both speakers) .. 1 = fully optimized, in
-    between the two are mixed, the same way the editor's preview mixes them (setSound in lib/player/engine.ts).
-    source: the uncut video. Its loudness is the one used, like the preview (clean_preview), which can't know
-    the cuts: measured after cutting, the video came out at another level than the slider had let them hear.
+def polish_sound(source: Path, keeps: list[tuple[float, float]], sound: Path, amount: float = 1) -> Path | None:
+    """Audio optimization of the cut video's sound, made from the uncut source while the picture is being
+    made (render runs this next to it; it used to wait for the picture, ~45 s of a 5 min clip, measured 11 Nov).
+    Cut by cut_sound_parts, exactly like the picture's own sound. Written to `sound` (AAC), None when there is
+    nothing to polish; add_sound puts it on the video.
+    amount: 0 = as recorded (on both speakers) .. 1 = fully optimized, in between the two are mixed, the same
+    way the editor's preview mixes them (setSound in lib/player/engine.ts). The uncut source's loudness and
+    sides are the ones used, like the preview (clean_preview), which can't know the cuts: measured after
+    cutting, the video came out at another level than the slider had let them hear.
     A video with its plain sound beats no video, so a failure here only logs."""
     try:
-        if not has_audio(video):
-            return False
+        if not has_audio(source):
+            return None
         amount = min(1.0, max(0.0, amount))
-        stereo = both_speakers(video)
-        voice = voice_filter(source or video, stereo) if amount > 0 else None
+        stereo = both_speakers(source)
+        voice = voice_filter(source, stereo) if amount > 0 else None
         if amount > 0 and voice is None:  # silent from start to end: nothing to bring up
-            return False
+            return None
+        cut = ";".join(cut_sound_parts(frame_segments(keeps)))
         recorded = f"{stereo}aresample=48000,asetpts=PTS-STARTPTS"  # starts at 0, like the optimized sound does
         if voice is None:
-            graph = f"[0:a:0]{recorded}[s]"
+            graph = f"{cut};[ca]{recorded}[s]"
         elif amount >= 1:
-            graph = f"[0:a:0]{stereo}{voice}[s]"
+            graph = f"{cut};[ca]{stereo}{voice}[s]"
         else:
             graph = (
-                f"[0:a:0]{recorded},asplit=2[d][w];[d]volume={1 - amount:.3f}[dry];[w]{voice},volume={amount:.3f}[wet];"
+                f"{cut};[ca]{recorded},asplit=2[d][w];[d]volume={1 - amount:.3f}[dry];[w]{voice},volume={amount:.3f}[wet];"
                 "[dry][wet]amix=inputs=2:normalize=0:duration=longest[s]"
             )
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(source), "-filter_complex", graph, "-map", "[s]", "-vn"]
+            + ["-c:a", "aac", "-b:a", "192k", str(sound)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-600:])
+        return sound
+    except Exception as err:
+        print(f"sound not polished: {err}")
+        return None
+
+
+def add_sound(video: Path, sound: Path) -> bool:
+    """Puts polish_sound's sound on the finished video in place of its plain one. Nothing is encoded again."""
+    try:
         polished = video.with_name("polished.mp4")
         result = subprocess.run(
-            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video), "-filter_complex", graph, "-map", "0:v:0", "-map", "[s]", "-c:v", "copy"]
-            + ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(polished)],
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video), "-i", str(sound), "-map", "0:v:0", "-map", "1:a:0"]
+            + ["-c", "copy", "-movflags", "+faststart", str(polished)],
             capture_output=True,
             text=True,
         )
@@ -1571,6 +1601,7 @@ def polish_sound(video: Path, amount: float = 1, source: Path | None = None) -> 
 @app.function(image=image, cpu=4, memory=4096, timeout=30 * 60)
 def render(video_url: str, edit: dict, output_url: str, error_url: str | None = None, style: dict | None = None, progress_url: str | None = None) -> dict:
     style = {**DEFAULT_STYLE, **(style or {})}
+    sound_worker = ThreadPoolExecutor(max_workers=1)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
@@ -1583,6 +1614,11 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             keeps = keep_segments(edit["duration"], edit.get("cuts", []))
             if not keeps:
                 raise RuntimeError("nothing left after cutting")
+            # The sound is polished next to the picture: it only needs the source and the cuts. The picture
+            # uses most of the machine but not all of it (8 CPUs made it no faster than 4, measured 11 Nov).
+            polishing = None
+            if style.get("audio", True):
+                polishing = sound_worker.submit(polish_sound, src, keeps, workdir / "sound.m4a", float(style.get("audioAmount", 1)))
 
             # The user's own font: libass also looks in this folder. Sent for the subtitles or a banner's font.
             fonts_dir = None
@@ -1659,7 +1695,8 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 raise RuntimeError(f"ffmpeg failed: {errors[-1500:]}")
 
             report(PROGRESS_PICTURE, force=True)
-            sound = polish_sound(out, float(style.get("audioAmount", 1)), src) if style.get("audio", True) else False
+            polished = polishing.result() if polishing else None
+            sound = add_sound(out, polished) if polished else False
             report(PROGRESS_SOUND, force=True)
             put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size, "sound": sound}
@@ -1667,6 +1704,8 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
         if error_url:
             put(error_url, json.dumps({"error": str(err)}).encode(), "application/json")
         raise
+    finally:
+        sound_worker.shutdown(wait=False, cancel_futures=True)  # a failed video doesn't wait for its sound
 
 
 PROXY_SIDE = 540  # px, the short side; the preview is at most ~440px wide on screen
