@@ -8,6 +8,7 @@ import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-sty
 import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
 import { Confirm, ConfirmDelete } from "./ConfirmDelete";
+import { clipLength, hasClearParts } from "@/lib/media-library";
 
 type Props = {
 	focus: string | null; // the layer just clicked on the timeline: open it here
@@ -40,23 +41,6 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
-// Does this picture really have clear parts? A PNG or GIF can be solid too, and a solid one works like a JPG.
-async function hasClearParts(file: File) {
-	if (!/^image\/(png|webp|gif)$/.test(file.type)) return false;
-	try {
-		const picture = await createImageBitmap(file);
-		const canvas = document.createElement("canvas");
-		canvas.width = canvas.height = 64;
-		const draw = canvas.getContext("2d", { willReadFrequently: true });
-		if (!draw) return false;
-		draw.drawImage(picture, 0, 0, 64, 64);
-		picture.close();
-		const { data } = draw.getImageData(0, 0, 64, 64);
-		for (let k = 3; k < data.length; k += 4) if (data[k] < 250) return true;
-	} catch {}
-	return false;
-}
-
 export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
@@ -487,17 +471,3 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	);
 }
 
-// A clip's length in seconds, read by the browser (null if it can't tell).
-function clipLength(file: File): Promise<number | null> {
-	return new Promise((resolve) => {
-		const video = document.createElement("video");
-		const url = URL.createObjectURL(file);
-		video.preload = "metadata";
-		video.onloadedmetadata = () => {
-			resolve(Number.isFinite(video.duration) ? video.duration : null);
-			URL.revokeObjectURL(url);
-		};
-		video.onerror = () => resolve(null);
-		video.src = url;
-	});
-}

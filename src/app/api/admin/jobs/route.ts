@@ -43,7 +43,8 @@ export async function GET() {
 
 	const jobs = [...folders.entries()]
 		.map(([id, files]) => {
-			const video = [...files.values()].find((f) => /\.(mp4|mov)$/i.test(f.key) && !OUR_VIDEOS.includes(f.key.split("/")[2]) && !f.key.includes("-before."));
+			// Pictures and clips the customer added to a video (insert-…, banner-…, Import's media-…) sit in its folder too: never the upload.
+			const video = [...files.values()].find((f) => /\.(mp4|mov)$/i.test(f.key) && !OUR_VIDEOS.includes(f.key.split("/")[2]) && !/^(insert|banner|media)-/.test(f.key.split("/")[2] ?? "") && !f.key.includes("-before."));
 			return { id, files, video };
 		})
 		.filter((job) => job.video)

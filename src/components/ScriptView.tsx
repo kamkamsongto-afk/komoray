@@ -1,10 +1,11 @@
 "use client";
 
-import { Crop, Film, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
-import type { Banner } from "@/lib/banners";
-import type { CutoutLayers } from "@/lib/behind";
+import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
+import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
+import { filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -17,6 +18,7 @@ import { type StudioMedia, StudioPlayer } from "./StudioPlayer";
 import { type ControlSection, SubtitleControls } from "./SubtitleControls";
 import { BannerControls } from "./BannerControls";
 import { CutoutControls } from "./CutoutControls";
+import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
 import { waitLabel } from "@/lib/use-cutout";
 import { AudioControls } from "./AudioControls";
@@ -195,13 +197,14 @@ type Props = {
 
 // What can be opened under the video. Nothing is open at first: the editor stays calm, and every
 // setting is a click away (here, or by clicking its part of the timeline).
-type Panel = ControlSection | "banners" | "cutout";
+type Panel = ControlSection | "banners" | "cutout" | "import";
 const SCRIPT_HEIGHT = "komoray.scriptHeight"; // the script box's dragged height, px
 const PANELS: { id: Panel; icon: LucideIcon; name: string }[] = [
 	{ id: "text", icon: Type, name: "Subtitles" },
 	{ id: "zoom", icon: ZoomIn, name: "Zoom" },
 	{ id: "banners", icon: Tag, name: "Banners" },
 	{ id: "cutout", icon: Layers, name: "Cutout" }, // only for people with Cutout on (/admin)
+	{ id: "import", icon: FolderInput, name: "Import" }, // pictures and clips kept in the project (Yoshi, 12 Nov)
 	{ id: "shape", icon: Crop, name: "Shape" },
 	{ id: "brand", icon: Palette, name: "Brand" },
 ];
@@ -316,6 +319,32 @@ export function ScriptView({
 	);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);
+	// Import: a project file put on the video where it is now, then its box opens on it to place it.
+	const putAsBanner = (item: LibraryItem) => {
+		if (banners.length >= BANNER.maxBanners) return;
+		const total = totalFrames(segments) / FPS;
+		const start = Math.round(Math.min(toOutSeconds(timeRef.current, segments), Math.max(0, total - 1)) * 10) / 10;
+		const end = Math.round(Math.min(total, start + Math.max(0.5, item.seconds ?? BANNER.seconds)) * 10) / 10;
+		const banner: Banner = { id: crypto.randomUUID(), kind: "file", text: item.name, sub: "", start, end, place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: item.file, media: item.media };
+		onBannersChange([...banners, banner].sort((a, b) => a.start - b.start));
+		setFocusBanner(banner.id);
+		openPanel("banners");
+	};
+	const putInPicClip = (item: LibraryItem) => {
+		const total = totalFrames(segments) / FPS;
+		const start = Math.round(Math.min(toOutSeconds(timeRef.current, segments), Math.max(0, total - 1)) * 100) / 100;
+		const end = Math.round(Math.min(total, start + Math.max(0.5, item.seconds ?? 3)) * 100) / 100;
+		const clear = Boolean(item.clear);
+		const insert: Insert = { id: crypto.randomUUID(), kind: item.media, file: item.file, start, end, speakerScale: clear ? 1 : INSERT.scale.start, speakerX: clear ? 0.5 : 0.25, hidden: false, seeThrough: clear, name: cleanInsertName(item.name) || undefined };
+		onCutoutChange({ ...cutoutLayers, inserts: [...cutoutLayers.inserts, insert].sort((a, b) => a.start - b.start) });
+		setFocusCutout(insert.id);
+		openPanel("cutout");
+	};
+	// Project files in Pic/Clip have a link at once (the Cutout check signs them only after the next save).
+	const cutoutFiles = useMemo(
+		() => ({ ...Object.fromEntries(cutoutLayers.inserts.map((i) => [i.file, projectFileSrc(i.file)])), ...cutout.files }),
+		[cutoutLayers.inserts, cutout.files],
+	);
 
 	// Which words the user has highlighted with the mouse (or a long press on a phone).
 	useEffect(() => {
@@ -773,7 +802,7 @@ export function ScriptView({
 							key={playerKey}
 							ref={playerRef}
 							media={stackedPreview ? { ...studio, videoUrl: stackedPreview, stacked: true } : studio}
-							cutout={{ layers: cutoutLayers, files: cutout.files, onInsert: (id, patch) => onCutoutChange({ ...cutoutLayers, inserts: cutoutLayers.inserts.map((i) => (i.id === id ? { ...i, ...patch } : i)) }) }}
+							cutout={{ layers: cutoutLayers, files: cutoutFiles, onInsert: (id, patch) => onCutoutChange({ ...cutoutLayers, inserts: cutoutLayers.inserts.map((i) => (i.id === id ? { ...i, ...patch } : i)) }) }}
 							segments={segments}
 							lines={lines}
 							subtitle={subtitle}
@@ -886,7 +915,7 @@ export function ScriptView({
 									<X className="h-4 w-4" aria-hidden />
 								</button>
 							</div>
-					{panel !== "banners" && panel !== "cutout" && (
+					{panel !== "banners" && panel !== "cutout" && panel !== "import" && (
 						<SubtitleControls
 							style={subtitle}
 							onChange={onSubtitleChange}
@@ -947,13 +976,20 @@ export function ScriptView({
 						<CutoutControls
 							layers={cutoutLayers}
 							onChange={onCutoutChange}
-							cutout={cutout}
+							cutout={{ ...cutout, files: cutoutFiles }}
 							segments={segments}
 							now={() => toOutSeconds(timeRef.current, segments)}
 							total={totalFrames(segments) / FPS}
 							videoUrl={studio?.videoUrl ?? null}
 							thai={thaiClip}
 							focus={focusCutout}
+						/>
+					)}
+					{panel === "import" && (
+						<ImportControls
+							onUseAsBanner={putAsBanner}
+							onUseInPicClip={cutout.on ? putInPicClip : undefined}
+							usedNow={filesInUse({ banners, cutout: cutoutLayers })}
 						/>
 					)}
 					{panel === "banners" && (

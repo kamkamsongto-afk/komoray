@@ -183,7 +183,7 @@ export const hasCyrillic = (text: string) => /[Ѐ-ԯ]/.test(text);
 const clamp = (n: number, { min, max }: { min: number; max: number }) => Math.min(max, Math.max(min, n));
 
 // One of our fonts, or the user's own with its name and height; anything else is Kanit.
-function readFont(font: unknown, own: unknown): Pick<SubtitleStyle, "font" | "ownFont"> {
+export function readFont(font: unknown, own: unknown): Pick<SubtitleStyle, "font" | "ownFont"> {
 	if (typeof font === "string" && font in FONTS) return { font: font as FontId };
 	const o = (own ?? {}) as Partial<OwnFont>;
 	if (font === "own" && typeof o.family === "string" && o.family.trim() && Number(o.height) > 0.5 && Number(o.height) < 4) {

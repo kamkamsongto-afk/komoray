@@ -168,6 +168,10 @@ LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
 BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
 BANNER_SCALE = (0.5, 2.5)  # smallest and biggest size (BANNER_SCALE in banners.ts)
+BANNER_MAX_LINES = 3  # lines of a banner's text (BANNER.maxLines in banners.ts)
+BANNER_LINE_GAP = (-20, 80)  # extra px between its rows, at normal size (BANNER_LINE_GAP in banners.ts)
+# An uploaded banner (BANNER_FILE in banners.ts): its width at size 100%, share of the video's; where it starts.
+BANNER_FILE = {"width": 0.5, "x": 0.5, "y": 0.3}
 # How a banner arrives (BANNER_ANIMS in banners.ts): size keyframes (ms, %), fades in, starts this far off (px).
 BANNER_ANIMS = {
     "fade": {"fade_in": True},
@@ -253,7 +257,14 @@ def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float) 
     fade = int(BANNER["fade"] * 1000)
     slide = spec.get("slide")
     tags = f"\\move({x + slide[0]:.0f},{y + slide[1]:.0f},{x:.0f},{y:.0f},0,{SLIDE_MS})" if slide else f"\\pos({x:.0f},{y:.0f})"
-    tags += f"\\fad({fade if spec['fade_in'] else 0},{fade})"
+    ms = int(seconds * 1000)
+    if spec["fade_in"] and ms < 2 * fade:
+        # Shorter than both fades: the preview takes the smaller of the two (bannerMotion), so it is most solid
+        # halfway, at seconds/2/fade. \fad would finish the fade in first, then jump down to the fade out.
+        top = round((1 - ms / 2 / fade) * 255)
+        tags += f"\\fade(255,{top},255,0,{ms // 2},{ms // 2},{ms})"
+    else:
+        tags += f"\\fad({fade if spec['fade_in'] else 0},{fade})"
     keys = spec.get("keys")
     if anim == "pulse":
         keys, at = [(0, 100)], 0
@@ -268,16 +279,27 @@ def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float) 
 def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16", own_font: bool = False, style: dict | None = None) -> list[str]:
     """Each banner's rows, as a box and its letters: in its place, or with its middle where it was dragged
     (x, y: share of the width / height), at its size (scale), arriving as picked (anim). Everything was
-    checked by the app (readBanners)."""
+    checked by the app (readBanners). Rows: each line of its text, then the small line, lineGap px apart
+    (bannerRows in banners.ts). font: one of FONTS or "own"; without it, the subtitles' font.
+    An uploaded banner (kind "file") is a picture put on by FFmpeg instead (banner_file_filters)."""
     style = style or {}
     brand = style.get("color", "#FFE600")
     events = []
     width = FORMATS.get(shape, (WIDTH, HEIGHT))[0]
     for b in banners:
         start, end = float(b.get("start", 0)), float(b.get("end", 0))
-        text = ass_text(str(b.get("text", ""))).strip()
-        if end <= start or not text:
+        lines = [ass_text(line).strip() for line in str(b.get("text", "")).split("\n")]
+        lines = [line for line in lines if line][:BANNER_MAX_LINES]
+        if end <= start or not lines or b.get("kind") == "file":
             continue
+        # Its own font: measured and named per banner. "own" without the file here falls back to Kanit, as the
+        # preview does when the font can't load (its family list ends in Kanit).
+        picked, row_style, row_own, name = b.get("font"), style, own_font, ""
+        if picked == "own" and style.get("_ownFontPath") and style.get("ownFamily"):
+            row_style, row_own, name = {**style, "font": "own", "ownFont": b.get("ownFont") or style.get("ownFont")}, True, str(style["ownFamily"])
+        elif picked == "own" or picked in FONTS:
+            key = picked if picked in FONTS else "kanit"
+            row_style, row_own, name = {**style, "font": key}, False, FONTS[key]
         size = min(BANNER_SCALE[1], max(BANNER_SCALE[0], float(b.get("scale") or 1)))
         pad_x, pad_y = BANNER["padding"] * size, BANNER["padding"] / 2 * size
         sub = ass_text(str(b.get("sub", ""))).strip()
@@ -285,22 +307,25 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         ink = ass_colour(b.get("ink") or banner_ink(background))
         fill = f"\\1c{ass_colour(background)}\\1a{alpha_of(float(b.get('opacity') or 1))}"
         radius = float(b.get("radius") or 0) * size
-        rows = [(text, BANNER["size"])] + ([(sub, BANNER["sub_size"])] if sub else [])
+        rows = [(line, BANNER["size"]) for line in lines] + ([(sub, BANNER["sub_size"])] if sub else [])
         heights = [row_size * size + 2 * pad_y for _, row_size in rows]
+        gap = min(BANNER_LINE_GAP[1], max(BANNER_LINE_GAP[0], float(b.get("lineGap") or 0))) * size
+        tall = sum(heights) + gap * (len(rows) - 1)
         places = BANNER_TOP.get(shape, BANNER_TOP["9:16"])
         x, y = b.get("x"), b.get("y")
         if x is not None and y is not None:
-            centre, top = float(x) * width, float(y) * height - sum(heights) / 2
+            centre, top = float(x) * width, float(y) * height - tall / 2
         else:
             # A place is where the first row's letters start; the box reaches a little above them.
             centre, top = width / 2, places.get(b.get("place"), places["top"]) * height - pad_y
         anim, seconds = b.get("anim") or "fade", end - start
         for (row_text, row_size), row_height in zip(rows, heights):
             middle = top + row_height / 2
-            top += row_height
-            box = rounded_box(text_width(row_text, style, row_size * size) + 2 * pad_x, row_height, radius)
-            font = font_tag(row_text, own_font, row_size)
-            fs = "" if font else f"\\fs{row_size}"
+            top += row_height + gap
+            box = rounded_box(text_width(row_text, row_style, row_size * size) + 2 * pad_x, row_height, radius)
+            font = font_tag(row_text, row_own, row_size)
+            named = f"\\fn{name}" if name else ""
+            fs = "" if font else f"{named}\\fs{row_size}"
             events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
             events.append(f"Dialogue: 3,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{font or fs}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
     return events
@@ -521,6 +546,91 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
         parts.append(f"{base}[csm{j}]overlay=x={x:.1f}:y=main_h-overlay_h-{lift:.1f}:enable='between(t,{a:.3f},{b:.3f})'[cs{j}]")
         base = f"[cs{j}]"
     return base
+
+
+def banner_file_size(anim: str, frames_ms: str) -> tuple[float, str]:
+    """An uploaded banner's size over time (1 = its Size), as an FFmpeg expression of `frames_ms` (ms since it
+    arrived), and the biggest it gets. Same keyframes as BANNER_ANIMS / bannerMotion in banners.ts, and as the
+    word banners' tags (banner_motion)."""
+    spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
+    if anim == "pulse":  # up to 108% and back every PULSE_MS
+        half = PULSE_MS / 2
+        swing = f"mod({frames_ms},{PULSE_MS})/{half:g}"
+        return 1.08, f"(1+0.08*if(lte({swing},1),{swing},2-{swing}))"
+    keys = spec.get("keys")
+    if not keys:
+        return 1.0, "1"
+    expr = f"{keys[-1][1] / 100:g}"
+    for (t0, s0), (t1, s1) in reversed(list(zip(keys, keys[1:]))):
+        expr = f"if(lt({frames_ms},{t1}),{s0 / 100:g}+{(s1 - s0) / 100:g}*({frames_ms}-{t0})/{t1 - t0},{expr})"
+    return max(1.0, max(k[1] for k in keys) / 100), expr
+
+
+def banner_file_filters(parts: list[str], base: str, size: tuple[int, int], banners: list[dict], inputs: list[int]) -> str:
+    """Puts each uploaded banner (a picture, GIF or clip: kind "file" in banners.ts) on the video `base`, over
+    the speaker and the Cutout layers, under the logo, the subtitles and the word banners: the preview's order
+    (PlayerFrame). Its middle at (x, y), BANNER_FILE width x its size wide, as solid as its opacity, arriving as
+    picked (anim: bannerMotion in banners.ts) and fading out like a word banner. inputs: each one's FFmpeg input.
+    Growing and shrinking is done by `perspective` on a canvas as big as it ever gets: scale moves in whole
+    pixels, which shakes (as it did for Auto zoom, smooth_zoom_expr). Returns the new label."""
+    W, H = size
+    fade = BANNER["fade"]
+    for j, b in enumerate(banners):
+        a, e = float(b["start"]), float(b["end"])
+        d = e - a
+        grow = min(BANNER_SCALE[1], max(BANNER_SCALE[0], float(b.get("scale") or 1)))
+        x, y = float(b.get("x", BANNER_FILE["x"])) * W, float(b.get("y", BANNER_FILE["y"])) * H
+        opacity = min(1.0, max(0.05, float(b.get("opacity") or 1)))
+        anim = b.get("anim") or "fade"
+        spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
+        ms = f"((in-1)*{1000 / FPS:.6f})"  # perspective counts frames from 1 (as in picture_zoom): one frame ahead without -1
+        biggest, now = banner_file_size(anim, ms)
+        # Drawn at its biggest, with a clear edge so the shrinking corners stay clear; at its normal size it is w wide.
+        w = max(2, round(W * BANNER_FILE["width"] * grow * biggest / 2) * 2)
+        motion = ""
+        if now != "1":
+            f = f"({now}/{biggest:g})"
+            mx, my = f"(W/2*(1-1/{f}))", f"(H/2*(1-1/{f}))"
+            motion = (
+                f"format=yuva420p,perspective=x0='{mx}':y0='{my}':x1='W-{mx}':y1='{my}':x2='{mx}':y2='H-{my}':x3='W-{mx}':y3='H-{my}'"
+                ":interpolation=linear:eval=frame,"
+            )
+        fade_in = f"fade=t=in:st=0:d={fade}:alpha=1," if spec["fade_in"] else ""
+        fades = f"{fade_in}fade=t=out:st={max(0.0, d - fade):.3f}:d={fade}:alpha=1,"
+        shown = ""
+        if d < 2 * fade:
+            # Shorter than both fades: the preview takes the smaller of the two (bannerMotion), two fades in a row
+            # multiply them (Codex review, 12 Nov). So the preview's rule, on these few frames only.
+            fall = f"({d:.3f}-T)/{fade}"
+            level = f"min(1,min(T/{fade},{fall}))" if spec["fade_in"] else f"min(1,{fall})"
+            shown = f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*{level}',"
+            fades = ""
+        # A clip or a GIF that ends early stays on its last frame, as the preview shows it (same as an insert).
+        moving = b.get("media") == "video" or str(b.get("file", "")).endswith(".gif")
+        hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
+        parts.append(
+            f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},setpts=PTS-STARTPTS,format=rgba,scale={w}:-2,setsar=1,"
+            f"colorchannelmixer=aa={opacity:.2f},{shown}pad=iw+4:ih+4:2:2:color=black@0,{motion}"
+            f"format=yuva420p,{fades}"
+            f"setpts=PTS-STARTPTS+{a:.3f}/TB[bf{j}]"
+        )
+        # Slide: starts this far off and glides into place in SLIDE_MS (whole pixels are fine for a fast move).
+        sx, sy = spec.get("slide") or (0, 0)
+        left = f"max(0,1-(t-{a:.3f})*{1000 / SLIDE_MS:.6f})"
+        px = f"{x:.1f}-overlay_w/2" + (f"+{sx}*{left}" if sx else "")
+        py = f"{y:.1f}-overlay_h/2" + (f"+{sy}*{left}" if sy else "")
+        parts.append(f"{base}[bf{j}]overlay=x='{px}':y='{py}':eval=frame:eof_action=pass:format=auto:enable='between(t,{a:.3f},{e:.3f})'[bfo{j}]")
+        base = f"[bfo{j}]"
+    return base
+
+
+def banner_file_input(b: dict) -> list[str]:
+    """How FFmpeg reads an uploaded banner: a picture as one frame repeated, a GIF as its file plays (-stream_loop
+    froze it, 11 Nov), an MP4 clip as it is."""
+    path, name = str(b["path"]), str(b.get("file", ""))
+    if b.get("media") != "video":
+        return (["-ignore_loop", "0"] if name.endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]) + ["-i", path]
+    return ["-i", path]
 
 
 def ass_colour(hex_colour: str) -> str:
@@ -1207,10 +1317,13 @@ def ffmpeg_command(
     zoom_period: float = SMOOTH_PERIOD,
     zoom_parts: list[dict] | None = None,
     cutout: dict | None = None,
+    banner_files: list[dict] | None = None,
 ) -> list[str]:
     """logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles.
     no_zoom: parts with Auto zoom turned off (source seconds). zoom_parts: parts with their own kind of zoom.
-    cutout: {"behind": subtitles file, "matte": path, "inserts": [{"path", "kind", "start", ...}]} (cutout_filters)."""
+    cutout: {"behind": subtitles file, "matte": path, "inserts": [{"path", "kind", "start", ...}]} (cutout_filters).
+    banner_files: uploaded banners, each a banner with "path" (banner_file_filters)."""
+    banner_files = banner_files or []
     aspect = display_aspect(src)
     # The pieces in whole frames of the final video, as the preview has them (StudioPlayer): each piece's
     # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
@@ -1226,6 +1339,8 @@ def ffmpeg_command(
         extra += 1
     if cutout:
         inputs["inserts"] = list(range(extra, extra + len(cutout.get("inserts") or [])))
+        extra += len(cutout.get("inserts") or [])
+    inputs["banners"] = list(range(extra, extra + len(banner_files)))
     matte_labels = []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
@@ -1271,6 +1386,8 @@ def ffmpeg_command(
         parts.append(f"{''.join(matte_labels)}concat=n={len(matte_labels)}:v=1:a=0[cm]")
     if cutout:
         base = cutout_filters(parts, base, size, cutout, inputs)
+    if banner_files:
+        base = banner_file_filters(parts, base, size, banner_files, inputs["banners"])
     if logo:
         # Same place as the preview (PlayerFrame): LOGO side / top px from its corner, size px wide.
         side, edge = LOGO["side"], LOGO["top"]
@@ -1297,6 +1414,8 @@ def ffmpeg_command(
             # A GIF has its own frames: played as its file says. -stream_loop froze it on the first frame (test 11 Nov).
             still = ["-ignore_loop", "0"] if str(ins.get("file", "")).endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]
             cmd += (still if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
+    for b in banner_files:
+        cmd += banner_file_input(b)
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         # High on purpose: polish_sound encodes this sound a second time, at the bitrate people get.
@@ -1465,9 +1584,9 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             if not keeps:
                 raise RuntimeError("nothing left after cutting")
 
-            # The user's own font: libass also looks in this folder.
+            # The user's own font: libass also looks in this folder. Sent for the subtitles or a banner's font.
             fonts_dir = None
-            if style.get("font") == "own" and style.get("fontUrl"):
+            if style.get("fontUrl"):
                 (workdir / "fonts").mkdir()
                 urllib.request.urlretrieve(style["fontUrl"], workdir / "fonts" / "own.ttf")
                 fonts_dir = "fonts"
@@ -1492,6 +1611,17 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     path = workdir / f"insert-{n}"
                     urllib.request.urlretrieve(link, path)
                     cutout["inserts"].append({**ins, "path": path})
+
+            # Uploaded banners (kind "file"): the app sends a link to each one's file (bannerFiles).
+            banner_files = []
+            links = edit.get("bannerFiles") or {}
+            for n, b in enumerate(edit.get("banners") or []):
+                link = links.get(b.get("file")) if b.get("kind") == "file" else None
+                if not link:
+                    continue
+                path = workdir / f"banner-{n}"
+                urllib.request.urlretrieve(link, path)
+                banner_files.append({**b, "path": path})
 
             # The user's logo picture, if this look shows it.
             logo = None
@@ -1519,6 +1649,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     float(style.get("zoomPeriod") or SMOOTH_PERIOD),
                     edit.get("zoomParts"),
                     cutout,
+                    banner_files,
                 ),
                 workdir,
                 frames,

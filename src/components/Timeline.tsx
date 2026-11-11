@@ -230,7 +230,7 @@ export function Timeline({
 	);
 	// Banners in their rows, then the Cutout layers in rows of their own under them.
 	const lane = useMemo(() => {
-		const bannerItems = banners.map((b): LaneItem => ({ id: b.id, kind: "banner", label: b.text, start: b.start, end: b.end }));
+		const bannerItems = banners.map((b): LaneItem => ({ id: b.id, kind: "banner", label: b.text.replace(/\n/g, " "), start: b.start, end: b.end }));
 		const cutoutItems = [
 			...cutoutLayers.texts.map((t): LaneItem => ({ id: t.id, kind: "text", label: t.text, start: t.start, end: t.end })),
 			...cutoutLayers.inserts.map((i): LaneItem => ({ id: i.id, kind: "insert", label: insertName(i), start: i.start, end: i.end })),
@@ -253,17 +253,13 @@ export function Timeline({
 		},
 		[banners, cutoutLayers, onBannersChange, onCutoutChange],
 	);
-	// Text behind you, pictures and clips ask first (coach, 9 Nov).
+	// Every layer asks first: text behind you, pictures and clips (coach, 9 Nov), and banners too (coach, 11 Nov).
 	const [removing, setRemoving] = useState<LaneItem | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
-	const removeItem = useCallback(
-		(item: LaneItem) => {
-			if (item.kind === "banner") changeItem(item, null);
-			else setRemoving(item);
-			setPickedItem(null);
-		},
-		[changeItem],
-	);
+	const removeItem = useCallback((item: LaneItem) => {
+		setRemoving(item);
+		setPickedItem(null);
+	}, []);
 	const startItemDrag = (e: PointerEvent<HTMLElement>, b: LaneItem, resize: false | "start" | "end") => {
 		e.stopPropagation();
 		e.preventDefault();
