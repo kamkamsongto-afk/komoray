@@ -6,7 +6,7 @@ import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNE
 import type { OwnFont } from "@/lib/font-info";
 import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
-import { clipLength } from "@/lib/media-library";
+import { clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 
 type Props = {
 	banners: Banner[];
@@ -17,6 +17,7 @@ type Props = {
 	focus: string | null; // the banner just clicked on the timeline: open it here
 	format: Format; // the video's shape: where a banner sits before it is dragged
 	videoKey?: string; // the video, for uploading a banner of your own next to it
+	onUseFile?: (item: LibraryItem) => void; // a picture or clip uploaded before (Import's list): a banner again
 };
 
 // One tab per kind, with a light blue frame on the open one, as in the Cutout box (coach, 11 Nov).
@@ -31,7 +32,7 @@ const round = (n: number) => Math.round(n * 10) / 10;
 
 // The editor's Banners box: add a price tag, a call to action or "follow me" at the spot the
 // preview is at, then change its words, place and when it shows.
-export function BannerControls({ banners, onChange, now, total, brand, focus, format, videoKey }: Props) {
+export function BannerControls({ banners, onChange, now, total, brand, focus, format, videoKey, onUseFile }: Props) {
 	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
 	const [open, setOpen] = useState<string | null>(focus);
 	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "price"));
@@ -101,6 +102,18 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		setOpen(banner.id);
 		onChange([...banners, banner].sort((a, b) => a.start - b.start));
 	}
+	// Pictures and clips this project already has (api/library), shown on the Upload tab: so nobody uploads the same file
+	// again because they didn't know about Import (coach, 11 Nov). Loaded again after each upload here.
+	const [kept, setKept] = useState<LibraryItem[]>([]);
+	const libraryKey = videoKey ?? (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("key"));
+	const fileBanners = banners.filter((b) => b.kind === "file").length;
+	useEffect(() => {
+		if (tab !== "file" || !libraryKey || !onUseFile) return;
+		void fetch(`/api/library?key=${encodeURIComponent(libraryKey)}`)
+			.then(async (res) => (res.ok ? ((await res.json()) as { items?: LibraryItem[] }) : {}))
+			.then((data: { items?: LibraryItem[] }) => setKept(data.items ?? []))
+			.catch(() => {});
+	}, [tab, libraryKey, onUseFile, fileBanners]);
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
 	// Where each banner was dragged to, so picking Top and then "Where you dragged it" brings it back (coach, 6 Nov).
@@ -213,6 +226,29 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						}}
 					/>
 					{fileNote && <p className="text-xs text-red-500">{fileNote}</p>}
+					{onUseFile && kept.length > 0 && (
+						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+							<p className="text-xs text-foreground/70">Uploaded before: click one to use it again, no need to upload it twice. All of them are in Import.</p>
+							<div className="flex gap-1.5 overflow-x-auto pb-1">
+								{kept.map((item) => (
+									<button
+										key={item.file}
+										onClick={() => onUseFile(item)}
+										disabled={banners.length >= BANNER.maxBanners}
+										title={`Use “${item.name}” as a banner where the video is now`}
+										className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md border border-foreground/20 bg-foreground/5 hover:ring-2 hover:ring-blue-500 disabled:opacity-40"
+									>
+										{item.media === "image" ? (
+											// eslint-disable-next-line @next/next/no-img-element
+											<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-contain" />
+										) : (
+											<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-contain" />
+										)}
+									</button>
+								))}
+							</div>
+						</div>
+					)}
 					{shown.length === 0 && (
 						<p className="text-xs text-foreground/60">
 							Have a banner made already? Upload it: JPG, PNG, WebP or GIF up to {BANNER_FILE.maxBytes.image / 1_000_000} MB, or an MP4 clip up to {BANNER_FILE.maxBytes.video / 1_000_000} MB (clips show without their sound). It goes over you, where the video is now.

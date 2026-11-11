@@ -1003,6 +1003,7 @@ export function ScriptView({
 							brand={subtitle.color}
 							focus={focusBanner}
 							format={subtitle.format}
+							onUseFile={putAsBanner}
 						/>
 					)}
 						</div>
