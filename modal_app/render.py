@@ -257,7 +257,14 @@ def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float) 
     fade = int(BANNER["fade"] * 1000)
     slide = spec.get("slide")
     tags = f"\\move({x + slide[0]:.0f},{y + slide[1]:.0f},{x:.0f},{y:.0f},0,{SLIDE_MS})" if slide else f"\\pos({x:.0f},{y:.0f})"
-    tags += f"\\fad({fade if spec['fade_in'] else 0},{fade})"
+    ms = int(seconds * 1000)
+    if spec["fade_in"] and ms < 2 * fade:
+        # Shorter than both fades: the preview takes the smaller of the two (bannerMotion), so it is most solid
+        # halfway, at seconds/2/fade. \fad would finish the fade in first, then jump down to the fade out.
+        top = round((1 - ms / 2 / fade) * 255)
+        tags += f"\\fade(255,{top},255,0,{ms // 2},{ms // 2},{ms})"
+    else:
+        tags += f"\\fad({fade if spec['fade_in'] else 0},{fade})"
     keys = spec.get("keys")
     if anim == "pulse":
         keys, at = [(0, 100)], 0
