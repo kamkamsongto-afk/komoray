@@ -541,29 +541,69 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     return base
 
 
+def banner_file_size(anim: str, frames_ms: str) -> tuple[float, str]:
+    """An uploaded banner's size over time (1 = its Size), as an FFmpeg expression of `frames_ms` (ms since it
+    arrived), and the biggest it gets. Same keyframes as BANNER_ANIMS / bannerMotion in banners.ts, and as the
+    word banners' tags (banner_motion)."""
+    spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
+    if anim == "pulse":  # up to 108% and back every PULSE_MS
+        half = PULSE_MS / 2
+        swing = f"mod({frames_ms},{PULSE_MS})/{half:g}"
+        return 1.08, f"(1+0.08*if(lte({swing},1),{swing},2-{swing}))"
+    keys = spec.get("keys")
+    if not keys:
+        return 1.0, "1"
+    expr = f"{keys[-1][1] / 100:g}"
+    for (t0, s0), (t1, s1) in reversed(list(zip(keys, keys[1:]))):
+        expr = f"if(lt({frames_ms},{t1}),{s0 / 100:g}+{(s1 - s0) / 100:g}*({frames_ms}-{t0})/{t1 - t0},{expr})"
+    return max(1.0, max(k[1] for k in keys) / 100), expr
+
+
 def banner_file_filters(parts: list[str], base: str, size: tuple[int, int], banners: list[dict], inputs: list[int]) -> str:
     """Puts each uploaded banner (a picture, GIF or clip: kind "file" in banners.ts) on the video `base`, over
     the speaker and the Cutout layers, under the logo, the subtitles and the word banners: the preview's order
-    (PlayerFrame). Its middle at (x, y), BANNER_FILE width x its size wide, as solid as its opacity, fading in
-    and out like a word banner (BANNER fade). inputs: each one's FFmpeg input. Returns the new label."""
+    (PlayerFrame). Its middle at (x, y), BANNER_FILE width x its size wide, as solid as its opacity, arriving as
+    picked (anim: bannerMotion in banners.ts) and fading out like a word banner. inputs: each one's FFmpeg input.
+    Growing and shrinking is done by `perspective` on a canvas as big as it ever gets: scale moves in whole
+    pixels, which shakes (as it did for Auto zoom, smooth_zoom_expr). Returns the new label."""
     W, H = size
     fade = BANNER["fade"]
     for j, b in enumerate(banners):
         a, e = float(b["start"]), float(b["end"])
         d = e - a
         grow = min(BANNER_SCALE[1], max(BANNER_SCALE[0], float(b.get("scale") or 1)))
-        w = max(2, round(W * BANNER_FILE["width"] * grow / 2) * 2)
         x, y = float(b.get("x", BANNER_FILE["x"])) * W, float(b.get("y", BANNER_FILE["y"])) * H
         opacity = min(1.0, max(0.05, float(b.get("opacity") or 1)))
+        anim = b.get("anim") or "fade"
+        spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
+        ms = f"((in-1)*{1000 / FPS:.6f})"  # perspective counts frames from 1 (as in picture_zoom): one frame ahead without -1
+        biggest, now = banner_file_size(anim, ms)
+        # Drawn at its biggest, with a clear edge so the shrinking corners stay clear; at its normal size it is w wide.
+        w = max(2, round(W * BANNER_FILE["width"] * grow * biggest / 2) * 2)
+        motion = ""
+        if now != "1":
+            f = f"({now}/{biggest:g})"
+            mx, my = f"(W/2*(1-1/{f}))", f"(H/2*(1-1/{f}))"
+            motion = (
+                f"format=yuva420p,perspective=x0='{mx}':y0='{my}':x1='W-{mx}':y1='{my}':x2='{mx}':y2='H-{my}':x3='W-{mx}':y3='H-{my}'"
+                ":interpolation=linear:eval=frame,"
+            )
+        fade_in = f"fade=t=in:st=0:d={fade}:alpha=1," if spec["fade_in"] else ""
         # A clip or a GIF that ends early stays on its last frame, as the preview shows it (same as an insert).
         moving = b.get("media") == "video" or str(b.get("file", "")).endswith(".gif")
         hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
         parts.append(
             f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},setpts=PTS-STARTPTS,format=rgba,scale={w}:-2,setsar=1,"
-            f"colorchannelmixer=aa={opacity:.2f},fade=t=in:st=0:d={fade}:alpha=1,fade=t=out:st={max(0.0, d - fade):.3f}:d={fade}:alpha=1,"
+            f"colorchannelmixer=aa={opacity:.2f},pad=iw+4:ih+4:2:2:color=black@0,{motion}"
+            f"format=yuva420p,{fade_in}fade=t=out:st={max(0.0, d - fade):.3f}:d={fade}:alpha=1,"
             f"setpts=PTS-STARTPTS+{a:.3f}/TB[bf{j}]"
         )
-        parts.append(f"{base}[bf{j}]overlay=x={x:.1f}-overlay_w/2:y={y:.1f}-overlay_h/2:eof_action=pass:format=auto:enable='between(t,{a:.3f},{e:.3f})'[bfo{j}]")
+        # Slide: starts this far off and glides into place in SLIDE_MS (whole pixels are fine for a fast move).
+        sx, sy = spec.get("slide") or (0, 0)
+        left = f"max(0,1-(t-{a:.3f})*{1000 / SLIDE_MS:.6f})"
+        px = f"{x:.1f}-overlay_w/2" + (f"+{sx}*{left}" if sx else "")
+        py = f"{y:.1f}-overlay_h/2" + (f"+{sy}*{left}" if sy else "")
+        parts.append(f"{base}[bf{j}]overlay=x='{px}':y='{py}':eval=frame:eof_action=pass:format=auto:enable='between(t,{a:.3f},{e:.3f})'[bfo{j}]")
         base = f"[bfo{j}]"
     return base
 

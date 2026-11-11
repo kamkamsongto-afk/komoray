@@ -179,7 +179,7 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(typeof raw.ink === "string" && HEX.test(raw.ink) && { ink: raw.ink.toUpperCase() }),
 			...(typeof raw.radius === "number" && raw.radius > 0 && { radius: Math.round(Math.min(BANNER_RADIUS.max, raw.radius)) }),
 			...(typeof raw.opacity === "number" && raw.opacity < 1 && { opacity: round(Math.max(BANNER_OPACITY.min, raw.opacity)) }),
-			...(typeof raw.anim === "string" && raw.anim in BANNER_ANIMS && raw.anim !== "fade" && !file && { anim: raw.anim as BannerAnim }),
+			...(typeof raw.anim === "string" && raw.anim in BANNER_ANIMS && raw.anim !== "fade" && { anim: raw.anim as BannerAnim }),
 			...(font && { font: font.font, ...(font.ownFont && { ownFont: font.ownFont }) }),
 			...(!file && Number.isFinite(gap) && gap !== 0 && { lineGap: Math.round(Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, gap))) }),
 			// An uploaded banner always sits where it was put (at first: the middle, near the top).

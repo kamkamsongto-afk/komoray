@@ -456,7 +456,8 @@ export function PlayerFrame({
 					    Same place, size and fades as banner_file_filters in render.py. */}
 					{banners.map((b) => {
 						if (b.kind !== "file" || !b.file) return null;
-						const opacity = bannerMotion(b, outTime).opacity * (b.opacity ?? 1);
+						const move = bannerMotion(b, outTime);
+						const opacity = move.opacity * (b.opacity ?? 1);
 						const src = bannerFileSrc(b.file);
 						if (!opacity || !src) return null;
 						const movable = Boolean(onBannersChange) && !playing;
@@ -470,7 +471,11 @@ export function PlayerFrame({
 									className="relative block"
 									onClick={(e) => movable && e.stopPropagation()}
 									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
-									style={movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : undefined}
+									style={{
+										// Arrives as picked, around its middle (banner_file_filters in render.py).
+										transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
+										...(movable && { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 }),
+									}}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									{b.media === "video" ? (
