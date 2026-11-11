@@ -930,7 +930,8 @@ export default function EditPage() {
 			{spellingFixed && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
 					<span>
-						The AI fixed {spellingFixed.length} {spellingFixed.length === 1 ? "word" : "words"} the speech-to-text got wrong (underlined in green). Click one to change it.
+						The AI fixed {spellingFixed.length} {spellingFixed.length === 1 ? "word" : "words"} the speech-to-text got wrong (underlined in green). Click one to change it.{" "}
+						<Link href="/words" className="underline text-foreground/70 hover:text-foreground">Help it get better for everyone</Link>
 					</span>
 					<button
 						onClick={() => {

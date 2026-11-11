@@ -1,9 +1,12 @@
 import { MAX_FIX_LENGTH, normText } from "@/lib/edit";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { addSharedFix, sharesWords } from "@/lib/shared-words";
 import { currentUser } from "@/lib/supabase/server";
 
 // The signed-in user's personal dictionary (table word_fixes, see supabase/migrations/002):
 //   GET     every word they have fixed, newest first
-//   POST    { heard, fixed }  learn a fix (again: counts up `uses`)
+//   POST    { heard, fixed }  learn a fix (again: counts up `uses`), and give it to Komoray's shared list if they said
+//           yes to that on My words (lib/shared-words.ts: anonymous, ordinary words only)
 //   PATCH   { heard, fixed }  change what a word is fixed to (from the My words page)
 //   DELETE  { heard }         forget one (they put the original words back)
 // The database only lets each user see and change their own rows.
@@ -23,8 +26,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-	const supabase = await signedIn();
-	if (!supabase) return Response.json({ error: "Please sign in" }, { status: 401 });
+	const { supabase, user } = await currentUser();
+	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
 	const body = (await request.json().catch(() => ({}))) as { heard?: unknown; fixed?: unknown };
 	const heard = normText(String(body.heard ?? "")).slice(0, MAX_FIX_LENGTH);
 	const fixed = String(body.fixed ?? "").trim().slice(0, MAX_FIX_LENGTH);
@@ -35,6 +38,10 @@ export async function POST(request: Request) {
 		.from("word_fixes")
 		.upsert({ heard, fixed, uses: (before?.uses ?? 0) + 1, updated_at: new Date().toISOString() }, { onConflict: "user_id,heard" });
 	if (error) return Response.json({ error: error.message }, { status: 500 });
+	if (await sharesWords(user.id)) {
+		const { RENDER_TOKEN } = getCloudflareContext().env as unknown as { RENDER_TOKEN: string };
+		await addSharedFix(user.id, RENDER_TOKEN, heard, fixed).catch((err) => console.error("Shared word failed:", err));
+	}
 	return Response.json({ ok: true });
 }
 

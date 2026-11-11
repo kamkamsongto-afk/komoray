@@ -55,6 +55,9 @@ function dictionary() {
 	return words;
 }
 
+// Is this one Thai word of the dictionary? (lib/shared-words.ts: only dictionary words are shared, never names.)
+export const isThaiWord = (word: string) => dictionary().has(word);
+
 // Every dictionary word that starts at `at`, shortest first.
 function wordsAt(text: string, at: number) {
 	const all = dictionary();

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 
@@ -13,6 +14,9 @@ export default function WordsPage() {
 	const [error, setError] = useState("");
 	const [filter, setFilter] = useState("");
 	const [editing, setEditing] = useState<{ heard: string; text: string } | null>(null);
+	// Giving fixes to Komoray's shared list (lib/shared-words.ts): off until they tick it.
+	const [share, setShare] = useState<boolean | null>(null);
+	const [shareError, setShareError] = useState("");
 
 	useEffect(() => {
 		if (!user) return;
@@ -20,7 +24,21 @@ export default function WordsPage() {
 			.then((res) => res.json() as Promise<{ words?: Word[]; error?: string }>)
 			.then((data) => (data.words ? setWords(data.words) : setError(data.error ?? "Could not load your words")))
 			.catch(() => setError("Could not load your words"));
+		fetch("/api/prefs")
+			.then((res) => res.json() as Promise<{ shareWords?: boolean }>)
+			.then((data) => setShare(data.shareWords === true))
+			.catch(() => setShare(false));
 	}, [user]);
+
+	async function changeShare(on: boolean) {
+		setShareError("");
+		setShare(on);
+		const res = await fetch("/api/prefs", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shareWords: on }) }).catch(() => null);
+		if (!res?.ok) {
+			setShare(!on);
+			setShareError("Could not save your choice. Please try again.");
+		}
+	}
 
 	async function change(heard: string, fixed: string) {
 		setEditing(null);
@@ -63,10 +81,40 @@ export default function WordsPage() {
 			<div className="flex flex-col gap-2">
 				<h1 className="text-3xl font-bold tracking-tight">My words</h1>
 				<p className="text-sm text-foreground/70">
-					Every word you fix in a script is remembered here, and fixed for you in your next videos. Only you can see it. It is never used to
-					train anything.
+					Every word you fix in a script is remembered here, and fixed for you in your next videos. Only you can see this list. It is never
+					used to train AI models.
 				</p>
 			</div>
+
+			{/* Coach, 11 Nov: clear enough to tick without worry. The same promises are in the Privacy Policy ("Shared word fixes"). */}
+			<section className="flex flex-col gap-2 rounded-xl border border-foreground/15 p-4">
+				<label className="flex items-start gap-3">
+					<input
+						type="checkbox"
+						checked={share === true}
+						disabled={share === null}
+						onChange={(e) => void changeShare(e.target.checked)}
+						className="mt-1 h-4 w-4 shrink-0"
+					/>
+					<span className="flex flex-col gap-1">
+						<span className="font-medium">Help make Komoray more accurate for everyone</span>
+						<span className="text-sm text-foreground/70">
+							Share the words you fix, without your name. When several creators fix the same mistake, our AI learns to fix it in every
+							video, including yours.
+						</span>
+					</span>
+				</label>
+				<ul className="ml-7 list-disc pl-4 text-xs text-foreground/60">
+					<li>Only the word pair is shared, like &ldquo;ผูหญิง → ผู้หญิง&rdquo;. Never your name, email, videos, or the sentence it came from.</li>
+					<li>Only ordinary words. Numbers, links and anything with @ are never shared.</li>
+					<li>A fix is only used once at least 3 different creators made the same one, so a fix only you would make, like a friend&apos;s name, is never used.</li>
+					<li>Off until you tick it. Untick any time to stop sharing. Fixes shared before stay in the list, without your name.</li>
+				</ul>
+				{shareError && <p className="ml-7 text-xs text-red-600">{shareError}</p>}
+				<p className="ml-7 text-xs text-foreground/50">
+					More in our <Link href="/privacy" className="underline">Privacy Policy</Link>.
+				</p>
+			</section>
 
 			{error && <p className="text-sm text-red-600">{error}</p>}
 			{!words && !error && <p className="text-sm text-foreground/60">Loading…</p>}

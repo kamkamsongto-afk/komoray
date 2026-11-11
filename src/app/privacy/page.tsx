@@ -7,7 +7,7 @@ const CONTACT = "hello@komoray.com";
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" updated="November 6, 2026">
+		<LegalPage title="Privacy Policy" updated="November 11, 2026">
 			<p>
 				Komoray is an AI studio for talking-head creators. You upload a video, we cut the silences, add subtitles and give you
 				back a finished video. This page explains what we collect to do that, who helps us, and how long we keep it.
@@ -17,6 +17,7 @@ export default function PrivacyPage() {
 			<ul>
 				<li>Your videos are yours. We use them only to make your edits.</li>
 				<li>We never sell your data, and we never use your videos to train AI models.</li>
+				<li>Sharing the words you fix with other creators is off unless you turn it on, and it never includes who you are.</li>
 				<li>During the beta, every video is deleted automatically after 14 days.</li>
 				<li>You can ask us to delete your data at any time.</li>
 			</ul>
@@ -44,8 +45,20 @@ export default function PrivacyPage() {
 				</li>
 				<li>
 					<strong>Your words (My words):</strong> when you fix a word in a script, we remember what the transcript said and what
-					you typed, so we can fix it for you in your next videos. Only you can see your words. We never share them or use them to
-					train anything.
+					you typed, so we can fix it for you in your next videos. Only you can see your list of words. We never use it to train AI
+					models, and we only share fixes from it if you choose to (next point).
+				</li>
+				<li>
+					<strong>Shared word fixes, only if you choose:</strong> on the My words page you can tick &ldquo;Help make Komoray more
+					accurate for everyone&rdquo;. It is off until you tick it. Then, each time you fix a word, we add that fix to a list shared by
+					all creators, so our AI can fix the same speech-to-text mistake in everyone&apos;s videos. What we share and what we don&apos;t:
+					<ul>
+						<li>Only the pair of words, such as &ldquo;ผูหญิง → ผู้หญิง&rdquo;. Never your name, email, account, videos, or the sentence the word came from.</li>
+						<li>Only ordinary words: Thai words that are in the dictionary, or other words in small letters. Numbers, links and anything with @ are never shared.</li>
+						<li>To count each creator once, we keep a scrambled code made from your account next to the fix. We never keep your account, name or email with it, and we never use the code to find out who made a fix.</li>
+						<li>A fix is only used once at least 3 different creators have made the same one, so a fix only you would make, such as the name of someone you know, is never used.</li>
+						<li>You can untick it any time on My words, and nothing more is shared from then on. Fixes shared before stay in the list, without your name. If you want them taken out too, email us.</li>
+					</ul>
 				</li>
 				<li>
 					<strong>Your Brand Kit:</strong> the subtitle look you save (style, font, color), the channel name you type and the font
@@ -83,7 +96,7 @@ export default function PrivacyPage() {
 					video at a time.
 				</li>
 				<li>
-					<strong>Anthropic</strong> reads your script with its AI model Claude to suggest parts you may want to cut and the moments worth a zoom, and translates your subtitles when you ask. It gets the text, never your video or audio, and does not train on it.
+					<strong>Anthropic</strong> reads your script with its AI model Claude to fix words the speech-to-text got wrong, to suggest parts you may want to cut and the moments worth a zoom, and translates your subtitles when you ask. With your script it gets the words in your My words list and the shared word fixes, so it spells them the way creators want. It gets the text, never your video or audio, and does not train on it.
 				</li>
 				<li>
 					<strong>Supabase</strong> handles sign-in and stores your account details.
@@ -104,6 +117,7 @@ export default function PrivacyPage() {
 					time on the My words page.
 				</li>
 				<li>Your Brand Kit stays with your account. You can change it any time on the Brand Kit page.</li>
+				<li>Shared word fixes are kept for as long as Komoray runs, without your name. If you want the ones you shared taken out, email us.</li>
 				<li>Your account stays until you ask us to delete it. Deleting your account also deletes your words and your Brand Kit.</li>
 			</ul>
 			<p>When the beta ends, this may change. If it does, we will update this page and email you before the change.</p>
