@@ -131,11 +131,15 @@ export function curatable(heard: string, fixed: string): Lang | null {
 }
 
 // Add (or change: the same heard with a new fixed) and remove pairs. Newest first.
+// The list is read without readCurated's fallback: if R2 can't be read, nothing is written, so a hiccup can't save an
+// empty list over it (Codex review 11 Nov). Two changes at the same moment can still lose one: only the admin writes
+// here, rarely at once, and a lost pair comes back the next time it is fixed.
 export async function changeCurated(lang: Lang, add: { heard: string; fixed: string }[], remove: string[] = []) {
 	const now = new Date().toISOString();
 	const fresh = add.map((p) => ({ heard: tidy(p.heard), fixed: tidy(p.fixed), at: now }));
 	const gone = new Set([...remove.map(tidy), ...fresh.map((p) => p.heard)]);
-	const pairs = [...fresh, ...(await readCurated(lang)).filter((p) => !gone.has(p.heard))].slice(0, MAX_CURATED);
+	const saved = (await getJson<{ pairs: CuratedPair[] }>(curatedKey(lang)))?.pairs ?? [];
+	const pairs = [...fresh, ...saved.filter((p) => !gone.has(p.heard))].slice(0, MAX_CURATED);
 	await putObject(curatedKey(lang), JSON.stringify({ pairs }), "application/json");
 	return pairs;
 }
