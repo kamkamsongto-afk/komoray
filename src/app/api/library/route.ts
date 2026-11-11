@@ -36,12 +36,13 @@ export async function GET(request: Request) {
 	const used = filesInUse(edit);
 	const there = new Map(folder.map((o) => [o.key.split("/").pop() ?? "", o]));
 	const items: LibraryItem[] = (library?.items ?? []).filter((i) => there.has(i.file));
-	// Files added before Import, as a banner or in Pic/Clip: named as the video names them.
+	// Files added before Import (as a banner or in Pic/Clip), and an Import file library.json lost (two uploads
+	// listed at the same moment, Codex review 12 Nov): shown anyway, named as the video names them, so none gets stuck.
 	const names = new Map<string, string>();
 	for (const b of edit?.banners ?? []) if (b.kind === "file" && b.file) names.set(b.file, b.text);
 	for (const i of edit?.cutout?.inserts ?? []) names.set(i.file, i.name ?? "");
 	for (const [file, info] of there) {
-		if (!PROJECT_FILE.test(file) || MEDIA_FILE.test(file) || items.some((i) => i.file === file)) continue;
+		if (!PROJECT_FILE.test(file) || items.some((i) => i.file === file)) continue;
 		items.push({ file, name: names.get(file) || (mediaOf(file) === "video" ? "Clip" : "Picture"), media: mediaOf(file), size: info.size, at: info.lastModified });
 	}
 	items.sort((a, b) => b.at.localeCompare(a.at));
