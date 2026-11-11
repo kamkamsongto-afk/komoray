@@ -6,6 +6,7 @@ import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNE
 import type { OwnFont } from "@/lib/font-info";
 import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { clipLength } from "@/lib/media-library";
 
 type Props = {
 	banners: Banner[];
@@ -34,12 +35,14 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
 	const [open, setOpen] = useState<string | null>(focus);
 	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "price"));
-	useEffect(() => {
+	// Another banner clicked on the timeline: open it, on its tab (set while drawing, not in an effect, as in CutoutControls).
+	const [seenFocus, setSeenFocus] = useState(focus);
+	if (focus !== seenFocus) {
+		setSeenFocus(focus);
 		setOpen(focus);
 		const kind = banners.find((b) => b.id === focus)?.kind;
 		if (kind) setTab(tabOf(kind));
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- only when another banner is clicked on the timeline
-	}, [focus]);
+	}
 	const shown = banners.filter((b) => tabOf(b.kind) === tab);
 	// The banner waiting for "yes, delete it" (coach, 11 Nov: the × is small and easy to hit).
 	const [removing, setRemoving] = useState<Banner | null>(null);
@@ -419,20 +422,4 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 			)}
 		</div>
 	);
-}
-
-// How long a clip plays, seconds (null if the browser can't tell).
-function clipLength(file: File): Promise<number | null> {
-	return new Promise((resolve) => {
-		const url = URL.createObjectURL(file);
-		const video = document.createElement("video");
-		video.preload = "metadata";
-		const done = (seconds: number | null) => {
-			URL.revokeObjectURL(url);
-			resolve(seconds);
-		};
-		video.onloadedmetadata = () => done(Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null);
-		video.onerror = () => done(null);
-		video.src = url;
-	});
 }

@@ -3,6 +3,7 @@
 // banner_events (words) and banner_file_filters (an uploaded picture or clip) in modal_app/render.py
 // for the final video (same sizes, places and fades).
 import type { OwnFont } from "./font-info";
+import { projectFileSrc } from "./media-library";
 import { type FontId, type Format, readFont } from "./subtitle-style";
 
 // file: the customer's own finished banner, a picture or clip uploaded next to the video (12 Nov).
@@ -87,17 +88,14 @@ export const BANNER_LINE_GAP = { min: -20, max: 80 };
 // An uploaded banner: how wide it is at size 100%, share of the video's width; where it starts; biggest files.
 // Same as BANNER_FILE in render.py.
 export const BANNER_FILE = { width: 0.5, x: 0.5, y: 0.3, maxBytes: { image: 10_000_000, video: 150_000_000 } };
-export const BANNER_FILE_NAME = /^banner-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4)$/; // clips: MP4 only for now (Yoshi, 12 Nov)
+export const BANNER_FILE_NAME = /^(banner|media)-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4)$/; // clips: MP4 only for now (Yoshi, 12 Nov)
 
 // Where the preview gets an uploaded banner: the file just picked on this page (no waiting for it to come back),
-// else through /api/banner-file for the video this page edits (/edit?key=…). "" off that page.
+// else through /api/library for the video this page edits (projectFileSrc). "" off that page.
 const pickedFiles = new Map<string, string>();
 export const keepBannerFile = (file: string, url: string) => pickedFiles.set(file, url);
 export function bannerFileSrc(file: string) {
-	const picked = pickedFiles.get(file);
-	if (picked) return picked;
-	const key = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("key");
-	return key ? `/api/banner-file?key=${encodeURIComponent(key)}&file=${encodeURIComponent(file)}` : "";
+	return pickedFiles.get(file) ?? projectFileSrc(file);
 }
 export const BANNER_SCALE = { min: 0.5, max: 2.5 };
 export const BANNER_RADIUS = { min: 0, max: 60 };

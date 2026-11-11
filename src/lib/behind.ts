@@ -221,7 +221,7 @@ export const cleanBehindText = (text: string) =>
 		.slice(0, BEHIND.maxText)
 		.trim();
 const id = (v: unknown) => String(v ?? "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || crypto.randomUUID();
-const INSERT_FILE = /^insert-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4|mov)$/;
+const INSERT_FILE = /^(insert|media)-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4|mov)$/;
 
 export function readCutout(value: unknown): CutoutLayers | null {
 	if (!value || typeof value !== "object") return null;
