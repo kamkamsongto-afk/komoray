@@ -144,6 +144,7 @@ export default function EditPage() {
 	// The AI's spelling fixes (api/spelling): read once on a new video, put on after the personal dictionary.
 	const [spelling, setSpelling] = useState<{ status: "done" | "failed"; fixes: Fix[] } | null>(null);
 	const [spellingFixed, setSpellingFixed] = useState<Fix[] | null>(null);
+	const [spellingTry, setSpellingTry] = useState(0); // Try again after the AI could not be reached
 	const [takesFound, setTakesFound] = useState<{ count: number; withoutTakes: number[] } | null>(null);
 	// The AI's bad takes (api/bad-takes). Read by itself when Bad takes was ticked when uploading; otherwise
 	// only when the creator presses Find bad takes (it costs us, so not for nothing).
@@ -456,7 +457,7 @@ export default function EditPage() {
 		return () => {
 			stopped = true;
 		};
-	}, [key, wantSpelling]);
+	}, [key, wantSpelling, spellingTry]);
 	const dictionaryDone = Boolean(analysis?.dictionaryApplied);
 	useEffect(() => {
 		if (spelling?.status !== "done" || !dictionaryDone) return;
@@ -469,7 +470,8 @@ export default function EditPage() {
 			setSpellingFixed(added);
 		}
 		setAnalysis((b) => (b ? { ...b, spellingApplied: true } : b));
-		save({ spellingApplied: true });
+		// Marked done only once its fixes are saved: if they weren't, the next visit puts them on again (Codex review 11 Nov).
+		void savingRef.current.then((saved) => saved && save({ spellingApplied: true }));
 		setSpelling(null);
 	}, [spelling, dictionaryDone, changeFixes, save]);
 
@@ -911,6 +913,20 @@ export default function EditPage() {
 				</div>
 			)}
 			{wantSpelling && !spelling && <p className="text-sm text-foreground/60">The AI is checking the spelling. You can edit meanwhile: it never changes a word you fixed.</p>}
+			{wantSpelling && spelling?.status === "failed" && (
+				<p className="flex flex-wrap items-center gap-2 text-sm text-foreground/60">
+					The AI could not check the spelling this time.
+					<button
+						onClick={() => {
+							setSpelling(null);
+							setSpellingTry((n) => n + 1);
+						}}
+						className="rounded-lg border border-foreground/20 px-3 py-1 hover:bg-foreground/5"
+					>
+						Try again
+					</button>
+				</p>
+			)}
 			{spellingFixed && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
 					<span>

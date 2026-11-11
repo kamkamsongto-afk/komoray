@@ -9,6 +9,7 @@ import type { Fix, WordFix } from "./edit";
 const MODEL = "claude-opus-5-5";
 const REQUEST_MS = 90_000; // Cloudflare gives up on a silent request after 100 seconds
 export const CHUNK_WORDS = 1500; // about 8 minutes of speech
+const END_SEARCH_WORDS = 200; // a part ends at the longest pause among its last this many words
 const LINE_WORDS = 20; // a line of the transcript sent: up to this many words, or to the next pause
 const LINE_PAUSE = 0.4;
 const MAX_HINTS = 150; // words from the creator's own dictionary, so the AI knows their names and terms
@@ -45,9 +46,15 @@ const THAI_MARK_FIRST = /^[ัำ-ฺ็-๎]/;
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 const squash = (text: string) => fixThai(text).replace(/\s+/g, "").toLowerCase();
 
-// The words from `from` up to CHUNK_WORDS, cut into lines (positions in `words`).
+// The words from `from` up to CHUNK_WORDS, cut into lines (positions in `words`). A part that isn't the last ends at
+// the longest pause near its end, so a word broken across two lines (เรื่อ|ง) is rarely split between two parts.
 export function chunkLines(words: Word[], from: number) {
-	const to = Math.min(words.length, from + CHUNK_WORDS);
+	let to = Math.min(words.length, from + CHUNK_WORDS);
+	if (to < words.length) {
+		let best = to;
+		for (let i = to; i > to - END_SEARCH_WORDS && i > from + 1; i--) if (words[i].start - words[i - 1].end > words[best].start - words[best - 1].end) best = i;
+		to = best;
+	}
 	const lines: number[][] = [];
 	let line: number[] = [];
 	for (let i = from; i < to; i++) {
@@ -70,10 +77,13 @@ export function placeFix(words: Word[], line: number[] | undefined, answer: Answ
 	if (heard.some((w) => THAI.test(w)) && !THAI.test(fixed)) return null;
 	const want = squash(heard.join(""));
 	if (want === squash(fixed)) return null; // only spacing (or ํา for ำ, which the script already shows right)
+	// Words said twice on the line: which one the AI meant isn't known, so neither is fixed (Codex review 11 Nov).
+	const runs: number[][] = [];
 	for (let k = 0; k + heard.length <= line.length; k++) {
 		const run = line.slice(k, k + heard.length);
-		if (squash(run.map((i) => words[i].text).join("")) === want) return { from: run[0], to: run[run.length - 1], text: fixed };
+		if (squash(run.map((i) => words[i].text).join("")) === want) runs.push(run);
 	}
+	if (runs.length) return runs.length === 1 ? { from: runs[0][0], to: runs[0][runs[0].length - 1], text: fixed } : null;
 	// Part of one word ("สรระบบ" in "สรระบบที่"): that word, with the part fixed. Only if it is in one word of the line.
 	const holders = heard.length === 1 ? line.filter((i) => fixThai(words[i].text).includes(fixThai(heard[0]))) : [];
 	if (holders.length === 1) {
@@ -110,5 +120,6 @@ export async function askForSpelling(words: Word[], from: number, apiKey: string
 		const fix = placeFix(words, lines[answer.line], answer);
 		if (fix && !fixes.some((f) => f.from <= fix.to && fix.from <= f.to)) fixes.push(fix);
 	}
-	return fixes.sort((a, b) => a.from - b.from);
+	const read = lines[lines.length - 1];
+	return { fixes: fixes.sort((a, b) => a.from - b.from), next: read ? read[read.length - 1] + 1 : words.length };
 }

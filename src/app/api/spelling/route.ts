@@ -3,7 +3,7 @@ import { accessFor, NO_INVITE } from "@/lib/access";
 import { scriptFingerprint } from "@/lib/bad-takes";
 import type { Fix } from "@/lib/edit";
 import { deleteObject, getJson, putIfAbsent, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
-import { askForSpelling, CHUNK_WORDS } from "@/lib/spelling";
+import { askForSpelling } from "@/lib/spelling";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // The AI's spelling fixes (lib/spelling.ts), kept next to the video so a script is only paid for once:
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
 		// The creator's own words (My words, most used first): how they spell their names and terms.
 		const { data } = await supabase.from("word_fixes").select("heard, fixed").order("uses", { ascending: false }).limit(HINT_WORDS);
 		const found = await askForSpelling(edit.words, state.done, apiKey, data ?? []);
-		const next: Saved = { script, done: Math.min(count, state.done + CHUNK_WORDS), fixes: [...state.fixes, ...found] };
+		const next: Saved = { script, done: Math.max(state.done + 1, Math.min(count, found.next)), fixes: [...state.fixes, ...found.fixes] };
 		await putObject(siblingKey(key, "spelling.json"), JSON.stringify(next), "application/json");
 		return Response.json({ fixes: next.fixes, remaining: count - next.done });
 	} catch (error) {
