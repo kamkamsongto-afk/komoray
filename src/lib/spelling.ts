@@ -1,11 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Fix, WordFix } from "./edit";
+import type { SharedPair } from "./shared-words";
 
 // The only file that asks Claude to fix speech-to-text spelling. It reads the whole script, a part at a time, and
 // only gives fixes: the AI studio puts them on once, underlined in green, and Undo takes them all off.
-// Test 11 Nov 2026 on a real Thai clip (339 words, 14 wrong): Opus at low effort fixed all 14 with no wrong fix, $0.019
-// (about $0.08 for 10 minutes). Haiku 5.5 missed 2 (แค่, ลายเซ็น) and at low effort made up a word. Sending only the
-// lines the dictionary flags saved under a cent but missed 6 of 14: wrong words are often real words (แค, กด, โค้ด).
+// Test 11 Nov 2026 on a real Thai clip (339 words, about 15 wrong): Opus at medium effort fixed 12-13 each time with no
+// wrong fix, about $0.03 (about $0.13 for 10 minutes). At low effort it found 15 once and 10 the next time. Haiku 5.5
+// missed แค่ and ลายเซ็น, and at low effort made up a word. Sending only the lines the dictionary flags saved under a
+// cent but missed 6 of 14: wrong words are often real words (แค, กด, โค้ด).
 const MODEL = "claude-opus-5-5";
 const REQUEST_MS = 90_000; // Cloudflare gives up on a silent request after 100 seconds
 export const CHUNK_WORDS = 1500; // about 8 minutes of speech
@@ -93,7 +95,7 @@ export function placeFix(words: Word[], line: number[] | undefined, answer: Answ
 	return null;
 }
 
-export async function askForSpelling(words: Word[], from: number, apiKey: string, hints: WordFix[]) {
+export async function askForSpelling(words: Word[], from: number, apiKey: string, hints: WordFix[], common: SharedPair[] = []) {
 	const lines = chunkLines(words, from);
 	const transcript = lines.map((line, n) => `${n}: ${line.map((i) => words[i].text).join(" ")}`).join("\n");
 	const known = [...new Set(hints.map((h) => h.fixed.trim()).filter(Boolean))].slice(0, MAX_HINTS);
@@ -103,12 +105,19 @@ export async function askForSpelling(words: Word[], from: number, apiKey: string
 		max_tokens: 16000,
 		betas: ["server-side-fallback-2026-07-01"],
 		fallbacks: "default",
-		output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
+		output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
 		system: INSTRUCTIONS,
 		messages: [
 			{
 				role: "user",
-				content: `${known.length ? `The creator's own words, spelled as they want them:\n${known.join(", ")}\n\n` : ""}Transcript:\n${transcript}`,
+				content: [
+					// Komoray's shared list (lib/shared-words.ts): mistakes many creators fixed. Examples, not rules to apply blindly.
+					common.length ? `Mistakes this speech-to-text often makes, and what was meant (fix them only where they fit):\n${common.map((p) => `${p.heard} → ${p.fixed}`).join("\n")}` : "",
+					known.length ? `The creator's own words, spelled as they want them:\n${known.join(", ")}` : "",
+					`Transcript:\n${transcript}`,
+				]
+					.filter(Boolean)
+					.join("\n\n"),
 			},
 		],
 	});
