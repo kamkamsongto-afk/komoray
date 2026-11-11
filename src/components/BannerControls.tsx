@@ -107,13 +107,14 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	const [kept, setKept] = useState<LibraryItem[]>([]);
 	const libraryKey = videoKey ?? (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("key"));
 	const fileBanners = banners.filter((b) => b.kind === "file").length;
+	const canReuse = Boolean(onUseFile); // not the callback itself: it is new on every frame while the video plays
 	useEffect(() => {
-		if (tab !== "file" || !libraryKey || !onUseFile) return;
+		if (tab !== "file" || !libraryKey || !canReuse) return;
 		void fetch(`/api/library?key=${encodeURIComponent(libraryKey)}`)
 			.then(async (res) => (res.ok ? ((await res.json()) as { items?: LibraryItem[] }) : {}))
 			.then((data: { items?: LibraryItem[] }) => setKept(data.items ?? []))
 			.catch(() => {});
-	}, [tab, libraryKey, onUseFile, fileBanners]);
+	}, [tab, libraryKey, canReuse, fileBanners]);
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
 	// Where each banner was dragged to, so picking Top and then "Where you dragged it" brings it back (coach, 6 Nov).
