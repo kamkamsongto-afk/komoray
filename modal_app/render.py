@@ -1705,7 +1705,9 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             put(error_url, json.dumps({"error": str(err)}).encode(), "application/json")
         raise
     finally:
-        sound_worker.shutdown(wait=False, cancel_futures=True)  # a failed video doesn't wait for its sound
+        # A failed video's sound is let finish (a minute at most), after its error was saved for the page: left
+        # running, its ffmpeg would take the machine's CPU from the next video Modal gives this container.
+        sound_worker.shutdown(wait=True, cancel_futures=True)
 
 
 PROXY_SIDE = 540  # px, the short side; the preview is at most ~440px wide on screen
