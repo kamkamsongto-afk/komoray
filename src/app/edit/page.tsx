@@ -60,6 +60,7 @@ const POLL_MS = 5000;
 const PROXY_POLL_MS = 10000;
 const STYLE_SAVE_DELAY_MS = 600; // dragging a slider changes the style many times a second
 const UNDO_STEPS = 100;
+const BURST_MS = 1000;
 const SAVE_TRIES = 3;
 const TRANSLATE_TRIES = 3; // tries for one batch of lines; each batch that works starts the count again
 const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
@@ -299,20 +300,35 @@ export default function EditPage() {
 		[key],
 	);
 
-	// Undo / Redo for script and timeline edits (deleted and fixed words, hand cuts, zoom parts): what
-	// they were before each change.
-	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[]; noZoom: Cut[]; zoomParts: ZoomPart[] };
+	// Undo / Redo for script and timeline edits (deleted and fixed words, hand cuts, zoom parts) and for
+	// banners and Cutout layers: what they were before each change. Without banners in it, Undo after moving
+	// a banner skipped back to the last fixed word and brought a wrong subtitle back (coach, 11 Nov).
+	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[]; noZoom: Cut[]; zoomParts: ZoomPart[]; banners: Banner[]; cutout: CutoutLayers };
 	const analysisRef = useRef(analysis);
 	useEffect(() => {
 		analysisRef.current = analysis;
+	});
+	const cutout = useCutout(key);
+	const cutoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const bannersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const refreshCutoutRef = useRef(cutout.refresh);
+	useEffect(() => {
+		refreshCutoutRef.current = cutout.refresh;
 	});
 	const history = useRef<{ past: Snapshot[]; future: Snapshot[] }>({ past: [], future: [] });
 	const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
 	const snapshot = (): Snapshot => {
 		const a = analysisRef.current;
-		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [], noZoom: a?.noZoom ?? [], zoomParts: a?.zoomParts ?? [] };
+		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [], noZoom: a?.noZoom ?? [], zoomParts: a?.zoomParts ?? [], banners: a?.banners ?? [], cutout: a?.cutout ?? NO_LAYERS };
 	};
-	const remember = useCallback(() => {
+	// Banners and Cutout layers change on every key typed and every step of a drag: changes from the same
+	// place less than BURST_MS apart are one step to undo.
+	const burst = useRef({ from: "", at: 0 });
+	const remember = useCallback((from = "") => {
+		const now = Date.now();
+		const last = burst.current;
+		burst.current = { from, at: now };
+		if (from && last.from === from && now - last.at < BURST_MS) return;
 		const h = history.current;
 		h.past = [...h.past.slice(-(UNDO_STEPS - 1)), snapshot()];
 		h.future = [];
@@ -325,8 +341,13 @@ export default function EditPage() {
 			if (!snap) return;
 			h[from === "past" ? "future" : "past"].push(snapshot());
 			setHistorySize({ past: h.past.length, future: h.future.length });
+			burst.current = { from: "", at: 0 };
+			// A banner or layer change still waiting to be saved would put back what was just undone.
+			if (bannersTimer.current) clearTimeout(bannersTimer.current);
+			if (cutoutTimer.current) clearTimeout(cutoutTimer.current);
 			setAnalysis((a) => (a ? { ...a, ...snap } : a));
 			save(snap);
+			void savingRef.current?.then(() => refreshCutoutRef.current());
 		},
 		[save],
 	);
@@ -491,11 +512,10 @@ export default function EditPage() {
 
 	// Cutout layers: typed into and dragged like banners, so saved a moment after the last change. Then the
 	// links to their pictures and clips are fetched again (a new one is shown from this computer meanwhile).
-	const cutout = useCutout(key);
-	const cutoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const refreshCutout = cutout.refresh;
 	const changeCutout = useCallback(
 		(layers: CutoutLayers) => {
+			remember("cutout");
 			setAnalysis((a) => (a ? { ...a, cutout: layers } : a));
 			if (cutoutTimer.current) clearTimeout(cutoutTimer.current);
 			cutoutTimer.current = setTimeout(() => {
@@ -503,18 +523,18 @@ export default function EditPage() {
 				void savingRef.current?.then(() => refreshCutout());
 			}, STYLE_SAVE_DELAY_MS);
 		},
-		[save, refreshCutout],
+		[save, refreshCutout, remember],
 	);
 
 	// Banners are typed into, so they are saved a moment after the last change too.
-	const bannersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const changeBanners = useCallback(
 		(banners: Banner[]) => {
+			remember("banners");
 			setAnalysis((a) => (a ? { ...a, banners } : a));
 			if (bannersTimer.current) clearTimeout(bannersTimer.current);
 			bannersTimer.current = setTimeout(() => save({ banners }), STYLE_SAVE_DELAY_MS);
 		},
-		[save],
+		[save, remember],
 	);
 
 	// Key moments (api/zoom-moments): the AI picks where to zoom and how, instead of zooming every take

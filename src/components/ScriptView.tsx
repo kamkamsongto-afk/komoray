@@ -708,6 +708,8 @@ export function ScriptView({
 			const target = e.target as Node | null;
 			if (!target || !document.contains(target)) return; // something that went away as it was clicked
 			if ([panelRef, tabsRef, playerAreaRef, timelineRef].some((r) => r.current?.contains(target))) return;
+			// A question it asks (ConfirmDelete) sits on the page itself, outside the box: answering it keeps the box open.
+			if (target instanceof Element && target.closest("[data-confirm]")) return;
 			setPanel(null);
 		};
 		const onKey = (e: KeyboardEvent) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, ImagePlus, Megaphone, Plus, Star, Tag, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, ImagePlus, Megaphone, Plus, Star, Tag, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import type { OwnFont } from "@/lib/font-info";
@@ -131,6 +131,15 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	function saveAsTemplate(b: Banner) {
 		const seconds = round(Math.max(0.5, b.end - b.start));
 		saveTemplates([...templates, { ...b, id: crypto.randomUUID(), start: 0, end: seconds }].slice(-BANNER.maxBanners));
+	}
+	// A copy of a banner, with every setting, right after it ends (or where the video is now if there's no
+	// room after it), to change only its words (coach, 11 Nov).
+	function duplicate(b: Banner) {
+		const seconds = b.end - b.start;
+		const start = round(b.end + seconds <= total ? b.end : Math.min(now(), Math.max(0, total - seconds)));
+		const id = crypto.randomUUID();
+		setOpen(id);
+		onChange([...banners, { ...b, id, start, end: round(Math.min(total, start + seconds)) }].sort((a, c) => a.start - c.start));
 	}
 	function addTemplate(t: Banner) {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
@@ -306,6 +315,15 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 								<Star className={`h-3.5 w-3.5 shrink-0 ${inTemplates(b) ? "fill-amber-400 text-amber-500" : ""}`} aria-hidden />
 							</button>
 						)}
+						<button
+							onClick={() => duplicate(b)}
+							disabled={banners.length >= BANNER.maxBanners}
+							title="Duplicate: a copy right after it"
+							aria-label="Duplicate banner"
+							className="rounded px-1.5 pt-1 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:opacity-30"
+						>
+							<Copy className="h-3.5 w-3.5 shrink-0" aria-hidden />
+						</button>
 						<button
 							onClick={() => setRemoving(b)}
 							aria-label="Remove banner"
