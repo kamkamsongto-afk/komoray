@@ -570,18 +570,10 @@ def banner_file_filters(parts: list[str], base: str, size: tuple[int, int], bann
 
 def banner_file_input(b: dict) -> list[str]:
     """How FFmpeg reads an uploaded banner: a picture as one frame repeated, a GIF as its file plays (-stream_loop
-    froze it, 11 Nov), a WebM with its see-through parts kept (FFmpeg's own VP8 / VP9 decoder drops them)."""
+    froze it, 11 Nov), an MP4 clip as it is."""
     path, name = str(b["path"]), str(b.get("file", ""))
     if b.get("media") != "video":
         return (["-ignore_loop", "0"] if name.endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]) + ["-i", path]
-    if name.endswith(".webm"):
-        probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1", path],
-            capture_output=True, text=True,
-        )
-        codec = probe.stdout.strip()
-        if codec in ("vp8", "vp9"):
-            return ["-c:v", "libvpx-vp9" if codec == "vp9" else "libvpx", "-i", path]
     return ["-i", path]
 
 

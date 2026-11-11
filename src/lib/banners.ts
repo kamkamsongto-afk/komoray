@@ -87,7 +87,7 @@ export const BANNER_LINE_GAP = { min: -20, max: 80 };
 // An uploaded banner: how wide it is at size 100%, share of the video's width; where it starts; biggest files.
 // Same as BANNER_FILE in render.py.
 export const BANNER_FILE = { width: 0.5, x: 0.5, y: 0.3, maxBytes: { image: 10_000_000, video: 150_000_000 } };
-export const BANNER_FILE_NAME = /^banner-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4|mov|webm)$/;
+export const BANNER_FILE_NAME = /^banner-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4)$/; // clips: MP4 only for now (Yoshi, 12 Nov)
 
 // Where the preview gets an uploaded banner: the file just picked on this page (no waiting for it to come back),
 // else through /api/banner-file for the video this page edits (/edit?key=…). "" off that page.
@@ -183,7 +183,7 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(font && { font: font.font, ...(font.ownFont && { ownFont: font.ownFont }) }),
 			...(!file && Number.isFinite(gap) && gap !== 0 && { lineGap: Math.round(Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, gap))) }),
 			// An uploaded banner always sits where it was put (at first: the middle, near the top).
-			...(file && { file, media: /\.(mp4|mov|webm)$/.test(file) ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),
+			...(file && { file, media: file.endsWith(".mp4") ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),
 		});
 	}
 	return out;

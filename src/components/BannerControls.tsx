@@ -24,7 +24,7 @@ type BannerTab = "price" | "cta" | "file";
 const TABS: [BannerTab, typeof Tag, string][] = [["price", Tag, "Price"], ["cta", Megaphone, "Call to action"], ["file", ImagePlus, "Upload"]];
 const tabOf = (kind: BannerKind): BannerTab => (kind === "follow" ? "cta" : kind);
 // What the browser can show in the preview, and render.py can put on the final video (api/banner-file).
-const FILE_TYPES = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm";
+const FILE_TYPES = "image/jpeg,image/png,image/webp,image/gif,video/mp4";
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
@@ -203,7 +203,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					{fileNote && <p className="text-xs text-red-500">{fileNote}</p>}
 					{shown.length === 0 && (
 						<p className="text-xs text-foreground/60">
-							Have a banner made already? Upload it: JPG, PNG, WebP or GIF up to {BANNER_FILE.maxBytes.image / 1_000_000} MB, or an MP4, MOV or WebM clip up to {BANNER_FILE.maxBytes.video / 1_000_000} MB (clips show without their sound). It goes over you, where the video is now.
+							Have a banner made already? Upload it: JPG, PNG, WebP or GIF up to {BANNER_FILE.maxBytes.image / 1_000_000} MB, or an MP4 clip up to {BANNER_FILE.maxBytes.video / 1_000_000} MB (clips show without their sound). It goes over you, where the video is now.
 						</p>
 					)}
 				</>

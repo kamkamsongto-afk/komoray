@@ -6,15 +6,13 @@ import { currentUser, ownsVideo } from "@/lib/supabase/server";
 // The customer's own finished banner (a picture, GIF or clip: kind "file" in lib/banners.ts), uploaded next to the video.
 //   POST { key, contentType, size }  →  { uploadUrl, file, media }   (the browser PUTs the file to uploadUrl)
 //   GET ?key=…&file=banner-….png      →  a short-lived link to it, for the preview
-// MPEG (.mpg), AVI and the like are not taken: a browser can't play them, so the preview couldn't show them.
+// Clips: MP4 only for now (Yoshi, 12 Nov). MPEG (.mpg), AVI and the like: a browser can't play them in the preview.
 const TYPES: Record<string, { ext: string; media: "image" | "video" }> = {
 	"image/jpeg": { ext: "jpg", media: "image" },
 	"image/png": { ext: "png", media: "image" },
 	"image/webp": { ext: "webp", media: "image" },
 	"image/gif": { ext: "gif", media: "image" },
 	"video/mp4": { ext: "mp4", media: "video" },
-	"video/quicktime": { ext: "mov", media: "video" },
-	"video/webm": { ext: "webm", media: "video" },
 };
 const URL_LIFETIME_SECONDS = 600;
 const VIEW_SECONDS = 3 * 3600;
@@ -25,7 +23,7 @@ export async function POST(request: Request) {
 	if (!(await canUseStudio((await currentUser()).user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
 
 	const type = typeof contentType === "string" ? TYPES[contentType] : undefined;
-	if (!type) return Response.json({ error: "Please pick a JPG, PNG, WebP or GIF picture, or an MP4, MOV or WebM clip." }, { status: 400 });
+	if (!type) return Response.json({ error: "Please pick a JPG, PNG, WebP or GIF picture, or an MP4 clip." }, { status: 400 });
 	const max = BANNER_FILE.maxBytes[type.media];
 	if (typeof size !== "number" || !Number.isInteger(size) || size <= 0 || size > max) {
 		return Response.json({ error: `That file is too big. ${type.media === "image" ? "Pictures" : "Clips"} can be up to ${Math.round(max / 1_000_000)} MB.` }, { status: 400 });
