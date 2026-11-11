@@ -21,9 +21,10 @@ import { readZoomParts, type ZoomPart } from "@/lib/zoom";
 //   cutout   text behind the speaker, pictures and clips behind a smaller speaker (lib/behind.ts)
 //   pace    tight / natural / relaxed: finds the silences again (answers with the new cuts)
 //   badTakesApplied  the AI's bad takes were cut once, as asked when uploading (never again by themselves)
+//   spellingApplied  the AI's spelling fixes were put on once (api/spelling)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, style, banners, pace, manual, keep, noZoom, zoomParts, zoomMomentsApplied, cutout } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, spellingApplied, style, banners, pace, manual, keep, noZoom, zoomParts, zoomMomentsApplied, cutout } = (await request.json()) as {
 		key?: string;
 		pace?: unknown;
 		deleted?: unknown;
@@ -31,6 +32,7 @@ export async function PUT(request: Request) {
 		dictionaryApplied?: unknown;
 		takesApplied?: unknown;
 		badTakesApplied?: unknown;
+		spellingApplied?: unknown;
 		style?: unknown;
 		banners?: unknown;
 		manual?: unknown;
@@ -53,6 +55,7 @@ export async function PUT(request: Request) {
 		dictionaryApplied?: boolean;
 		takesApplied?: boolean;
 		badTakesApplied?: boolean;
+		spellingApplied?: boolean;
 		style?: unknown;
 		banners?: Banner[];
 		manual?: { start: number; end: number }[];
@@ -89,6 +92,7 @@ export async function PUT(request: Request) {
 	if (dictionaryApplied === true) edit.dictionaryApplied = true;
 	if (takesApplied === true) edit.takesApplied = true;
 	if (badTakesApplied === true) edit.badTakesApplied = true;
+	if (spellingApplied === true) edit.spellingApplied = true;
 	if (zoomMomentsApplied === true) edit.zoomMomentsApplied = true;
 	if (zoomParts !== undefined) {
 		const checked = readZoomParts(zoomParts, edit.duration);

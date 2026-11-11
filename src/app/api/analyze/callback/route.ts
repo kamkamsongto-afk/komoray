@@ -44,6 +44,9 @@ export async function POST(request: Request) {
 			// Deepgram's Thai comes in pieces of words; the script works on whole words.
 			words: mergeThaiWords(words),
 			wordsJoined: true,
+			// The AI fixes the speech-to-text's spelling once, when the AI studio first opens (api/spelling).
+			// Only on videos from now on: older ones were already fixed by hand.
+			spellingWanted: true,
 			...(options && { options }),
 		};
 		await putObject(siblingKey(key, "edit.json"), JSON.stringify(edit, null, 2), "application/json");

@@ -30,6 +30,8 @@ type Analysis = {
 	deleted?: number[];
 	fixes?: Fix[];
 	dictionaryApplied?: boolean; // the personal dictionary already ran on this video once
+	spellingWanted?: boolean; // uploaded since the AI fixes spelling (api/spelling): it does, once
+	spellingApplied?: boolean; // the AI's spelling fixes were put on
 	takesApplied?: boolean; // repeated takes were already looked for on this video once
 	options?: UploadOptions; // what was asked for when uploading (none on videos from before)
 	badTakesApplied?: boolean; // the AI's bad takes were cut once, as asked when uploading
@@ -139,6 +141,9 @@ export default function EditPage() {
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
 	const [dictionary, setDictionary] = useState<WordFix[] | null>(null);
 	const [dictionaryFixed, setDictionaryFixed] = useState<{ count: number; before: Fix[] } | null>(null);
+	// The AI's spelling fixes (api/spelling): read once on a new video, put on after the personal dictionary.
+	const [spelling, setSpelling] = useState<{ status: "done" | "failed"; fixes: Fix[] } | null>(null);
+	const [spellingFixed, setSpellingFixed] = useState<Fix[] | null>(null);
 	const [takesFound, setTakesFound] = useState<{ count: number; withoutTakes: number[] } | null>(null);
 	// The AI's bad takes (api/bad-takes). Read by itself when Bad takes was ticked when uploading; otherwise
 	// only when the creator presses Find bad takes (it costs us, so not for nothing).
@@ -256,6 +261,7 @@ export default function EditPage() {
 			deleted?: number[];
 			fixes?: Fix[];
 			dictionaryApplied?: boolean;
+			spellingApplied?: boolean;
 			takesApplied?: boolean;
 			badTakesApplied?: boolean;
 			style?: SubtitleStyle;
@@ -428,6 +434,44 @@ export default function EditPage() {
 		},
 		[save],
 	);
+
+	// Ask the AI for spelling fixes, one part at a time (saved, so only paid for once). Put on when the whole script
+	// is read and the personal dictionary has run, where nothing is fixed already: it never undoes a hand fix.
+	const wantSpelling = Boolean(analysis?.words?.length && analysis.spellingWanted && !analysis.spellingApplied);
+	useEffect(() => {
+		if (!key || !wantSpelling) return;
+		let stopped = false;
+		void (async () => {
+			for (;;) {
+				const res = await fetch("/api/spelling", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) }).catch(() => null);
+				if (stopped) return;
+				const data = res?.ok ? ((await res.json()) as { fixes: Fix[]; remaining: number; busy?: boolean }) : null;
+				if (stopped) return;
+				if (!data) return setSpelling({ status: "failed", fixes: [] });
+				if (!data.remaining) return setSpelling({ status: "done", fixes: data.fixes });
+				// Another tab is reading this part: wait for it instead of paying again.
+				if (data.busy) await new Promise((resolve) => setTimeout(resolve, 3000));
+			}
+		})();
+		return () => {
+			stopped = true;
+		};
+	}, [key, wantSpelling]);
+	const dictionaryDone = Boolean(analysis?.dictionaryApplied);
+	useEffect(() => {
+		if (spelling?.status !== "done" || !dictionaryDone) return;
+		const a = analysisRef.current;
+		if (!a || a.spellingApplied) return;
+		const before = a.fixes ?? [];
+		const added = spelling.fixes.filter((f) => f.to < a.words.length && !before.some((b) => b.from <= f.to && f.from <= b.to));
+		if (added.length) {
+			changeFixes([...before, ...added].sort((x, y) => x.from - y.from));
+			setSpellingFixed(added);
+		}
+		setAnalysis((b) => (b ? { ...b, spellingApplied: true } : b));
+		save({ spellingApplied: true });
+		setSpelling(null);
+	}, [spelling, dictionaryDone, changeFixes, save]);
 
 	const takesApplied = useCallback(
 		(count: number, withoutTakes: number[]) => {
@@ -862,6 +906,28 @@ export default function EditPage() {
 						Undo
 					</button>
 					<button onClick={() => setDictionaryFixed(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
+						<X className="h-3 w-3 shrink-0" aria-hidden />
+					</button>
+				</div>
+			)}
+			{wantSpelling && !spelling && <p className="text-sm text-foreground/60">The AI is checking the spelling. You can edit meanwhile: it never changes a word you fixed.</p>}
+			{spellingFixed && (
+				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
+					<span>
+						The AI fixed {spellingFixed.length} {spellingFixed.length === 1 ? "word" : "words"} the speech-to-text got wrong (underlined in green). Click one to change it.
+					</span>
+					<button
+						onClick={() => {
+							// Only the AI's fixes come off: words fixed by hand since then stay.
+							const ai = (f: Fix) => spellingFixed.some((s) => s.from === f.from && s.to === f.to && s.text === f.text);
+							changeFixes((analysis.fixes ?? []).filter((f) => !ai(f)));
+							setSpellingFixed(null);
+						}}
+						className="rounded-lg border border-foreground/20 px-3 py-1 hover:bg-foreground/5"
+					>
+						Undo
+					</button>
+					<button onClick={() => setSpellingFixed(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
 						<X className="h-3 w-3 shrink-0" aria-hidden />
 					</button>
 				</div>
