@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 type ConfirmProps = { title: string; body: string; action: string; danger?: boolean; onCancel: () => void; onConfirm: () => void };
 
@@ -16,7 +17,9 @@ export function Confirm({ title, body, action, danger, onCancel, onConfirm }: Co
 		return () => document.removeEventListener("keydown", onKey, true);
 	}, [onCancel]);
 
-	return (
+	// Put on the page itself, not inside the box that asks: the timeline sits under the player column, so
+	// its question to delete a banner was hidden behind the player and Delete seemed to do nothing (coach, 11 Nov).
+	return createPortal(
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="presentation" onClick={onCancel}>
 			<div role="alertdialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="flex w-full max-w-sm flex-col gap-3 rounded-xl border border-foreground/15 bg-background p-4 text-foreground shadow-2xl">
 				<p className="text-sm font-medium break-words">{title}</p>
@@ -30,7 +33,8 @@ export function Confirm({ title, body, action, danger, onCancel, onConfirm }: Co
 					</button>
 				</div>
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
 }
 
