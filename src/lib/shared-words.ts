@@ -14,6 +14,7 @@ import { getJson, putObject } from "./r2";
 
 export const MIN_VOTERS = 3; // a fix only counts once this many different creators made it
 const MAX_PAIRS = 1000; // per language, most voted first
+const MAX_VOTERS = 100; // counted up to this many: plenty to rank by, and a pair's file stays small
 const MAX_LETTERS = 30;
 const MAX_WORDS = 4;
 export type SharedPair = { heard: string; fixed: string; voters: number };
@@ -31,11 +32,26 @@ export function shareable(heard: string, fixed: string): Lang | null {
 	if (!h || !f || h === f || h.length > MAX_LETTERS || f.length > MAX_LETTERS) return null;
 	if (h.split(/\s+/).length > MAX_WORDS || f.split(/\s+/).length > MAX_WORDS) return null;
 	if (/[0-9๐-๙@#/:.\\_]/.test(h + f)) return null;
+	// Both sides are words, not sentences: the heard side is shown to the AI too, so it can't be an instruction
+	// three accounts agreed on (Codex review 11 Nov).
 	if (THAI.test(f)) {
+		if (!/^[฀-๿ ]+$/.test(h) || !/^[฀-๿ ]+$/.test(f)) return null;
 		const words = f.split(/\s+/).flatMap((part) => cutThaiWords(part.replace(/ๆ/g, "")));
 		return words.length && words.every((w) => isThaiWord(w)) ? "th" : null;
 	}
-	return /^[\p{Ll}' -]+$/u.test(f) && /^[\p{Ll}' -]+$/u.test(h) ? "latin" : null;
+	if (!/^[\p{Ll}' -]+$/u.test(f) || !/^[\p{Ll}' -]+$/u.test(h)) return null;
+	// A mishearing looks like the word: a few letters apart ("teh" → "the"), not a different phrase.
+	return distance(h, f) <= Math.max(2, Math.ceil(0.4 * Math.max(h.length, f.length))) ? "latin" : null;
+}
+
+function distance(a: string, b: string) {
+	let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+	for (let i = 1; i <= a.length; i++) {
+		const next = [i];
+		for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+		row = next;
+	}
+	return row[b.length];
 }
 
 // Did this creator tick "Help make Komoray more accurate"? (their settings, api/prefs)
@@ -46,19 +62,22 @@ async function pairId(lang: Lang, heard: string, fixed: string) {
 	return [...bytes].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// One creator's fix, counted once. Two fixes counted at the same moment can lose one vote: fine for a count.
+// One creator's fix, counted once. R2 has no locks, so two fixes saved at the same moment can lose a vote, or a pair
+// from the list: the next time anyone makes that fix, it is put back (the list is checked every time, not only at 3).
 export async function addSharedFix(userId: string, secret: string, heard: string, fixed: string) {
 	const lang = shareable(heard, fixed);
 	if (!lang) return;
 	const voter = (await hmac(`shared-words:${secret}`, userId)).slice(0, 16);
 	const key = `shared-words/votes/${lang}/${await pairId(lang, heard.trim(), fixed.trim())}.json`;
 	const votes = (await getJson<Votes>(key)) ?? { heard: heard.trim(), fixed: fixed.trim(), voters: [] };
-	if (votes.voters.includes(voter)) return;
-	votes.voters.push(voter);
-	await putObject(key, JSON.stringify(votes), "application/json");
+	if (!votes.voters.includes(voter) && votes.voters.length < MAX_VOTERS) {
+		votes.voters.push(voter);
+		await putObject(key, JSON.stringify(votes), "application/json");
+	}
 	if (votes.voters.length < MIN_VOTERS) return;
 	const listKey = `shared-words/${lang}.json`;
 	const list = (await getJson<{ pairs: SharedPair[] }>(listKey))?.pairs ?? [];
+	if (list.some((p) => p.heard === votes.heard && p.fixed === votes.fixed && p.voters === votes.voters.length)) return;
 	const pairs = [{ heard: votes.heard, fixed: votes.fixed, voters: votes.voters.length }, ...list.filter((p) => p.heard !== votes.heard || p.fixed !== votes.fixed)]
 		.sort((a, b) => b.voters - a.voters)
 		.slice(0, MAX_PAIRS);
