@@ -327,6 +327,18 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					)}
 					{open === b.id && b.kind === "file" && <>
 						<p className="text-xs text-foreground/60">Pause the video on it to drag it anywhere, or drag its corner to make it bigger or smaller.</p>
+						<select
+							value={b.anim ?? "fade"}
+							onChange={(e) => update(b.id, { anim: e.target.value as BannerAnim })}
+							aria-label="How it arrives"
+							className="self-start rounded-md border border-foreground/20 bg-background px-1 py-0.5 text-xs"
+						>
+							{(Object.keys(BANNER_ANIMS) as BannerAnim[]).map((a) => (
+								<option key={a} value={a}>
+									{BANNER_ANIMS[a].name}
+								</option>
+							))}
+						</select>
 						{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 						{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
 					</>}
