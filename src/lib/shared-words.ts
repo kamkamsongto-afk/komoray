@@ -17,6 +17,7 @@ const MAX_PAIRS = 1000; // per language, most voted first
 const MAX_VOTERS = 100; // counted up to this many: plenty to rank by, and a pair's file stays small
 const MAX_LETTERS = 30;
 const MAX_WORDS = 4;
+const MAX_THAI_LETTERS = 20; // a Thai fix is a word or two, never a sentence
 export type SharedPair = { heard: string; fixed: string; voters: number };
 type Votes = { heard: string; fixed: string; voters: string[] };
 type Lang = "th" | "latin";
@@ -35,11 +36,13 @@ export function shareable(heard: string, fixed: string): Lang | null {
 	// Both sides are words, not sentences: the heard side is shown to the AI too, so it can't be an instruction
 	// three accounts agreed on (Codex review 11 Nov).
 	if (THAI.test(f)) {
+		if (h.length > MAX_THAI_LETTERS || f.length > MAX_THAI_LETTERS) return null;
 		if (!/^[฀-๿ ]+$/.test(h) || !/^[฀-๿ ]+$/.test(f)) return null;
 		const words = f.split(/\s+/).flatMap((part) => cutThaiWords(part.replace(/ๆ/g, "")));
 		return words.length && words.every((w) => isThaiWord(w)) ? "th" : null;
 	}
-	if (!/^[\p{Ll}' -]+$/u.test(f) || !/^[\p{Ll}' -]+$/u.test(h)) return null;
+	// One word only: an instruction needs a sentence.
+	if (!/^[\p{Ll}'-]+$/u.test(f) || !/^[\p{Ll}'-]+$/u.test(h)) return null;
 	// A mishearing looks like the word: a few letters apart ("teh" → "the"), not a different phrase.
 	return distance(h, f) <= Math.max(2, Math.ceil(0.4 * Math.max(h.length, f.length))) ? "latin" : null;
 }
