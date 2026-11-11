@@ -15,7 +15,6 @@ type Saved = { script: string; done: number; fixes: Fix[] };
 
 const LOCK_MS = 120_000; // longer than a request can last: after this, whoever held it has died
 const HINT_WORDS = 150;
-const SHARED_WORDS = 150;
 
 export async function POST(request: Request) {
 	const { key } = (await request.json().catch(() => ({}))) as { key?: string };
@@ -44,7 +43,7 @@ export async function POST(request: Request) {
 	try {
 		// The creator's own words (My words, most used first): how they spell their names and terms.
 		const { data } = await supabase.from("word_fixes").select("heard, fixed").order("uses", { ascending: false }).limit(HINT_WORDS);
-		const common = await sharedFixes(edit.words.some((w) => /[฀-๿]/.test(w.text)), SHARED_WORDS);
+		const common = await sharedFixes(edit.words.some((w) => /[฀-๿]/.test(w.text)));
 		const found = await askForSpelling(edit.words, state.done, apiKey, data ?? [], common);
 		const next: Saved = { script, done: Math.max(state.done + 1, Math.min(count, found.next)), fixes: [...state.fixes, ...found.fixes] };
 		await putObject(siblingKey(key, "spelling.json"), JSON.stringify(next), "application/json");

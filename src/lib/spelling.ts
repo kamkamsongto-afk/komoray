@@ -16,6 +16,8 @@ const END_SEARCH_WORDS = 200; // a part ends at the longest pause among its last
 const LINE_WORDS = 20; // a line of the transcript sent: up to this many words, or to the next pause
 const LINE_PAUSE = 0.4;
 const MAX_HINTS = 150; // words from the creator's own dictionary, so the AI knows their names and terms
+const MAX_SHARED = 300; // mistakes from Komoray's word list found in the part read
+const SHARED_EXAMPLES = 15; // and a few more, to show the AI the kind of mistake it makes
 
 type Word = { text: string; start: number; end: number };
 type Answer = { line: number; heard: string; fixed: string };
@@ -100,6 +102,11 @@ export async function askForSpelling(words: Word[], from: number, apiKey: string
 	const lines = chunkLines(words, from);
 	const transcript = lines.map((line, n) => `${n}: ${line.map((i) => words[i].text).join(" ")}`).join("\n");
 	const known = [...new Set(hints.map((h) => h.fixed.trim()).filter(Boolean))].slice(0, MAX_HINTS);
+	// Of the shared list (it can hold thousands), only the mistakes found in this part, plus a few to show the kind.
+	const said = squash(lines.flat().map((i) => words[i].text).join(""));
+	const found = common.filter((p) => said.includes(squash(p.heard)));
+	const examples = [...found.slice(0, MAX_SHARED), ...common.filter((p) => !found.includes(p)).slice(0, SHARED_EXAMPLES)];
+	common = examples;
 	const client = new Anthropic({ apiKey, timeout: REQUEST_MS, maxRetries: 0 });
 	// No refusal fallback: Haiku has none on the server. A refusal stops here (stop_reason below) and the page offers Try again.
 	const response = await client.messages.create({

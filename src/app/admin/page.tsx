@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ActivityTable } from "@/components/ActivityTable";
+import { AdminWords } from "@/components/AdminWords";
 import type { Activity } from "@/lib/admin-activity";
 import { CUTOUT_ON } from "@/lib/cutout";
 import { CUTOUT_SECONDS, type Features } from "@/lib/features";
@@ -24,7 +25,7 @@ type Report = { at: string; email?: string; stage: string; error: string; key?: 
 type Person = { email: string; at: string; used: number; features: Features };
 type Waiting = { email: string; at: string };
 type Answer = { email: string; at: string; easy: number | null; result: number | null; pay: string | null; note: string; file: string };
-type Tab = "people" | "activity" | "videos" | "feedback" | "logs";
+type Tab = "people" | "activity" | "videos" | "feedback" | "logs" | "words";
 type ActivityData = { people?: Activity[]; used?: Record<string, number>; shown?: number; total?: number };
 
 const BADGE: Record<Step["status"], string> = {
@@ -171,6 +172,7 @@ export default function AdminPage() {
 		["videos", "Videos", jobs.length],
 		["feedback", "Feedback", feedback.length],
 		["logs", "Logs", reports.length],
+		["words", "Words", -1],
 	];
 
 	return (
@@ -190,7 +192,7 @@ export default function AdminPage() {
 						aria-current={tab === id ? "page" : undefined}
 						className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${tab === id ? "border-foreground" : "border-transparent text-foreground/60 hover:text-foreground"}`}
 					>
-						{name} <span className="text-foreground/50">{count}</span>
+						{name} {count >= 0 && <span className="text-foreground/50">{count}</span>}
 						{id === "videos" && problemCount > 0 && <span className="ml-1 text-red-600">· {problemCount} with problems</span>}
 					</button>
 				))}
@@ -352,6 +354,8 @@ export default function AdminPage() {
 					))}
 				</section>
 			)}
+
+			{tab === "words" && <AdminWords />}
 
 			{tab === "logs" && (
 				<section className="flex flex-col gap-3">

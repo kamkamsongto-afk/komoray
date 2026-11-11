@@ -1,7 +1,7 @@
 import { MAX_FIX_LENGTH, normText } from "@/lib/edit";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { addSharedFix, sharesWords } from "@/lib/shared-words";
-import { currentUser } from "@/lib/supabase/server";
+import { addSharedFix, changeCurated, shareable, sharesWords } from "@/lib/shared-words";
+import { currentUser, isAdmin } from "@/lib/supabase/server";
 
 // The signed-in user's personal dictionary (table word_fixes, see supabase/migrations/002):
 //   GET     every word they have fixed, newest first
@@ -38,6 +38,10 @@ export async function POST(request: Request) {
 		.from("word_fixes")
 		.upsert({ heard, fixed, uses: (before?.uses ?? 0) + 1, updated_at: new Date().toISOString() }, { onConflict: "user_id,heard" });
 	if (error) return Response.json({ error: error.message }, { status: 500 });
+	// The admin's own fixes build Komoray's own word list (lib/shared-words.ts), ordinary words only: a name or brand
+	// the admin fixes stays in their My words. Pairs can be removed on the admin page.
+	const lang = isAdmin(user.email) ? shareable(heard, fixed) : null;
+	if (lang) await changeCurated(lang, [{ heard, fixed }]).catch((err) => console.error("Komoray words failed:", err));
 	if (await sharesWords(user.id)) {
 		const { RENDER_TOKEN } = getCloudflareContext().env as unknown as { RENDER_TOKEN: string };
 		await addSharedFix(user.id, RENDER_TOKEN, heard, fixed).catch((err) => console.error("Shared word failed:", err));

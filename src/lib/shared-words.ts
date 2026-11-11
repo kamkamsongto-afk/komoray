@@ -110,10 +110,47 @@ const SEED: Record<Lang, SharedPair[]> = {
 	latin: [],
 };
 
-// What the spelling AI is shown for a script: the language's shared fixes, most voted first.
-export async function sharedFixes(thai: boolean, limit: number): Promise<SharedPair[]> {
+// Komoray's own word list (coach, 11 Nov: our own correct Thai first, before creators share theirs): pairs the team
+// checked, at shared-words/curated-<lang>.json. It grows two ways: the admin's own word fixes go in by themselves
+// (api/dictionary, ordinary words only, as shareable checks), and the admin adds or removes pairs on the admin page
+// (Words tab). It needs no votes: we checked it. Nothing in it comes from customers.
+export type CuratedPair = { heard: string; fixed: string; at: string };
+const MAX_CURATED = 20_000;
+const curatedKey = (lang: Lang) => `shared-words/curated-${lang}.json`;
+export const readCurated = async (lang: Lang) => (await getJson<{ pairs: CuratedPair[] }>(curatedKey(lang)).catch(() => null))?.pairs ?? [];
+const tidy = (text: string) => text.trim().replace(/\s+/g, " ");
+
+// A pair the team typed in: short, Thai or letters only (a team member may add a word the dictionary lacks).
+export function curatable(heard: string, fixed: string): Lang | null {
+	const h = tidy(heard);
+	const f = tidy(fixed);
+	if (!h || !f || h === f || h.length > MAX_LETTERS || f.length > MAX_LETTERS) return null;
+	if (/[0-9๐-๙@#/:\\_{}<>]/.test(h + f)) return null;
+	if (THAI.test(f)) return /^[฀-๿ ]+$/.test(h + f) ? "th" : null;
+	return /^[\p{L}' -]+$/u.test(h + f) ? "latin" : null;
+}
+
+// Add (or change: the same heard with a new fixed) and remove pairs. Newest first.
+export async function changeCurated(lang: Lang, add: { heard: string; fixed: string }[], remove: string[] = []) {
+	const now = new Date().toISOString();
+	const fresh = add.map((p) => ({ heard: tidy(p.heard), fixed: tidy(p.fixed), at: now }));
+	const gone = new Set([...remove.map(tidy), ...fresh.map((p) => p.heard)]);
+	const pairs = [...fresh, ...(await readCurated(lang)).filter((p) => !gone.has(p.heard))].slice(0, MAX_CURATED);
+	await putObject(curatedKey(lang), JSON.stringify({ pairs }), "application/json");
+	return pairs;
+}
+
+// What the spelling AI may be shown: our own list first, then what creators agreed on, then the first mistakes we
+// collected (SEED). lib/spelling.ts shows only the ones whose wrong words are in the part it reads.
+export async function sharedFixes(thai: boolean): Promise<SharedPair[]> {
 	const lang: Lang = thai ? "th" : "latin";
-	const saved = (await getJson<{ pairs: SharedPair[] }>(`shared-words/${lang}.json`).catch(() => null))?.pairs ?? [];
-	const seen = new Set(saved.map((p) => p.heard));
-	return [...saved, ...SEED[lang].filter((p) => !seen.has(p.heard))].slice(0, limit);
+	const [curated, voted] = await Promise.all([readCurated(lang), getJson<{ pairs: SharedPair[] }>(`shared-words/${lang}.json`).catch(() => null)]);
+	const out: SharedPair[] = [];
+	const seen = new Set<string>();
+	for (const p of [...curated.map((c) => ({ heard: c.heard, fixed: c.fixed, voters: 0 })), ...(voted?.pairs ?? []), ...SEED[lang]]) {
+		if (seen.has(p.heard)) continue;
+		seen.add(p.heard);
+		out.push(p);
+	}
+	return out;
 }
