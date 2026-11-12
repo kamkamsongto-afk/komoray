@@ -1452,12 +1452,16 @@ def ffmpeg_command(
         lo, hi = part
         shots = [(i, max(o, lo), t + max(o, lo) - o, min(o + n, hi) - max(o, lo), lv, rn) for i, o, t, n, lv, rn in shots if o < hi and o + n > lo]
         audio = False
+    # A part jumps to a second before its first frame (-ss on the video and the matte): read from the start, a part
+    # decoded the whole video before it only to throw it away, 16 s of a 3 min video's 1.2 s (12 Nov). Timestamps then
+    # start at `seek`, so every trim is moved back by it; the second's margin keeps the cut away from where it lands.
+    seek = max(0, math.floor(min(t for _, _, t, *_ in shots) / FPS) - 1) if part and shots else 0
     for k, (i, out_frame, trim, frames, level, run) in enumerate(shots):
-        a, b = trim / FPS, (trim + frames) / FPS
+        a, b = trim / FPS - seek, (trim + frames) / FPS - seek
         # Framed on its own (face crop, Auto zoom), so parts can differ before they are joined. The face
         # is found per whole piece, so it doesn't move at a no-zoom edge.
         piece_trim, piece_frames = pieces[i][1], pieces[i][2]
-        focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)
+        focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)  # source seconds, not moved by seek
         if run and run[2] != "cuts":
             framing = smooth_filter(aspect, focus, part_zoom_expr(out_frame, run, zoom_amount), size, zoom_amount)
         elif not run and zoom in ("smooth", "in", "out"):
@@ -1509,12 +1513,13 @@ def ffmpeg_command(
         f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}[outv]"
     )
 
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
+    jump = ["-ss", str(seek)] if seek else []
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *jump, "-i", str(src)]
     if logo:
         cmd += ["-i", str(logo["path"])]
     if cutout:
         if cutout.get("matte"):
-            cmd += ["-i", str(cutout["matte"])]
+            cmd += [*jump, "-i", str(cutout["matte"])]
         for ins in cutout.get("inserts") or []:
             # A picture is one frame: repeated for as long as it shows (trimmed in cutout_filters).
             # A GIF has its own frames: played as its file says. -stream_loop froze it on the first frame (test 11 Nov).
@@ -1716,14 +1721,75 @@ PART_MIN_SECONDS = 15
 PART_THREADS = 2
 
 
-def picture_parts(frames: int) -> list[tuple[int, int]]:
-    """The final video's frames split into nearly equal parts [from, to) made at the same time."""
+# A frame with cutout layers costs about this many plain frames: the matte is read, framed (Auto zoom's perspective)
+# and laid on the picture. The matte was worked on for every frame of the video as soon as one layer was there, so a
+# 5 min video took ~4 min to make instead of ~2 (coach, 12 Nov). Now only the parts with a layer have it (picture_parts).
+CUTOUT_COST = 1.7  # 3 min test video with Auto zoom on Modal: 27.9 s with the matte on every frame, 16.4 s without (12 Nov)
+BUSY_GAP_SECONDS = 10  # layers closer than this share one part: a part of its own costs a new ffmpeg reading the video
+MOST_PARTS = 12
+
+
+def cutout_busy(cutout: dict | None, frames: int) -> list[tuple[int, int]]:
+    """The final video's frames [from, to) where a cutout layer shows (a text behind, a picture or clip), merged."""
+    if not cutout:
+        return []
+    spans = sorted(
+        (max(0, math.floor(float(x["start"]) * FPS) - 1), min(frames, math.ceil(float(x["end"]) * FPS) + 1))
+        for x in [*(cutout.get("texts") or []), *(cutout.get("inserts") or [])]
+    )
+    busy: list[list[int]] = []
+    for a, b in spans:
+        if b <= a:
+            continue
+        if busy and a <= busy[-1][1]:
+            busy[-1][1] = max(busy[-1][1], b)
+        else:
+            busy.append([a, b])
+    return [(a, b) for a, b in busy]
+
+
+def picture_parts(frames: int, busy: list[tuple[int, int]] | None = None) -> list[tuple[int, int, bool]]:
+    """The final video's frames split into parts [from, to) made side by side, and whether each one has cutout layers.
+    Without layers: nearly equal parts. With them: the parts start and end where the layers do, so the parts without
+    one skip the matte, and the work is shared by how much each frame costs (CUTOUT_COST), not by its length."""
     count = max(1, min(PICTURE_PARTS, frames // (PART_MIN_SECONDS * FPS)))
-    edges = [round(frames * n / count) for n in range(count + 1)]
-    return list(zip(edges, edges[1:]))
+    if not busy:
+        edges = [round(frames * n / count) for n in range(count + 1)]
+        return [(a, b, False) for a, b in zip(edges, edges[1:])]
+    if count == 1:
+        return [(0, frames, True)]
+    gap = BUSY_GAP_SECONDS * FPS
+    while True:
+        # Layers close together are one busy stretch: the frames between them are cheaper made with them than apart.
+        merged: list[list[int]] = []
+        for a, b in busy:
+            if merged and a - merged[-1][1] < gap:
+                merged[-1][1] = b
+            else:
+                merged.append([a, b])
+        runs, at = [], 0
+        for a, b in merged:
+            if a - at >= 1:
+                runs.append((at, a, False))
+            runs.append((a, b, True))
+            at = b
+        if frames - at >= 1:
+            runs.append((at, frames, False))
+        if len(runs) <= MOST_PARTS or gap >= frames:
+            break
+        gap *= 2
+    cost = lambda a, b, on: (b - a) * (CUTOUT_COST if on else 1)
+    # Pieces of about half a CPU's share: the busy runs make them uneven, smaller ones even out on PICTURE_PARTS CPUs.
+    share = sum(cost(*r) for r in runs) / (2 * count)
+    parts = []
+    for a, b, on in runs:
+        n = max(1, min(2 * count, math.ceil(cost(a, b, on) / share - 0.05)))
+        edges = [a + round((b - a) * k / n) for k in range(n + 1)]
+        parts += [(x, y, on) for x, y in zip(edges, edges[1:]) if y > x]
+    return parts
 
 
-def run_parts(cmds: list[list[str]], cwd: Path, frames: list[int], on_part) -> tuple[int, str]:
+def run_parts(cmds: list[list[str]], cwd: Path, frames: list[int], on_part, costs: list[float] | None = None) -> tuple[int, str]:
     """Runs the parts' ffmpegs at the same time, on_part(0-1) for all of them together. Returns the first
     failure's exit code and error text (0, "" when all made it)."""
     done = [0.0] * len(cmds)
@@ -1735,8 +1801,10 @@ def run_parts(cmds: list[list[str]], cwd: Path, frames: list[int], on_part) -> t
 
         return run_counting_frames(cmds[n], cwd, frames[n], seen)
 
-    with ThreadPoolExecutor(max_workers=len(cmds)) as pool:
-        results = list(pool.map(one, range(len(cmds))))
+    # At most PICTURE_PARTS at a time (each holds ~1.9 GB), the costliest first so the last one to start is a short one.
+    order = sorted(range(len(cmds)), key=lambda n: -(costs[n] if costs else frames[n]))
+    with ThreadPoolExecutor(max_workers=min(len(cmds), PICTURE_PARTS)) as pool:
+        results = list(pool.map(one, order))
     return next((r for r in results if r[0] != 0), (0, ""))
 
 
@@ -1796,7 +1864,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             # The sound is polished next to the picture: it only needs the source and the cuts. The picture
             # uses most of the machine but not all of it (8 CPUs made it no faster than 4, measured 11 Nov).
             frames = sum(count for _, _, count in frame_segments(keeps))
-            spans = picture_parts(frames)
+            spans = picture_parts(frames)  # made again below with the cutout layers: the same count, 1 or more
             amount, polish = float(style.get("audioAmount", 1)), bool(style.get("audio", True))
             polishing = None
             if len(spans) > 1:  # the parts have no sound: this makes it, polished or not
@@ -1817,7 +1885,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             cutout = None
             layers = edit.get("cutout") or {}
             if layers.get("texts") or layers.get("inserts"):
-                cutout = {"fontsdir": fonts_dir, "inserts": []}
+                cutout = {"fontsdir": fonts_dir, "inserts": [], "texts": layers.get("texts") or []}
                 if layers.get("texts"):
                     (workdir / "behind.ass").write_text(build_behind(layers["texts"], style.get("format", "9:16")), encoding="utf-8")
                     cutout["behind"] = "behind.ass"
@@ -1851,7 +1919,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 logo = {"path": logo_path, "size": style.get("logoSize", 180), "opacity": style.get("logoOpacity", 1), "at": style.get("logoAt", "top-left")}
 
             report(PROGRESS_READY, force=True)
-            command = lambda path, part=None: ffmpeg_command(
+            command = lambda path, part=None, cut=cutout: ffmpeg_command(
                 src,
                 subs,
                 path,
@@ -1866,14 +1934,22 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 float(style.get("zoomAmount") or ZOOM),
                 float(style.get("zoomPeriod") or SMOOTH_PERIOD),
                 edit.get("zoomParts"),
-                cutout,
+                cut,
                 banner_files,
                 part,
             )
             picture = lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY))
             if len(spans) > 1:
+                # A part without a cutout layer is made without the matte: the same picture there, much faster.
+                spans = picture_parts(frames, cutout_busy(cutout, frames))
                 files = [workdir / f"part-{n}.mp4" for n in range(len(spans))]
-                code, errors = run_parts([command(f, span) for f, span in zip(files, spans)], workdir, [b - a for a, b in spans], picture)
+                code, errors = run_parts(
+                    [command(f, (a, b), cutout if on else None) for f, (a, b, on) in zip(files, spans)],
+                    workdir,
+                    [b - a for a, b, _ in spans],
+                    picture,
+                    [(b - a) * (CUTOUT_COST if on else 1) for a, b, on in spans],
+                )
             else:
                 code, errors = run_counting_frames(command(out), workdir, frames, picture)
             if code != 0:
