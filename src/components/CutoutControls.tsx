@@ -8,6 +8,7 @@ import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-sty
 import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
 import { Confirm, ConfirmDelete } from "./ConfirmDelete";
+import { ClipSound } from "./ClipSound";
 import { LayerTools } from "./LayerTools";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 import { clipLength, hasClearParts } from "@/lib/media-library";
@@ -545,6 +546,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
 							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}
 							{row("Rotate", range(i.picRotate ?? 0, -INSERT.picture.rotate, INSERT.picture.rotate, 1, `${i.picRotate ?? 0}°`, (picRotate) => updateInsert(i.id, { picRotate })))}
+								{i.kind === "video" && row("Sound", <ClipSound volume={i.volume} onChange={(volume) => updateInsert(i.id, { volume })} />)}
 							{times(i, (patch) => updateInsert(i.id, patch))}
 						</div>
 						</div>

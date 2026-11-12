@@ -6,6 +6,7 @@ import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNE
 import type { OwnFont } from "@/lib/font-info";
 import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { ClipSound } from "./ClipSound";
 import { LayerTools } from "./LayerTools";
 import { clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { layerPlace, moveLayer, sameBannerPass } from "@/lib/layers";
@@ -412,6 +413,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						</select>
 						{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 						{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
+						{b.media === "video" && <ClipSound volume={b.volume} onChange={(volume) => update(b.id, { volume })} />}
 					</>}
 					{open === b.id && b.kind !== "file" && <>
 					<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/70">

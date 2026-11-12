@@ -1823,6 +1823,44 @@ def join_parts(parts: list[Path], sound: Path | None, out: Path, frames: int) ->
         raise RuntimeError("the joined video came out at another length")
 
 
+CLIP_SOUND_FADE = 0.25  # CLIP_SOUND.fade in lib/clip-sound.ts
+
+
+def clip_sounds(cutout: dict | None, banner_files: list[dict]) -> list[dict]:
+    """The uploaded clips whose own sound was turned on (volume, lib/clip-sound.ts): Pic/Clip inserts and clip banners."""
+    clips = [i for i in (cutout or {}).get("inserts") or [] if i.get("kind") == "video"]
+    clips += [b for b in banner_files if b.get("media") == "video"]
+    return [c for c in clips if float(c.get("volume") or 0) > 0 and has_audio(c["path"])]
+
+
+def mix_clip_sounds(video: Path, clips: list[dict]) -> None:
+    """Lays each clip's sound under the finished video's own, from when the clip shows until it goes or its sound ends,
+    faded in and out like the preview (clipGain). Only the sound is made again; the picture is copied."""
+    total = duration_of(video)
+    own = has_audio(video)
+    parts = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo[m]" if own else f"anullsrc=r=48000:cl=stereo,atrim=duration={total:.3f}[m]"]
+    for k, c in enumerate(clips):
+        a, b = float(c["start"]), float(c["end"])
+        d, v = b - a, min(1.0, float(c["volume"]))
+        parts.append(
+            f"[{k + 1}:a]atrim=duration={d:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume={v:.2f},"
+            f"afade=t=in:st=0:d={CLIP_SOUND_FADE},afade=t=out:st={max(0.0, d - CLIP_SOUND_FADE):.3f}:d={CLIP_SOUND_FADE},adelay=delays={round(a * 1000)}:all=1[c{k}]"
+        )
+    # normalize=0: each sound keeps its own level (amix would otherwise lower all of them); duration=first: the video's length.
+    parts.append(f"[m]{''.join(f'[c{k}]' for k in range(len(clips)))}amix=inputs={len(clips) + 1}:normalize=0:duration=first:dropout_transition=0[a]")
+    mixed = video.with_name("mixed.mp4")
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video)]
+    for c in clips:
+        cmd += ["-i", str(c["path"])]
+    cmd += ["-filter_complex", ";".join(parts), "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", str(mixed)]
+    result = subprocess.run(cmd, cwd=video.parent, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed mixing the clips' sound: {result.stderr[-600:]}")
+    if abs(duration_of(mixed) - total) > 0.1:
+        raise RuntimeError("the video changed length when the clips' sound was mixed in")
+    mixed.replace(video)
+
+
 def add_sound(video: Path, sound: Path) -> bool:
     """Puts polish_sound's sound on the finished video in place of its plain one. Nothing is encoded again."""
     try:
@@ -1962,6 +2000,9 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             else:
                 polished = polishing.result() if polishing else None
                 sound = add_sound(out, polished) if polished else False
+            clips = clip_sounds(cutout, banner_files)
+            if clips:
+                mix_clip_sounds(out, clips)
             report(PROGRESS_SOUND, force=True)
             put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size, "sound": sound}

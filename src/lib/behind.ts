@@ -6,6 +6,7 @@
 import { FONTS, type FontId } from "./subtitle-style";
 import { FPS, type Segment } from "./timeline";
 import type { Window } from "./cutout";
+import { readVolume } from "./clip-sound";
 
 // How a text arrives. run*: slides across the screen all the time it shows (a news ticker).
 export type BehindFx = "fade" | "burst" | "drop" | "pulse" | "runLeft" | "runRight";
@@ -65,6 +66,7 @@ export type Insert = {
 	seeThrough?: boolean;
 	picMotion?: PicMotion; // pictures only: grows or shrinks slowly while it shows
 	picZoom?: number; // how much bigger it gets in the time it shows: more is a faster zoom. Older videos have none = INSERT.zoom.start
+	volume?: number; // clips only: how loud its own sound is, none = silent (lib/clip-sound.ts). Added 12 Nov
 };
 
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
@@ -272,6 +274,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			seeThrough: i.seeThrough === true && !/\.(mp4|mov)$/.test(i.file),
 			picMotion: i.picMotion === "in" || i.picMotion === "out" ? i.picMotion : "still",
 			picZoom: round(num(i.picZoom, INSERT.zoom.min, INSERT.zoom.max, INSERT.zoom.start)),
+			...(/\.(mp4|mov)$/.test(i.file) && readVolume(i.volume) && { volume: readVolume(i.volume) }),
 		});
 	}
 	return { texts, inserts };
