@@ -646,6 +646,131 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     return base
 
 
+# Frame Me (src/lib/frame-me.ts): the speaker inside a shape over a background, for a stretch of the video.
+FRAME_RATIO = {"circle": 1, "oval": 1.3, "square": 1, "rounded": 1.25, "triangle": 0.9, "star": 1, "heart": 0.9}  # FRAME_SHAPES ratio
+FRAME_ROUND = 0.18  # Rounded: the corners' radius, share of the shorter side (ROUND in frame-me.ts)
+FRAME_SUPERSAMPLE = 4  # the shape is drawn this many times bigger and shrunk: smooth edges
+
+
+def _fit(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    return [((x - x0) / (x1 - x0) - 0.5, (y - y0) / (y1 - y0) - 0.5) for x, y in points]
+
+
+def frame_points(shape: str) -> list[tuple[float, float]]:
+    """The shape's outline as points from -0.5 to 0.5 of its box, y down. Same numbers as framePoints in frame-me.ts."""
+    ring = lambda n, at: [at(2 * math.pi * k / n) for k in range(n)]
+    if shape in ("circle", "oval"):
+        return ring(96, lambda a: (0.5 * math.cos(a), 0.5 * math.sin(a)))
+    if shape == "square":
+        return [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)]
+    if shape == "rounded":
+        r = FRAME_ROUND
+        ry = r / FRAME_RATIO["rounded"]
+        corners = [(0.5 - r, -0.5 + ry, -math.pi / 2), (0.5 - r, 0.5 - ry, 0), (-0.5 + r, 0.5 - ry, math.pi / 2), (-0.5 + r, -0.5 + ry, math.pi)]
+        return [(cx + r * math.cos(a), cy + ry * math.sin(a)) for cx, cy, start in corners for a in (start + k / 8 * math.pi / 2 for k in range(9))]
+    if shape == "triangle":
+        return [(0, -0.5), (0.5, 0.5), (-0.5, 0.5)]
+    if shape == "star":
+        return _fit([((0.25 if k % 2 else 0.5) * math.cos(-math.pi / 2 + k * math.pi / 5), (0.25 if k % 2 else 0.5) * math.sin(-math.pi / 2 + k * math.pi / 5)) for k in range(10)])
+    if shape == "heart":
+        return _fit(ring(120, lambda t: (16 * math.sin(t) ** 3, -(13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)))))
+    return frame_points("circle")
+
+
+def frame_rect(f: dict, size: tuple[int, int]) -> tuple[float, float, float, float]:
+    """The shape's box on the video: left, top, width, height px. Same as frameRect in frame-me.ts."""
+    W, H = size
+    w = float(f["size"]) * W
+    h = w * FRAME_RATIO.get(f.get("shape"), 1)
+    return float(f["x"]) * W - w / 2, float(f["y"]) * H - h / 2, w, h
+
+
+def frame_art(f: dict, size: tuple[int, int], folder: Path, n: int) -> dict:
+    """The shape as a still mask (white inside, the size of the video) and its border as a still picture, drawn
+    with OpenCV at FRAME_SUPERSAMPLE times the size and shrunk, so the edge is as smooth as the preview's SVG.
+    The border is as thick on both sides of the edge, as an SVG stroke is (frameEdge in PlayerFrame.tsx)."""
+    import cv2
+    import numpy as np
+
+    W, H = size
+    S = FRAME_SUPERSAMPLE
+    left, top, w, h = frame_rect(f, size)
+    # Sixteenths of a pixel (shift=4): the shape lands where the preview puts it, not on the nearest pixel.
+    points = np.array([[[round((left + (x + 0.5) * w) * S * 16), round((top + (y + 0.5) * h) * S * 16)] for x, y in frame_points(f.get("shape", "circle"))]], dtype=np.int32)
+    big = np.zeros((H * S, W * S), dtype=np.uint8)
+    cv2.fillPoly(big, points, 255, lineType=cv2.LINE_8, shift=4)
+    mask = folder / f"frame-mask-{n}.png"
+    cv2.imwrite(str(mask), cv2.resize(big, (W, H), interpolation=cv2.INTER_AREA))
+    art = {"mask": mask, "border": None}
+    border = float(f.get("border") or 0)
+    if border > 0:
+        big[:] = 0
+        cv2.polylines(big, points, True, 255, thickness=max(1, round(border * S)), lineType=cv2.LINE_8, shift=4)
+        alpha = cv2.resize(big, (W, H), interpolation=cv2.INTER_AREA)
+        hexa = str(f.get("borderColor") or "#FFFFFF").lstrip("#")
+        r, g, b = (int(hexa[k : k + 2], 16) for k in (0, 2, 4))
+        picture = np.dstack([np.full((H, W), b, np.uint8), np.full((H, W), g, np.uint8), np.full((H, W), r, np.uint8), alpha])
+        art["border"] = folder / f"frame-border-{n}.png"
+        cv2.imwrite(str(art["border"]), picture)
+    return art
+
+
+def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: list[dict], inputs: list[dict]) -> str:
+    """Frame Me: for each frame's time, the picture so far (the speaker and the Cutout layers) is made smaller or bigger
+    (zoom), put with the point (meX, meY) of it in the shape's middle, cut to the shape (the mask from frame_art) and laid
+    on its background: the same picture blurred and darkened, a colour, or a project picture or clip. Then its border.
+    Over the speaker and Cutout, under the banners and subtitles, as the preview draws it (PlayerFrame). Two at once: the
+    later in the list on top. inputs: each frame's FFmpeg inputs {"mask", "border", "file"}. Returns the new label."""
+    W, H = size
+    for j, f in enumerate(frames):
+        a, b = float(f["start"]), float(f["end"])
+        d = b - a
+        src = inputs[j]
+        parts.append(f"{base}split=2[fmm{j}][fms{j}]")
+        parts.append(f"[fms{j}]trim=start={a:.3f}:end={b:.3f},split=2[fmb{j}][fmp{j}]")
+        back = f.get("back")
+        if back == "color":
+            colour = str(f.get("backColor") or "#000000").lstrip("#")
+            parts.append(f"[fmb{j}]drawbox=c=0x{colour}:t=fill[fbg{j}]")
+        elif back == "file" and src.get("file") is not None:
+            # Fills the screen (cover), as the preview's object-fit: cover. A clip or GIF that ends early stays on its last frame.
+            moving = f.get("media") == "video" or str(f.get("file", "")).endswith(".gif")
+            hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
+            parts.append(
+                f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
+                f"format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
+            )
+            parts.append(f"[fmb{j}]drawbox=c=black:t=fill[fbk{j}]")
+            parts.append(f"[fbk{j}][fbf{j}]overlay=eof_action=repeat[fbg{j}]")
+        else:
+            # Blur: gblur's sigma is CSS blur's px (as the Cutout backdrop), black laid over at dim.
+            blur, dim = float(f.get("blur") or 0), float(f.get("dim") or 0)
+            look = ",".join(x for x in (f"gblur=sigma={blur:.0f}" if blur >= 1 else "", f"drawbox=c=black@{dim:.2f}:t=fill" if dim > 0 else "") if x) or "null"
+            parts.append(f"[fmb{j}]{look}[fbg{j}]")
+        parts.append(f"[fbg{j}]split=2[fbu{j}][fbv{j}]")
+        # The picture at zoom, its (meX, meY) on the shape's middle (framePicture in frame-me.ts), on the background:
+        # where it doesn't reach, the background shows inside the shape too, as in the preview.
+        zoom = float(f["zoom"])
+        sw, sh = max(2, round(W * zoom / 2) * 2), max(2, round(H * zoom / 2) * 2)
+        px = float(f["x"]) * W - zoom * float(f["meX"]) * W
+        py = float(f["y"]) * H - zoom * float(f["meY"]) * H
+        parts.append(f"[fmp{j}]scale={sw}:{sh},setsar=1[fpz{j}]")
+        parts.append(f"[fbv{j}][fpz{j}]overlay=x={px:.1f}:y={py:.1f}[fpc{j}]")
+        parts.append(f"[{src['mask']}:v]format=gray,trim=duration={d:.3f},setpts=PTS-STARTPTS+{a:.3f}/TB[fmk{j}]")
+        parts.append(f"[fpc{j}][fmk{j}]alphamerge[fpa{j}]")
+        parts.append(f"[fbu{j}][fpa{j}]overlay[fco{j}]")
+        out = f"[fco{j}]"
+        if src.get("border") is not None:
+            parts.append(f"[{src['border']}:v]format=rgba,trim=duration={d:.3f},setpts=PTS-STARTPTS+{a:.3f}/TB[fbd{j}]")
+            parts.append(f"[fco{j}][fbd{j}]overlay=format=auto[fcb{j}]")
+            out = f"[fcb{j}]"
+        parts.append(f"[fmm{j}]{out}overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[fmo{j}]")
+        base = f"[fmo{j}]"
+    return base
+
+
 def banner_file_size(anim: str, frames_ms: str) -> tuple[float, str]:
     """An uploaded banner's size over time (1 = its Size), as an FFmpeg expression of `frames_ms` (ms since it
     arrived), and the biggest it gets. Same keyframes as BANNER_ANIMS / bannerMotion in banners.ts, and as the
@@ -1432,6 +1557,7 @@ def ffmpeg_command(
     cutout: dict | None = None,
     banner_files: list[dict] | None = None,
     part: tuple[int, int] | None = None,
+    frames: list[dict] | None = None,
 ) -> list[str]:
     """part: only these frames of the final video [from, to), without sound, for picture_parts (made side
     by side, then joined). Every layer goes by the time on the picture, so the part is moved to its place
@@ -1439,8 +1565,11 @@ def ffmpeg_command(
     logo: {"path", "size", "opacity", "at"}: a picture put in a corner under the subtitles.
     no_zoom: parts with Auto zoom turned off (source seconds). zoom_parts: parts with their own kind of zoom.
     cutout: {"behind": subtitles file, "matte": path, "inserts": [{"path", "kind", "start", ...}]} (cutout_filters).
-    banner_files: uploaded banners, each a banner with "path" (banner_file_filters)."""
+    banner_files: uploaded banners, each a banner with "path" (banner_file_filters).
+    frames: Frame Me, each with "art" (frame_art) and, for a picture or clip background, "path" (frame_filters)."""
     banner_files = banner_files or []
+    # A part only reads the frames that show in it: the others' mask and background would be read for nothing.
+    framed = [f for f in frames or [] if not part or (float(f["start"]) * FPS < part[1] and float(f["end"]) * FPS > part[0])]
     aspect = display_aspect(src)
     # The pieces in whole frames of the final video, as the preview has them (StudioPlayer): each piece's
     # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
@@ -1458,6 +1587,18 @@ def ffmpeg_command(
         inputs["inserts"] = list(range(extra, extra + len(cutout.get("inserts") or [])))
         extra += len(cutout.get("inserts") or [])
     inputs["banners"] = list(range(extra, extra + len(banner_files)))
+    extra += len(banner_files)
+    inputs["frames"] = []
+    for f in framed:
+        reads = {"mask": extra, "border": None, "file": None}
+        extra += 1
+        if f["art"].get("border"):
+            reads["border"] = extra
+            extra += 1
+        if f.get("back") == "file" and f.get("path"):
+            reads["file"] = extra
+            extra += 1
+        inputs["frames"].append(reads)
     matte_labels = []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
@@ -1512,6 +1653,8 @@ def ffmpeg_command(
         parts.append(f"{''.join(matte_labels)}concat=n={len(matte_labels)}:v=1:a=0{shift}[cm]")
     if cutout:
         base = cutout_filters(parts, base, size, cutout, inputs)
+    if framed:
+        base = frame_filters(parts, base, size, framed, inputs["frames"])
     if banner_files:
         base = banner_file_filters(parts, base, size, banner_files, inputs["banners"])
     if logo:
@@ -1543,6 +1686,13 @@ def ffmpeg_command(
             cmd += (still if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
     for b in banner_files:
         cmd += banner_file_input(b)
+    still = ["-loop", "1", "-framerate", str(FPS)]
+    for f in framed:
+        cmd += [*still, "-i", str(f["art"]["mask"])]
+        if f["art"].get("border"):
+            cmd += [*still, "-i", str(f["art"]["border"])]
+        if f.get("back") == "file" and f.get("path"):
+            cmd += banner_file_input({"path": f["path"], "file": f.get("file", ""), "media": f.get("media")})
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         # The sound people get when Audio optimization is off or polish_sound failed.
@@ -1967,6 +2117,19 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 urllib.request.urlretrieve(link, path)
                 banner_files.append({**b, "path": path})
 
+            # Frame Me (frame-me.ts): each one's shape and border drawn once, and a link to a picture or clip background.
+            frames = []
+            frame_links = edit.get("frameFiles") or {}
+            for n, f in enumerate(edit.get("frames") or []):
+                f = {**f, "art": frame_art(f, FORMATS.get(style.get("format"), (WIDTH, HEIGHT)), workdir, n)}
+                link = frame_links.get(f.get("file")) if f.get("back") == "file" else None
+                if link:
+                    f["path"] = workdir / f"frame-back-{n}"
+                    urllib.request.urlretrieve(link, f["path"])
+                elif f.get("back") == "file":
+                    f["back"] = "blur"  # its file is gone: the blurred video, rather than no video
+                frames.append(f)
+
             # The user's logo picture, if this look shows it.
             logo = None
             if style.get("logoUrl"):
@@ -1993,6 +2156,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 cut,
                 banner_files,
                 part,
+                frames,
             )
             picture = lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY))
             if len(spans) > 1:
