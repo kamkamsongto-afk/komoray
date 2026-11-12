@@ -127,6 +127,14 @@ export function toOutSeconds(t: number, segments: Segment[]) {
 	return (next ? next.from : totalFrames(segments)) / FPS;
 }
 
+// And back: the moment of the source shown at this second of the final video (the editor only, to move the
+// player to a banner or a picture, which are timed on the final video). Same as toSource in Timeline.tsx.
+export function toSourceSeconds(out: number, segments: Segment[]) {
+	const f = out * FPS;
+	const s = segments.find((seg) => f < seg.from + seg.frames) ?? segments[segments.length - 1];
+	return s ? (s.trim + Math.min(s.frames, Math.max(0, f - s.from))) / FPS : 0;
+}
+
 // Output frame for a moment of the source, or null if that moment was cut.
 function placeFrame(t: number, segments: Segment[]): number | null {
 	const f = t * FPS;

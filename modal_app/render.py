@@ -296,9 +296,10 @@ def banner_pose(b: dict, t: float) -> tuple[float, float, float, float]:
     return min(1.0, fade_in, (end - t) / BANNER["fade"]), scale, slide[0] * left, slide[1] * left
 
 
-def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity) -> list[str]:
+def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity, layer=2) -> list[str]:
     """A banner of several rows that grows as it arrives (Pop, Bounce, Pulse), frame by frame: the box and every row
-    grow around the box's middle, as in the preview. Once it stops growing (Pop, Bounce), one plain event each."""
+    grow around the box's middle, as in the preview. Once it stops growing (Pop, Bounce), one plain event each.
+    layer: its box's ASS layer, its letters one above (banner_events)."""
     start, end = float(b.get("start", 0)), float(b.get("end", 0))
     anim = b.get("anim") or "fade"
     keys = BANNER_ANIMS.get(anim, {}).get("keys")
@@ -315,19 +316,19 @@ def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, mid
             continue
         when = f"{ass_time(f / FPS)},{ass_time((f + 1) / FPS)}"
         if not b.get("noBox"):
-            events.append(f"Dialogue: 2,{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{colour}\\1a{alpha_of(fill_opacity * opacity)}\\pos({centre + dx:.1f},{box_middle + dy:.1f})\\fscx{scale * 100:.2f}\\fscy{scale * 100:.2f}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{colour}\\1a{alpha_of(fill_opacity * opacity)}\\pos({centre + dx:.1f},{box_middle + dy:.1f})\\fscx{scale * 100:.2f}\\fscy{scale * 100:.2f}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look in zip(rows, middles, looks):
             y = box_middle + (middle - box_middle) * scale + dy
             grow = size * scale * 100
-            events.append(f"Dialogue: 3,{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
     if last / FPS < end:
         # Settled: still until the end, then the fade out, as banner_motion does it.
         rest = f"{ass_time(last / FPS)},{ass_time(end)}"
         fade = int(BANNER["fade"] * 1000)
         if not b.get("noBox"):
-            events.append(f"Dialogue: 2,{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look in zip(rows, middles, looks):
-            events.append(f"Dialogue: 3,{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}\\pos({centre:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}\\pos({centre:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
     return events
 
 
@@ -341,6 +342,10 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
     brand = style.get("color", "#FFE600")
     events = []
     width = FORMATS.get(shape, (WIDTH, HEIGHT))[0]
+    # Each banner its own pair of ASS layers, the later in the list on top (Bring forward / Send backward,
+    # lib/layers.ts): with one layer for every box and one for every row of letters, an overlapping banner's
+    # letters showed through the box over them, which the preview never does (12 Nov). From 2: over the subtitles and logo.
+    layer = 2
     for b in banners:
         start, end = float(b.get("start", 0)), float(b.get("end", 0))
         lines = [ass_text(line).strip() for line in str(b.get("text", "")).split("\n")]
@@ -390,15 +395,16 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             looks.append(font or f"{named}\\fs{row_size}")
         anim, seconds = b.get("anim") or "fade", end - start
         grows = anim in ("pop", "bounce", "pulse")
+        layer += 2
         if len(rows) > 1 and grows:
             # Growing as one piece: libass grows each line around its own middle, so the rows would come apart
             # from the box. Here every frame puts them where the box's growth takes them (banner_pose).
-            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1))
+            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2)
             continue
         if not b.get("noBox"):
-            events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look in zip(rows, middles, looks):
-            events.append(f"Dialogue: 3,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
+            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
     return events
 
 
