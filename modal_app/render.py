@@ -743,11 +743,13 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
         d = b - a
         src = inputs[j]
         trim = f"trim=start={a:.3f}:end={b:.3f}"
+        # fmq: the picture without frames, which a frame fades over (the preview fades it over a copy of its picture,
+        # not over an earlier frame still showing: Codex review 12 Nov).
         if plain and j in blurs:
-            parts.append(f"[fms{j}]{trim}[fmp{j}]")
+            parts.append(f"[fms{j}]{trim},split=2[fmp{j}][fmq{j}]")
             parts.append(f"[fpl{j}]{trim}[fmb{j}]")
         else:
-            parts.append(f"[fms{j}]{trim},split=2[fmb{j}][fmp{j}]")
+            parts.append(f"[fms{j}]{trim},split=3[fmb{j}][fmp{j}][fmq{j}]")
         back = f.get("back")
         if back == "color":
             colour = str(f.get("backColor") or "#000000").lstrip("#")
@@ -789,7 +791,8 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
         parts.append(
             f"{out}format=yuva420p,fade=t=in:st={a:.3f}:d={fade_in:.3f}:alpha=1,fade=t=out:st={b - fade_in:.3f}:d={fade_in:.3f}:alpha=1[fcf{j}]"
         )
-        parts.append(f"{base}[fcf{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[fmo{j}]")
+        parts.append(f"[fmq{j}][fcf{j}]overlay[fcx{j}]")
+        parts.append(f"{base}[fcx{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[fmo{j}]")
         base = f"[fmo{j}]"
     return base
 
