@@ -1838,7 +1838,9 @@ def mix_clip_sounds(video: Path, clips: list[dict]) -> None:
     faded in and out like the preview (clipGain). Only the sound is made again; the picture is copied."""
     total = duration_of(video)
     own = has_audio(video)
-    parts = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo[m]" if own else f"anullsrc=r=48000:cl=stereo,atrim=duration={total:.3f}[m]"]
+    # The video's own sound padded with silence to the picture's length: amix stops with it (duration=first), and a sound
+    # that ends early would cut off a clip that still shows (Codex review 12 Nov).
+    parts = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,apad=whole_dur={total:.3f}[m]" if own else f"anullsrc=r=48000:cl=stereo,atrim=duration={total:.3f}[m]"]
     for k, c in enumerate(clips):
         a, b = float(c["start"]), float(c["end"])
         d, v = b - a, min(1.0, float(c["volume"]))
