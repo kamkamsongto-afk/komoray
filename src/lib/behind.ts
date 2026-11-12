@@ -40,7 +40,20 @@ export type BehindText = {
 	speed: BehindSpeed;
 	y: number;
 	lineGap?: number; // extra px between lines, on the 1080-wide video. Older videos have none = 0
+	// Added 12 Nov (coach: Darken / Blur background). While the text shows, everything but the speaker gets darker (dim:
+	// black laid over it at that opacity) and blurrier (blur: px on the 1080-wide video), fading in and out over BEHIND.fade.
+	// None = as before. Same as the backdrop in cutout_filters (render.py).
+	dim?: number;
+	blur?: number;
 };
+
+export const BACKDROP = { dim: { max: 0.8 }, blur: { max: 40 }, darken: { dim: 0.55 }, blurry: { blur: 14, dim: 0.15 } };
+
+// How far a text's backdrop shows at final-video second t: 0..1, fading in and out with BEHIND.fade.
+export function backdropShown(t: BehindText, at: number) {
+	if ((!t.dim && !t.blur) || at < t.start || at >= t.end) return 0;
+	return Math.max(0, Math.min(1, (at - t.start) / BEHIND.fade, (t.end - at) / BEHIND.fade));
+}
 
 // A picture or clip (uploaded next to the video as insert-<id>.<ext>) filling the screen behind the speaker,
 // who becomes smaller (speakerScale, middle at speakerX, feet on the bottom edge) or hidden.
@@ -248,6 +261,8 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			speed: t.speed === "slow" || t.speed === "fast" ? t.speed : "normal",
 			y: round(num(t.y, 0.03, 0.97, BEHIND.y), 1000),
 			lineGap: Math.round(num(t.lineGap, BEHIND.lineGap.min, BEHIND.lineGap.max, 0)),
+			...(num(t.dim, 0, BACKDROP.dim.max, 0) > 0 && { dim: round(num(t.dim, 0, BACKDROP.dim.max, 0), 100) }),
+			...(num(t.blur, 0, BACKDROP.blur.max, 0) >= 1 && { blur: Math.round(num(t.blur, 0, BACKDROP.blur.max, 0)) }),
 		});
 	}
 	const inserts: Insert[] = [];

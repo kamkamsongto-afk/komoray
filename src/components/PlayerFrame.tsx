@@ -4,7 +4,7 @@ import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
-import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
+import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import { clipGain } from "@/lib/clip-sound";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -349,6 +349,14 @@ export function PlayerFrame({
 			: {};
 		return (
 			<>
+				{/* Darken / Blur background while a text shows (BehindText dim, blur), under the text and the speaker. Blur in
+				    screen px (the video's px times scale), as gblur's sigma in cutout_filters is the video's px. */}
+				{layers.texts.map((t) => {
+					const show = backdropShown(t, outTime);
+					if (!show) return null;
+					const blur = t.blur ? `blur(${(t.blur * scale).toFixed(2)}px)` : undefined;
+					return <div key={`backdrop-${t.id}`} className="pointer-events-none absolute inset-0" style={{ zIndex: 1, opacity: show, background: t.dim ? `rgba(0,0,0,${t.dim})` : undefined, backdropFilter: blur, WebkitBackdropFilter: blur }} />;
+				})}
 				<div className="pointer-events-none absolute top-0 left-0" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 1 }}>
 					{layers.texts.flatMap((t) => {
 						const face = FONT_FACES[t.font] ?? FONT_FACES.kanit;

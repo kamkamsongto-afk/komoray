@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, ImagePlus, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Droplets, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { PIC_MOTION, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
+import { BACKDROP, PIC_MOTION, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
@@ -96,7 +96,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const updateInsert = (id: string, patch: Partial<Insert>) => setInserts(layers.inserts.map((i) => (i.id === id ? { ...i, ...patch } : i)));
 	const startAt = () => round(Math.min(now(), Math.max(0, total - 1)));
 
-	function addText() {
+	// look: a template, Darken background or Blur background (coach, 12 Nov). It is a text like any other, with its backdrop set.
+	function addText(look: Partial<BehindText> = {}) {
 		const start = startAt();
 		const text: BehindText = {
 			id: crypto.randomUUID(),
@@ -111,6 +112,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			fx: "burst",
 			speed: "normal",
 			y: BEHIND.y,
+			...look,
 		};
 		setOpen(text.id);
 		setTexts([...layers.texts, text]); // on top of the others (lib/layers.ts)
@@ -348,9 +350,23 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			{tab === "motion" && <p className="rounded-lg border border-dashed border-foreground/20 p-3 text-center text-xs text-foreground/60">Motion templates are coming soon.</p>}
 
 			{tab === "text" && (
-				<button onClick={addText} disabled={layers.texts.length >= BEHIND.maxItems} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
-					<Plus className="h-3.5 w-3.5" aria-hidden /> Add text
-				</button>
+				<>
+					<button onClick={() => addText()} disabled={layers.texts.length >= BEHIND.maxItems} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
+						<Plus className="h-3.5 w-3.5" aria-hidden /> Add text
+					</button>
+					<span className="grid grid-cols-2 gap-1">
+						{(
+							[
+								["Darken background", Moon, BACKDROP.darken],
+								["Blur background", Droplets, BACKDROP.blurry],
+							] as const
+						).map(([name, Icon, look]) => (
+							<button key={name} onClick={() => addText(look)} disabled={layers.texts.length >= BEHIND.maxItems} className="inline-flex items-center justify-center gap-1 rounded-md border border-foreground/20 px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-40">
+								<Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /> {name}
+							</button>
+						))}
+					</span>
+				</>
 			)}
 			{tab === "inserts" && (
 				<>
@@ -442,6 +458,12 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}
 							{row("Height", range(Math.round((1 - t.y) * 100), 3, 97, 1, `${Math.round((1 - t.y) * 100)}%`, (up) => updateText(t.id, { y: Math.round((1 - up / 100) * 1000) / 1000 })))}
 							{times(t, (patch) => updateText(t.id, patch))}
+						</div>
+						{/* Everything but you, while this text shows (BehindText dim / blur). */}
+						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+							<span className="text-xs font-medium text-foreground/80">Background</span>
+							{row("Darken", range(t.dim ?? 0, 0, BACKDROP.dim.max, 0.05, `${Math.round((t.dim ?? 0) * 100)}%`, (dim) => updateText(t.id, { dim: dim || undefined })))}
+							{row("Blur", range(t.blur ?? 0, 0, BACKDROP.blur.max, 1, `${t.blur ?? 0}px`, (blur) => updateText(t.id, { blur: blur || undefined })))}
 						</div>
 				</div>
 			))}

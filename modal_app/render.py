@@ -562,6 +562,22 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     if person:
         parts.append(f"{base}split=2[cbg][cpic]")
         base = "[cbg]"
+    # Darken / Blur background while a text shows (dim, blur in behind.ts): the picture under the speaker blurred (gblur's
+    # sigma is CSS blur's px) with black laid over at dim, only for the text's time, fading in and out like backdropShown.
+    for j, t in enumerate(cutout.get("texts") or []):
+        dim, blur = float(t.get("dim") or 0), float(t.get("blur") or 0)
+        if dim <= 0 and blur < 1:
+            continue
+        a, b = float(t["start"]), float(t["end"])
+        fade = BEHIND["fade"]
+        parts.append(f"{base}split=2[cdm{j}][cdi{j}]")
+        parts.append(
+            f"[cdi{j}]trim=start={a:.3f}:end={b:.3f},{f'gblur=sigma={blur:.0f},' if blur >= 1 else ''}"
+            f"{f'drawbox=c=black@{dim:.2f}:t=fill,' if dim > 0 else ''}format=yuva420p,"
+            f"fade=t=in:st={a:.3f}:d={fade}:alpha=1,fade=t=out:st={max(a, b - fade):.3f}:d={fade}:alpha=1[cdk{j}]"
+        )
+        parts.append(f"[cdm{j}][cdk{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[cdo{j}]")
+        base = f"[cdo{j}]"
     if cutout.get("behind"):
         parts.append(f"{base}ass={cutout['behind']}:shaping=complex{f':fontsdir={cutout['fontsdir']}' if cutout.get('fontsdir') else ''}[cbt]")
         base = "[cbt]"
