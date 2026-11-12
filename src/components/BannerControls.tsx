@@ -6,7 +6,10 @@ import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNE
 import type { OwnFont } from "@/lib/font-info";
 import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { ClipSound } from "./ClipSound";
+import { LayerTools } from "./LayerTools";
 import { clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { layerPlace, moveLayer, sameBannerPass } from "@/lib/layers";
 
 type Props = {
 	banners: Banner[];
@@ -18,6 +21,7 @@ type Props = {
 	format: Format; // the video's shape: where a banner sits before it is dragged
 	videoKey?: string; // the video, for uploading a banner of your own next to it
 	onUseFile?: (item: LibraryItem) => void; // a picture or clip uploaded before (Import's list): a banner again
+	onReveal?: (id: string, start: number) => void; // show it: the blue line to its start, its strip picked on the timeline
 };
 
 // One tab per kind, with a light blue frame on the open one, as in the Cutout box (coach, 11 Nov).
@@ -32,7 +36,7 @@ const round = (n: number) => Math.round(n * 10) / 10;
 
 // The editor's Banners box: add a price tag, a call to action or "follow me" at the spot the
 // preview is at, then change its words, place and when it shows.
-export function BannerControls({ banners, onChange, now, total, brand, focus, format, videoKey, onUseFile }: Props) {
+export function BannerControls({ banners, onChange, now, total, brand, focus, format, videoKey, onUseFile, onReveal }: Props) {
 	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
 	const [open, setOpen] = useState<string | null>(focus);
 	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "price"));
@@ -44,7 +48,20 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		const kind = banners.find((b) => b.id === focus)?.kind;
 		if (kind) setTab(tabOf(kind));
 	}
-	const shown = banners.filter((b) => tabOf(b.kind) === tab);
+	// In time order here; the list itself is in layer order (the last one on top, lib/layers.ts).
+	const shown = banners.filter((b) => tabOf(b.kind) === tab).sort((a, b) => a.start - b.start);
+	// A new banner goes on top of the others, and its strip shows on the timeline.
+	const addBanner = (banner: Banner) => {
+		setOpen(banner.id);
+		onChange([...banners, banner]);
+		onReveal?.(banner.id, banner.start);
+	};
+	function moveHere(b: Banner) {
+		const seconds = b.end - b.start;
+		const start = round(Math.max(0, Math.min(now(), total - seconds)));
+		update(b.id, { start, end: round(Math.min(total, start + seconds)) });
+		onReveal?.(b.id, start);
+	}
 	// The banner waiting for "yes, delete it" (coach, 11 Nov: the × is small and easy to hit).
 	const [removing, setRemoving] = useState<Banner | null>(null);
 
@@ -98,9 +115,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		// A clip shows for as long as it plays; a picture for a few seconds, as a word banner.
 		const seconds = Math.max(0.5, Math.min(clip ?? BANNER.seconds, total - start));
 		const name = cleanBannerText(file.name.replace(/\.[^.]+$/, "")) || BANNER_KINDS.file.text;
-		const banner: Banner = { id: crypto.randomUUID(), kind: "file", text: name, sub: "", start, end: round(start + seconds), place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: data.file, media: data.media };
-		setOpen(banner.id);
-		onChange([...banners, banner].sort((a, b) => a.start - b.start));
+		addBanner({ id: crypto.randomUUID(), kind: "file", text: name, sub: "", start, end: round(start + seconds), place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: data.file, media: data.media });
 	}
 	// Pictures and clips this project already has (api/library), shown on the Upload tab: so nobody uploads the same file
 	// again because they didn't know about Import (coach, 11 Nov). Loaded again after each upload here.
@@ -151,23 +166,17 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	function duplicate(b: Banner) {
 		const seconds = b.end - b.start;
 		const start = round(b.end + seconds <= total ? b.end : Math.min(now(), Math.max(0, total - seconds)));
-		const id = crypto.randomUUID();
-		setOpen(id);
-		onChange([...banners, { ...b, id, start, end: round(Math.min(total, start + seconds)) }].sort((a, c) => a.start - c.start));
+		addBanner({ ...b, id: crypto.randomUUID(), start, end: round(Math.min(total, start + seconds)) });
 	}
 	function addTemplate(t: Banner) {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
-		const id = crypto.randomUUID();
-		setOpen(id);
-		onChange([...banners, { ...t, id, start, end: round(Math.min(total, start + t.end)) }].sort((a, b) => a.start - b.start));
+		addBanner({ ...t, id: crypto.randomUUID(), start, end: round(Math.min(total, start + t.end)) });
 	}
 
 	function add(kind: Exclude<BannerKind, "file">) {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const preset = BANNER_KINDS[kind];
-		const banner: Banner = { id: crypto.randomUUID(), kind, text: preset.text, sub: preset.sub, start, end: round(Math.min(total, start + BANNER.seconds)), place: "top" };
-		setOpen(banner.id);
-		onChange([...banners, banner].sort((a, b) => a.start - b.start));
+		addBanner({ id: crypto.randomUUID(), kind, text: preset.text, sub: preset.sub, start, end: round(Math.min(total, start + BANNER.seconds)), place: "top" });
 	}
 
 	const swatches = (b: Banner, label: string, key: "color" | "ink", value: string) => (
@@ -370,6 +379,14 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 							<X className="h-3 w-3 shrink-0" aria-hidden />
 						</button>
 					</div>
+					{open === b.id && (
+						<LayerTools
+							onMoveHere={() => moveHere(b)}
+							onUp={() => onChange(moveLayer(banners, b.id, true, sameBannerPass))}
+							onDown={() => onChange(moveLayer(banners, b.id, false, sameBannerPass))}
+							place={layerPlace(banners, b.id, sameBannerPass)}
+						/>
+					)}
 					{open === b.id && b.kind === "price" && (
 						<input
 							value={b.sub}
@@ -396,6 +413,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						</select>
 						{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 						{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
+						{b.media === "video" && <ClipSound volume={b.volume} onChange={(volume) => update(b.id, { volume })} />}
 					</>}
 					{open === b.id && b.kind !== "file" && <>
 					<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/70">

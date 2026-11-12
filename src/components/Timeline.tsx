@@ -46,6 +46,7 @@ type Props = {
 	cutoutLayers: CutoutLayers; // text behind the speaker, pictures or clips: their own rows under the banners
 	onCutoutChange: (layers: CutoutLayers) => void;
 	onOpenCutout: (id: string) => void;
+	revealed: { id: string; n: number } | null; // picked in a box: pick its strip here and scroll to it (n: each ask)
 	splits: number[]; // where Split divided the sound and the words, seconds of the original video
 	onSplitsChange: (splits: number[]) => void;
 };
@@ -153,6 +154,7 @@ export function Timeline({
 	cutoutLayers,
 	onCutoutChange,
 	onOpenCutout,
+	revealed,
 	splits,
 	onSplitsChange,
 }: Props) {
@@ -243,6 +245,12 @@ export function Timeline({
 	const laneHeight = laneRows * LANE_ROW + (laneRows ? 2 : 0);
 	// The strip clicked on the timeline: highlighted, and Delete removes it (coach, 6 Nov: no trip back to the box's ×).
 	const [pickedItem, setPickedItem] = useState<string | null>(null);
+	// Picked in the Banners or Cutout box: picked here too (set while drawing, as the boxes do with focus).
+	const [seenReveal, setSeenReveal] = useState(revealed);
+	if (revealed !== seenReveal) {
+		setSeenReveal(revealed);
+		if (revealed) setPickedItem(revealed.id);
+	}
 	// patch null: remove it.
 	const changeItem = useCallback(
 		(item: LaneItem, patch: { start?: number; end?: number } | null) => {
@@ -516,6 +524,18 @@ export function Timeline({
 		frame = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(frame);
 	}, [xOf, showCuts, segments, playing, timeRef]);
+
+	// A strip picked in a box: scrolled into view when it is off the screen (only once per ask, so the timeline
+	// can be scrolled away again).
+	const revealAsk = revealed?.n;
+	useEffect(() => {
+		const el = scrollRef.current;
+		const item = lane.find((l) => l.item.id === revealed?.id)?.item;
+		if (!el || !item) return;
+		const x = xOf(toSource(item.start));
+		if (x < el.scrollLeft || x > el.scrollLeft + el.clientWidth - 40) el.scrollLeft = Math.max(0, x - 40);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- only a new ask scrolls, not every change of the lane
+	}, [revealAsk]);
 
 	// Pressing on the ruler moves the playhead (drag to scrub). Anywhere else: a click moves the
 	// playhead (or, in a red cut, picks that cut), a drag picks a stretch, and an edge of the picked

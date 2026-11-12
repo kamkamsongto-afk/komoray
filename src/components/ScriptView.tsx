@@ -10,7 +10,7 @@ import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, groupTakes, type TakeGroup } from "@/lib/takes";
-import { FPS, keepSegments, subtitleLines, toOutSeconds, totalFrames } from "@/lib/timeline";
+import { FPS, keepSegments, subtitleLines, toOutSeconds, toSourceSeconds, totalFrames } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
 import { studioSupported } from "@/lib/player/engine";
 import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
@@ -319,6 +319,13 @@ export function ScriptView({
 	);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);
+	// A banner, picture or text picked in a box (or just added): the blue line goes to its start, and the
+	// timeline picks its strip and scrolls to it (coach, 12 Nov). n: a new ask each time, also for the same one.
+	const [revealed, setRevealed] = useState<{ id: string; n: number } | null>(null);
+	const reveal = (id: string, start: number) => {
+		jump(toSourceSeconds(start, segments));
+		setRevealed((s) => ({ id, n: (s?.n ?? 0) + 1 }));
+	};
 	// Import: a project file put on the video where it is now, then its box opens on it to place it.
 	const putAsBanner = (item: LibraryItem) => {
 		if (banners.length >= BANNER.maxBanners) return;
@@ -326,9 +333,10 @@ export function ScriptView({
 		const start = Math.round(Math.min(toOutSeconds(timeRef.current, segments), Math.max(0, total - 1)) * 10) / 10;
 		const end = Math.round(Math.min(total, start + Math.max(0.5, item.seconds ?? BANNER.seconds)) * 10) / 10;
 		const banner: Banner = { id: crypto.randomUUID(), kind: "file", text: item.name, sub: "", start, end, place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: item.file, media: item.media };
-		onBannersChange([...banners, banner].sort((a, b) => a.start - b.start));
+		onBannersChange([...banners, banner]); // on top of the others (lib/layers.ts)
 		setFocusBanner(banner.id);
 		openPanel("banners");
+		reveal(banner.id, start);
 	};
 	const putInPicClip = (item: LibraryItem) => {
 		const total = totalFrames(segments) / FPS;
@@ -336,9 +344,10 @@ export function ScriptView({
 		const end = Math.round(Math.min(total, start + Math.max(0.5, item.seconds ?? 3)) * 100) / 100;
 		const clear = Boolean(item.clear);
 		const insert: Insert = { id: crypto.randomUUID(), kind: item.media, file: item.file, start, end, speakerScale: clear ? 1 : INSERT.scale.start, speakerX: clear ? 0.5 : 0.25, hidden: false, seeThrough: clear, name: cleanInsertName(item.name) || undefined };
-		onCutoutChange({ ...cutoutLayers, inserts: [...cutoutLayers.inserts, insert].sort((a, b) => a.start - b.start) });
+		onCutoutChange({ ...cutoutLayers, inserts: [...cutoutLayers.inserts, insert] });
 		setFocusCutout(insert.id);
 		openPanel("cutout");
+		reveal(insert.id, start);
 	};
 	// Project files in Pic/Clip have a link at once (the Cutout check signs them only after the next save).
 	const cutoutFiles = useMemo(
@@ -985,6 +994,7 @@ export function ScriptView({
 							videoUrl={studio?.videoUrl ?? null}
 							thai={thaiClip}
 							focus={focusCutout}
+							onReveal={reveal}
 						/>
 					)}
 					{panel === "import" && (
@@ -1004,6 +1014,7 @@ export function ScriptView({
 							focus={focusBanner}
 							format={subtitle.format}
 							onUseFile={putAsBanner}
+							onReveal={reveal}
 						/>
 					)}
 						</div>
@@ -1269,6 +1280,7 @@ export function ScriptView({
 					}}
 					cutoutLayers={cutoutLayers}
 					onCutoutChange={onCutoutChange}
+					revealed={revealed}
 					splits={subtitle.splits ?? []}
 					onSplitsChange={(splits) => onSubtitleChange({ ...subtitle, splits })}
 					onOpenCutout={(id) => {

@@ -296,9 +296,10 @@ def banner_pose(b: dict, t: float) -> tuple[float, float, float, float]:
     return min(1.0, fade_in, (end - t) / BANNER["fade"]), scale, slide[0] * left, slide[1] * left
 
 
-def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity) -> list[str]:
+def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity, layer=2) -> list[str]:
     """A banner of several rows that grows as it arrives (Pop, Bounce, Pulse), frame by frame: the box and every row
-    grow around the box's middle, as in the preview. Once it stops growing (Pop, Bounce), one plain event each."""
+    grow around the box's middle, as in the preview. Once it stops growing (Pop, Bounce), one plain event each.
+    layer: its box's ASS layer, its letters one above (banner_events)."""
     start, end = float(b.get("start", 0)), float(b.get("end", 0))
     anim = b.get("anim") or "fade"
     keys = BANNER_ANIMS.get(anim, {}).get("keys")
@@ -315,19 +316,19 @@ def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, mid
             continue
         when = f"{ass_time(f / FPS)},{ass_time((f + 1) / FPS)}"
         if not b.get("noBox"):
-            events.append(f"Dialogue: 2,{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{colour}\\1a{alpha_of(fill_opacity * opacity)}\\pos({centre + dx:.1f},{box_middle + dy:.1f})\\fscx{scale * 100:.2f}\\fscy{scale * 100:.2f}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{colour}\\1a{alpha_of(fill_opacity * opacity)}\\pos({centre + dx:.1f},{box_middle + dy:.1f})\\fscx{scale * 100:.2f}\\fscy{scale * 100:.2f}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look in zip(rows, middles, looks):
             y = box_middle + (middle - box_middle) * scale + dy
             grow = size * scale * 100
-            events.append(f"Dialogue: 3,{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
     if last / FPS < end:
         # Settled: still until the end, then the fade out, as banner_motion does it.
         rest = f"{ass_time(last / FPS)},{ass_time(end)}"
         fade = int(BANNER["fade"] * 1000)
         if not b.get("noBox"):
-            events.append(f"Dialogue: 2,{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look in zip(rows, middles, looks):
-            events.append(f"Dialogue: 3,{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}\\pos({centre:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}\\pos({centre:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
     return events
 
 
@@ -341,6 +342,11 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
     brand = style.get("color", "#FFE600")
     events = []
     width = FORMATS.get(shape, (WIDTH, HEIGHT))[0]
+    # Each banner its own pair of ASS layers, the later in the list on top (Bring forward / Send backward,
+    # lib/layers.ts): with one layer for every box and one for every row of letters, an overlapping banner's
+    # letters showed through the box over them, which the preview never does (12 Nov). From 3: over the logo (1) and
+    # every subtitle, a bouncing word included (up to 2 with a box, bounce_events; Codex review 12 Nov).
+    layer = 3
     for b in banners:
         start, end = float(b.get("start", 0)), float(b.get("end", 0))
         lines = [ass_text(line).strip() for line in str(b.get("text", "")).split("\n")]
@@ -390,15 +396,16 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             looks.append(font or f"{named}\\fs{row_size}")
         anim, seconds = b.get("anim") or "fade", end - start
         grows = anim in ("pop", "bounce", "pulse")
+        layer += 2
         if len(rows) > 1 and grows:
             # Growing as one piece: libass grows each line around its own middle, so the rows would come apart
             # from the box. Here every frame puts them where the box's growth takes them (banner_pose).
-            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1))
+            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2)
             continue
         if not b.get("noBox"):
-            events.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look in zip(rows, middles, looks):
-            events.append(f"Dialogue: 3,{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
+            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
     return events
 
 
@@ -549,9 +556,28 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     inserts = cutout.get("inserts") or []
     person = "matte" in inputs
     smalls = [i for i in inserts if not i.get("hidden")] if person else []
+    # Two pictures at once: the speaker goes by the one on top, the later in the list (Bring forward, lib/layers.ts),
+    # as the preview does (PlayerFrame). So a smaller speaker is only drawn while no later picture shows, hidden or not.
+    later = {id(ins): "+".join(f"between(t,{float(k['start']):.3f},{float(k['end']):.3f})" for k in inserts[n + 1 :]) for n, ins in enumerate(inserts)}
     if person:
         parts.append(f"{base}split=2[cbg][cpic]")
         base = "[cbg]"
+    # Darken / Blur background while a text shows (dim, blur in behind.ts): the picture under the speaker blurred (gblur's
+    # sigma is CSS blur's px) with black laid over at dim, only for the text's time, fading in and out like backdropShown.
+    for j, t in enumerate(cutout.get("texts") or []):
+        dim, blur = float(t.get("dim") or 0), float(t.get("blur") or 0)
+        if dim <= 0 and blur < 1:
+            continue
+        a, b = float(t["start"]), float(t["end"])
+        fade = BEHIND["fade"]
+        parts.append(f"{base}split=2[cdm{j}][cdi{j}]")
+        parts.append(
+            f"[cdi{j}]trim=start={a:.3f}:end={b:.3f},{f'gblur=sigma={blur:.0f},' if blur >= 1 else ''}"
+            f"{f'drawbox=c=black@{dim:.2f}:t=fill,' if dim > 0 else ''}format=yuva420p,"
+            f"fade=t=in:st={a:.3f}:d={fade}:alpha=1,fade=t=out:st={max(a, b - fade):.3f}:d={fade}:alpha=1[cdk{j}]"
+        )
+        parts.append(f"[cdm{j}][cdk{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[cdo{j}]")
+        base = f"[cdo{j}]"
     if cutout.get("behind"):
         parts.append(f"{base}ass={cutout['behind']}:shaping=complex{f':fontsdir={cutout['fontsdir']}' if cutout.get('fontsdir') else ''}[cbt]")
         base = "[cbt]"
@@ -614,7 +640,8 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
             f"fade=t=out:st={max(a, b - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1[csm{j}]"
         )
         lift = float(ins.get("speakerLift", 0)) * H
-        parts.append(f"{base}[csm{j}]overlay=x={x:.1f}:y=main_h-overlay_h-{lift:.1f}:enable='between(t,{a:.3f},{b:.3f})'[cs{j}]")
+        on_top = f"*not({later[id(ins)]})" if later[id(ins)] else ""
+        parts.append(f"{base}[csm{j}]overlay=x={x:.1f}:y=main_h-overlay_h-{lift:.1f}:enable='between(t,{a:.3f},{b:.3f}){on_top}'[cs{j}]")
         base = f"[cs{j}]"
     return base
 
@@ -1441,12 +1468,16 @@ def ffmpeg_command(
         lo, hi = part
         shots = [(i, max(o, lo), t + max(o, lo) - o, min(o + n, hi) - max(o, lo), lv, rn) for i, o, t, n, lv, rn in shots if o < hi and o + n > lo]
         audio = False
+    # A part jumps to a second before its first frame (-ss on the video and the matte): read from the start, a part
+    # decoded the whole video before it only to throw it away, 16 s of a 3 min video's 1.2 s (12 Nov). Timestamps then
+    # start at `seek`, so every trim is moved back by it; the second's margin keeps the cut away from where it lands.
+    seek = max(0, math.floor(min(t for _, _, t, *_ in shots) / FPS) - 1) if part and shots else 0
     for k, (i, out_frame, trim, frames, level, run) in enumerate(shots):
-        a, b = trim / FPS, (trim + frames) / FPS
+        a, b = trim / FPS - seek, (trim + frames) / FPS - seek
         # Framed on its own (face crop, Auto zoom), so parts can differ before they are joined. The face
         # is found per whole piece, so it doesn't move at a no-zoom edge.
         piece_trim, piece_frames = pieces[i][1], pieces[i][2]
-        focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)
+        focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)  # source seconds, not moved by seek
         if run and run[2] != "cuts":
             framing = smooth_filter(aspect, focus, part_zoom_expr(out_frame, run, zoom_amount), size, zoom_amount)
         elif not run and zoom in ("smooth", "in", "out"):
@@ -1498,12 +1529,13 @@ def ffmpeg_command(
         f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}[outv]"
     )
 
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
+    jump = ["-ss", str(seek)] if seek else []
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *jump, "-i", str(src)]
     if logo:
         cmd += ["-i", str(logo["path"])]
     if cutout:
         if cutout.get("matte"):
-            cmd += ["-i", str(cutout["matte"])]
+            cmd += [*jump, "-i", str(cutout["matte"])]
         for ins in cutout.get("inserts") or []:
             # A picture is one frame: repeated for as long as it shows (trimmed in cutout_filters).
             # A GIF has its own frames: played as its file says. -stream_loop froze it on the first frame (test 11 Nov).
@@ -1705,14 +1737,75 @@ PART_MIN_SECONDS = 15
 PART_THREADS = 2
 
 
-def picture_parts(frames: int) -> list[tuple[int, int]]:
-    """The final video's frames split into nearly equal parts [from, to) made at the same time."""
+# A frame with cutout layers costs about this many plain frames: the matte is read, framed (Auto zoom's perspective)
+# and laid on the picture. The matte was worked on for every frame of the video as soon as one layer was there, so a
+# 5 min video took ~4 min to make instead of ~2 (coach, 12 Nov). Now only the parts with a layer have it (picture_parts).
+CUTOUT_COST = 1.7  # 3 min test video with Auto zoom on Modal: 27.9 s with the matte on every frame, 16.4 s without (12 Nov)
+BUSY_GAP_SECONDS = 10  # layers closer than this share one part: a part of its own costs a new ffmpeg reading the video
+MOST_PARTS = 12
+
+
+def cutout_busy(cutout: dict | None, frames: int) -> list[tuple[int, int]]:
+    """The final video's frames [from, to) where a cutout layer shows (a text behind, a picture or clip), merged."""
+    if not cutout:
+        return []
+    spans = sorted(
+        (max(0, math.floor(float(x["start"]) * FPS) - 1), min(frames, math.ceil(float(x["end"]) * FPS) + 1))
+        for x in [*(cutout.get("texts") or []), *(cutout.get("inserts") or [])]
+    )
+    busy: list[list[int]] = []
+    for a, b in spans:
+        if b <= a:
+            continue
+        if busy and a <= busy[-1][1]:
+            busy[-1][1] = max(busy[-1][1], b)
+        else:
+            busy.append([a, b])
+    return [(a, b) for a, b in busy]
+
+
+def picture_parts(frames: int, busy: list[tuple[int, int]] | None = None) -> list[tuple[int, int, bool]]:
+    """The final video's frames split into parts [from, to) made side by side, and whether each one has cutout layers.
+    Without layers: nearly equal parts. With them: the parts start and end where the layers do, so the parts without
+    one skip the matte, and the work is shared by how much each frame costs (CUTOUT_COST), not by its length."""
     count = max(1, min(PICTURE_PARTS, frames // (PART_MIN_SECONDS * FPS)))
-    edges = [round(frames * n / count) for n in range(count + 1)]
-    return list(zip(edges, edges[1:]))
+    if not busy:
+        edges = [round(frames * n / count) for n in range(count + 1)]
+        return [(a, b, False) for a, b in zip(edges, edges[1:])]
+    if count == 1:
+        return [(0, frames, True)]
+    gap = BUSY_GAP_SECONDS * FPS
+    while True:
+        # Layers close together are one busy stretch: the frames between them are cheaper made with them than apart.
+        merged: list[list[int]] = []
+        for a, b in busy:
+            if merged and a - merged[-1][1] < gap:
+                merged[-1][1] = b
+            else:
+                merged.append([a, b])
+        runs, at = [], 0
+        for a, b in merged:
+            if a - at >= 1:
+                runs.append((at, a, False))
+            runs.append((a, b, True))
+            at = b
+        if frames - at >= 1:
+            runs.append((at, frames, False))
+        if len(runs) <= MOST_PARTS or gap >= frames:
+            break
+        gap *= 2
+    cost = lambda a, b, on: (b - a) * (CUTOUT_COST if on else 1)
+    # Pieces of about half a CPU's share: the busy runs make them uneven, smaller ones even out on PICTURE_PARTS CPUs.
+    share = sum(cost(*r) for r in runs) / (2 * count)
+    parts = []
+    for a, b, on in runs:
+        n = max(1, min(2 * count, math.ceil(cost(a, b, on) / share - 0.05)))
+        edges = [a + round((b - a) * k / n) for k in range(n + 1)]
+        parts += [(x, y, on) for x, y in zip(edges, edges[1:]) if y > x]
+    return parts
 
 
-def run_parts(cmds: list[list[str]], cwd: Path, frames: list[int], on_part) -> tuple[int, str]:
+def run_parts(cmds: list[list[str]], cwd: Path, frames: list[int], on_part, costs: list[float] | None = None) -> tuple[int, str]:
     """Runs the parts' ffmpegs at the same time, on_part(0-1) for all of them together. Returns the first
     failure's exit code and error text (0, "" when all made it)."""
     done = [0.0] * len(cmds)
@@ -1724,8 +1817,10 @@ def run_parts(cmds: list[list[str]], cwd: Path, frames: list[int], on_part) -> t
 
         return run_counting_frames(cmds[n], cwd, frames[n], seen)
 
-    with ThreadPoolExecutor(max_workers=len(cmds)) as pool:
-        results = list(pool.map(one, range(len(cmds))))
+    # At most PICTURE_PARTS at a time (each holds ~1.9 GB), the costliest first so the last one to start is a short one.
+    order = sorted(range(len(cmds)), key=lambda n: -(costs[n] if costs else frames[n]))
+    with ThreadPoolExecutor(max_workers=min(len(cmds), PICTURE_PARTS)) as pool:
+        results = list(pool.map(one, order))
     return next((r for r in results if r[0] != 0), (0, ""))
 
 
@@ -1742,6 +1837,46 @@ def join_parts(parts: list[Path], sound: Path | None, out: Path, frames: int) ->
         raise RuntimeError(f"ffmpeg failed joining the parts: {result.stderr[-600:]}")
     if abs(duration_of(out) - frames / FPS) > 0.1:
         raise RuntimeError("the joined video came out at another length")
+
+
+CLIP_SOUND_FADE = 0.25  # CLIP_SOUND.fade in lib/clip-sound.ts
+
+
+def clip_sounds(cutout: dict | None, banner_files: list[dict]) -> list[dict]:
+    """The uploaded clips whose own sound was turned on (volume, lib/clip-sound.ts): Pic/Clip inserts and clip banners."""
+    clips = [i for i in (cutout or {}).get("inserts") or [] if i.get("kind") == "video"]
+    clips += [b for b in banner_files if b.get("media") == "video"]
+    return [c for c in clips if float(c.get("volume") or 0) > 0 and has_audio(c["path"])]
+
+
+def mix_clip_sounds(video: Path, clips: list[dict]) -> None:
+    """Lays each clip's sound under the finished video's own, from when the clip shows until it goes or its sound ends,
+    faded in and out like the preview (clipGain). Only the sound is made again; the picture is copied."""
+    total = duration_of(video)
+    own = has_audio(video)
+    # The video's own sound padded with silence to the picture's length: amix stops with it (duration=first), and a sound
+    # that ends early would cut off a clip that still shows (Codex review 12 Nov).
+    parts = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,apad=whole_dur={total:.3f}[m]" if own else f"anullsrc=r=48000:cl=stereo,atrim=duration={total:.3f}[m]"]
+    for k, c in enumerate(clips):
+        a, b = float(c["start"]), float(c["end"])
+        d, v = b - a, min(1.0, float(c["volume"]))
+        parts.append(
+            f"[{k + 1}:a]atrim=duration={d:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume={v:.2f},"
+            f"afade=t=in:st=0:d={CLIP_SOUND_FADE},afade=t=out:st={max(0.0, d - CLIP_SOUND_FADE):.3f}:d={CLIP_SOUND_FADE},adelay=delays={round(a * 1000)}:all=1[c{k}]"
+        )
+    # normalize=0: each sound keeps its own level (amix would otherwise lower all of them); duration=first: the video's length.
+    parts.append(f"[m]{''.join(f'[c{k}]' for k in range(len(clips)))}amix=inputs={len(clips) + 1}:normalize=0:duration=first:dropout_transition=0[a]")
+    mixed = video.with_name("mixed.mp4")
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video)]
+    for c in clips:
+        cmd += ["-i", str(c["path"])]
+    cmd += ["-filter_complex", ";".join(parts), "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", str(mixed)]
+    result = subprocess.run(cmd, cwd=video.parent, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed mixing the clips' sound: {result.stderr[-600:]}")
+    if abs(duration_of(mixed) - total) > 0.1:
+        raise RuntimeError("the video changed length when the clips' sound was mixed in")
+    mixed.replace(video)
 
 
 def add_sound(video: Path, sound: Path) -> bool:
@@ -1785,7 +1920,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             # The sound is polished next to the picture: it only needs the source and the cuts. The picture
             # uses most of the machine but not all of it (8 CPUs made it no faster than 4, measured 11 Nov).
             frames = sum(count for _, _, count in frame_segments(keeps))
-            spans = picture_parts(frames)
+            spans = picture_parts(frames)  # made again below with the cutout layers: the same count, 1 or more
             amount, polish = float(style.get("audioAmount", 1)), bool(style.get("audio", True))
             polishing = None
             if len(spans) > 1:  # the parts have no sound: this makes it, polished or not
@@ -1806,7 +1941,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             cutout = None
             layers = edit.get("cutout") or {}
             if layers.get("texts") or layers.get("inserts"):
-                cutout = {"fontsdir": fonts_dir, "inserts": []}
+                cutout = {"fontsdir": fonts_dir, "inserts": [], "texts": layers.get("texts") or []}
                 if layers.get("texts"):
                     (workdir / "behind.ass").write_text(build_behind(layers["texts"], style.get("format", "9:16")), encoding="utf-8")
                     cutout["behind"] = "behind.ass"
@@ -1840,7 +1975,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 logo = {"path": logo_path, "size": style.get("logoSize", 180), "opacity": style.get("logoOpacity", 1), "at": style.get("logoAt", "top-left")}
 
             report(PROGRESS_READY, force=True)
-            command = lambda path, part=None: ffmpeg_command(
+            command = lambda path, part=None, cut=cutout: ffmpeg_command(
                 src,
                 subs,
                 path,
@@ -1855,14 +1990,22 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 float(style.get("zoomAmount") or ZOOM),
                 float(style.get("zoomPeriod") or SMOOTH_PERIOD),
                 edit.get("zoomParts"),
-                cutout,
+                cut,
                 banner_files,
                 part,
             )
             picture = lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY))
             if len(spans) > 1:
+                # A part without a cutout layer is made without the matte: the same picture there, much faster.
+                spans = picture_parts(frames, cutout_busy(cutout, frames))
                 files = [workdir / f"part-{n}.mp4" for n in range(len(spans))]
-                code, errors = run_parts([command(f, span) for f, span in zip(files, spans)], workdir, [b - a for a, b in spans], picture)
+                code, errors = run_parts(
+                    [command(f, (a, b), cutout if on else None) for f, (a, b, on) in zip(files, spans)],
+                    workdir,
+                    [b - a for a, b, _ in spans],
+                    picture,
+                    [(b - a) * (CUTOUT_COST if on else 1) for a, b, on in spans],
+                )
             else:
                 code, errors = run_counting_frames(command(out), workdir, frames, picture)
             if code != 0:
@@ -1875,6 +2018,9 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             else:
                 polished = polishing.result() if polishing else None
                 sound = add_sound(out, polished) if polished else False
+            clips = clip_sounds(cutout, banner_files)
+            if clips:
+                mix_clip_sounds(out, clips)
             report(PROGRESS_SOUND, force=True)
             put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "seconds": round(sum(b - a for a, b in keeps), 2), "bytes": out.stat().st_size, "sound": sound}

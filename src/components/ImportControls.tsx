@@ -4,6 +4,7 @@ import { Film, ImageIcon, Layers, Plus, Tag, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clipLength, hasClearParts, LIBRARY, LIBRARY_ACCEPT, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { ViewSwitch, useListView } from "./ViewSwitch";
 
 type Props = {
 	onUseAsBanner: (item: LibraryItem) => void; // over the speaker, where the video is now
@@ -22,6 +23,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow }: Props
 	const [uploading, setUploading] = useState<string | null>(null); // "2 of 5"
 	const [removing, setRemoving] = useState<LibraryItem | null>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
+	const [view, setView] = useListView("komoray.importView");
 
 	const load = useCallback(
 		() =>
@@ -73,9 +75,12 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow }: Props
 	const full = (items?.length ?? 0) >= LIBRARY.maxItems;
 	return (
 		<div className="flex flex-col gap-2 p-3 pt-1">
-			<button onClick={() => fileRef.current?.click()} disabled={uploading !== null || full} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
-				<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading${uploading ? ` ${uploading}` : ""}…` : "Import pictures or clips"}
-			</button>
+			<span className="flex items-center gap-2">
+				<button onClick={() => fileRef.current?.click()} disabled={uploading !== null || full} className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
+					<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading${uploading ? ` ${uploading}` : ""}…` : "Import pictures or clips"}
+				</button>
+				{items && items.length > 0 && <ViewSwitch view={view} onChange={setView} />}
+			</span>
 			<input
 				ref={fileRef}
 				type="file"
@@ -95,6 +100,51 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow }: Props
 				<p className="text-xs text-foreground/60">
 					Bring in the pictures and clips you use often (JPG, PNG, WebP, GIF up to {LIBRARY.maxBytes.image / 1_000_000} MB, MP4 up to {LIBRARY.maxBytes.video / 1_000_000} MB). They stay in this project: use each one as a banner or in Pic/Clip as often as you like.
 				</p>
+			) : view === "list" ? (
+				<ul className="flex flex-col gap-1">
+					{items.map((item) => {
+						const used = usedNow.has(item.file) || item.used;
+						return (
+							<li key={item.file} className="flex items-center gap-2 rounded-md border border-foreground/15 bg-foreground/5 p-1 text-xs">
+								<span className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-black/60">
+									{item.media === "video" ? (
+										<video src={`${projectFileSrc(item.file)}#t=0.5`} muted playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" />
+									) : (
+										// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+										<img src={projectFileSrc(item.file)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+									)}
+								</span>
+								<span className="flex min-w-0 flex-1 flex-col">
+									<span className="truncate" title={item.name}>
+										{item.name}
+									</span>
+									<span className="flex items-center gap-1 text-[10px] text-foreground/50">
+										{item.media === "video" ? <Film className="h-3 w-3" aria-hidden /> : <ImageIcon className="h-3 w-3" aria-hidden />}
+										{item.media === "video" && item.seconds ? `${Math.round(item.seconds)}s` : size(item.size)}
+										{used && <span className="rounded bg-green-600 px-1 text-white">On the video</span>}
+									</span>
+								</span>
+								<button onClick={() => onUseAsBanner(item)} title="Put it over you as a banner, where the video is now" aria-label={`Use ${item.name} as a banner`} className="rounded border border-foreground/20 p-1 hover:bg-foreground/5">
+									<Tag className="h-3 w-3" aria-hidden />
+								</button>
+								{onUseInPicClip && (
+									<button onClick={() => onUseInPicClip(item)} title="Put it behind you (Cutout → Pic/Clip), where the video is now" aria-label={`Use ${item.name} in Pic/Clip`} className="rounded border border-foreground/20 p-1 hover:bg-foreground/5">
+										<Layers className="h-3 w-3" aria-hidden />
+									</button>
+								)}
+								<button
+									onClick={() => setRemoving(item)}
+									disabled={used}
+									title={used ? "It is on your video: delete it from Banners or Pic/Clip first" : "Delete from this project"}
+									aria-label={`Delete ${item.name}`}
+									className="rounded p-1 text-foreground/50 hover:bg-red-500/10 hover:text-red-600 disabled:opacity-30"
+								>
+									<Trash2 className="h-3 w-3" aria-hidden />
+								</button>
+							</li>
+						);
+					})}
+				</ul>
 			) : (
 				<ul className="grid grid-cols-2 gap-2">
 					{items.map((item) => {

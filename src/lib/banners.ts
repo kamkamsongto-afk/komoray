@@ -5,6 +5,7 @@
 import type { OwnFont } from "./font-info";
 import { projectFileSrc } from "./media-library";
 import { type FontId, type Format, readFont } from "./subtitle-style";
+import { readVolume } from "./clip-sound";
 
 // file: the customer's own finished banner, a picture or clip uploaded next to the video (12 Nov).
 export type BannerKind = "price" | "cta" | "follow" | "file";
@@ -38,6 +39,7 @@ export type Banner = {
 	// Always placed by x / y; scale 1 = BANNER_FILE.width of the video's width.
 	file?: string;
 	media?: "image" | "video";
+	volume?: number; // media "video": how loud its own sound is, none = silent (lib/clip-sound.ts). Added 12 Nov
 };
 
 // How a banner arrives. Same keyframes as BANNER_ANIMS in render.py, which writes them as ASS tags.
@@ -185,6 +187,7 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(!file && Number.isFinite(gap) && gap !== 0 && { lineGap: Math.round(Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, gap))) }),
 			// An uploaded banner always sits where it was put (at first: the middle, near the top).
 			...(file && { file, media: file.endsWith(".mp4") ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),
+			...(file?.endsWith(".mp4") && readVolume(raw.volume) && { volume: readVolume(raw.volume) }),
 		});
 	}
 	return out;

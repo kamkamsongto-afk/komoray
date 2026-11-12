@@ -6,6 +6,7 @@
 import { FONTS, type FontId } from "./subtitle-style";
 import { FPS, type Segment } from "./timeline";
 import type { Window } from "./cutout";
+import { readVolume } from "./clip-sound";
 
 // How a text arrives. run*: slides across the screen all the time it shows (a news ticker).
 export type BehindFx = "fade" | "burst" | "drop" | "pulse" | "runLeft" | "runRight";
@@ -39,7 +40,20 @@ export type BehindText = {
 	speed: BehindSpeed;
 	y: number;
 	lineGap?: number; // extra px between lines, on the 1080-wide video. Older videos have none = 0
+	// Added 12 Nov (coach: Darken / Blur background). While the text shows, everything but the speaker gets darker (dim:
+	// black laid over it at that opacity) and blurrier (blur: px on the 1080-wide video), fading in and out over BEHIND.fade.
+	// None = as before. Same as the backdrop in cutout_filters (render.py).
+	dim?: number;
+	blur?: number;
 };
+
+export const BACKDROP = { dim: { max: 0.8 }, blur: { max: 40 }, darken: { dim: 0.55 }, blurry: { blur: 14, dim: 0.15 } };
+
+// How far a text's backdrop shows at final-video second t: 0..1, fading in and out with BEHIND.fade.
+export function backdropShown(t: BehindText, at: number) {
+	if ((!t.dim && !t.blur) || at < t.start || at >= t.end) return 0;
+	return Math.max(0, Math.min(1, (at - t.start) / BEHIND.fade, (t.end - at) / BEHIND.fade));
+}
 
 // A picture or clip (uploaded next to the video as insert-<id>.<ext>) filling the screen behind the speaker,
 // who becomes smaller (speakerScale, middle at speakerX, feet on the bottom edge) or hidden.
@@ -65,6 +79,7 @@ export type Insert = {
 	seeThrough?: boolean;
 	picMotion?: PicMotion; // pictures only: grows or shrinks slowly while it shows
 	picZoom?: number; // how much bigger it gets in the time it shows: more is a faster zoom. Older videos have none = INSERT.zoom.start
+	volume?: number; // clips only: how loud its own sound is, none = silent (lib/clip-sound.ts). Added 12 Nov
 };
 
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
@@ -246,6 +261,8 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			speed: t.speed === "slow" || t.speed === "fast" ? t.speed : "normal",
 			y: round(num(t.y, 0.03, 0.97, BEHIND.y), 1000),
 			lineGap: Math.round(num(t.lineGap, BEHIND.lineGap.min, BEHIND.lineGap.max, 0)),
+			...(num(t.dim, 0, BACKDROP.dim.max, 0) > 0 && { dim: round(num(t.dim, 0, BACKDROP.dim.max, 0), 100) }),
+			...(num(t.blur, 0, BACKDROP.blur.max, 0) >= 1 && { blur: Math.round(num(t.blur, 0, BACKDROP.blur.max, 0)) }),
 		});
 	}
 	const inserts: Insert[] = [];
@@ -272,6 +289,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			seeThrough: i.seeThrough === true && !/\.(mp4|mov)$/.test(i.file),
 			picMotion: i.picMotion === "in" || i.picMotion === "out" ? i.picMotion : "still",
 			picZoom: round(num(i.picZoom, INSERT.zoom.min, INSERT.zoom.max, INSERT.zoom.start)),
+			...(/\.(mp4|mov)$/.test(i.file) && readVolume(i.volume) && { volume: readVolume(i.volume) }),
 		});
 	}
 	return { texts, inserts };

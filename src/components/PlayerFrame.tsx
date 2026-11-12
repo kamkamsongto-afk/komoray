@@ -4,7 +4,8 @@ import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
-import { behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
+import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
+import { clipGain } from "@/lib/clip-sound";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -140,16 +141,25 @@ type Props = {
 };
 
 // An inserted clip, kept at the final video's time: it plays with the preview, and jumps when it is far off.
-function InsertClip({ src, at, playing, style, onRatio }: { src: string; at: number; playing: boolean; style: CSSProperties; onRatio: (ratio: number) => void }) {
+// volume / length: its own sound, faded at the edges of the time it shows (clipGain, same as mix_clip_sounds in render.py).
+function InsertClip({ src, at, playing, style, onRatio, volume, length }: { src: string; at: number; playing: boolean; style: CSSProperties; onRatio: (ratio: number) => void; volume?: number; length: number }) {
 	const ref = useRef<HTMLVideoElement>(null);
 	useEffect(() => {
 		const video = ref.current;
 		if (!video) return;
 		const want = Math.min(at, Math.max(0, (video.duration || at + 1) - 0.05)); // past its end: its last picture
 		if (Math.abs(video.currentTime - want) > 0.25) video.currentTime = want;
-		if (playing && want < (video.duration || Infinity) - 0.05) void video.play().catch(() => {});
+		const gain = clipGain(volume, at, length);
+		video.muted = gain <= 0;
+		video.volume = Math.min(1, gain); // iPhone and iPad ignore this: there a clip with sound plays at full volume
+		if (playing && want < (video.duration || Infinity) - 0.05)
+			void video.play().catch(() => {
+				// A browser that won't play sound without a tap: the picture still plays, silent.
+				video.muted = true;
+				void video.play().catch(() => {});
+			});
 		else video.pause();
-	}, [at, playing]);
+	}, [at, playing, volume, length]);
 	return <video ref={ref} src={src} muted playsInline preload="auto" style={style} onLoadedMetadata={(e) => e.currentTarget.videoHeight && onRatio(e.currentTarget.videoWidth / e.currentTarget.videoHeight)} />;
 }
 
@@ -322,7 +332,9 @@ export function PlayerFrame({
 	// over the whole picture), then the cut-out speaker: full size over the text, or smaller in front of an
 	// insert (or hidden). Same order and sizes as the final video (render.py).
 	function cutoutLayers({ layers, files, person, onInsert }: NonNullable<Props["cutout"]>) {
-		const insert = layers.inserts.find((i) => insertShown(i, outTime) > 0) as Insert | undefined;
+		// Two at once: the speaker goes by the one on top, the later in the list (lib/layers.ts), as the final video does
+		// (cutout_filters only draws a smaller speaker while no later picture shows, Codex review 12 Nov).
+		const insert = layers.inserts.findLast((i) => insertShown(i, outTime) > 0) as Insert | undefined;
 		const shown = insert ? insertShown(insert, outTime) : 0;
 		const soft = (insert?.soft ?? INSERT.edgeFade) * 100;
 		// Soft edges: melting at the left, right and bottom, clear towards the top. Same as cutout_filters in render.py.
@@ -337,6 +349,14 @@ export function PlayerFrame({
 			: {};
 		return (
 			<>
+				{/* Darken / Blur background while a text shows (BehindText dim, blur), under the text and the speaker. Blur in
+				    screen px (the video's px times scale), as gblur's sigma in cutout_filters is the video's px. */}
+				{layers.texts.map((t) => {
+					const show = backdropShown(t, outTime);
+					if (!show) return null;
+					const blur = t.blur ? `blur(${(t.blur * scale).toFixed(2)}px)` : undefined;
+					return <div key={`backdrop-${t.id}`} className="pointer-events-none absolute inset-0" style={{ zIndex: 1, opacity: show, background: t.dim ? `rgba(0,0,0,${t.dim})` : undefined, backdropFilter: blur, WebkitBackdropFilter: blur }} />;
+				})}
 				<div className="pointer-events-none absolute top-0 left-0" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 1 }}>
 					{layers.texts.flatMap((t) => {
 						const face = FONT_FACES[t.font] ?? FONT_FACES.kanit;
@@ -379,7 +399,7 @@ export function PlayerFrame({
 						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
 							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
 								{i.kind === "video" ? (
-									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} />
+									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} volume={i.volume} length={i.end - i.start} />
 								) : (
 									// eslint-disable-next-line @next/next/no-img-element
 									<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
@@ -479,7 +499,7 @@ export function PlayerFrame({
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									{b.media === "video" ? (
-										<InsertClip src={src} at={outTime - b.start} playing={playing} style={fit} onRatio={() => {}} />
+										<InsertClip src={src} at={outTime - b.start} playing={playing} style={fit} onRatio={() => {}} volume={b.volume} length={b.end - b.start} />
 									) : (
 										// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 										<img src={src} alt="" draggable={false} style={fit} />
