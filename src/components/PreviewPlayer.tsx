@@ -3,6 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createDebugLog, type DebugLog, videoState } from "@/lib/debug-log";
 import type { Banner } from "@/lib/banners";
+import type { FrameMe } from "@/lib/frame-me";
 import type { Faces } from "@/lib/framing";
 import type { SubtitleStyle } from "@/lib/subtitle-style";
 import { FPS, type Line, type Segment } from "@/lib/timeline";
@@ -21,6 +22,8 @@ export type PreviewProps = {
 	onPlayingChange: (playing: boolean) => void;
 	banners?: Banner[];
 	onBannersChange?: (banners: Banner[]) => void; // a banner dragged or resized on the video
+	frames?: FrameMe[]; // Frame Me (lib/frame-me.ts)
+	onFrameChange?: (id: string, patch: Partial<FrameMe>) => void; // a frame dragged or resized on the video
 	faces?: Faces | null; // where the speaker's face is (lib/framing.ts); only the canvas player uses it
 	noZoom?: { start: number; end: number }[]; // parts with Auto zoom turned off (lib/zoom.ts)
 	zoomParts?: ZoomPart[]; // parts with their own kind of zoom
@@ -46,7 +49,7 @@ const isSafari = () => /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chrom
 // Safari takes a moment to start a video, which showed as a freeze and a black flash at each cut.
 // Only on Safari: Chrome starts instantly, and decoding two videos at once made it drop frames.
 export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function PreviewPlayer(
-	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, banners, onBannersChange, noZoom, zoomParts },
+	{ src, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, banners, onBannersChange, frames, onFrameChange, noZoom, zoomParts },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -293,6 +296,8 @@ export const PreviewPlayer = forwardRef<PreviewHandle, PreviewProps>(function Pr
 			zoom={zoom}
 			banners={banners}
 			onBannersChange={onBannersChange}
+			frames={frames}
+			onFrameChange={onFrameChange}
 			subtitle={subtitle}
 			onSubtitleChange={onSubtitleChange}
 			onToggle={toggle}

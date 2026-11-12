@@ -4,6 +4,7 @@ import { AudioWaveform, ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateC
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Banner } from "@/lib/banners";
 import { type CutoutLayers, insertName } from "@/lib/behind";
+import { type FrameMe, frameName } from "@/lib/frame-me";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, pieceAt, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
@@ -46,18 +47,22 @@ type Props = {
 	cutoutLayers: CutoutLayers; // text behind the speaker, pictures or clips: their own rows under the banners
 	onCutoutChange: (layers: CutoutLayers) => void;
 	onOpenCutout: (id: string) => void;
+	frames: FrameMe[]; // Frame Me: its own rows under the Cutout layers
+	onFramesChange: (frames: FrameMe[]) => void;
+	onOpenFrame: (id: string) => void;
 	revealed: { id: string; n: number } | null; // picked in a box: pick its strip here and scroll to it (n: each ask)
 	splits: number[]; // where Split divided the sound and the words, seconds of the original video
 	onSplitsChange: (splits: number[]) => void;
 };
 
-// Things shown over the video, as strips under the waveform: banners first, then the Cutout layers in rows of their own.
-type LaneKind = "banner" | "text" | "insert";
+// Things shown over the video, as strips under the waveform: banners first, then the Cutout layers, then Frame Me, each in rows of their own.
+type LaneKind = "banner" | "text" | "insert" | "frame";
 type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number };
 const LANE_LOOK: Record<LaneKind, { edge: string; body: string; picked: string; ring: string; name: string }> = {
 	banner: { edge: "bg-fuchsia-500/70", body: "bg-fuchsia-500/30 hover:bg-fuchsia-500/45", picked: "bg-fuchsia-500/55", ring: "ring-fuchsia-600", name: "banner" },
 	text: { edge: "bg-sky-500/70", body: "bg-sky-500/30 hover:bg-sky-500/45", picked: "bg-sky-500/55", ring: "ring-sky-600", name: "text behind you" },
 	insert: { edge: "bg-orange-500/70", body: "bg-orange-500/30 hover:bg-orange-500/45", picked: "bg-orange-500/55", ring: "ring-orange-600", name: "picture or clip" },
+	frame: { edge: "bg-emerald-500/70", body: "bg-emerald-500/30 hover:bg-emerald-500/45", picked: "bg-emerald-500/55", ring: "ring-emerald-600", name: "Frame Me" },
 };
 // Each item goes in the first row with room, so a row only starts where two overlap.
 function packRows(items: LaneItem[], first: number) {
@@ -154,6 +159,9 @@ export function Timeline({
 	cutoutLayers,
 	onCutoutChange,
 	onOpenCutout,
+	frames,
+	onFramesChange,
+	onOpenFrame,
 	revealed,
 	splits,
 	onSplitsChange,
@@ -237,10 +245,12 @@ export function Timeline({
 			...cutoutLayers.texts.map((t): LaneItem => ({ id: t.id, kind: "text", label: t.text, start: t.start, end: t.end })),
 			...cutoutLayers.inserts.map((i): LaneItem => ({ id: i.id, kind: "insert", label: insertName(i), start: i.start, end: i.end })),
 		];
+		const rowsOf = (packed: { row: number }[], from: number) => (packed.length ? Math.max(...packed.map((l) => l.row)) + 1 : from);
 		const top = packRows(bannerItems, 0);
-		const bannerRows = top.length ? Math.max(...top.map((l) => l.row)) + 1 : 0;
-		return [...top, ...packRows(cutoutItems, bannerRows)];
-	}, [banners, cutoutLayers]);
+		const middle = packRows(cutoutItems, rowsOf(top, 0));
+		const frameItems = frames.map((f): LaneItem => ({ id: f.id, kind: "frame", label: frameName(f), start: f.start, end: f.end }));
+		return [...top, ...middle, ...packRows(frameItems, rowsOf(middle, rowsOf(top, 0)))];
+	}, [banners, cutoutLayers, frames]);
 	const laneRows = lane.length ? Math.max(...lane.map((l) => l.row)) + 1 : 0;
 	const laneHeight = laneRows * LANE_ROW + (laneRows ? 2 : 0);
 	// The strip clicked on the timeline: highlighted, and Delete removes it (coach, 6 Nov: no trip back to the box's ×).
@@ -257,9 +267,10 @@ export function Timeline({
 			const apply = <T extends { id: string }>(list: T[]) => (patch ? list.map((x) => (x.id === item.id ? { ...x, ...patch } : x)) : list.filter((x) => x.id !== item.id));
 			if (item.kind === "banner") onBannersChange(apply(banners));
 			else if (item.kind === "text") onCutoutChange({ ...cutoutLayers, texts: apply(cutoutLayers.texts) });
+			else if (item.kind === "frame") onFramesChange(apply(frames));
 			else onCutoutChange({ ...cutoutLayers, inserts: apply(cutoutLayers.inserts) });
 		},
-		[banners, cutoutLayers, onBannersChange, onCutoutChange],
+		[banners, cutoutLayers, frames, onBannersChange, onCutoutChange, onFramesChange],
 	);
 	// Every layer asks first: text behind you, pictures and clips (coach, 9 Nov), and banners too (coach, 11 Nov).
 	const [removing, setRemoving] = useState<LaneItem | null>(null);
@@ -297,6 +308,7 @@ export function Timeline({
 			setSelection(null);
 			if (moved) return;
 			if (b.kind === "banner") onOpenBanners(b.id);
+			else if (b.kind === "frame") onOpenFrame(b.id);
 			else onOpenCutout(b.id);
 			onSeek(toSource(b.start));
 		};

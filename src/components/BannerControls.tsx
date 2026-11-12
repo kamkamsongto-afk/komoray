@@ -9,6 +9,7 @@ import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { LayerTools } from "./LayerTools";
 import { clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { newClipSound } from "@/lib/clip-sound";
 import { layerPlace, moveLayer, sameBannerPass } from "@/lib/layers";
 
 type Props = {
@@ -115,7 +116,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		// A clip shows for as long as it plays; a picture for a few seconds, as a word banner.
 		const seconds = Math.max(0.5, Math.min(clip ?? BANNER.seconds, total - start));
 		const name = cleanBannerText(file.name.replace(/\.[^.]+$/, "")) || BANNER_KINDS.file.text;
-		addBanner({ id: crypto.randomUUID(), kind: "file", text: name, sub: "", start, end: round(start + seconds), place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: data.file, media: data.media });
+		addBanner({ id: crypto.randomUUID(), kind: "file", text: name, sub: "", start, end: round(start + seconds), place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: data.file, media: data.media, ...newClipSound(data.media) });
 	}
 	// Pictures and clips this project already has (api/library), shown on the Upload tab: so nobody uploads the same file
 	// again because they didn't know about Import (coach, 11 Nov). Loaded again after each upload here.
@@ -413,7 +414,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						</select>
 						{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 						{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
-						{b.media === "video" && <ClipSound volume={b.volume} onChange={(volume) => update(b.id, { volume })} />}
+						{b.media === "video" && <ClipSound sound={b} onChange={(patch) => update(b.id, patch)} />}
 					</>}
 					{open === b.id && b.kind !== "file" && <>
 					<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/70">

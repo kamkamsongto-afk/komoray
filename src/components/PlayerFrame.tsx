@@ -2,10 +2,12 @@
 
 import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
-import { clipGain } from "@/lib/clip-sound";
+import { clipGain, soundOf } from "@/lib/clip-sound";
+import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
+import { projectFileSrc } from "@/lib/media-library";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -138,7 +140,48 @@ type Props = {
 	// person: the canvas the cut-out speaker is drawn on; files: a link to each inserted picture or clip.
 	// onInsert: the speaker dragged or resized on the video, while paused.
 	cutout?: { layers: CutoutLayers; files: Record<string, string>; person: ReactNode; onInsert?: (id: string, patch: Partial<Insert>) => void };
+	// Frame Me (lib/frame-me.ts): the picture and the cutout layers inside a shape, over a background.
+	// onFrameChange: the frame dragged or resized on the video, while paused (left out: it can't be moved here).
+	frames?: FrameMe[];
+	onFrameChange?: (id: string, patch: Partial<FrameMe>) => void;
 };
+
+// Frame Me's Blur background: the picture as it is drawn now, copied small on every screen refresh and blurred by CSS
+// (Safari's canvas has no blur of its own). Blown up a little, so the blur's see-through edge stays off the screen,
+// as gblur in frame_filters (render.py) keeps its edges. dim: black laid over it, as drawbox does there.
+// ratio: the video's width / height. The copy has the same shape, so 1:1 and 16:9 aren't stretched (Codex review 12 Nov).
+// side: the copy's longer side, px (blurred, a small copy is enough; the plain copy under a fading frame is sharper).
+function BlurBack({ source, blur, dim, ratio, side = 320 }: { source: RefObject<HTMLDivElement | null>; blur: number; dim: number; ratio: number; side?: number }) {
+	const ref = useRef<HTMLCanvasElement>(null);
+	useEffect(() => {
+		let next = 0;
+		const draw = () => {
+			const out = ref.current;
+			const box = source.current;
+			// The engine's canvas, or (the <video> player) the video on screen.
+			const videos = [...(box?.querySelectorAll("video") ?? [])];
+			const from = box?.querySelector("canvas") ?? videos.find((v) => v.style.zIndex === "1") ?? videos[0];
+			const pen = out?.getContext("2d");
+			if (out && from && pen) {
+				try {
+					pen.drawImage(from, 0, 0, out.width, out.height);
+				} catch {
+					// nothing to draw yet (a video still loading): try again next time
+				}
+			}
+			next = requestAnimationFrame(draw);
+		};
+		draw();
+		return () => cancelAnimationFrame(next);
+	}, [source]);
+	const grow = 1 + (4 * blur) / 100; // blur is screen px here: about two blur widths more on each side of a ~300px box
+	return (
+		<>
+			<canvas ref={ref} width={Math.round(side * Math.min(1, ratio))} height={Math.round(side * Math.min(1, 1 / ratio))} className="absolute inset-0 h-full w-full" style={{ filter: blur ? `blur(${blur}px)` : undefined, transform: `scale(${grow})` }} />
+			{dim > 0 && <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${dim})` }} />}
+		</>
+	);
+}
 
 // An inserted clip, kept at the final video's time: it plays with the preview, and jumps when it is far off.
 // volume / length: its own sound, faded at the edges of the time it shows (clipGain, same as mix_clip_sounds in render.py).
@@ -163,6 +206,73 @@ function InsertClip({ src, at, playing, style, onRatio, volume, length }: { src:
 	return <video ref={ref} src={src} muted playsInline preload="auto" style={style} onLoadedMetadata={(e) => e.currentTarget.videoHeight && onRatio(e.currentTarget.videoWidth / e.currentTarget.videoHeight)} />;
 }
 
+// Frame Me's border, as thick on both sides of the shape's edge as frame_filters draws it (render.py), and, while paused
+// with its box open (onChange), the handles: drag the frame to move it, its corner to resize it, the dot in its middle
+// to move the speaker inside it. W x H: the final video, laid out at full size and shrunk by scale.
+function FrameEdge({ f, W, H, scale, box, onChange }: { f: FrameMe; W: number; H: number; scale: number; box: RefObject<HTMLDivElement | null>; onChange?: (id: string, patch: Partial<FrameMe>) => void }) {
+	const drag = useRef<{ mode: "move" | "size" | "me"; x: number; y: number; from: FrameMe; reach: number } | null>(null);
+	const moved = useRef(false); // a drag that ends on the frame must not also press play
+	const r = frameRect(f, W, H);
+	const [x, y, w, h] = [r.x * scale, r.y * scale, r.w * scale, r.h * scale];
+	const middleOf = (g: FrameMe) => {
+		const rect = box.current?.getBoundingClientRect();
+		return { x: (rect?.left ?? 0) + g.x * W * scale, y: (rect?.top ?? 0) + g.y * H * scale };
+	};
+	const start = (e: ReactPointerEvent<HTMLElement>, mode: "move" | "size" | "me") => {
+		e.stopPropagation();
+		e.preventDefault();
+		e.currentTarget.setPointerCapture(e.pointerId);
+		const middle = middleOf(f);
+		drag.current = { mode, x: e.clientX, y: e.clientY, from: f, reach: Math.max(8, Math.hypot(e.clientX - middle.x, e.clientY - middle.y)) };
+		moved.current = false;
+	};
+	const move = (e: ReactPointerEvent<HTMLElement>) => {
+		const d = drag.current;
+		if (!d || !onChange) return;
+		e.stopPropagation();
+		moved.current = true;
+		const dx = (e.clientX - d.x) / (W * scale);
+		const dy = (e.clientY - d.y) / (H * scale);
+		const clamp = (n: number, lo: number, hi: number) => Math.round(Math.min(hi, Math.max(lo, n)) * 1000) / 1000;
+		if (d.mode === "move") onChange(f.id, { x: clamp(d.from.x + dx, FRAME.move.min, FRAME.move.max), y: clamp(d.from.y + dy, FRAME.move.min, FRAME.move.max) });
+		// The point of the speaker in the frame's middle: dragging right brings a point further left there.
+		else if (d.mode === "me") onChange(f.id, { meX: clamp(d.from.meX - dx / d.from.zoom, 0, 1), meY: clamp(d.from.meY - dy / d.from.zoom, 0, 1) });
+		else {
+			const middle = middleOf(d.from);
+			onChange(f.id, { size: clamp((d.from.size * Math.hypot(e.clientX - middle.x, e.clientY - middle.y)) / d.reach, FRAME.size.min, FRAME.size.max) });
+		}
+	};
+	const stop = () => (drag.current = null);
+	const handle = { onPointerMove: move, onPointerUp: stop, onPointerCancel: stop };
+	return (
+		<>
+			{f.border > 0 && (
+				<svg className="pointer-events-none absolute overflow-visible" style={{ left: x, top: y, width: w, height: h }} viewBox={`0 0 ${w} ${h}`}>
+					<polygon points={shapePolygon(f.shape, w, h)} fill="none" stroke={f.borderColor} strokeWidth={f.border * scale} strokeLinejoin="round" />
+				</svg>
+			)}
+			{onChange && (
+				<div
+					title="Drag to move the frame. Drag the corner to resize it. Drag the dot to move yourself inside it."
+					onClick={(e) => moved.current && e.stopPropagation()}
+					onPointerDown={(e) => start(e, "move")}
+					{...handle}
+					className="absolute cursor-move outline-2 outline-blue-400 outline-dashed"
+					style={{ left: x, top: y, width: w, height: h, touchAction: "none" }}
+				>
+					<span onPointerDown={(e) => start(e, "size")} {...handle} className="absolute -right-2 -bottom-2 h-4 w-4 cursor-nwse-resize rounded-sm bg-blue-400" />
+					<span
+						title="Drag to move yourself inside the frame"
+						onPointerDown={(e) => start(e, "me")}
+						{...handle}
+						className="absolute top-1/2 left-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-white bg-blue-500/80"
+					/>
+				</div>
+			)}
+		</>
+	);
+}
+
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
 // (drawn at full 1080x1920 and shrunk, so sizes match the final video; drag it to move it),
 // the play button and the time bar.
@@ -185,6 +295,8 @@ export function PlayerFrame({
 	speed = 1,
 	onSpeedChange,
 	cutout,
+	frames,
+	onFrameChange,
 }: Props) {
 	const line = subtitle.subtitles ? saying : null; // subtitles turned off: none drawn, like the final video (build_subtitles)
 	const boxRef = useRef<HTMLDivElement>(null);
@@ -237,6 +349,7 @@ export function PlayerFrame({
 	const [boxWidth, setBoxWidth] = useState(324);
 	const [ratios, setRatios] = useState<Record<string, number>>({}); // each inserted picture or clip's width / height
 	const dragRef = useRef<{ y: number; position: number; piece?: [number, number] } | null>(null);
+	const pictureRef = useRef<HTMLDivElement>(null); // the picture, for Frame Me's Blur background
 	const speakerDrag = useRef<{ corner: boolean; x: number; y: number; ax: number; ay: number; from: number; scale: number; speakerX: number; lift: number } | null>(null);
 	const speakerMoved = useRef(false); // a drag that ends on the speaker must not also press play
 	// The final video's size (9:16, 1:1 or 16:9); everything on it is laid out at full size and shrunk.
@@ -399,7 +512,7 @@ export function PlayerFrame({
 						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
 							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
 								{i.kind === "video" ? (
-									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} volume={i.volume} length={i.end - i.start} />
+									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
 								) : (
 									// eslint-disable-next-line @next/next/no-img-element
 									<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
@@ -452,6 +565,35 @@ export function PlayerFrame({
 		);
 	}
 
+	// Frame Me: the one showing now (the later one in the list when two overlap), laid out on the 1080-wide video
+	// (frameRect, framePicture) and shrunk by scale, as frame_filters puts it on the final video (render.py).
+	const framed = frameAt(frames, outTime);
+	const fade = framed ? frameShown(framed, outTime) : 0;
+	const frameMask = (f: FrameMe): CSSProperties => {
+		const r = frameRect(f, W, H);
+		const [image, size, at] = [shapeMask(f.shape), `${r.w * scale}px ${r.h * scale}px`, `${r.x * scale}px ${r.y * scale}px`];
+		return { maskImage: image, maskSize: size, maskPosition: at, maskRepeat: "no-repeat", WebkitMaskImage: image, WebkitMaskSize: size, WebkitMaskPosition: at, WebkitMaskRepeat: "no-repeat" };
+	};
+	const framePlace = (f: FrameMe): CSSProperties => {
+		const p = framePicture(f, W, H);
+		return { transformOrigin: "0 0", transform: `translate(${p.x * scale}px, ${p.y * scale}px) scale(${p.scale})` };
+	};
+	function frameBack(f: FrameMe) {
+		const src = f.back === "file" && f.file ? projectFileSrc(f.file) : "";
+		const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+		return (
+			<div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ background: f.back === "color" ? f.backColor : "#000" }}>
+				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} ratio={W / H} />}
+				{src &&
+					(f.media === "video" ? (
+						<InsertClip src={src} at={outTime - f.start} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
+					) : (
+						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+						<img src={src} alt="" style={fill} />
+					))}
+			</div>
+		);
+	}
 	return (
 		// As wide as fits, but never taller than --player-h (ScriptView keeps it clear of the timeline), else ~70% of the screen.
 		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: `calc(var(--player-h, 70vh) * ${W} / ${H})` }}>
@@ -461,13 +603,25 @@ export function PlayerFrame({
 				className="relative w-full cursor-pointer overflow-hidden rounded-lg bg-black"
 				style={{ aspectRatio: `${W} / ${H}` }}
 			>
-				<div
-					className="absolute inset-0"
-					style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: `${ZOOM_ORIGIN.x * 100}% ${ZOOM_ORIGIN.y * 100}%` } : undefined}
-				>
-					{children}
+				{/* Fading in or out (frameShown): the plain picture, copied, under the framed one, as frame_filters fades the frame over it. */}
+				{framed && fade < 1 && <BlurBack source={pictureRef} blur={0} dim={0} ratio={W / H} side={720} />}
+				<div className="absolute inset-0" style={framed && fade < 1 ? { opacity: fade } : undefined}>
+					{framed && frameBack(framed)}
+					{/* Always the same elements, with or without a frame: a new canvas would lose the picture the engine draws on. */}
+					<div className="absolute inset-0" style={framed ? frameMask(framed) : undefined}>
+						<div className="absolute inset-0" style={framed ? framePlace(framed) : undefined}>
+							<div
+								ref={pictureRef}
+								className="absolute inset-0"
+								style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: `${ZOOM_ORIGIN.x * 100}% ${ZOOM_ORIGIN.y * 100}%` } : undefined}
+							>
+								{children}
+							</div>
+							{cutout && cutoutLayers(cutout)}
+						</div>
+					</div>
+					{framed && <FrameEdge f={framed} W={W} H={H} scale={scale} box={boxRef} onChange={playing ? undefined : onFrameChange} />}
 				</div>
-				{cutout && cutoutLayers(cutout)}
 				<div
 					className="pointer-events-none absolute top-0 left-0"
 					style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}
@@ -499,7 +653,7 @@ export function PlayerFrame({
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									{b.media === "video" ? (
-										<InsertClip src={src} at={outTime - b.start} playing={playing} style={fit} onRatio={() => {}} volume={b.volume} length={b.end - b.start} />
+										<InsertClip src={src} at={outTime - b.start} playing={playing} style={fit} onRatio={() => {}} volume={soundOf(b)} length={b.end - b.start} />
 									) : (
 										// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 										<img src={src} alt="" draggable={false} style={fit} />

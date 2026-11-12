@@ -4,6 +4,7 @@
 // (beta: 14 days). Files added before Import (a banner's banner-…, a Pic/Clip's insert-…) show in it too.
 import type { Banner } from "./banners";
 import type { CutoutLayers } from "./behind";
+import type { FrameMe } from "./frame-me";
 
 export type LibraryItem = {
 	file: string; // its name in the video's folder
@@ -38,10 +39,11 @@ export const cleanMediaName = (name: unknown) =>
 		.slice(0, LIBRARY.maxName);
 
 // The files this video uses now: deleting one of them would leave a hole in the video.
-export function filesInUse(edit: { banners?: Banner[]; cutout?: CutoutLayers } | null) {
+export function filesInUse(edit: { banners?: Banner[]; cutout?: CutoutLayers; frames?: FrameMe[] } | null) {
 	const used = new Set<string>();
 	for (const b of edit?.banners ?? []) if (b.kind === "file" && b.file) used.add(b.file);
 	for (const i of edit?.cutout?.inserts ?? []) used.add(i.file);
+	for (const f of edit?.frames ?? []) if (f.back === "file" && f.file) used.add(f.file);
 	return used;
 }
 
