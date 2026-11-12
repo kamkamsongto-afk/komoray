@@ -18,7 +18,7 @@ export const FRAME_SHAPES: { id: FrameShape; name: string; ratio: number }[] = [
 ];
 
 // start / end: seconds of the final video. x, y: the shape's middle, share of the width / height. size: the shape's width,
-// share of the video's width. zoom: how big the speaker's picture is inside (1 = as big as the video). meX, meY: the point of
+// share of the video's shorter side (its width on 9:16, its height on 16:9: the same frame fits on either). zoom: how big the speaker's picture is inside (1 = as big as the video). meX, meY: the point of
 // the speaker's picture (share of its width / height) that sits in the shape's middle: the face, at first.
 export type FrameMe = {
 	id: string;
@@ -83,7 +83,7 @@ export const shapeRatio = (shape: FrameShape) => FRAME_SHAPES.find((s) => s.id =
 
 // The shape's box on a W x H video, px.
 export function frameRect(f: FrameMe, W: number, H: number) {
-	const w = f.size * W;
+	const w = f.size * Math.min(W, H);
 	const h = w * shapeRatio(f.shape);
 	return { x: f.x * W - w / 2, y: f.y * H - h / 2, w, h };
 }

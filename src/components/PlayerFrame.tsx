@@ -149,7 +149,8 @@ type Props = {
 // Frame Me's Blur background: the picture as it is drawn now, copied small on every screen refresh and blurred by CSS
 // (Safari's canvas has no blur of its own). Blown up a little, so the blur's see-through edge stays off the screen,
 // as gblur in frame_filters (render.py) keeps its edges. dim: black laid over it, as drawbox does there.
-function BlurBack({ source, blur, dim }: { source: RefObject<HTMLDivElement | null>; blur: number; dim: number }) {
+// ratio: the video's width / height. The copy has the same shape, so 1:1 and 16:9 aren't stretched (Codex review 12 Nov).
+function BlurBack({ source, blur, dim, ratio }: { source: RefObject<HTMLDivElement | null>; blur: number; dim: number; ratio: number }) {
 	const ref = useRef<HTMLCanvasElement>(null);
 	useEffect(() => {
 		let next = 0;
@@ -175,7 +176,7 @@ function BlurBack({ source, blur, dim }: { source: RefObject<HTMLDivElement | nu
 	const grow = 1 + (4 * blur) / 100; // blur is screen px here: about two blur widths more on each side of a ~300px box
 	return (
 		<>
-			<canvas ref={ref} width={180} height={320} className="absolute inset-0 h-full w-full" style={{ filter: blur ? `blur(${blur}px)` : undefined, transform: `scale(${grow})` }} />
+			<canvas ref={ref} width={Math.round(320 * Math.min(1, ratio))} height={Math.round(320 * Math.min(1, 1 / ratio))} className="absolute inset-0 h-full w-full" style={{ filter: blur ? `blur(${blur}px)` : undefined, transform: `scale(${grow})` }} />
 			{dim > 0 && <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${dim})` }} />}
 		</>
 	);
@@ -580,7 +581,7 @@ export function PlayerFrame({
 		const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 		return (
 			<div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ background: f.back === "color" ? f.backColor : "#000" }}>
-				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} />}
+				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} ratio={W / H} />}
 				{src &&
 					(f.media === "video" ? (
 						<InsertClip src={src} at={outTime - f.start} playing={playing} style={fill} onRatio={() => {}} length={f.end - f.start} />

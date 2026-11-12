@@ -273,6 +273,7 @@ export function ScriptView({
 	const [panel, setPanel] = useState<Panel | null>(null);
 	const [focusBanner, setFocusBanner] = useState<string | null>(null);
 	const [focusCutout, setFocusCutout] = useState<string | null>(null);
+	const [focusFrame, setFocusFrame] = useState<string | null>(null);
 	// From the timeline: the panels live under the preview.
 	const openPanel = (next: Panel) => {
 		setMode("preview");
@@ -1016,7 +1017,7 @@ export function ScriptView({
 							onChange={onFramesChange}
 							now={() => toOutSeconds(timeRef.current, segments)}
 							total={totalFrames(segments) / FPS}
-							focus={null}
+							focus={focusFrame}
 							onReveal={reveal}
 						/>
 					)}
@@ -1309,6 +1310,12 @@ export function ScriptView({
 					onOpenCutout={(id) => {
 						setFocusCutout(id);
 						openPanel("cutout");
+					}}
+					frames={frames}
+					onFramesChange={onFramesChange}
+					onOpenFrame={(id) => {
+						setFocusFrame(id);
+						openPanel("frame");
 					}}
 					noZoom={noZoom}
 					zoomParts={zoomParts}

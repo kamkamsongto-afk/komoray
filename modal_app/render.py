@@ -680,9 +680,10 @@ def frame_points(shape: str) -> list[tuple[float, float]]:
 
 
 def frame_rect(f: dict, size: tuple[int, int]) -> tuple[float, float, float, float]:
-    """The shape's box on the video: left, top, width, height px. Same as frameRect in frame-me.ts."""
+    """The shape's box on the video: left, top, width, height px. Its width is size times the video's shorter side.
+    Same as frameRect in frame-me.ts."""
     W, H = size
-    w = float(f["size"]) * W
+    w = float(f["size"]) * min(W, H)
     h = w * FRAME_RATIO.get(f.get("shape"), 1)
     return float(f["x"]) * W - w / 2, float(f["y"]) * H - h / 2, w, h
 
@@ -717,19 +718,35 @@ def frame_art(f: dict, size: tuple[int, int], folder: Path, n: int) -> dict:
     return art
 
 
-def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: list[dict], inputs: list[dict]) -> str:
+def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: list[dict], inputs: list[dict], plain: str | None = None) -> str:
     """Frame Me: for each frame's time, the picture so far (the speaker and the Cutout layers) is made smaller or bigger
     (zoom), put with the point (meX, meY) of it in the shape's middle, cut to the shape (the mask from frame_art) and laid
     on its background: the same picture blurred and darkened, a colour, or a project picture or clip. Then its border.
     Over the speaker and Cutout, under the banners and subtitles, as the preview draws it (PlayerFrame). Two at once: the
-    later in the list on top. inputs: each frame's FFmpeg inputs {"mask", "border", "file"}. Returns the new label."""
+    later in the list on top. inputs: each frame's FFmpeg inputs {"mask", "border", "file"}. plain: the picture before the
+    Cutout layers, which Blur blurs: the preview blurs the picture it draws on, without the layers (Codex review 12 Nov).
+    Returns the new label.
+    Every frame is made from the picture before any frame and covers the whole screen, so where two overlap the later
+    one simply hides the earlier, as in the preview: chained, the earlier frame showed blurred in the later one's
+    background (Codex review 12 Nov)."""
     W, H = size
+    blurs = [j for j, f in enumerate(frames) if f.get("back") not in ("color", "file") or inputs[j].get("file") is None and f.get("back") == "file"]
+    parts.append(f"{base}split={len(frames) + 1}[fmm]{''.join(f'[fms{j}]' for j in range(len(frames)))}")
+    if plain and blurs:
+        parts.append(f"{plain}split={len(blurs)}{''.join(f'[fpl{j}]' for j in blurs)}")
+    elif plain:
+        parts.append(f"{plain}nullsink")  # no Blur frame: an output left unused stops FFmpeg
+    base = "[fmm]"
     for j, f in enumerate(frames):
         a, b = float(f["start"]), float(f["end"])
         d = b - a
         src = inputs[j]
-        parts.append(f"{base}split=2[fmm{j}][fms{j}]")
-        parts.append(f"[fms{j}]trim=start={a:.3f}:end={b:.3f},split=2[fmb{j}][fmp{j}]")
+        trim = f"trim=start={a:.3f}:end={b:.3f}"
+        if plain and j in blurs:
+            parts.append(f"[fms{j}]{trim}[fmp{j}]")
+            parts.append(f"[fpl{j}]{trim}[fmb{j}]")
+        else:
+            parts.append(f"[fms{j}]{trim},split=2[fmb{j}][fmp{j}]")
         back = f.get("back")
         if back == "color":
             colour = str(f.get("backColor") or "#000000").lstrip("#")
@@ -766,7 +783,7 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             parts.append(f"[{src['border']}:v]format=rgba,trim=duration={d:.3f},setpts=PTS-STARTPTS+{a:.3f}/TB[fbd{j}]")
             parts.append(f"[fco{j}][fbd{j}]overlay=format=auto[fcb{j}]")
             out = f"[fcb{j}]"
-        parts.append(f"[fmm{j}]{out}overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[fmo{j}]")
+        parts.append(f"{base}{out}overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[fmo{j}]")
         base = f"[fmo{j}]"
     return base
 
@@ -1651,10 +1668,15 @@ def ffmpeg_command(
     base = "[cv]"
     if matte_labels:
         parts.append(f"{''.join(matte_labels)}concat=n={len(matte_labels)}:v=1:a=0{shift}[cm]")
+    plain = None
+    if cutout and framed:
+        # Frame Me's Blur blurs the picture without the Cutout layers, as the preview does (frame_filters).
+        parts.append(f"{base}split=2[cvc][cvf]")
+        base, plain = "[cvc]", "[cvf]"
     if cutout:
         base = cutout_filters(parts, base, size, cutout, inputs)
     if framed:
-        base = frame_filters(parts, base, size, framed, inputs["frames"])
+        base = frame_filters(parts, base, size, framed, inputs["frames"], plain)
     if banner_files:
         base = banner_file_filters(parts, base, size, banner_files, inputs["banners"])
     if logo:
