@@ -649,6 +649,7 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
 # Frame Me (src/lib/frame-me.ts): the speaker inside a shape over a background, for a stretch of the video.
 FRAME_RATIO = {"circle": 1, "oval": 1.3, "square": 1, "rounded": 1.25, "triangle": 0.9, "star": 1, "heart": 0.9}  # FRAME_SHAPES ratio
 FRAME_ROUND = 0.18  # Rounded: the corners' radius, share of the shorter side (ROUND in frame-me.ts)
+FRAME_FADE = 0.25  # seconds a frame fades in, and out, over the plain picture (FRAME.fade, frameShown in frame-me.ts)
 FRAME_SUPERSAMPLE = 4  # the shape is drawn this many times bigger and shrunk: smooth edges
 
 
@@ -783,7 +784,12 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             parts.append(f"[{src['border']}:v]format=rgba,trim=duration={d:.3f},setpts=PTS-STARTPTS+{a:.3f}/TB[fbd{j}]")
             parts.append(f"[fco{j}][fbd{j}]overlay=format=auto[fcb{j}]")
             out = f"[fcb{j}]"
-        parts.append(f"{base}{out}overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[fmo{j}]")
+        # Fades in and out over the picture under it (frameShown in frame-me.ts). Timestamps are the whole video's here.
+        fade_in = min(FRAME_FADE, d / 2)
+        parts.append(
+            f"{out}format=yuva420p,fade=t=in:st={a:.3f}:d={fade_in:.3f}:alpha=1,fade=t=out:st={b - fade_in:.3f}:d={fade_in:.3f}:alpha=1[fcf{j}]"
+        )
+        parts.append(f"{base}[fcf{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[fmo{j}]")
         base = f"[fmo{j}]"
     return base
 
@@ -2014,11 +2020,13 @@ def join_parts(parts: list[Path], sound: Path | None, out: Path, frames: int) ->
 CLIP_SOUND_FADE = 0.25  # CLIP_SOUND.fade in lib/clip-sound.ts
 
 
-def clip_sounds(cutout: dict | None, banner_files: list[dict]) -> list[dict]:
-    """The uploaded clips whose own sound was turned on (volume, lib/clip-sound.ts): Pic/Clip inserts and clip banners."""
+def clip_sounds(cutout: dict | None, banner_files: list[dict], frames: list[dict] | None = None) -> list[dict]:
+    """The uploaded clips that sound (a volume, Mute not ticked: lib/clip-sound.ts): Pic/Clip inserts, clip banners and
+    Frame Me clip backgrounds."""
     clips = [i for i in (cutout or {}).get("inserts") or [] if i.get("kind") == "video"]
     clips += [b for b in banner_files if b.get("media") == "video"]
-    return [c for c in clips if float(c.get("volume") or 0) > 0 and has_audio(c["path"])]
+    clips += [f for f in frames or [] if f.get("back") == "file" and f.get("media") == "video" and f.get("path")]
+    return [c for c in clips if not c.get("muted") and float(c.get("volume") or 0) > 0 and has_audio(c["path"])]
 
 
 def mix_clip_sounds(video: Path, clips: list[dict]) -> None:
@@ -2204,7 +2212,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             else:
                 polished = polishing.result() if polishing else None
                 sound = add_sound(out, polished) if polished else False
-            clips = clip_sounds(cutout, banner_files)
+            clips = clip_sounds(cutout, banner_files, frames)
             if clips:
                 mix_clip_sounds(out, clips)
             report(PROGRESS_SOUND, force=True)

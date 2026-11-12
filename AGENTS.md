@@ -70,6 +70,7 @@ git log --oneline -15         # เพิ่งมีใครแก้อะไ
 | `motion.ts` | `POP`, `BOUNCE`, `BOUNCE_WORD_GAP`, `pop_tags`, `word_places`, `bounce_events` |
 | `subtitle-style.ts` | `DEFAULT_STYLE`, `FONTS`, `FORMATS` |
 | `behind.ts` (+ ชั้นใน `PlayerFrame.tsx`) | `behind_motion`, `run_repeats`, `build_behind`, `cutout_filters`, `RUN_SPEED`, `ARRIVE_TIME`, `INSERT_FADE`, `INSERT_EDGE_FADE` |
+| `frame-me.ts` (+ `frameMask`, `framePlace`, `FrameEdge`, `BlurBack` ใน `PlayerFrame.tsx`) | `frame_points`, `frame_rect`, `frame_art`, `frame_filters`, `FRAME_RATIO`, `FRAME_ROUND`, `FRAME_FADE` |
 
 comment บางจุดในฝั่งเว็บอ้างชื่อเก่าที่ไม่มีใน `render.py` แล้ว เช่น `build_banners`, `MOTION`, `LOOKS` ให้ค้นจากชื่อจริงในตารางนี้
 

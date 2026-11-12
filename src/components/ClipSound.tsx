@@ -1,32 +1,36 @@
 "use client";
 
-import { Volume2, VolumeX } from "lucide-react";
-import { CLIP_SOUND } from "@/lib/clip-sound";
+import { CLIP_SOUND, type ClipSoundSettings } from "@/lib/clip-sound";
 
-// Sound on/off and how loud, for an uploaded clip (lib/clip-sound.ts). undefined = off.
-export function ClipSound({ volume, onChange }: { volume: number | undefined; onChange: (volume: number | undefined) => void }) {
-	const on = !!volume;
+// Mute and how loud, for an uploaded clip (lib/clip-sound.ts). The same in Pic/Clip, Banners and Frame Me (coach, 12 Nov).
+// Mute keeps the volume, so untying it brings back the same level.
+export function ClipSound({ sound, onChange }: { sound: ClipSoundSettings; onChange: (patch: ClipSoundSettings) => void }) {
+	const muted = !!sound.muted;
+	const volume = sound.volume ?? 0;
 	return (
-		<div className="flex items-center gap-2 text-xs">
-			<button
-				onClick={() => onChange(on ? undefined : CLIP_SOUND.on)}
-				aria-pressed={on}
-				className={`flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 ${on ? "border-blue-600 bg-blue-600/10" : "border-foreground/20"}`}
-			>
-				{on ? <Volume2 className="h-3.5 w-3.5" aria-hidden /> : <VolumeX className="h-3.5 w-3.5" aria-hidden />}
-				{on ? "Sound on" : "Sound off"}
-			</button>
+		<div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
+			<label className="flex shrink-0 cursor-pointer items-center gap-1">
+				<input
+					type="checkbox"
+					checked={muted}
+					// Untied on a clip that was silent before: back to a quiet level, or nothing would be heard.
+					onChange={(e) => onChange(e.target.checked ? { muted: true } : { muted: undefined, volume: volume || CLIP_SOUND.start })}
+					className="accent-blue-600"
+				/>
+				Mute
+			</label>
 			<input
 				type="range"
 				min={0}
 				max={CLIP_SOUND.max}
 				step={0.05}
-				value={volume ?? 0}
-				onChange={(e) => onChange(Number(e.target.value) || undefined)}
+				value={volume}
+				disabled={muted}
+				onChange={(e) => onChange({ volume: Number(e.target.value) || undefined })}
 				aria-label="Clip volume"
-				className="min-w-0 flex-1"
+				className="min-w-0 flex-1 accent-blue-600 disabled:opacity-40"
 			/>
-			<span className="w-9 shrink-0 text-right tabular-nums text-foreground/60">{Math.round((volume ?? 0) * 100)}%</span>
+			<span className="w-9 shrink-0 text-right tabular-nums text-foreground/60">{muted ? "Off" : `${Math.round(volume * 100)}%`}</span>
 		</div>
 	);
 }

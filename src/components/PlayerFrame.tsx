@@ -5,8 +5,8 @@ import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Promp
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
-import { clipGain } from "@/lib/clip-sound";
-import { type FrameMe, FRAME, frameAt, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
+import { clipGain, soundOf } from "@/lib/clip-sound";
+import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
 import { projectFileSrc } from "@/lib/media-library";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -150,7 +150,8 @@ type Props = {
 // (Safari's canvas has no blur of its own). Blown up a little, so the blur's see-through edge stays off the screen,
 // as gblur in frame_filters (render.py) keeps its edges. dim: black laid over it, as drawbox does there.
 // ratio: the video's width / height. The copy has the same shape, so 1:1 and 16:9 aren't stretched (Codex review 12 Nov).
-function BlurBack({ source, blur, dim, ratio }: { source: RefObject<HTMLDivElement | null>; blur: number; dim: number; ratio: number }) {
+// side: the copy's longer side, px (blurred, a small copy is enough; the plain copy under a fading frame is sharper).
+function BlurBack({ source, blur, dim, ratio, side = 320 }: { source: RefObject<HTMLDivElement | null>; blur: number; dim: number; ratio: number; side?: number }) {
 	const ref = useRef<HTMLCanvasElement>(null);
 	useEffect(() => {
 		let next = 0;
@@ -176,7 +177,7 @@ function BlurBack({ source, blur, dim, ratio }: { source: RefObject<HTMLDivEleme
 	const grow = 1 + (4 * blur) / 100; // blur is screen px here: about two blur widths more on each side of a ~300px box
 	return (
 		<>
-			<canvas ref={ref} width={Math.round(320 * Math.min(1, ratio))} height={Math.round(320 * Math.min(1, 1 / ratio))} className="absolute inset-0 h-full w-full" style={{ filter: blur ? `blur(${blur}px)` : undefined, transform: `scale(${grow})` }} />
+			<canvas ref={ref} width={Math.round(side * Math.min(1, ratio))} height={Math.round(side * Math.min(1, 1 / ratio))} className="absolute inset-0 h-full w-full" style={{ filter: blur ? `blur(${blur}px)` : undefined, transform: `scale(${grow})` }} />
 			{dim > 0 && <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${dim})` }} />}
 		</>
 	);
@@ -511,7 +512,7 @@ export function PlayerFrame({
 						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
 							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
 								{i.kind === "video" ? (
-									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} volume={i.volume} length={i.end - i.start} />
+									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
 								) : (
 									// eslint-disable-next-line @next/next/no-img-element
 									<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
@@ -567,6 +568,7 @@ export function PlayerFrame({
 	// Frame Me: the one showing now (the later one in the list when two overlap), laid out on the 1080-wide video
 	// (frameRect, framePicture) and shrunk by scale, as frame_filters puts it on the final video (render.py).
 	const framed = frameAt(frames, outTime);
+	const fade = framed ? frameShown(framed, outTime) : 0;
 	const frameMask = (f: FrameMe): CSSProperties => {
 		const r = frameRect(f, W, H);
 		const [image, size, at] = [shapeMask(f.shape), `${r.w * scale}px ${r.h * scale}px`, `${r.x * scale}px ${r.y * scale}px`];
@@ -584,7 +586,7 @@ export function PlayerFrame({
 				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} ratio={W / H} />}
 				{src &&
 					(f.media === "video" ? (
-						<InsertClip src={src} at={outTime - f.start} playing={playing} style={fill} onRatio={() => {}} length={f.end - f.start} />
+						<InsertClip src={src} at={outTime - f.start} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
 					) : (
 						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 						<img src={src} alt="" style={fill} />
@@ -601,21 +603,25 @@ export function PlayerFrame({
 				className="relative w-full cursor-pointer overflow-hidden rounded-lg bg-black"
 				style={{ aspectRatio: `${W} / ${H}` }}
 			>
-				{framed && frameBack(framed)}
-				{/* Always the same elements, with or without a frame: a new canvas would lose the picture the engine draws on. */}
-				<div className="absolute inset-0" style={framed ? frameMask(framed) : undefined}>
-					<div className="absolute inset-0" style={framed ? framePlace(framed) : undefined}>
-						<div
-							ref={pictureRef}
-							className="absolute inset-0"
-							style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: `${ZOOM_ORIGIN.x * 100}% ${ZOOM_ORIGIN.y * 100}%` } : undefined}
-						>
-							{children}
+				{/* Fading in or out (frameShown): the plain picture, copied, under the framed one, as frame_filters fades the frame over it. */}
+				{framed && fade < 1 && <BlurBack source={pictureRef} blur={0} dim={0} ratio={W / H} side={720} />}
+				<div className="absolute inset-0" style={framed && fade < 1 ? { opacity: fade } : undefined}>
+					{framed && frameBack(framed)}
+					{/* Always the same elements, with or without a frame: a new canvas would lose the picture the engine draws on. */}
+					<div className="absolute inset-0" style={framed ? frameMask(framed) : undefined}>
+						<div className="absolute inset-0" style={framed ? framePlace(framed) : undefined}>
+							<div
+								ref={pictureRef}
+								className="absolute inset-0"
+								style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: `${ZOOM_ORIGIN.x * 100}% ${ZOOM_ORIGIN.y * 100}%` } : undefined}
+							>
+								{children}
+							</div>
+							{cutout && cutoutLayers(cutout)}
 						</div>
-						{cutout && cutoutLayers(cutout)}
 					</div>
+					{framed && <FrameEdge f={framed} W={W} H={H} scale={scale} box={boxRef} onChange={playing ? undefined : onFrameChange} />}
 				</div>
-				{framed && <FrameEdge f={framed} W={W} H={H} scale={scale} box={boxRef} onChange={playing ? undefined : onFrameChange} />}
 				<div
 					className="pointer-events-none absolute top-0 left-0"
 					style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 2 }}
@@ -647,7 +653,7 @@ export function PlayerFrame({
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									{b.media === "video" ? (
-										<InsertClip src={src} at={outTime - b.start} playing={playing} style={fit} onRatio={() => {}} volume={b.volume} length={b.end - b.start} />
+										<InsertClip src={src} at={outTime - b.start} playing={playing} style={fit} onRatio={() => {}} volume={soundOf(b)} length={b.end - b.start} />
 									) : (
 										// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 										<img src={src} alt="" draggable={false} style={fit} />

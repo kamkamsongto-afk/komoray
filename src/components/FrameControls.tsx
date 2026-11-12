@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameName, FRAME_SHAPES, type FrameShape, NEW_FRAME, shapePolygon } from "@/lib/frame-me";
 import { layerPlace, moveLayer } from "@/lib/layers";
 import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { newClipSound } from "@/lib/clip-sound";
+import { ClipSound } from "./ClipSound";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { LayerTools } from "./LayerTools";
 
@@ -64,6 +66,8 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 	}, []);
 
 	const update = (id: string, patch: Partial<FrameMe>) => onChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+	// A clip background: quietly on at first, so people hear it plays (coach, 12 Nov). A picture has no sound.
+	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
 	const add = (shape: FrameShape) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const frame = NEW_FRAME(start, round(Math.min(total, start + FRAME.seconds)), shape);
@@ -222,7 +226,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 										onClick={() => {
 											// A picture or clip: the one it had, else the project's newest.
 											if (id !== "file" || f.file) update(f.id, { back: id });
-											else if (files[0]) update(f.id, { back: "file", file: files[0].file, media: files[0].media });
+											else if (files[0]) pickFile(f, files[0]);
 										}}
 										disabled={id === "file" && !f.file && !files.length}
 										title={id === "file" && !f.file && !files.length ? "Add a picture or clip in Import first" : undefined}
@@ -244,7 +248,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 									{files.map((item) => (
 										<button
 											key={item.file}
-											onClick={() => update(f.id, { file: item.file, media: item.media })}
+											onClick={() => pickFile(f, item)}
 											title={item.name}
 											aria-pressed={f.file === item.file}
 											className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${f.file === item.file ? "border-blue-600" : "border-transparent hover:border-foreground/30"}`}
@@ -262,6 +266,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 									))}
 								</div>
 							)}
+							{f.back === "file" && f.media === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={f} onChange={(patch) => update(f.id, patch)} /></div>}
 							{(f.back === "file" || !files.length) && (
 								<p className="flex items-center gap-1 text-xs text-foreground/60">
 									<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Add your pictures and clips in Import, then pick one here.{library === null && " Loading…"}

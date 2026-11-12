@@ -9,6 +9,7 @@ import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
 import { Confirm, ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
+import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 import { clipLength, hasClearParts } from "@/lib/media-library";
@@ -130,7 +131,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		if ("error" in done) return setNotice(done.error);
 		const start = startAt();
 		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
-		const insert: Insert = { id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
+		const insert: Insert = { ...newClipSound(done.kind), id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
 		setOpen(insert.id);
 		setTab("inserts");
 		setInserts([...layers.inserts, insert]);
@@ -568,7 +569,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
 							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}
 							{row("Rotate", range(i.picRotate ?? 0, -INSERT.picture.rotate, INSERT.picture.rotate, 1, `${i.picRotate ?? 0}°`, (picRotate) => updateInsert(i.id, { picRotate })))}
-								{i.kind === "video" && row("Sound", <ClipSound volume={i.volume} onChange={(volume) => updateInsert(i.id, { volume })} />)}
+								{/* Not in a <label>: Mute has its own. */}
+								{i.kind === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={i} onChange={(patch) => updateInsert(i.id, patch)} /></div>}
 							{times(i, (patch) => updateInsert(i.id, patch))}
 						</div>
 						</div>

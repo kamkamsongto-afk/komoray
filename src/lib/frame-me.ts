@@ -3,6 +3,8 @@
 // "frames". Drawn by PlayerFrame in the preview and by frame_filters in modal_app/render.py for the final video,
 // with the same shapes (framePoints = frame_points) and the same placing (frameRect, framePicture = frame_place).
 
+import { readClipSound } from "./clip-sound";
+
 export type FrameShape = "circle" | "oval" | "square" | "rounded" | "triangle" | "star" | "heart";
 export type FrameBack = "blur" | "color" | "file";
 
@@ -39,6 +41,8 @@ export type FrameMe = {
 	blur: number; // back "blur": px on the 1080-wide video
 	file?: string; // back "file": a project file (Import), next to the video
 	media?: "image" | "video";
+	volume?: number; // a clip background's own sound (lib/clip-sound.ts)
+	muted?: boolean;
 	name?: string;
 };
 
@@ -51,6 +55,7 @@ export const FRAME = {
 	blur: { max: 60, start: 30 },
 	maxItems: 10,
 	seconds: 3,
+	fade: 0.25, // seconds it takes to fade in, and out (coach, 12 Nov). FRAME_FADE in render.py
 	me: { x: 0.5, y: 0.4 }, // where a face sits in the framed video (FACE_HEIGHT in framing.ts)
 };
 
@@ -77,6 +82,14 @@ export const NEW_FRAME = (start: number, end: number, shape: FrameShape = "circl
 });
 
 // The frame showing at final-video second t: the last one in the list wins when two overlap (it is on top, lib/layers.ts).
+// How far it has faded in at final-video second t: 0..1. Same fades as frame_filters in render.py.
+// A frame shorter than both fades fades over half its time each way, so it still shows fully in its middle.
+export function frameShown(f: FrameMe, t: number) {
+	if (t < f.start || t >= f.end) return 0;
+	const fade = Math.min(FRAME.fade, (f.end - f.start) / 2);
+	return Math.max(0, Math.min(1, (t - f.start) / fade, (f.end - t) / fade));
+}
+
 export const frameAt = (frames: FrameMe[] | undefined, t: number) => frames?.findLast((f) => t >= f.start && t < f.end);
 
 export const shapeRatio = (shape: FrameShape) => FRAME_SHAPES.find((s) => s.id === shape)?.ratio ?? 1;
@@ -186,6 +199,7 @@ export function readFrames(value: unknown): FrameMe[] | null {
 			dim: round(num(f.dim, 0, FRAME.dim.max, FRAME.dim.start), 100),
 			blur: Math.round(num(f.blur, 0, FRAME.blur.max, FRAME.blur.start)),
 			...(file && { file, media: /\.(mp4|mov)$/.test(file) ? ("video" as const) : ("image" as const) }),
+			...readClipSound(f, Boolean(file && /\.(mp4|mov)$/.test(file))),
 			...(typeof f.name === "string" && f.name.trim() && { name: f.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});
 	}

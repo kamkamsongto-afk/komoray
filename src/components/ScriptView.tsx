@@ -20,6 +20,7 @@ import { BannerControls } from "./BannerControls";
 import { CutoutControls } from "./CutoutControls";
 import { FrameControls } from "./FrameControls";
 import type { FrameMe } from "@/lib/frame-me";
+import { newClipSound } from "@/lib/clip-sound";
 import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
 import { waitLabel } from "@/lib/use-cutout";
@@ -340,7 +341,7 @@ export function ScriptView({
 		const total = totalFrames(segments) / FPS;
 		const start = Math.round(Math.min(toOutSeconds(timeRef.current, segments), Math.max(0, total - 1)) * 10) / 10;
 		const end = Math.round(Math.min(total, start + Math.max(0.5, item.seconds ?? BANNER.seconds)) * 10) / 10;
-		const banner: Banner = { id: crypto.randomUUID(), kind: "file", text: item.name, sub: "", start, end, place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: item.file, media: item.media };
+		const banner: Banner = { id: crypto.randomUUID(), kind: "file", text: item.name, sub: "", start, end, place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: item.file, media: item.media, ...newClipSound(item.media) };
 		onBannersChange([...banners, banner]); // on top of the others (lib/layers.ts)
 		setFocusBanner(banner.id);
 		openPanel("banners");
@@ -351,7 +352,7 @@ export function ScriptView({
 		const start = Math.round(Math.min(toOutSeconds(timeRef.current, segments), Math.max(0, total - 1)) * 100) / 100;
 		const end = Math.round(Math.min(total, start + Math.max(0.5, item.seconds ?? 3)) * 100) / 100;
 		const clear = Boolean(item.clear);
-		const insert: Insert = { id: crypto.randomUUID(), kind: item.media, file: item.file, start, end, speakerScale: clear ? 1 : INSERT.scale.start, speakerX: clear ? 0.5 : 0.25, hidden: false, seeThrough: clear, name: cleanInsertName(item.name) || undefined };
+		const insert: Insert = { ...newClipSound(item.media), id: crypto.randomUUID(), kind: item.media, file: item.file, start, end, speakerScale: clear ? 1 : INSERT.scale.start, speakerX: clear ? 0.5 : 0.25, hidden: false, seeThrough: clear, name: cleanInsertName(item.name) || undefined };
 		onCutoutChange({ ...cutoutLayers, inserts: [...cutoutLayers.inserts, insert] });
 		setFocusCutout(insert.id);
 		openPanel("cutout");
