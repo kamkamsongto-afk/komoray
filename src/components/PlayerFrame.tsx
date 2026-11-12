@@ -322,7 +322,9 @@ export function PlayerFrame({
 	// over the whole picture), then the cut-out speaker: full size over the text, or smaller in front of an
 	// insert (or hidden). Same order and sizes as the final video (render.py).
 	function cutoutLayers({ layers, files, person, onInsert }: NonNullable<Props["cutout"]>) {
-		const insert = layers.inserts.find((i) => insertShown(i, outTime) > 0) as Insert | undefined;
+		// Two at once: the speaker goes by the one on top, the later in the list (lib/layers.ts), as the final video does
+		// (cutout_filters only draws a smaller speaker while no later picture shows, Codex review 12 Nov).
+		const insert = layers.inserts.findLast((i) => insertShown(i, outTime) > 0) as Insert | undefined;
 		const shown = insert ? insertShown(insert, outTime) : 0;
 		const soft = (insert?.soft ?? INSERT.edgeFade) * 100;
 		// Soft edges: melting at the left, right and bottom, clear towards the top. Same as cutout_filters in render.py.

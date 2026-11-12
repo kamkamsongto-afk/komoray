@@ -344,8 +344,9 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
     width = FORMATS.get(shape, (WIDTH, HEIGHT))[0]
     # Each banner its own pair of ASS layers, the later in the list on top (Bring forward / Send backward,
     # lib/layers.ts): with one layer for every box and one for every row of letters, an overlapping banner's
-    # letters showed through the box over them, which the preview never does (12 Nov). From 2: over the subtitles and logo.
-    layer = 2
+    # letters showed through the box over them, which the preview never does (12 Nov). From 3: over the logo (1) and
+    # every subtitle, a bouncing word included (up to 2 with a box, bounce_events; Codex review 12 Nov).
+    layer = 3
     for b in banners:
         start, end = float(b.get("start", 0)), float(b.get("end", 0))
         lines = [ass_text(line).strip() for line in str(b.get("text", "")).split("\n")]
@@ -555,6 +556,9 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
     inserts = cutout.get("inserts") or []
     person = "matte" in inputs
     smalls = [i for i in inserts if not i.get("hidden")] if person else []
+    # Two pictures at once: the speaker goes by the one on top, the later in the list (Bring forward, lib/layers.ts),
+    # as the preview does (PlayerFrame). So a smaller speaker is only drawn while no later picture shows, hidden or not.
+    later = {id(ins): "+".join(f"between(t,{float(k['start']):.3f},{float(k['end']):.3f})" for k in inserts[n + 1 :]) for n, ins in enumerate(inserts)}
     if person:
         parts.append(f"{base}split=2[cbg][cpic]")
         base = "[cbg]"
@@ -620,7 +624,8 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
             f"fade=t=out:st={max(a, b - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1[csm{j}]"
         )
         lift = float(ins.get("speakerLift", 0)) * H
-        parts.append(f"{base}[csm{j}]overlay=x={x:.1f}:y=main_h-overlay_h-{lift:.1f}:enable='between(t,{a:.3f},{b:.3f})'[cs{j}]")
+        on_top = f"*not({later[id(ins)]})" if later[id(ins)] else ""
+        parts.append(f"{base}[csm{j}]overlay=x={x:.1f}:y=main_h-overlay_h-{lift:.1f}:enable='between(t,{a:.3f},{b:.3f}){on_top}'[cs{j}]")
         base = f"[cs{j}]"
     return base
 
