@@ -2151,7 +2151,8 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 banner_files.append({**b, "path": path})
 
             # Frame Me (frame-me.ts): each one's shape and border drawn once, and a link to a picture or clip background.
-            frames = []
+            # Not "frames": that is the video's frame count above, and a list there broke every Make video (13 Nov).
+            frame_list = []
             frame_links = edit.get("frameFiles") or {}
             for n, f in enumerate(edit.get("frames") or []):
                 f = {**f, "art": frame_art(f, FORMATS.get(style.get("format"), (WIDTH, HEIGHT)), workdir, n)}
@@ -2161,7 +2162,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     urllib.request.urlretrieve(link, f["path"])
                 elif f.get("back") == "file":
                     f["back"] = "blur"  # its file is gone: the blurred video, rather than no video
-                frames.append(f)
+                frame_list.append(f)
 
             # The user's logo picture, if this look shows it.
             logo = None
@@ -2189,7 +2190,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 cut,
                 banner_files,
                 part,
-                frames,
+                frame_list,
             )
             picture = lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY))
             if len(spans) > 1:
@@ -2215,7 +2216,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             else:
                 polished = polishing.result() if polishing else None
                 sound = add_sound(out, polished) if polished else False
-            clips = clip_sounds(cutout, banner_files, frames)
+            clips = clip_sounds(cutout, banner_files, frame_list)
             if clips:
                 mix_clip_sounds(out, clips)
             report(PROGRESS_SOUND, force=True)
