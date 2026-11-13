@@ -3,9 +3,9 @@
 import { AudioLines, Captions, Check, Film, Lock, Plus, Scissors, Sparkles, Sun, Users, Wand2, ZoomIn } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { LanguagePicker } from "@/components/LanguagePicker";
-import type { UploadOptions as Options } from "@/lib/upload-options";
+import type { UploadOptions as Options, UploadToggle } from "@/lib/upload-options";
 
-const READY: { id: keyof Options; name: string; hint: string; icon: typeof Scissors }[] = [
+const READY: { id: UploadToggle; name: string; hint: string; icon: typeof Scissors }[] = [
 	{ id: "silences", name: "Silences", hint: "Cut the pauses", icon: Scissors },
 	{ id: "badTakes", name: "Bad takes", hint: "AI cuts the takes you said again. One click brings them all back", icon: Sparkles },
 	{ id: "zoom", name: "Auto zoom", hint: "Moves in slowly, so the video feels alive", icon: ZoomIn },
@@ -33,6 +33,7 @@ export function UploadOptions({
 	upload,
 	onStart,
 	onClose,
+	kits = [],
 }: {
 	fileName: string;
 	options: Options;
@@ -44,6 +45,7 @@ export function UploadOptions({
 	upload: { status: "uploading" | "done" | "error"; progress: number };
 	onStart: () => void;
 	onClose: () => void;
+	kits?: { id: string; name: string }[]; // the creator's Brand Kits (api/brand): a choice only when there are two or more
 }) {
 	const dialog = useRef<HTMLDivElement>(null);
 	const close = useRef(onClose);
@@ -104,6 +106,24 @@ export function UploadOptions({
 					<LanguagePicker value={language} onChange={onLanguageChange} defaultCode={defaultLanguage} onSetDefault={onSetDefaultLanguage} />
 					<span className="text-xs text-foreground/60">Komoray listens in this language. Star one to make it your default.</span>
 				</div>
+
+				{kits.length > 1 && (
+					<label className="mx-auto flex w-full max-w-md flex-col gap-1.5">
+						<span className="text-sm font-medium">Brand Kit</span>
+						<select
+							value={options.kit ?? kits[0].id}
+							onChange={(e) => onOptionsChange({ ...options, kit: e.target.value })}
+							className="rounded-md border border-foreground/20 bg-background px-3 py-2 text-sm"
+						>
+							{kits.map((k) => (
+								<option key={k.id} value={k.id}>
+									{k.name}
+								</option>
+							))}
+						</select>
+						<span className="text-xs text-foreground/60">The subtitle look this video starts with. Change your kits on the Brand Kit page.</span>
+					</label>
+				)}
 
 				<fieldset className="grid gap-3 sm:grid-cols-2">
 					<legend className="mb-2 text-sm font-medium">Do this for me</legend>

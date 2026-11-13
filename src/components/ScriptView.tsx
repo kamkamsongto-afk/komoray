@@ -711,12 +711,45 @@ export function ScriptView({
 		edit: (from, to) => startEdit(from, to),
 	};
 
-	// This video's subtitle look becomes the Brand Kit: every new video starts with it.
+	// Brand Kits (api/brand, coach 13 Nov: one per channel): put one on this video, or save this video's look into
+	// one of them or a new one. Loaded when the panel opens.
+	type Kit = { id: string; name: string; style: SubtitleStyle };
+	const [kits, setKits] = useState<Kit[] | null>(null);
+	const [saveTo, setSaveTo] = useState<string>("");
 	const [brandSaved, setBrandSaved] = useState<"saving" | "saved" | "failed" | null>(null);
+	const kitsAsked = useRef(false);
+	useEffect(() => {
+		if (panel !== "brand" || kitsAsked.current) return;
+		kitsAsked.current = true;
+		fetch("/api/brand")
+			.then((res) => (res.ok ? (res.json() as Promise<{ kits?: Kit[]; defaultId?: string | null }>) : null))
+			.catch(() => null)
+			.then((data) => {
+				setKits(data?.kits ?? []);
+				setSaveTo((now) => now || data?.defaultId || "new");
+			});
+	}, [panel]);
+	function applyKit(id: string) {
+		const kit = kits?.find((k) => k.id === id);
+		// Where this video's subtitles were split or moved stays: that belongs to the video.
+		if (kit) onSubtitleChange({ ...kit.style, splits: subtitle.splits, spots: subtitle.spots });
+	}
 	async function saveBrand() {
+		const fresh = saveTo === "new" || !kits?.some((k) => k.id === saveTo);
+		const name = fresh ? window.prompt("Name the new Brand Kit (a channel name, say):", `Brand Kit ${(kits?.length ?? 0) + 1}`) : null;
+		if (fresh && name === null) return;
 		setBrandSaved("saving");
-		const res = await fetch("/api/brand", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ style: subtitle }) }).catch(() => null);
-		setBrandSaved(res?.ok ? "saved" : "failed");
+		const res = await fetch("/api/brand", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ style: subtitle, ...(fresh ? { name } : { kitId: saveTo }) }),
+		}).catch(() => null);
+		const data = res?.ok ? ((await res.json()) as { kits?: Kit[] }) : null;
+		setBrandSaved(data ? "saved" : "failed");
+		if (data?.kits) {
+			setKits(data.kits);
+			if (fresh) setSaveTo(data.kits[data.kits.length - 1].id);
+		}
 	}
 	useEffect(() => setBrandSaved((s) => (s === "saved" ? null : s)), [subtitle]);
 
@@ -1017,19 +1050,45 @@ export function ScriptView({
 							}
 							footer={
 								panel === "brand" ? (
-									<div className="flex flex-col gap-1.5">
-										<button
-											onClick={() => void saveBrand()}
-											disabled={brandSaved === "saving"}
-											className="self-start rounded-md border border-foreground/20 px-2.5 py-1 text-sm hover:bg-foreground/5 disabled:opacity-50"
-											title="Use this look for every new video"
-										>
-											{brandSaved === "saved" ? "Saved to Brand Kit" : brandSaved === "failed" ? "Could not save, try again" : "Save as my Brand Kit"}
-										</button>
-										{/* Coach, 6 Nov: does a saved logo stay, and how many Brand Kits are there? */}
+									<div className="flex flex-col gap-2">
+										{kits && kits.length > 0 && (
+											<label className="flex flex-wrap items-center gap-2 text-sm">
+												<span className="text-foreground/70">Use a Brand Kit</span>
+												<select value="" onChange={(e) => applyKit(e.target.value)} className="rounded-md border border-foreground/20 bg-background px-2 py-1 text-sm">
+													<option value="" disabled>
+														Pick one…
+													</option>
+													{kits.map((k) => (
+														<option key={k.id} value={k.id}>
+															{k.name}
+														</option>
+													))}
+												</select>
+											</label>
+										)}
+										<div className="flex flex-wrap items-center gap-2 text-sm">
+											<span className="text-foreground/70">Save this look to</span>
+											<select value={saveTo} onChange={(e) => (setSaveTo(e.target.value), setBrandSaved(null))} aria-label="Brand Kit to save to" className="rounded-md border border-foreground/20 bg-background px-2 py-1 text-sm">
+												{(kits ?? []).map((k) => (
+													<option key={k.id} value={k.id}>
+														{k.name}
+													</option>
+												))}
+												<option value="new">New Brand Kit…</option>
+											</select>
+											<button
+												onClick={() => void saveBrand()}
+												disabled={brandSaved === "saving" || kits === null}
+												className="rounded-md border border-foreground/20 px-2.5 py-1 hover:bg-foreground/5 disabled:opacity-50"
+											>
+												{brandSaved === "saved" ? "Saved" : brandSaved === "failed" ? "Could not save, try again" : "Save"}
+											</button>
+										</div>
+										{/* Coach, 6 Nov: does a saved logo stay? 13 Nov: several Brand Kits, one per channel. */}
 										<p className="text-xs text-foreground/60">
-											Your Brand Kit is one look kept in your account: every new video starts with it, so you never upload your logo again. Saving
-											again replaces it. Videos you already made keep their own look, but your logo is one picture: Change picture uses the new one everywhere.
+											Brand Kits are looks kept in your account, one per channel if you like. New videos start with the starred one, or the one you pick when
+											uploading. Saving into a kit replaces its look. Videos you already made keep their own look, but your logo is one picture: Change picture
+											uses the new one everywhere.
 										</p>
 									</div>
 								) : undefined
