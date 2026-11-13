@@ -10,6 +10,7 @@ import {
 	WORD_BASE_SECONDS,
 	WORD_SECONDS_PER_LETTER,
 } from "@/lib/silences";
+import { isLanguage } from "@/lib/languages";
 import { mergeThaiWords } from "@/lib/thai-words";
 import { readTranscript } from "@/lib/transcribe";
 import { readOptions } from "@/lib/upload-options";
@@ -31,7 +32,11 @@ export async function POST(request: Request) {
 		// words, so a word is never cut through (a piece "่วน" after a pause is still part of "ส่วน", lib/thai-words.ts).
 		const words = mergeThaiWords(trimStretchedWords(transcript.words));
 		// What the creator asked for when uploading (none on videos from before): the editor uses it once.
-		const options = readOptions((await getJson<{ options?: unknown }>(siblingKey(key, "analyze.json")).catch(() => null))?.options);
+		const asked = await getJson<{ options?: unknown; language?: unknown }>(siblingKey(key, "analyze.json")).catch(() => null);
+		const options = readOptions(asked?.options);
+		// The language it was listened in: Komoray's word list is kept per language (lib/shared-words.ts).
+		const said = asked?.language;
+		const language = isLanguage(said) ? said : undefined;
 		const edit = {
 			source: key,
 			duration: transcript.duration,
@@ -49,6 +54,7 @@ export async function POST(request: Request) {
 			// Only on videos from now on: older ones were already fixed by hand.
 			spellingWanted: true,
 			...(options && { options }),
+			...(language && { language }),
 		};
 		await putObject(siblingKey(key, "edit.json"), JSON.stringify(edit, null, 2), "application/json");
 	} catch (err) {

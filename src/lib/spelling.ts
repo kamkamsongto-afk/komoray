@@ -139,3 +139,24 @@ export async function askForSpelling(words: Word[], from: number, apiKey: string
 	const read = lines[lines.length - 1];
 	return { fixes: fixes.sort((a, b) => a.from - b.from), next: read ? read[read.length - 1] + 1 : words.length };
 }
+
+// Komoray's "always" pairs (lib/shared-words.ts) put on by themselves where one to MAX_RUN whole words, starting
+// in from..to, read as the pair's heard side, as the script joins them (Thai without spaces). A run may go on past
+// `to`, so a pair across two parts is still found (Codex review 13 Nov); api/spelling keeps parts from overlapping.
+// No AI: these can't be right as heard.
+const MAX_RUN = 4;
+export function placeAlways(words: Word[], from: number, to: number, pairs: { heard: string; fixed: string }[]): Fix[] {
+	const want = new Map(pairs.map((p) => [squash(p.heard), p.fixed]));
+	const fixes: Fix[] = [];
+	if (!want.size) return fixes;
+	for (let i = from; i < Math.min(to, words.length); i++) {
+		for (let n = Math.min(MAX_RUN, words.length - i); n >= 1; n--) {
+			const fixed = want.get(squash(words.slice(i, i + n).map((w) => w.text).join("")));
+			if (!fixed) continue;
+			fixes.push({ from: i, to: i + n - 1, text: fixed });
+			i += n - 1;
+			break;
+		}
+	}
+	return fixes;
+}
