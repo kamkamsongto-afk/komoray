@@ -102,7 +102,8 @@ export default function BrandPage() {
 	}
 	async function remove() {
 		const kit = file?.kits.find((k) => k.id === kitId);
-		if (!kit || !window.confirm(`Delete the Brand Kit "${kit.name}"? Videos you already made keep their look.`)) return;
+		const unsaved = changed ? " The changes you haven't saved go too." : "";
+		if (!kit || !window.confirm(`Delete the Brand Kit "${kit.name}"?${unsaved} Videos you already made keep their look.`)) return;
 		const data = await call("DELETE", { kitId });
 		if (data) show(data, null);
 	}

@@ -9,7 +9,7 @@ import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/b
 import { filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
-import { outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
+import { DEFAULT_STYLE, fontMetrics, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, groupTakes, type TakeGroup } from "@/lib/takes";
 import { FPS, keepSegments, subtitleLines, toOutSeconds, toSourceSeconds, totalFrames } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
@@ -731,8 +731,11 @@ export function ScriptView({
 	}, [panel]);
 	function applyKit(id: string) {
 		const kit = kits?.find((k) => k.id === id);
-		// Where this video's subtitles were split or moved stays: that belongs to the video.
-		if (kit) onSubtitleChange({ ...kit.style, splits: subtitle.splits, spots: subtitle.spots });
+		if (!kit) return;
+		// Where this video's subtitles were split or moved stays: that belongs to the video. An English-only font has no
+		// Thai letters: a Thai video uses Kanit instead, as when a video first opens (edit page; Codex review 13 Nov).
+		const font = thaiClip && !fontMetrics(kit.style).thai ? DEFAULT_STYLE.font : kit.style.font;
+		onSubtitleChange({ ...kit.style, font, splits: subtitle.splits, spots: subtitle.spots });
 	}
 	async function saveBrand() {
 		const fresh = saveTo === "new" || !kits?.some((k) => k.id === saveTo);
