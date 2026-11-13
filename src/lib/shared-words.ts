@@ -130,8 +130,15 @@ export const isWordList = (list: unknown): list is WordList => typeof list === "
 // Where a pair goes: Thai to "th", others to their video's language when known, else "latin".
 export const listFor = (lang: Lang, language?: string): WordList => (lang === "th" ? "th" : language && language !== "th" && /^[a-z]{2}$/.test(language) ? language : "latin");
 
-// How a pair of Komoray's list is used on everyone's videos: what the team set, else the rules.
-export const effectiveUse = (p: { heard: string; fixed: string; use?: WordUse }) => p.use ?? wordUse(p.heard, p.fixed, { realWords: realThaiWords, shared: true });
+// How a pair of Komoray's list is used on everyone's videos: what the team set, else the rules. A Thai pair whose fixed
+// side has a word the dictionary lacks (ไบโอ, a name) is only the AI's to use until the team approves it: the admin's
+// own fixes come in without the dictionary check, and "Always" goes on every creator's video (13 Nov).
+export function effectiveUse(p: { heard: string; fixed: string; use?: WordUse; reviewed?: boolean }): WordUse {
+	if (p.use) return p.use;
+	const rule = wordUse(p.heard, p.fixed, { realWords: realThaiWords, shared: true });
+	if (rule === "always" && !p.reviewed && THAI.test(p.fixed) && !realThaiWords(p.fixed.replace(/\s+/g, ""))) return "ai";
+	return rule;
+}
 
 // A pair the team typed in: short, Thai or letters only (a team member may add a word the dictionary lacks).
 export function curatable(heard: string, fixed: string): Lang | null {
