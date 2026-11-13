@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { covered } from "./behind";
-import { clock, type CutoutTier, slowSeconds, type Window } from "./cutout";
+import { clock, type CutoutTier, finishSeconds, slowSeconds, type Window } from "./cutout";
 import { type LocalTier, localSupport, makeLocalMatte } from "./cutout-local";
 
 // The editor's side of Cutout (lib/cutout.ts, lib/behind.ts): is it on for this person, how far the
@@ -23,25 +23,27 @@ export type CutoutState = {
 	saved: Partial<Record<CutoutTier, Window[]>>; // what each quality has already made for this video, kept when another replaced it
 	restoring?: CutoutTier; // switching to a saved quality: takes a moment
 	runs?: number; // how many times Slow has run on this video
+	savingSince?: number; // Fast and Normal: when this computer began saving the cutout (Date.now())
 };
 
 // The running number people watch, so "my text is still in front" reads as waiting and not as broken (coach, 9 Nov).
 export function waitLabel(c: Pick<CutoutState, "local" | "status" | "tier"> & { timeLeft: number | null }) {
-	if (c.local?.phase === "sending") return "Less than a minute";
+	const left = (t: number) => (t > 0 ? `About ${clock(t)} left` : "Taking longer than usual…");
+	if (c.local?.phase === "sending") return c.timeLeft === null ? "Less than a minute" : left(c.timeLeft);
 	if (c.local) return c.timeLeft === null ? "Getting ready…" : `About ${clock(c.timeLeft)} left`;
 	if (c.status !== "processing") return null;
-	if (c.tier !== "best") return "Almost done…";
+	if (c.tier !== "best") return c.timeLeft === null ? "Almost done…" : left(c.timeLeft);
 	if (c.timeLeft === null) return "Starting…";
-	return c.timeLeft > 0 ? `About ${clock(c.timeLeft)} left` : "Taking longer than usual…";
+	return left(c.timeLeft);
 }
 
 const POLL_MS = 10_000;
-const SAVE_SECONDS = 25; // Fast and Normal: uploading and finishing after the last frame (measured 15–19 s to finish)
 const FIRST_ESTIMATE_MS = 3000; // the first frames say little about the speed
 const SHOW_EVERY_MS = 250;
 const NO_BEST = { unlimited: false, limit: 0, used: 0 };
 
-export function useCutout(key: string | null) {
+// videoSeconds: the video's length, for how long finishing a Fast or Normal cutout takes (finishSeconds).
+export function useCutout(key: string | null, videoSeconds = 0) {
 	const [state, setState] = useState<CutoutState>({ on: false, status: "none", windows: [], files: {}, best: NO_BEST, support: { fast: false, balanced: false }, local: null, saved: {} });
 	const local = useRef<Record<string, string>>({}); // files just uploaded: shown from this computer at once
 	const stop = useRef<AbortController | null>(null);
@@ -51,7 +53,7 @@ export function useCutout(key: string | null) {
 		const res = await fetch(`/api/cutout?key=${encodeURIComponent(key)}`).catch(() => null);
 		if (!res?.ok) return;
 		const data = (await res.json()) as Omit<CutoutState, "on" | "support" | "local">;
-		setState((s) => ({ ...s, previewUrl: undefined, version: undefined, tier: undefined, error: undefined, startedAt: undefined, restoring: undefined, ...data, files: { ...data.files, ...local.current } }));
+		setState((s) => ({ ...s, previewUrl: undefined, version: undefined, tier: undefined, error: undefined, startedAt: undefined, restoring: undefined, ...data, savingSince: data.status === "processing" ? s.savingSince : undefined, files: { ...data.files, ...local.current } }));
 	}, [key]);
 
 	useEffect(() => {
@@ -75,16 +77,21 @@ export function useCutout(key: string | null) {
 		return () => clearInterval(timer);
 	}, [state.status, state.local, refresh]);
 
-	// Slow's countdown runs on the clock: the GPU tells us nothing until it is done.
+	// Slow's countdown runs on the clock: the GPU tells us nothing until it is done. So does finishing Fast and Normal
+	// (saving, then "Almost done"), timed from when saving began, or from the job's start after a reload.
 	const [tick, setTick] = useState(0);
 	const slowRunning = state.status === "processing" && state.tier === "best" && !state.local;
+	const finishing = state.local?.phase === "sending" || (state.status === "processing" && state.tier !== "best" && !state.local && !state.restoring);
 	useEffect(() => {
-		if (!slowRunning) return;
+		if (!slowRunning && !finishing) return;
 		const timer = setInterval(() => setTick(Date.now()), 1000);
 		return () => clearInterval(timer);
-	}, [slowRunning]);
-	const slowLeft = slowRunning && state.startedAt && tick ? slowSeconds(state.windows) - Math.max(0, tick - Date.parse(state.startedAt)) / 1000 : null;
-	const timeLeft = state.local ? state.local.left : slowLeft;
+	}, [slowRunning, finishing]);
+	const since = (start: number | undefined) => (start && tick ? Math.max(0, tick - start) / 1000 : null);
+	const slowGone = slowRunning && state.startedAt ? since(Date.parse(state.startedAt)) : null;
+	const finishGone = finishing && videoSeconds ? since(state.savingSince ?? (state.startedAt ? Date.parse(state.startedAt) : undefined)) : null;
+	const timeLeft =
+		state.local && state.local.phase === "cutting" ? state.local.left : finishGone !== null ? finishSeconds(videoSeconds) - finishGone : slowGone !== null ? slowSeconds(state.windows) - slowGone : null;
 
 	// Fast and Balanced stop if the page closes, so ask first.
 	const working = Boolean(state.local);
@@ -125,12 +132,12 @@ export function useCutout(key: string | null) {
 				if (at - shown < SHOW_EVERY_MS) return;
 				shown = at;
 				const spent = at - first.at;
-				const left = spent >= FIRST_ESTIMATE_MS && part > first.part ? (((1 - part) * spent) / (part - first.part)) / 1000 + SAVE_SECONDS : null;
+				const left = spent >= FIRST_ESTIMATE_MS && part > first.part ? (((1 - part) * spent) / (part - first.part)) / 1000 + finishSeconds(videoSeconds) : null;
 				setState((s) => (s.local ? { ...s, local: { ...s.local, part, left } } : s));
 			};
 			try {
 				const matte = await makeLocalMatte(tier, videoUrl, windows, progress, controller.signal);
-				setState((s) => (s.local ? { ...s, local: { ...s.local, phase: "sending", part: 1, left: null } } : s));
+				setState((s) => (s.local ? { ...s, savingSince: Date.now(), local: { ...s.local, phase: "sending", part: 1, left: null } } : s));
 				const asked = await fetch("/api/cutout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, windows, tier }) });
 				const place = (await asked.json().catch(() => ({}))) as { uploadUrl?: string; error?: string };
 				if (!asked.ok || !place.uploadUrl) return failed(place.error ?? "Could not save the cutout. Please try again.");
@@ -146,7 +153,7 @@ export function useCutout(key: string | null) {
 				failed(error instanceof Error && error.message ? error.message : "The cutout stopped. Please try again.");
 			}
 		},
-		[key, refresh, failed],
+		[key, refresh, failed, videoSeconds],
 	);
 
 	// Back to a quality already made. If that fails, Fast and Normal simply cut again (they cost nothing);
