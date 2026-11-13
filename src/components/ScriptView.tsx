@@ -185,6 +185,8 @@ type Props = {
 	onLearn?: (heard: string, fixed: string | null) => void; // null: forget (original words put back)
 	subtitle: SubtitleStyle;
 	onSubtitleChange: (style: SubtitleStyle) => void;
+	videoKey?: string | null; // to remember which Brand Kit this video uses (this computer only)
+	startKit?: string; // the Brand Kit picked when uploading (lib/upload-options.ts)
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void;
 	// Cutout (lib/behind.ts): text behind the speaker, pictures and clips behind a smaller speaker.
@@ -243,6 +245,8 @@ export function ScriptView({
 	onLearn,
 	subtitle,
 	onSubtitleChange,
+	videoKey,
+	startKit,
 	banners,
 	onBannersChange,
 	cutoutLayers,
@@ -711,12 +715,22 @@ export function ScriptView({
 		edit: (from, to) => startEdit(from, to),
 	};
 
-	// Brand Kits (api/brand, coach 13 Nov: one per channel): put one on this video, or save this video's look into
-	// one of them or a new one. Loaded when the panel opens.
+	// Brand Kits (api/brand, coach 13 Nov: one per channel). The panel shows the one this video uses, and can only save
+	// into that one, or into a new one: picking a kit in one place and saving into another made one channel's kit take
+	// another's look (coach, 13 Nov). Another kit is changed on the Brand Kit page. Which kit a video uses is kept on
+	// this computer; else the one picked when uploading, else the starred one.
 	type Kit = { id: string; name: string; style: SubtitleStyle };
 	const [kits, setKits] = useState<Kit[] | null>(null);
-	const [saveTo, setSaveTo] = useState<string>("");
+	const [inUse, setInUse] = useState<string | null>(null);
 	const [brandSaved, setBrandSaved] = useState<"saving" | "saved" | "failed" | null>(null);
+	const [savedNew, setSavedNew] = useState(false); // which button the "Saved" goes after
+	const kitMemory = videoKey ? `komoray-kit-in-use:${videoKey}` : null;
+	const remember = (id: string) => {
+		setInUse(id);
+		try {
+			if (kitMemory) localStorage.setItem(kitMemory, id);
+		} catch {}
+	};
 	const kitsAsked = useRef(false);
 	useEffect(() => {
 		if (panel !== "brand" || kitsAsked.current) return;
@@ -725,33 +739,57 @@ export function ScriptView({
 			.then((res) => (res.ok ? (res.json() as Promise<{ kits?: Kit[]; defaultId?: string | null }>) : null))
 			.catch(() => null)
 			.then((data) => {
-				setKits(data?.kits ?? []);
-				setSaveTo((now) => now || data?.defaultId || "new");
+				const list = data?.kits ?? [];
+				let kept: string | null = null;
+				try {
+					kept = kitMemory ? localStorage.getItem(kitMemory) : null;
+				} catch {}
+				setKits(list);
+				setInUse([kept, startKit, data?.defaultId].find((id) => id && list.some((k) => k.id === id)) ?? null);
 			});
-	}, [panel]);
+	}, [panel, kitMemory, startKit]);
+	// A kit's look as it goes on this video: an English-only font has no Thai letters, so a Thai video uses Kanit
+	// instead, as when a video first opens (edit page; Codex review 13 Nov).
+	const onThisVideo = (kit: Kit) => ({ ...kit.style, font: thaiClip && !fontMetrics(kit.style).thai ? DEFAULT_STYLE.font : kit.style.font });
+	// Same look, whatever order the settings are in; where subtitles were split or moved belongs to the video.
+	const lookKey = (style: SubtitleStyle) => {
+		const sorted = (v: unknown): unknown => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])])) : v);
+		const look: Record<string, unknown> = { ...style };
+		delete look.splits;
+		delete look.spots;
+		return JSON.stringify(sorted(look));
+	};
+	const kitInUse = kits?.find((k) => k.id === inUse) ?? null;
+	const kitChanged = Boolean(kitInUse && lookKey(subtitle) !== lookKey(onThisVideo(kitInUse)));
 	function applyKit(id: string) {
 		const kit = kits?.find((k) => k.id === id);
 		if (!kit) return;
-		// Where this video's subtitles were split or moved stays: that belongs to the video. An English-only font has no
-		// Thai letters: a Thai video uses Kanit instead, as when a video first opens (edit page; Codex review 13 Nov).
-		const font = thaiClip && !fontMetrics(kit.style).thai ? DEFAULT_STYLE.font : kit.style.font;
-		onSubtitleChange({ ...kit.style, font, splits: subtitle.splits, spots: subtitle.spots });
+		if (kitChanged && !window.confirm(`Put "${kit.name}" on this video? The changes you made to "${kitInUse?.name}" here go.`)) return;
+		onSubtitleChange({ ...onThisVideo(kit), splits: subtitle.splits, spots: subtitle.spots });
+		remember(id);
 	}
-	async function saveBrand() {
-		const fresh = saveTo === "new" || !kits?.some((k) => k.id === saveTo);
+	async function saveBrand(fresh: boolean) {
+		if (!fresh && !kitInUse) return;
 		const name = fresh ? window.prompt("Name the new Brand Kit (a channel name, say):", `Brand Kit ${(kits?.length ?? 0) + 1}`) : null;
 		if (fresh && name === null) return;
+		setSavedNew(fresh);
 		setBrandSaved("saving");
 		const res = await fetch("/api/brand", {
 			method: "PUT",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ style: subtitle, ...(fresh ? { name } : { kitId: saveTo }) }),
+			body: JSON.stringify({ style: subtitle, ...(fresh ? { name } : { kitId: kitInUse!.id }) }),
 		}).catch(() => null);
 		const data = res?.ok ? ((await res.json()) as { kits?: Kit[] }) : null;
 		setBrandSaved(data ? "saved" : "failed");
+		if (res?.status === 404) {
+			window.alert("That Brand Kit was deleted. Use Create New Brand Kit instead.");
+			kitsAsked.current = false; // read the kits again next time the panel opens
+			setKits((list) => list?.filter((k) => k.id !== kitInUse?.id) ?? null);
+			setInUse(null);
+		}
 		if (data?.kits) {
 			setKits(data.kits);
-			if (fresh) setSaveTo(data.kits[data.kits.length - 1].id);
+			if (fresh) remember(data.kits[data.kits.length - 1].id);
 		}
 	}
 	useEffect(() => setBrandSaved((s) => (s === "saved" ? null : s)), [subtitle]);
@@ -1056,41 +1094,52 @@ export function ScriptView({
 									<div className="flex flex-col gap-2">
 										{kits && kits.length > 0 && (
 											<label className="flex flex-wrap items-center gap-2 text-sm">
-												<span className="text-foreground/70">Use a Brand Kit</span>
-												<select value="" onChange={(e) => applyKit(e.target.value)} className="rounded-md border border-foreground/20 bg-background px-2 py-1 text-sm">
-													<option value="" disabled>
-														Pick one…
-													</option>
+												<span className="text-foreground/70">Brand Kit for this video</span>
+												<select value={inUse ?? ""} onChange={(e) => applyKit(e.target.value)} className="rounded-md border border-foreground/20 bg-background px-2 py-1 text-sm">
+													{!inUse && (
+														<option value="" disabled>
+															Custom look
+														</option>
+													)}
 													{kits.map((k) => (
 														<option key={k.id} value={k.id}>
 															{k.name}
 														</option>
 													))}
 												</select>
+												{kitChanged && <span className="text-xs font-medium text-amber-600">changed</span>}
 											</label>
 										)}
+										{/* Coach, 13 Nov: "Save to" the kit in use, "Saved" right after the button pressed, "Create New Brand Kit" below. */}
+										{kitInUse && (
+											<div className="flex flex-wrap items-center gap-2 text-sm">
+												<button
+													onClick={() => void saveBrand(false)}
+													disabled={brandSaved === "saving" || !kitChanged}
+													title={kitChanged ? `Your next videos with "${kitInUse.name}" start with this look` : "Nothing changed yet"}
+													className="rounded-md border border-foreground/20 px-2.5 py-1 hover:bg-foreground/5 disabled:opacity-50"
+												>
+													Save to &ldquo;{kitInUse.name}&rdquo;
+												</button>
+												{!savedNew && brandSaved === "saved" && <span className="text-xs font-medium text-green-600">Saved</span>}
+												{!savedNew && brandSaved === "failed" && <span className="text-xs text-red-600">Could not save, try again</span>}
+											</div>
+										)}
 										<div className="flex flex-wrap items-center gap-2 text-sm">
-											<span className="text-foreground/70">Save this look to</span>
-											<select value={saveTo} onChange={(e) => (setSaveTo(e.target.value), setBrandSaved(null))} aria-label="Brand Kit to save to" className="rounded-md border border-foreground/20 bg-background px-2 py-1 text-sm">
-												{(kits ?? []).map((k) => (
-													<option key={k.id} value={k.id}>
-														{k.name}
-													</option>
-												))}
-												<option value="new">New Brand Kit…</option>
-											</select>
 											<button
-												onClick={() => void saveBrand()}
+												onClick={() => void saveBrand(true)}
 												disabled={brandSaved === "saving" || kits === null}
 												className="rounded-md border border-foreground/20 px-2.5 py-1 hover:bg-foreground/5 disabled:opacity-50"
 											>
-												{brandSaved === "saved" ? "Saved" : brandSaved === "failed" ? "Could not save, try again" : "Save"}
+												Create New Brand Kit
 											</button>
+											{savedNew && brandSaved === "saved" && <span className="text-xs font-medium text-green-600">Saved</span>}
+											{savedNew && brandSaved === "failed" && <span className="text-xs text-red-600">Could not save, try again</span>}
 										</div>
 										{/* Coach, 6 Nov: does a saved logo stay? 13 Nov: several Brand Kits, one per channel. */}
 										<p className="text-xs text-foreground/60">
 											Brand Kits are looks kept in your account, one per channel if you like. New videos start with the starred one, or the one you pick when
-											uploading. Saving into a kit replaces its look. Videos you already made keep their own look, but your logo is one picture: Change picture
+											uploading. Here you save only into the kit this video uses, or a new one; change other kits on the Brand Kit page. Videos you already made keep their own look, but your logo is one picture: Change picture
 											uses the new one everywhere.
 										</p>
 									</div>
