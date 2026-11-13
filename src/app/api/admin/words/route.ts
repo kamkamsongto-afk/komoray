@@ -59,7 +59,7 @@ export async function GET() {
 				? []
 				: voted[bucket]
 						.filter((p) => !blocked[bucket].has(p.heard) && !has.has(p.heard))
-						.map((p) => ({ heard: p.heard, fixed: p.fixed, uses: p.voters, source: "creators", rule: rule(p.heard, p.fixed), use: rule(p.heard, p.fixed), reviewed: false }));
+						.map((p) => ({ heard: p.heard, fixed: p.fixed, uses: p.voters, source: "creators", rule: rule(p.heard, p.fixed), use: rule(p.heard, p.fixed) === "always" ? "ai" : rule(p.heard, p.fixed), reviewed: false })); // as sharedFixes: AI only until approved
 		lists[list] = [...team, ...theirs];
 	});
 	return Response.json({ lists });

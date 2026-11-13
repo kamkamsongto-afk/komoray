@@ -2,6 +2,7 @@
 
 import { Check, Download, Redo2, Scissors, Sparkles, Undo2, X } from "lucide-react";
 import Link from "next/link";
+import { HomeLogo } from "@/components/HomeLogo";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import type { BadTake } from "@/lib/bad-takes";
@@ -787,9 +788,12 @@ export default function EditPage() {
 			{/* A few buttons only: the settings that go together sit in a menu (coach, 7 Nov: the top was crowded, not minimal). */}
 			<header className="flex flex-wrap items-center justify-between gap-3 border-b border-foreground/10 pb-3">
 				<div className="flex min-w-0 flex-col">
-					<Link href="/projects" className="text-xs text-foreground/60 hover:text-foreground">
-						← My projects
-					</Link>
+					<div className="flex items-center gap-3">
+						<HomeLogo />
+						<Link href="/projects" className="text-xs text-foreground/60 hover:text-foreground">
+							← My projects
+						</Link>
+					</div>
 					<h1 className="truncate text-lg font-semibold">{filename}</h1>
 					<p className="text-xs text-foreground/60">
 						{clock(analysis.duration)} → {clock(finalSeconds)} · {analysis.cuts.length} silences ({silentSeconds.toFixed(1)}s)

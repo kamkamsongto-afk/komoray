@@ -33,11 +33,28 @@ export default function WordsPage() {
 	useEffect(() => {
 		if (!user) return;
 		void load();
+		// Not read: say so and show neither the box nor the line, rather than "not sharing" for someone who shares (Codex review 13 Nov).
 		fetch("/api/prefs")
-			.then((res) => res.json() as Promise<{ shareWords?: boolean }>)
+			.then((res) => (res.ok ? (res.json() as Promise<{ shareWords?: boolean }>) : Promise.reject(new Error(String(res.status)))))
 			.then((data) => setShare(data.shareWords === true))
-			.catch(() => setShare(false));
+			.catch(() => setShareError("Could not load your sharing choice. Please reload the page."));
 	}, [user]);
+
+	// Coach, 13 Nov: the box stays big until they share; ticking asks to confirm, then it folds into a small line at the
+	// bottom of the page ("Change" opens it again to stop sharing).
+	const [shareOpen, setShareOpen] = useState(false);
+	function askShare(on: boolean) {
+		const question = on
+			? [
+					"Share your word fixes with Komoray?",
+					"Only the word pair is shared (like ผูหญิง → ผู้หญิง), never your name, email, videos or the sentence. A fix is only used once at least 3 different creators made the same one.",
+					"You can stop any time. Fixes shared before stay in the list, without your name.",
+				].join("\n\n")
+			: ["Stop sharing your word fixes?", "Fixes from now on stay yours only. Fixes shared before stay in the list, without your name."].join("\n\n");
+		if (!window.confirm(question)) return;
+		void changeShare(on);
+		if (on) setShareOpen(false);
+	}
 
 	async function changeShare(on: boolean) {
 		setShareError("");
@@ -104,13 +121,14 @@ export default function WordsPage() {
 			</div>
 
 			{/* Coach, 11 Nov: clear enough to tick without worry. The same promises are in the Privacy Policy ("Shared word fixes"). */}
+			{(share === false || shareOpen) && (
 			<section className="flex flex-col gap-2 rounded-xl border border-foreground/15 p-4">
 				<label className="flex items-start gap-3">
 					<input
 						type="checkbox"
 						checked={share === true}
 						disabled={share === null}
-						onChange={(e) => void changeShare(e.target.checked)}
+						onChange={(e) => askShare(e.target.checked)}
 						className="mt-1 h-4 w-4 shrink-0"
 					/>
 					<span className="flex flex-col gap-1">
@@ -132,6 +150,7 @@ export default function WordsPage() {
 					More in our <Link href="/privacy" className="underline">Privacy Policy</Link>.
 				</p>
 			</section>
+			)}
 
 			{error && <p className="text-sm text-red-600">{error}</p>}
 			{!words && !error && <p className="text-sm text-foreground/60">Loading…</p>}
@@ -228,6 +247,15 @@ export default function WordsPage() {
 						{words.length} {words.length === 1 ? "word" : "words"}. Removing a word only stops future fixes; videos you already edited keep theirs.
 					</p>
 				</>
+			)}
+			{share === null && shareError && <p className="text-xs text-red-600">{shareError}</p>}
+			{share === true && !shareOpen && (
+				<p className="text-xs text-foreground/50">
+					You share your word fixes to help make Komoray more accurate, without your name.{" "}
+					<button onClick={() => setShareOpen(true)} className="underline hover:text-foreground">
+						Change
+					</button>
+				</p>
 			)}
 		</main>
 	);
