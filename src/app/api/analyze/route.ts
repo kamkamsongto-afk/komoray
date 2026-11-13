@@ -38,10 +38,11 @@ export async function POST(request: Request) {
 		// Listening again (Wrong language?) sends no choices: the ones made the first time stay.
 		const options = readOptions(asked) ?? readOptions((await getJson<{ options?: unknown }>(siblingKey(key, "analyze.json")))?.options);
 		await Promise.all([deleteObject(siblingKey(key, "edit.json")), deleteObject(siblingKey(key, "analyze-error.json"))]);
-		// usageKey: lets the callback give the minutes back if the job fails.
+		// usageKey: lets the callback give the minutes back if the job fails. language: what was listened for, so the
+		// admin's Accuracy tab can score each language (13 Nov; older videos are guessed from their letters).
 		await putObject(
 			siblingKey(key, "analyze.json"),
-			JSON.stringify({ startedAt: new Date().toISOString(), usageKey: listen.usageKey, ...(options && { options }) }),
+			JSON.stringify({ startedAt: new Date().toISOString(), usageKey: listen.usageKey, language: language || "en", ...(options && { options }) }),
 			"application/json",
 		);
 
