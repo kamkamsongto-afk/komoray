@@ -163,8 +163,13 @@ function wordFix(pieces: string[], typed: string): { kind: FixKind; pairs: Pair[
 	while (tail < A.length - head && tail < B.length - head && same(A[A.length - 1 - tail], B[B.length - 1 - tail])) tail++;
 	const took = A.slice(head, A.length - tail);
 	const put = B.slice(head, B.length - tail);
-	if (!took.length && put.length) return { kind: "added", pairs: [] };
-	if (took.length && !put.length) return { kind: "removed", pairs: [] };
+	// Only the spaces and capitals of a name changed ("Ali express" → "AliExpress"): learned whole.
+	if (took.length && put.length && noSpace(took.join("")).toLowerCase() === noSpace(put.join("")).toLowerCase())
+		return { kind: "spelling", pairs: [{ heard: took.join(" ").replace(TRAIL, ""), fixed: put.join(" ").replace(TRAIL, "") }] };
+	// More or fewer words than were heard: words were put in or taken out ("weather" → "the weather"), not misspelled
+	// (Codex review 13 Nov).
+	if (put.length > took.length) return { kind: "added", pairs: [] };
+	if (put.length < took.length) return { kind: "removed", pairs: [] };
 	if (took.length > MAX_PIECES || put.length > MAX_PIECES || put.join(" ").length > MAX_LETTERS) return { kind: "rewrite", pairs: [] };
 	return { kind: "spelling", pairs: [{ heard: took.join(" ").replace(TRAIL, ""), fixed: put.join(" ").replace(TRAIL, "") }] };
 }
@@ -175,7 +180,10 @@ export function wordUse(heard: string, fixed: string, options: { realWords?: (th
 	const thai = THAI.test(heard + fixed);
 	const { kind } = learnFromFix(thai ? [heard.replace(/\s+/g, "")] : [heard], fixed);
 	if (kind !== "spelling") return "off";
-	if (!thai) return options.shared ? "ai" : "always"; // a creator's own: mostly names and brands, no dictionary to ask
+	// Other languages have no dictionary here to ask. A creator's own name or brand (a capital or a number, 3 letters
+	// or more: komorey → Komoray) is put on everywhere; anything else could be a real word either way (their → there,
+	// a → I), so the AI decides (Codex review 13 Nov).
+	if (!thai) return !options.shared && /[\p{Lu}0-9]/u.test(fixed) && heard.replace(/[^\p{L}0-9]/gu, "").length >= 3 ? "always" : "ai";
 	if (!options.realWords) return "ai";
 	return options.realWords(heard.replace(/\s+/g, "")) ? "ai" : "always";
 }
