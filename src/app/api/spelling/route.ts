@@ -4,7 +4,7 @@ import { scriptFingerprint } from "@/lib/bad-takes";
 import type { Fix } from "@/lib/edit";
 import { deleteObject, getJson, putIfAbsent, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { sharedFixes } from "@/lib/shared-words";
-import { askForSpelling } from "@/lib/spelling";
+import { askForSpelling, placeAlways } from "@/lib/spelling";
 import { realThaiWords } from "@/lib/word-check";
 import { wordUse } from "@/lib/word-rules";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 	const { supabase, user } = await currentUser();
 	if (!(await accessFor(user?.email)).allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
 
-	const edit = await getJson<{ words: { text: string; start: number; end: number }[] }>(siblingKey(key, "edit.json"));
+	const edit = await getJson<{ words: { text: string; start: number; end: number }[]; language?: string }>(siblingKey(key, "edit.json"));
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 	const count = edit.words.length;
 	const script = await scriptFingerprint(edit.words);
@@ -49,11 +49,14 @@ export async function POST(request: Request) {
 		// puts them where the sentence fits, first in its list of mistakes to look for. Pairs that are off aren't shown.
 		const mine = (data ?? []).map((w) => ({ ...w, use: wordUse(w.heard, w.fixed, { realWords: realThaiWords }) }));
 		const theirs = mine.filter((w) => w.use === "ai").map(({ heard, fixed }) => ({ heard, fixed, voters: 0 }));
-		// Komoray's list too: a pair that adds or drops words (ใช่ → ไม่ใช่) is never shown, however it got in.
-		const shared = (await sharedFixes(edit.words.some((w) => /[฀-๿]/.test(w.text)))).filter((p) => wordUse(p.heard, p.fixed, { realWords: realThaiWords, shared: true }) !== "off");
+		// Komoray's list for the video's language (pairs that are "off" are left out there).
+		const shared = await sharedFixes(edit.words.some((w) => /[฀-๿]/.test(w.text)), edit.language);
 		const common = [...theirs, ...shared];
 		const found = await askForSpelling(edit.words, state.done, apiKey, mine.filter((w) => w.use !== "off"), common);
-		const next: Saved = { script, done: Math.max(state.done + 1, Math.min(count, found.next)), fixes: [...state.fixes, ...found.fixes] };
+		// Its "always" pairs (no real word as heard: ผูหญิง) go on by themselves where whole words read so, before the AI's.
+		const sure = placeAlways(edit.words, state.done, found.next, shared.filter((p) => p.use === "always"));
+		const fixes = [...sure, ...found.fixes.filter((f) => !sure.some((g) => g.from <= f.to && f.from <= g.to))].sort((a, b) => a.from - b.from);
+		const next: Saved = { script, done: Math.max(state.done + 1, Math.min(count, found.next)), fixes: [...state.fixes, ...fixes] };
 		await putObject(siblingKey(key, "spelling.json"), JSON.stringify(next), "application/json");
 		return Response.json({ fixes: next.fixes, remaining: count - next.done });
 	} catch (error) {

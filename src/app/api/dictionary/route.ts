@@ -1,6 +1,6 @@
 import { MAX_FIX_LENGTH, normText } from "@/lib/edit";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { addSharedFix, changeCurated, shareable, sharesWords } from "@/lib/shared-words";
+import { addSharedFix, changeCurated, listFor, shareable, sharesWords } from "@/lib/shared-words";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
 import { realThaiWords } from "@/lib/word-check";
 import { wordUse } from "@/lib/word-rules";
@@ -8,7 +8,7 @@ import { wordUse } from "@/lib/word-rules";
 // The signed-in user's personal dictionary (table word_fixes, see supabase/migrations/002):
 //   GET     every word they have fixed, newest first, each with `use` (lib/word-rules.ts): always = put on every
 //           match of a new video, ai = only where the spelling AI finds the sentence fits, off = not used
-//   POST    { heard, fixed }  learn a fix (again: counts up `uses`), and give it to Komoray's shared list if they said
+//   POST    { heard, fixed, language? }  learn a fix (again: counts up `uses`), and give it to Komoray's shared list if they said
 //           yes to that on My words (lib/shared-words.ts: anonymous, ordinary words only)
 //   PATCH   { heard, fixed }  change what a word is fixed to (from the My words page)
 //   DELETE  { heard }         forget one (they put the original words back)
@@ -31,7 +31,7 @@ export async function GET() {
 export async function POST(request: Request) {
 	const { supabase, user } = await currentUser();
 	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
-	const body = (await request.json().catch(() => ({}))) as { heard?: unknown; fixed?: unknown };
+	const body = (await request.json().catch(() => ({}))) as { heard?: unknown; fixed?: unknown; language?: unknown };
 	const heard = normText(String(body.heard ?? "")).slice(0, MAX_FIX_LENGTH);
 	const fixed = String(body.fixed ?? "").trim().slice(0, MAX_FIX_LENGTH);
 	if (!heard || !fixed || normText(fixed) === heard) return Response.json({ error: "Nothing to learn" }, { status: 400 });
@@ -47,7 +47,8 @@ export async function POST(request: Request) {
 	// The admin's own fixes build Komoray's own word list (lib/shared-words.ts), ordinary words only: a name or brand
 	// the admin fixes stays in their My words. Pairs can be removed on the admin page.
 	const lang = isAdmin(user.email) ? shareable(heard, fixed) : null;
-	if (lang) await changeCurated(lang, [{ heard, fixed }]).catch((err) => console.error("Komoray words failed:", err));
+	// Into the list of the video's language (lib/shared-words.ts listFor), "latin" when the video didn't keep it.
+	if (lang) await changeCurated(listFor(lang, typeof body.language === "string" ? body.language : undefined), [{ heard, fixed }]).catch((err) => console.error("Komoray words failed:", err));
 	if (await sharesWords(user.id)) {
 		const { RENDER_TOKEN } = getCloudflareContext().env as unknown as { RENDER_TOKEN: string };
 		await addSharedFix(user.id, RENDER_TOKEN, heard, fixed).catch((err) => console.error("Shared word failed:", err));

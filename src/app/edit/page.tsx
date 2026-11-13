@@ -32,6 +32,7 @@ type Analysis = {
 	fixes?: Fix[];
 	dictionaryApplied?: boolean; // the personal dictionary already ran on this video once
 	spellingWanted?: boolean; // uploaded since the AI fixes spelling (api/spelling): it does, once
+	language?: string; // what it was listened in (from 13 Nov): Komoray's word list is kept per language
 	spellingApplied?: boolean; // the AI's spelling fixes were put on
 	takesApplied?: boolean; // repeated takes were already looked for on this video once
 	options?: UploadOptions; // what was asked for when uploading (none on videos from before)
@@ -544,7 +545,7 @@ export default function EditPage() {
 			void fetch("/api/dictionary", {
 				method: fixed ? "POST" : "DELETE",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ heard, fixed }),
+				body: JSON.stringify({ heard, fixed, language: analysisRef.current?.language }),
 			})
 				.then(async (res) => {
 					if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${res.status}`);
