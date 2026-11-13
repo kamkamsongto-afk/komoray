@@ -46,6 +46,8 @@ export async function PUT(request: Request) {
 	const style = lookOf(body.style);
 	const { file } = me;
 	const kit = typeof body.kitId === "string" ? file.kits.find((k) => k.id === body.kitId) : undefined;
+	// A kit asked for by name that is gone (deleted in another tab): say so, never save into a new one unasked.
+	if (body.kitId !== undefined && !kit) return Response.json({ error: "That Brand Kit was deleted. Save as a new one instead." }, { status: 404 });
 	if (kit) {
 		kit.style = style;
 		if (cleanName(body.name)) kit.name = cleanName(body.name);

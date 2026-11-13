@@ -779,6 +779,12 @@ export function ScriptView({
 		}).catch(() => null);
 		const data = res?.ok ? ((await res.json()) as { kits?: Kit[] }) : null;
 		setBrandSaved(data ? "saved" : "failed");
+		if (res?.status === 404) {
+			window.alert("That Brand Kit was deleted. Use Save as a new Brand Kit instead.");
+			kitsAsked.current = false; // read the kits again next time the panel opens
+			setKits((list) => list?.filter((k) => k.id !== kitInUse?.id) ?? null);
+			setInUse(null);
+		}
 		if (data?.kits) {
 			setKits(data.kits);
 			if (fresh) remember(data.kits[data.kits.length - 1].id);
