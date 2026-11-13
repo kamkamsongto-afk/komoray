@@ -66,7 +66,9 @@ export function AdminWords() {
 	const typeCount = (t: WordUse) => inView.filter((r) => r.rule === t).length;
 	const shown = type === "all" ? inView : inView.filter((r) => r.rule === type);
 	const reviewCount = rows.filter(toReview).length;
-	const chosen = shown.filter((r) => picked.has(keyOf(r)));
+	// Only ticked rows on screen: the table shows the first 500, and a row ticked before a search or a filter hid it
+	// mustn't be approved or deleted unseen (Codex review 13 Nov).
+	const chosen = shown.slice(0, 500).filter((r) => picked.has(keyOf(r)));
 
 	async function call(method: "POST" | "PATCH" | "DELETE", body: object, done = "") {
 		setBusy(true);
