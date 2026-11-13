@@ -24,10 +24,20 @@ const clean = (text: string) =>
 		.replace(/ํา/g, "ำ")
 		.replace(/[\s.,!?;:…"'“”‘’()[\]\-–—]+/g, "");
 
-// Letters to change, add or remove to turn a into b.
+// Letters to change, add or remove to turn a into b. The same start and end are skipped first; a stretch still too
+// long to compare letter by letter (a fix can be 2,000 letters) counts as all wrong, so one odd video can't use up
+// the request's time (200 such fixes took 7.4 s, Codex review 13 Nov).
+const MAX_COMPARE = 250_000; // letters × letters
 export function distance(a: string, b: string) {
-	const A = [...a];
-	const B = [...b];
+	let A = [...a];
+	let B = [...b];
+	let head = 0;
+	while (head < A.length && head < B.length && A[head] === B[head]) head++;
+	let tail = 0;
+	while (tail < A.length - head && tail < B.length - head && A[A.length - 1 - tail] === B[B.length - 1 - tail]) tail++;
+	A = A.slice(head, A.length - tail);
+	B = B.slice(head, B.length - tail);
+	if (A.length * B.length > MAX_COMPARE) return Math.max(A.length, B.length);
 	let row = Array.from({ length: B.length + 1 }, (_, j) => j);
 	for (let i = 1; i <= A.length; i++) {
 		const next = [i];
@@ -54,8 +64,14 @@ function readAs(words: Word[], fixes: Fix[], from: number, to: number) {
 export function scoreClip(words: Word[], fixes: Fix[] = [], deleted: number[] = [], aiFixes: Fix[] | null = null): ClipScore {
 	const gone = new Set(deleted);
 	const valid = (f: Fix) => Number.isInteger(f.from) && Number.isInteger(f.to) && f.from >= 0 && f.to < words.length && f.from <= f.to && typeof f.text === "string";
-	const final = fixes.filter(valid);
-	const ai = (aiFixes ?? []).filter(valid);
+	// Sorted, and one that overlaps the one before is dropped (as readFixes in lib/edit.ts refuses them).
+	const tidy = (list: Fix[]) =>
+		list
+			.filter(valid)
+			.sort((a, b) => a.from - b.from)
+			.filter((f, i, all) => i === 0 || f.from > all[i - 1].to);
+	const final = tidy(fixes);
+	const ai = tidy(aiFixes ?? []);
 	const allGone = (from: number, to: number) => {
 		for (let i = from; i <= to; i++) if (!gone.has(i)) return false;
 		return true;

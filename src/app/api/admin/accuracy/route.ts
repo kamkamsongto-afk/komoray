@@ -1,5 +1,6 @@
 import { type AccuracyRow, guessScript, scoreClip } from "@/lib/accuracy";
 import { isUpload, OWNER_FILE } from "@/lib/admin-activity";
+import { scriptFingerprint } from "@/lib/bad-takes";
 import { getJson, listObjects, type ObjectInfo } from "@/lib/r2";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
 
@@ -32,20 +33,29 @@ export async function GET() {
 			const at = (file: string) => items.find((item) => name(item) === file)?.key;
 			const read = <T,>(file: string) => (at(file) ? getJson<T>(at(file)!).catch(() => null) : Promise.resolve(null));
 			const [edit, spelling, analyze, owner] = await Promise.all([
-				read<{ words?: { text: string }[]; fixes?: Fix[]; deleted?: number[]; spellingWanted?: boolean }>("edit.json"),
-				read<{ fixes?: Fix[] }>("spelling.json"),
+				read<{ words?: { text: string; start: number; end: number }[]; fixes?: Fix[]; deleted?: number[] }>("edit.json"),
+				read<{ script?: string; done?: number; fixes?: Fix[] }>("spelling.json"),
 				read<{ language?: string }>("analyze.json"),
 				read<{ email?: string }>(OWNER_FILE),
 			]);
-			if (!Array.isArray(edit?.words) || !edit.words.length) return null;
+			const words = edit?.words;
+			if (!Array.isArray(words) || !words.length || !words.every((w) => typeof w?.text === "string")) return null;
 			const video = items.find((item) => isUpload({ name: name(item), lastModified: item.lastModified }));
-			const score = scoreClip(edit.words, Array.isArray(edit.fixes) ? edit.fixes : [], Array.isArray(edit.deleted) ? edit.deleted : [], Array.isArray(spelling?.fixes) ? spelling.fixes : null);
+			// The AI's fixes count only if it read the whole of this script: a part read, or an older script's, would
+			// score the AI on what it never saw (Codex review 13 Nov). Same check as api/spelling.
+			const aiRead = Array.isArray(spelling?.fixes) && (spelling.done ?? 0) >= words.length && spelling.script === (await scriptFingerprint(words));
+			let score;
+			try {
+				score = scoreClip(words, Array.isArray(edit!.fixes) ? edit!.fixes : [], Array.isArray(edit!.deleted) ? edit!.deleted : [], aiRead ? spelling!.fixes! : null);
+			} catch {
+				return null; // a damaged edit.json: left out, never the whole tab
+			}
 			return {
 				...score,
 				id,
 				file: video ? name(video) : "",
 				email: owner?.email ?? null,
-				language: analyze?.language ?? guessScript(edit.words),
+				language: analyze?.language ?? guessScript(words),
 				guessed: !analyze?.language,
 				at: final!.lastModified,
 			};
