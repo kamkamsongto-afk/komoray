@@ -27,7 +27,7 @@ export const LANGUAGE_TESTS: LanguageTest[] = [
 	{ language: "fi", engine: "Deepgram nova-3", clips: 20, minutes: 3.7, percent: 80.9, source: "FLEURS dev (read speech)", at: "2026-11-13", note: "words right 79.8%" },
 	{ language: "no", engine: "Deepgram nova-3", clips: 20, minutes: 4, percent: 94.9, source: "FLEURS dev (read speech)", at: "2026-11-13", note: "words right 85.4%" },
 	{ language: "ca", engine: "Deepgram nova-3", clips: 20, minutes: 4.1, percent: 96.7, source: "FLEURS dev (read speech)", at: "2026-11-13", note: "words right 94.2%" },
-	{ language: "zh", engine: "Deepgram nova-3", clips: 20, minutes: 4.1, percent: 94.8, source: "FLEURS dev (read speech)", at: "2026-11-13", note: "not offered on the site yet" },
+	{ language: "zh-Hans", engine: "Deepgram nova-3", clips: 20, minutes: 4.1, percent: 94.8, source: "FLEURS dev (read speech)", at: "2026-11-13", note: "not offered on the site yet" },
 	{ language: "ja", engine: "Deepgram nova-3", clips: 20, minutes: 4.6, percent: 96.1, source: "FLEURS dev (read speech)", at: "2026-11-13", note: "not offered on the site yet" },
 	{ language: "ko", engine: "Deepgram nova-3", clips: 20, minutes: 4.4, percent: 91.9, source: "FLEURS dev (read speech)", at: "2026-11-13", note: "words right 80.3%; not offered on the site yet" },
 	{ language: "vi", engine: "Deepgram nova-3", clips: 20, minutes: 3.8, percent: 92.7, source: "FLEURS dev (read speech)", at: "2026-11-13", note: "words right 90.8%; not offered on the site yet" },
