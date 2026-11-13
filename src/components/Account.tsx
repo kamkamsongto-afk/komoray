@@ -2,6 +2,7 @@
 
 import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
+import { HomeLogo } from "@/components/HomeLogo";
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
@@ -55,7 +56,8 @@ export function SignInCard({ title = "Sign in to continue" }: { title?: string }
 export function AccountBar({ user }: { user: User }) {
 	return (
 		<div className="flex flex-wrap items-center justify-between gap-2 text-sm text-foreground/70">
-			<div className="flex items-center gap-4">
+			<div className="flex flex-wrap items-center gap-4">
+				<HomeLogo />
 				<Link href="/upload" className="hover:text-foreground">
 					New video
 				</Link>
