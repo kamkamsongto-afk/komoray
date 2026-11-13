@@ -723,6 +723,7 @@ export function ScriptView({
 	const [kits, setKits] = useState<Kit[] | null>(null);
 	const [inUse, setInUse] = useState<string | null>(null);
 	const [brandSaved, setBrandSaved] = useState<"saving" | "saved" | "failed" | null>(null);
+	const [savedNew, setSavedNew] = useState(false); // which button the "Saved" goes after
 	const kitMemory = videoKey ? `komoray-kit-in-use:${videoKey}` : null;
 	const remember = (id: string) => {
 		setInUse(id);
@@ -771,6 +772,7 @@ export function ScriptView({
 		if (!fresh && !kitInUse) return;
 		const name = fresh ? window.prompt("Name the new Brand Kit (a channel name, say):", `Brand Kit ${(kits?.length ?? 0) + 1}`) : null;
 		if (fresh && name === null) return;
+		setSavedNew(fresh);
 		setBrandSaved("saving");
 		const res = await fetch("/api/brand", {
 			method: "PUT",
@@ -780,7 +782,7 @@ export function ScriptView({
 		const data = res?.ok ? ((await res.json()) as { kits?: Kit[] }) : null;
 		setBrandSaved(data ? "saved" : "failed");
 		if (res?.status === 404) {
-			window.alert("That Brand Kit was deleted. Use Save as a new Brand Kit instead.");
+			window.alert("That Brand Kit was deleted. Use Create New Brand Kit instead.");
 			kitsAsked.current = false; // read the kits again next time the panel opens
 			setKits((list) => list?.filter((k) => k.id !== kitInUse?.id) ?? null);
 			setInUse(null);
@@ -1108,26 +1110,31 @@ export function ScriptView({
 												{kitChanged && <span className="text-xs font-medium text-amber-600">changed</span>}
 											</label>
 										)}
-										<div className="flex flex-wrap items-center gap-2 text-sm">
-											{kitInUse && (
+										{/* Coach, 13 Nov: "Save to" the kit in use, "Saved" right after the button pressed, "Create New Brand Kit" below. */}
+										{kitInUse && (
+											<div className="flex flex-wrap items-center gap-2 text-sm">
 												<button
 													onClick={() => void saveBrand(false)}
 													disabled={brandSaved === "saving" || !kitChanged}
 													title={kitChanged ? `Your next videos with "${kitInUse.name}" start with this look` : "Nothing changed yet"}
 													className="rounded-md border border-foreground/20 px-2.5 py-1 hover:bg-foreground/5 disabled:opacity-50"
 												>
-													Save changes to &ldquo;{kitInUse.name}&rdquo;
+													Save to &ldquo;{kitInUse.name}&rdquo;
 												</button>
-											)}
+												{!savedNew && brandSaved === "saved" && <span className="text-xs font-medium text-green-600">Saved</span>}
+												{!savedNew && brandSaved === "failed" && <span className="text-xs text-red-600">Could not save, try again</span>}
+											</div>
+										)}
+										<div className="flex flex-wrap items-center gap-2 text-sm">
 											<button
 												onClick={() => void saveBrand(true)}
 												disabled={brandSaved === "saving" || kits === null}
 												className="rounded-md border border-foreground/20 px-2.5 py-1 hover:bg-foreground/5 disabled:opacity-50"
 											>
-												Save as a new Brand Kit…
+												Create New Brand Kit
 											</button>
-											{brandSaved === "saved" && <span className="text-xs text-green-600">Saved</span>}
-											{brandSaved === "failed" && <span className="text-xs text-red-600">Could not save, try again</span>}
+											{savedNew && brandSaved === "saved" && <span className="text-xs font-medium text-green-600">Saved</span>}
+											{savedNew && brandSaved === "failed" && <span className="text-xs text-red-600">Could not save, try again</span>}
 										</div>
 										{/* Coach, 6 Nov: does a saved logo stay? 13 Nov: several Brand Kits, one per channel. */}
 										<p className="text-xs text-foreground/60">
