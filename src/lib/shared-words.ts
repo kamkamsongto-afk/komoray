@@ -231,10 +231,14 @@ export async function sharedFixes(thai: boolean, language?: string): Promise<(Sh
 	// Creators' pairs only if they pass today's gate (some got their votes before it, Codex review 13 Nov); the team
 	// can still approve any of them on the Word Hub tab, which makes it the team's own.
 	const theirs = voted.filter((v) => !blocked.has(v.heard) && hubLang(v.heard, v.fixed));
+	const fromCreators = new Set(theirs);
 	for (const p of [...curated.map((c) => ({ ...c, voters: 0 })), ...theirs, ...SEED[lang]]) {
 		if (seen.has(p.heard)) continue;
 		seen.add(p.heard);
-		const use = effectiveUse(p);
+		// A creators' pair is never put on everyone's videos by itself, only shown to the AI, until the team approves it
+		// (which makes it the team's): three accounts agreeing on a wrong pair must not reach every creator unchecked.
+		const rule = effectiveUse(p);
+		const use = fromCreators.has(p as SharedPair) && rule === "always" ? "ai" : rule;
 		if (use !== "off") out.push({ heard: p.heard, fixed: p.fixed, voters: p.voters, use });
 	}
 	return out;
