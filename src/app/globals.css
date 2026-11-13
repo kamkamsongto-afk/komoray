@@ -37,6 +37,26 @@
 	color-scheme: dark;
 }
 
+/* The Komoray logo with dark letters on the light theme and white ones on the dark theme (components/HomeLogo.tsx),
+   by the same rules as the colours above: the computer's choice until someone picks. */
+.logo-on-dark {
+	display: none;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) .logo-on-light {
+		display: none;
+	}
+	:root:not([data-theme="light"]) .logo-on-dark {
+		display: block;
+	}
+}
+:root[data-theme="dark"] .logo-on-light {
+	display: none;
+}
+:root[data-theme="dark"] .logo-on-dark {
+	display: block;
+}
+
 /* The opposite of the page, for what should stand out: dark on a white page, white on a dark one. */
 .surface-inverse {
 	--background: var(--inverse-background);

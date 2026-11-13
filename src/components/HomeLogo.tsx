@@ -8,7 +8,9 @@ export const LOGO_HREF = "/upload";
 export function HomeLogo({ className = "" }: { className?: string }) {
 	return (
 		<Link href={LOGO_HREF} aria-label="Komoray: start a new video" title="Start a new video" className={`shrink-0 ${className}`}>
-			<Image src="/logo.svg" alt="Komoray" width={110} height={24} unoptimized priority />
+			{/* Dark letters on the light theme, white on the dark one (coach, 13 Nov); which shows is in globals.css. */}
+			<Image src="/logo.svg" alt="Komoray" width={110} height={24} unoptimized priority className="logo-on-light" />
+			<Image src="/logo-white.svg" alt="" aria-hidden width={110} height={24} unoptimized priority className="logo-on-dark" />
 		</Link>
 	);
 }
