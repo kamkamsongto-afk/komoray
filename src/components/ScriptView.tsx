@@ -2,7 +2,7 @@
 
 import { Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
+import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
 import { filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
@@ -421,19 +421,31 @@ export function ScriptView({
 		onLearn?.(original, fixed && norm(fixed) !== norm(original) ? fixed : null);
 	}
 
+	// The words from..to as the script draws them now (fixes in).
+	const drawnText = (from: number, to: number) =>
+		wordItems
+			.filter((w) => w.index >= from && w.last <= to)
+			.map((w, k) => (k && w.space ? " " : "") + w.text)
+			.join("");
+
 	function saveEdit(text: string) {
 		if (!editing || text.trim().length > MAX_FIX_LENGTH) return;
-		onFixesChange(setFix(fixes, editing.from, editing.to, text, editing.original));
-		learn(editing.original, text);
+		// Typed in the word next to it too ("ใช่" → "ไม่ใช่" right after "ไม่"): the fix covers that word, never repeats it.
+		const { from, to } = withNeighbours(wordItems, editing.from, editing.to, text, editing.before);
+		const original = from === editing.from && to === editing.to ? editing.original : originalText(from, to);
+		onFixesChange(setFix(fixes, from, to, text, original));
+		learn(original, text);
 		setEditing(null);
 	}
 
 	// Put `replacement` on every run of words in `matches` (keeping a comma or full stop after it).
+	// Fix all and the dictionary too never repeat the word next to a match (withNeighbours).
 	function fixMatches(current: Fix[], matches: ReturnType<typeof findMatches>, replacement: string) {
 		let next = current;
 		for (const m of matches) {
 			const text = m.keep ? m.keep.join(replacement.trim()) : replacement.trim() && m.trail && !TRAIL.test(replacement.trim()) ? replacement.trim() + m.trail : replacement;
-			next = setFix(next, m.from, m.to, text, originalText(m.from, m.to));
+			const { from, to } = withNeighbours(wordItems, m.from, m.to, text, drawnText(m.from, m.to));
+			next = setFix(next, from, to, text, originalText(from, to));
 		}
 		return next;
 	}

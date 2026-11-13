@@ -202,6 +202,39 @@ export function findInside(words: { index: number; last: number; text: string; s
 	return matches;
 }
 
+// A fix that starts with the word just before it, or ends with the word just after it, is the words from..to
+// together with that neighbour: Thai shows no gaps between words, so a creator double-clicks "ใช่" in "ไม่ใช่",
+// types "ไม่ใช่", and the subtitle read "ไม่ไม่ใช่" (or "นะครับครับ" from "นะ" → "นะครับ"). Seen 3 times in
+// VID20261112093656, 13 Nov. Returns the words the fix really covers. `words` = the words as the script draws them.
+const MAX_NEIGHBOURS = 3;
+const squashWord = (text: string) => normText(text).replace(/\s+/g, "");
+function opens(text: string, word: string) {
+	if (/[฀-๿]/.test(word)) return squashWord(text).length > squashWord(word).length && squashWord(text).startsWith(squashWord(word));
+	return normText(text).startsWith(`${normText(word)} `);
+}
+function closes(text: string, word: string) {
+	if (/[฀-๿]/.test(word)) return squashWord(text).length > squashWord(word).length && squashWord(text).endsWith(squashWord(word));
+	return normText(text).endsWith(` ${normText(word)}`);
+}
+export function withNeighbours(words: { index: number; last: number; text: string }[], from: number, to: number, text: string, shown: string) {
+	let first = words.findIndex((w) => w.index === from);
+	let last = words.findIndex((w) => w.last === to);
+	if (first < 0 || last < 0 || !normText(text)) return { from, to };
+	for (let n = 0; n < MAX_NEIGHBOURS && first > 0; n++) {
+		const before = words[first - 1].text;
+		if (!opens(text, before) || opens(shown, before)) break;
+		first--;
+		shown = /[฀-๿]/.test(before) ? before + shown : `${before} ${shown}`;
+	}
+	for (let n = 0; n < MAX_NEIGHBOURS && last < words.length - 1; n++) {
+		const after = words[last + 1].text;
+		if (!closes(text, after) || closes(shown, after)) break;
+		last++;
+		shown = /[฀-๿]/.test(after) ? shown + after : `${shown} ${after}`;
+	}
+	return { from: words[first].index, to: words[last].last };
+}
+
 // Put a fix on words from..to, replacing any fix it overlaps. The original text (or nothing) removes it.
 export function setFix(fixes: Fix[], from: number, to: number, text: string, original: string): Fix[] {
 	const kept = fixes.filter((f) => f.to < from || f.from > to);
