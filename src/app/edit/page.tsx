@@ -1019,6 +1019,8 @@ export default function EditPage() {
 			{showReady && render.status === "done" && render.videoUrl && <VideoReady videoUrl={render.videoUrl} downloadUrl={render.downloadUrl} videoKey={key} onClose={closeReady} />}
 
 			<ScriptView
+				videoKey={key}
+				startKit={analysis.options?.kit}
 				videoUrl={analysis.videoUrl}
 				studio={analysis.studio ?? null}
 				duration={analysis.duration}
