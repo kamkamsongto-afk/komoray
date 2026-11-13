@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { type AccuracyRow, percentRight } from "@/lib/accuracy";
 import { LANGUAGE_TESTS } from "@/lib/language-tests";
-import { LANGUAGES } from "@/lib/languages";
+import { LANGUAGES, translationName } from "@/lib/languages";
 
 const GUESSES: Record<string, string> = { latin: "Latin letters (language not saved)", cyrillic: "Cyrillic letters (language not saved)" };
-const languageName = (code: string) => GUESSES[code] ?? LANGUAGES.find((l) => l.code === code)?.english ?? code;
+// Languages not offered yet (team tests) are named from the translation list.
+const languageName = (code: string) => GUESSES[code] ?? LANGUAGES.find((l) => l.code === code)?.english ?? translationName(code) ?? code;
 const shown = (errors: number | null, chars: number) => {
 	const p = errors === null ? null : percentRight(errors, chars);
 	return p === null ? "—" : `${p.toFixed(1)}%`;
