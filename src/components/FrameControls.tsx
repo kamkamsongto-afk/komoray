@@ -174,7 +174,17 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 								<span className="text-foreground/60">
 									<ShapeIcon shape={f.shape} size={16} />
 								</span>
-								<span className="min-w-0 flex-1 truncate text-sm font-medium">{frameName(f)}</span>
+								{/* The name on the timeline strip: the shape's name until the creator types their own (coach, 13 Nov:
+								    several Hearts all read "Heart"). Empty goes back to the shape's name. */}
+								<input
+									value={f.name ?? ""}
+									placeholder={frameName({ ...f, name: undefined })}
+									maxLength={40}
+									onChange={(e) => update(f.id, { name: e.target.value.replace(/[\n\r\t]/g, " ") || undefined })}
+									aria-label="Name on the timeline"
+									title="Name on the timeline"
+									className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium placeholder:text-foreground placeholder:opacity-100 hover:border-foreground/20 focus:border-foreground/30 focus:outline-none"
+								/>
 								{trash(f)}
 							</div>
 						</div>

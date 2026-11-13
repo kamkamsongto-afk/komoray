@@ -158,7 +158,7 @@ export function shapeMask(shape: FrameShape) {
 	return `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" preserveAspectRatio="none"><polygon points="${points}" fill="#fff"/></svg>`)}")`;
 }
 
-export const frameName = (f: FrameMe) => f.name || FRAME_SHAPES.find((s) => s.id === f.shape)?.name || "Frame";
+export const frameName = (f: FrameMe) => f.name?.trim() || FRAME_SHAPES.find((s) => s.id === f.shape)?.name || "Frame";
 
 // ---- checking what the browser sends ----
 
