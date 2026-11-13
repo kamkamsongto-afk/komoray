@@ -7,8 +7,8 @@ import { AccountBar, SignInCard, useUser } from "@/components/Account";
 // use (lib/word-rules.ts): always = fixed in every new video; ai = only where the sentence fits; off = not used.
 type Word = { heard: string; fixed: string; uses: number; updated_at: string; use?: "always" | "ai" | "off" };
 const USE_LABEL = {
-	always: { text: "Every video", tone: "bg-green-600/10 text-green-700 dark:text-green-400", tip: "It can't be right as heard, so it is fixed in every new video." },
-	ai: { text: "Where it fits", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-400", tip: "Both are real words (like สวน and ส่วน), so our AI only fixes it where the sentence means it." },
+	always: { text: "Every video", tone: "bg-green-600/10 text-green-700 dark:text-green-400", tip: "It can't be right as heard (or it is a name of yours), so it is fixed in every new video." },
+	ai: { text: "Where it fits", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-400", tip: "It could be right as heard in another sentence (like สวน and ส่วน), so our AI only fixes it where the sentence means it." },
 	off: { text: "Not used", tone: "bg-foreground/10 text-foreground/60", tip: "This fix added or took out words, or only changed spacing. That belongs to one video, so it isn't used again." },
 };
 
@@ -154,8 +154,8 @@ export default function WordsPage() {
 						</button>
 					</div>
 					<p className="text-xs text-foreground/60">
-						<span className="font-medium">Every video</span>: fixed wherever it shows up. <span className="font-medium">Where it fits</span>: real words either way,
-						so our AI only fixes them where the sentence means it. <span className="font-medium">Not used</span>: added words or spacing, which belong to one video.
+						<span className="font-medium">Every video</span>: fixed wherever it shows up. <span className="font-medium">Where it fits</span>: could be right as heard
+						in another sentence, so our AI only fixes it where the sentence means it. <span className="font-medium">Not used</span>: added words or spacing, which belong to one video.
 						{unused.length > 0 && (
 							<>
 								{" "}

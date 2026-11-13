@@ -180,10 +180,11 @@ export function wordUse(heard: string, fixed: string, options: { realWords?: (th
 	const thai = THAI.test(heard + fixed);
 	const { kind } = learnFromFix(thai ? [heard.replace(/\s+/g, "")] : [heard], fixed);
 	if (kind !== "spelling") return "off";
-	// Other languages have no dictionary here to ask. A creator's own name or brand (a capital or a number, 3 letters
-	// or more: komorey → Komoray) is put on everywhere; anything else could be a real word either way (their → there,
-	// a → I), so the AI decides (Codex review 13 Nov).
-	if (!thai) return !options.shared && /[\p{Lu}0-9]/u.test(fixed) && heard.replace(/[^\p{L}0-9]/gu, "").length >= 3 ? "always" : "ai";
+	// Other languages have no dictionary here to ask. Only what can only be a name or brand (a capital inside a word
+	// or a number, 3 letters or more: AliExpress, iPhone 17) is put on everywhere. A capital at the start may just begin
+	// a sentence (their → There), and anything else may be a real word either way (a → I), so the AI decides, with the
+	// creator's own words in front of it (Codex review 13 Nov).
+	if (!thai) return !options.shared && /\p{L}\p{Lu}|[0-9]/u.test(fixed) && heard.replace(/[^\p{L}0-9]/gu, "").length >= 3 ? "always" : "ai";
 	if (!options.realWords) return "ai";
 	return options.realWords(heard.replace(/\s+/g, "")) ? "ai" : "always";
 }
