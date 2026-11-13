@@ -39,6 +39,7 @@ export function AdminWords() {
 	const [list, setList] = useState("th");
 	const [view, setView] = useState<"review" | "all">("review");
 	const [sort, setSort] = useState<"used" | "az">("used");
+	const [type, setType] = useState<WordUse | "all">("all"); // only Safe, Needs context or Suspicious (coach, 13 Nov)
 	const [filter, setFilter] = useState("");
 	const [paste, setPaste] = useState("");
 	const [note, setNote] = useState("");
@@ -56,13 +57,18 @@ export function AdminWords() {
 	}, []);
 
 	const rows = useMemo(() => lists?.[list] ?? [], [lists, list]);
-	const shown = useMemo(() => {
+	const inView = useMemo(() => {
 		const q = filter.trim().toLowerCase();
 		const some = rows.filter((r) => (view === "all" || toReview(r)) && (!q || `${r.heard} ${r.fixed}`.toLowerCase().includes(q)));
 		return [...some].sort((a, b) => (sort === "az" ? a.heard.localeCompare(b.heard, list === "th" ? "th" : undefined) : b.uses - a.uses || a.heard.localeCompare(b.heard)));
 	}, [rows, view, filter, sort, list]);
+	// How many of each type are in view (To review or All, and the search), before the Type filter.
+	const typeCount = (t: WordUse) => inView.filter((r) => r.rule === t).length;
+	const shown = type === "all" ? inView : inView.filter((r) => r.rule === type);
 	const reviewCount = rows.filter(toReview).length;
-	const chosen = shown.filter((r) => picked.has(keyOf(r)));
+	// Only ticked rows on screen: the table shows the first 500, and a row ticked before a search or a filter hid it
+	// mustn't be approved or deleted unseen (Codex review 13 Nov).
+	const chosen = shown.slice(0, 500).filter((r) => picked.has(keyOf(r)));
 
 	async function call(method: "POST" | "PATCH" | "DELETE", body: object, done = "") {
 		setBusy(true);
@@ -178,6 +184,19 @@ export function AdminWords() {
 				<button onClick={download} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
 					Download (CSV)
 				</button>
+			</div>
+			<div className="flex flex-wrap items-center gap-2 text-sm">
+				<span className="text-xs text-foreground/60">Type</span>
+				<div className="flex flex-wrap gap-1 rounded-lg bg-foreground/5 p-0.5">
+					<button onClick={() => (setType("all"), setPicked(new Set()))} className={pill(type === "all")}>
+						All types ({inView.length})
+					</button>
+					{(["always", "ai", "off"] as const).map((t) => (
+						<button key={t} onClick={() => (setType(t), setPicked(new Set()))} title={RULE[t].tip} className={pill(type === t)}>
+							{RULE[t].mark} {RULE[t].text} ({typeCount(t)})
+						</button>
+					))}
+				</div>
 			</div>
 
 			{chosen.length > 0 && (
