@@ -27,7 +27,9 @@ export async function POST(request: Request) {
 	try {
 		const transcript = readTranscript(await request.json());
 		// Trimmed words feed both the cuts and the subtitle timing in edit.json.
-		const words = trimStretchedWords(transcript.words);
+		// Deepgram's Thai comes in pieces of words; the script works on whole words. Silences are found between whole
+		// words, so a word is never cut through (a piece "่วน" after a pause is still part of "ส่วน", lib/thai-words.ts).
+		const words = mergeThaiWords(trimStretchedWords(transcript.words));
 		// What the creator asked for when uploading (none on videos from before): the editor uses it once.
 		const options = readOptions((await getJson<{ options?: unknown }>(siblingKey(key, "analyze.json")).catch(() => null))?.options);
 		const edit = {
@@ -41,8 +43,7 @@ export async function POST(request: Request) {
 			},
 			// Silences unticked: nothing cut. Pace in the editor finds them if they change their mind.
 			cuts: options?.silences === false ? [] : findSilences({ duration: transcript.duration, words }),
-			// Deepgram's Thai comes in pieces of words; the script works on whole words.
-			words: mergeThaiWords(words),
+			words,
 			wordsJoined: true,
 			// The AI fixes the speech-to-text's spelling once, when the AI studio first opens (api/spelling).
 			// Only on videos from now on: older ones were already fixed by hand.

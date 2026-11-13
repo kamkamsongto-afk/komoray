@@ -2,7 +2,7 @@
 
 import { Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, type WordFix } from "@/lib/edit";
+import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
 import { filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
@@ -421,28 +421,48 @@ export function ScriptView({
 		onLearn?.(original, fixed && norm(fixed) !== norm(original) ? fixed : null);
 	}
 
+	// The words from..to as the script draws them now (fixes in).
+	const drawnText = (from: number, to: number) =>
+		wordItems
+			.filter((w) => w.index >= from && w.last <= to)
+			.map((w, k) => (k && w.space ? " " : "") + w.text)
+			.join("");
+
 	function saveEdit(text: string) {
 		if (!editing || text.trim().length > MAX_FIX_LENGTH) return;
-		onFixesChange(setFix(fixes, editing.from, editing.to, text, editing.original));
-		learn(editing.original, text);
+		// Typed in the word next to it too ("ใช่" → "ไม่ใช่" right after "ไม่"): the fix covers that word, never repeats it.
+		const { from, to } = withNeighbours(wordItems, editing.from, editing.to, text, editing.before);
+		const original = from === editing.from && to === editing.to ? editing.original : originalText(from, to);
+		onFixesChange(setFix(fixes, from, to, text, original));
+		learn(original, text);
 		setEditing(null);
 	}
 
 	// Put `replacement` on every run of words in `matches` (keeping a comma or full stop after it).
-	function fixMatches(current: Fix[], matches: ReturnType<typeof findMatches>, replacement: string) {
+	// Fix all and the dictionary too never repeat the word next to a match (withNeighbours).
+	// skip: a stretch (after widening) not to touch. Returns the fixes, how many matches were fixed, and those not widened.
+	function fixMatches(current: Fix[], matches: ReturnType<typeof findMatches>, replacement: string, skip?: (span: { from: number; to: number }) => boolean) {
 		let next = current;
+		let applied = 0;
+		const plain: typeof matches = [];
 		for (const m of matches) {
 			const text = m.keep ? m.keep.join(replacement.trim()) : replacement.trim() && m.trail && !TRAIL.test(replacement.trim()) ? replacement.trim() + m.trail : replacement;
-			next = setFix(next, m.from, m.to, text, originalText(m.from, m.to));
+			const span = withNeighbours(wordItems, m.from, m.to, text, drawnText(m.from, m.to));
+			if (skip?.(span)) continue;
+			next = setFix(next, span.from, span.to, text, originalText(span.from, span.to));
+			if (norm(text) !== norm(originalText(span.from, span.to))) applied++; // widened onto words that already read so: nothing changed
+			if (span.from === m.from && span.to === m.to) plain.push(m);
 		}
-		return next;
+		return { next, applied, plain };
 	}
 
 	// Everywhere the script reads `query`.
 	function replaceAll(query: string, replacement: string, inside = false) {
-		const matches = findMatches(wordItems, query, inside);
-		onFixesChange(fixMatches(fixes, matches, replacement));
-		const learned = new Map(matches.map((m) => [originalText(m.from, m.to), m.keep ? m.keep.join(replacement.trim()) : replacement]));
+		const { next, plain } = fixMatches(fixes, findMatches(wordItems, query, inside), replacement);
+		onFixesChange(next);
+		// Only what was replaced as found is learned: "ใช่" → "ไม่ใช่" next to "ไม่" took that word in, and must not
+		// teach the dictionary to put "ไม่" before every "ใช่" (Codex review 13 Nov).
+		const learned = new Map(plain.map((m) => [originalText(m.from, m.to), m.keep ? m.keep.join(replacement.trim()) : replacement]));
 		for (const [original, text] of learned) learn(original, text);
 	}
 
@@ -456,8 +476,10 @@ export function ScriptView({
 		let count = 0;
 		for (const entry of dictionary) {
 			const matches = findMatches(wordItems, entry.heard).filter((m) => !handFixed(m) && norm(originalText(m.from, m.to)) === entry.heard);
-			next = fixMatches(next, matches, entry.fixed);
-			count += matches.length;
+			// Widened over a word fixed by hand (withNeighbours): left alone, the hand fix wins (Codex review 13 Nov).
+			const done = fixMatches(next, matches, entry.fixed, handFixed);
+			next = done.next;
+			count += done.applied;
 		}
 		if (count) onFixesChange(next);
 		onDictionaryApplied?.(count, fixes);

@@ -318,7 +318,7 @@ export default function EditPage() {
 	useEffect(() => {
 		analysisRef.current = analysis;
 	});
-	const cutout = useCutout(key);
+	const cutout = useCutout(key, analysis?.duration ?? 0);
 	const cutoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const bannersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const framesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

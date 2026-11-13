@@ -77,6 +77,11 @@ export function clock(seconds: number) {
 // Roughly how long Slow (tier "best") takes, for the countdown: the GPU reports no progress, so this is an
 // estimate. Machine start + 4.5 s of model time per second of video (measured 9 Nov: 0.144 s a frame at 30 fps),
 // shared like split_parts in modal_app/cutout.py (PART_SECONDS, MAX_PARTS) + putting the files together.
+// Fast and Normal, after the last frame: uploading the matte and Modal's finish_local, which works through the whole
+// video (matte + preview copy), so it grows with the video's length. 12 Nov: a 4:54 video took 68 s from upload to done
+// (Modal 59.9 s); this says 71 s. The old flat 25 s left people at "Almost done" with no countdown (coach, 13 Nov).
+export const finishSeconds = (videoSeconds: number) => Math.round(12 + 0.2 * videoSeconds);
+
 export function slowSeconds(wins: Window[]) {
 	const seconds = windowSeconds(wins);
 	const machines = Math.min(4, Math.max(1, Math.ceil(seconds / 45)));

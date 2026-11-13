@@ -256,7 +256,10 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							<span className="text-foreground/70">You can keep editing or close this page. Your text moves behind you when this finishes.</span>
 						</>
 					) : (
-						<span>Almost done, putting your cutout together…</span>
+						<span className="flex items-baseline justify-between gap-2">
+							<span>Almost done, putting your cutout together…</span>
+							{wait && wait !== "Almost done…" && <span className="shrink-0 font-medium tabular-nums">{wait}</span>}
+						</span>
 					)
 				) : cutOut && ready && !changing ? (
 					<span className="flex items-center justify-between gap-2">
