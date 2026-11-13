@@ -440,21 +440,29 @@ export function ScriptView({
 
 	// Put `replacement` on every run of words in `matches` (keeping a comma or full stop after it).
 	// Fix all and the dictionary too never repeat the word next to a match (withNeighbours).
-	function fixMatches(current: Fix[], matches: ReturnType<typeof findMatches>, replacement: string) {
+	// skip: a stretch (after widening) not to touch. Returns the fixes, how many matches were fixed, and those not widened.
+	function fixMatches(current: Fix[], matches: ReturnType<typeof findMatches>, replacement: string, skip?: (span: { from: number; to: number }) => boolean) {
 		let next = current;
+		let applied = 0;
+		const plain: typeof matches = [];
 		for (const m of matches) {
 			const text = m.keep ? m.keep.join(replacement.trim()) : replacement.trim() && m.trail && !TRAIL.test(replacement.trim()) ? replacement.trim() + m.trail : replacement;
-			const { from, to } = withNeighbours(wordItems, m.from, m.to, text, drawnText(m.from, m.to));
-			next = setFix(next, from, to, text, originalText(from, to));
+			const span = withNeighbours(wordItems, m.from, m.to, text, drawnText(m.from, m.to));
+			if (skip?.(span)) continue;
+			next = setFix(next, span.from, span.to, text, originalText(span.from, span.to));
+			if (norm(text) !== norm(originalText(span.from, span.to))) applied++; // widened onto words that already read so: nothing changed
+			if (span.from === m.from && span.to === m.to) plain.push(m);
 		}
-		return next;
+		return { next, applied, plain };
 	}
 
 	// Everywhere the script reads `query`.
 	function replaceAll(query: string, replacement: string, inside = false) {
-		const matches = findMatches(wordItems, query, inside);
-		onFixesChange(fixMatches(fixes, matches, replacement));
-		const learned = new Map(matches.map((m) => [originalText(m.from, m.to), m.keep ? m.keep.join(replacement.trim()) : replacement]));
+		const { next, plain } = fixMatches(fixes, findMatches(wordItems, query, inside), replacement);
+		onFixesChange(next);
+		// Only what was replaced as found is learned: "ใช่" → "ไม่ใช่" next to "ไม่" took that word in, and must not
+		// teach the dictionary to put "ไม่" before every "ใช่" (Codex review 13 Nov).
+		const learned = new Map(plain.map((m) => [originalText(m.from, m.to), m.keep ? m.keep.join(replacement.trim()) : replacement]));
 		for (const [original, text] of learned) learn(original, text);
 	}
 
@@ -468,8 +476,10 @@ export function ScriptView({
 		let count = 0;
 		for (const entry of dictionary) {
 			const matches = findMatches(wordItems, entry.heard).filter((m) => !handFixed(m) && norm(originalText(m.from, m.to)) === entry.heard);
-			next = fixMatches(next, matches, entry.fixed);
-			count += matches.length;
+			// Widened over a word fixed by hand (withNeighbours): left alone, the hand fix wins (Codex review 13 Nov).
+			const done = fixMatches(next, matches, entry.fixed, handFixed);
+			next = done.next;
+			count += done.applied;
 		}
 		if (count) onFixesChange(next);
 		onDictionaryApplied?.(count, fixes);
