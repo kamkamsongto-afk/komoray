@@ -228,7 +228,10 @@ export async function sharedFixes(thai: boolean, language?: string): Promise<(Sh
 	const [curated, voted, blocked] = await Promise.all([Promise.all(lists.map(readCurated)).then((l) => l.flat()), readVoted(lang), readBlocked(lang)]);
 	const out: (SharedPair & { use: WordUse })[] = [];
 	const seen = new Set<string>();
-	for (const p of [...curated.map((c) => ({ ...c, voters: 0 })), ...voted.filter((v) => !blocked.has(v.heard)), ...SEED[lang]]) {
+	// Creators' pairs only if they pass today's gate (some got their votes before it, Codex review 13 Nov); the team
+	// can still approve any of them on the Word Hub tab, which makes it the team's own.
+	const theirs = voted.filter((v) => !blocked.has(v.heard) && hubLang(v.heard, v.fixed));
+	for (const p of [...curated.map((c) => ({ ...c, voters: 0 })), ...theirs, ...SEED[lang]]) {
 		if (seen.has(p.heard)) continue;
 		seen.add(p.heard);
 		const use = effectiveUse(p);
