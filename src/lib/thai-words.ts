@@ -9,6 +9,7 @@ type Word = { text: string; start: number; end: number };
 
 const THAI = /[฀-๿]/;
 const RUN_GAP = 0.3; // pieces further apart than this (seconds) are never one word
+const THAI_MARK_FIRST = /^[ัำ-ฺ็-๎]/; // a vowel or tone mark that can't begin a word
 
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
@@ -20,7 +21,9 @@ export function thaiWordGroups(words: Word[]): number[][] {
 		// A run: Thai pieces right after one another.
 		let j = i;
 		if (THAI.test(words[i].text)) {
-			while (j + 1 < words.length && THAI.test(words[j + 1].text) && words[j + 1].start - words[j].end <= RUN_GAP) j++;
+			// A piece that starts with a vowel or tone mark ("ส" "่วน") belongs to the one before it, however long the gap:
+			// alone it can't be read, and the gap was cut as silence (VID20261112093656, 13 Nov).
+			while (j + 1 < words.length && THAI.test(words[j + 1].text) && (words[j + 1].start - words[j].end <= RUN_GAP || THAI_MARK_FIRST.test(words[j + 1].text))) j++;
 		}
 		if (j === i) {
 			groups.push([i++]);

@@ -1,4 +1,4 @@
-import { PADDING } from "./silences";
+import { PACES, PADDING } from "./silences";
 
 type Span = { start: number; end: number };
 export type EditCut = Span & { reason: "silence" | "words" | "manual" };
@@ -106,13 +106,25 @@ export type WordFix = { heard: string; fixed: string };
 const spokenLetters = (text: string) => Math.max(1, text.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, "").length);
 
 const PAUSE_INSIDE_FIX = 0.05; // seconds between two words that counts as a pause, not words said in a row
+const CUTTABLE_PAUSE = PACES.tight.minSilence; // the shortest pause any pace cuts (lib/silences.ts)
 
 // A fix with spaces in it is several words, each with its own time, or the Highlight look and Bounce
 // treat the whole phrase as one word. The time is shared by letters over when the words were really
 // said (never the pauses between them, which may be cut). space: the user typed a space before it.
 function splitFix<W extends Span & { text: string }>(run: W[], text: string): W[] {
 	const pieces = text.trim().split(/\s+/);
-	if (pieces.length === 1) return [{ ...run[0], text, end: run[run.length - 1].end }];
+	if (pieces.length === 1) {
+		// One word over a pause: timed on its longest stretch of speech, not across the pause. Subtitles place a word
+		// at its middle, and the middle of "ส|่วน|ใหญ่" (263.00-264.04 s) fell in the 263.35-263.62 s silence that was cut,
+		// so the fixed word vanished from the subtitles (VID20261112093656, 13 Nov).
+		let best = [0, 0];
+		for (let s = 0, k = 1; k <= run.length; k++) {
+			if (k < run.length && run[k].start - run[k - 1].end < CUTTABLE_PAUSE) continue;
+			if (run[k - 1].end - run[s].start > run[best[1]].end - run[best[0]].start) best = [s, k - 1];
+			s = k;
+		}
+		return [{ ...run[0], text, start: run[best[0]].start, end: run[best[1]].end }];
+	}
 	const spoken = run.reduce((sum, w) => sum + w.end - w.start, 0);
 	const letters = pieces.reduce((sum, p) => sum + spokenLetters(p), 0);
 	// Which word is being said after `gone` seconds of speech, and when.
