@@ -59,6 +59,15 @@ function distance(a: string, b: string) {
 	return row[b.length];
 }
 
+// What may go into Word Hub by itself, from the admin's fixes or creators' shared ones (coach, 13 Nov: "My words is
+// your own list, Word Hub the shared one, and not every save should land there"): ordinary words (shareable) that
+// are a clear misspelling, the heard side no real word (ผูหญิง → ผู้หญิง). A word right in other sentences (เนี่ย,
+// สวน → ส่วน) stays in the creator's My words. The team still adds any pair by hand on the Word Hub tab.
+export function hubLang(heard: string, fixed: string): Lang | null {
+	const lang = shareable(heard, fixed);
+	return lang && wordUse(heard, fixed, { realWords: realThaiWords, shared: true }) === "always" ? lang : null;
+}
+
 // Did this creator tick "Help make Komoray more accurate"? (their settings, api/prefs)
 export const sharesWords = async (userId: string) => (await getJson<{ shareWords?: boolean }>(`prefs/${userId}.json`).catch(() => null))?.shareWords === true;
 
@@ -70,7 +79,7 @@ async function pairId(lang: Lang, heard: string, fixed: string) {
 // One creator's fix, counted once. R2 has no locks, so two fixes saved at the same moment can lose a vote, or a pair
 // from the list: the next time anyone makes that fix, it is put back (the list is checked every time, not only at 3).
 export async function addSharedFix(userId: string, secret: string, heard: string, fixed: string) {
-	const lang = shareable(heard, fixed);
+	const lang = hubLang(heard, fixed);
 	if (!lang) return;
 	const voter = (await hmac(`shared-words:${secret}`, userId)).slice(0, 16);
 	const key = `shared-words/votes/${lang}/${await pairId(lang, heard.trim(), fixed.trim())}.json`;

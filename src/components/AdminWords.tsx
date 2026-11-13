@@ -32,7 +32,7 @@ const keyOf = (r: WordRow) => `${r.source}:${r.heard}`;
 // Waiting for the team: anything not looked at that the rules aren't sure of, creators' pairs, and new ones.
 const toReview = (r: WordRow) => !r.reviewed && (r.rule !== "always" || r.source === "creators" || (r.at !== undefined && Date.now() - Date.parse(r.at) < NEW_DAYS * 86_400_000));
 
-// The admin page's Words tab: Komoray's own word lists (lib/shared-words.ts), one per language, that the spelling AI
+// The admin page's Word Hub tab (coach, 13 Nov: My words is a creator's own list, Word Hub the shared one): Komoray's own word lists (lib/shared-words.ts), one per language, that the spelling AI
 // learns from and "Always" pairs fix by themselves. Creators' shared fixes show only as a pair and how many made it.
 export function AdminWords() {
 	const [lists, setLists] = useState<Record<string, WordRow[]> | null>(null);
@@ -125,9 +125,10 @@ export function AdminWords() {
 	return (
 		<section className="flex flex-col gap-3">
 			<p className="text-sm text-foreground/70">
-				Komoray&apos;s word lists, one per language. 🟢 Safe pairs are fixed in every new video by themselves, 🟡 ones only by the spelling AI where the
-				sentence fits, 🔴 ones never, unless you choose otherwise. Your own fixes come here by themselves. Creators&apos; shared fixes show only as the pair and
-				how many creators made it.
+				Word Hub: Komoray&apos;s shared word lists, one per language, for every creator&apos;s videos (My words is each creator&apos;s own). 🟢 Safe pairs are
+				fixed in every new video by themselves, 🟡 ones only by the spelling AI where the sentence fits, 🔴 ones never, unless you choose otherwise. Only
+				clear misspellings come here by themselves, from your own fixes or from creators who share theirs (shown only as the pair and how many made it);
+				add any other pair by hand.
 			</p>
 
 			<div className="flex flex-wrap gap-1 rounded-lg bg-foreground/5 p-0.5">

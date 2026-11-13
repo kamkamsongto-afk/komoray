@@ -1,6 +1,6 @@
 import { MAX_FIX_LENGTH, normText } from "@/lib/edit";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { addSharedFix, changeCurated, curatable, listFor, sharesWords } from "@/lib/shared-words";
+import { addSharedFix, changeCurated, hubLang, listFor, sharesWords } from "@/lib/shared-words";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
 import { realThaiWords } from "@/lib/word-check";
 import { wordUse } from "@/lib/word-rules";
@@ -44,10 +44,9 @@ export async function POST(request: Request) {
 		.from("word_fixes")
 		.upsert({ heard, fixed, uses: (before?.uses ?? 0) + 1, updated_at: new Date().toISOString() }, { onConflict: "user_id,heard" });
 	if (error) return Response.json({ error: error.message }, { status: 500 });
-	// The admin's own fixes build Komoray's own word list (lib/shared-words.ts).
-	// Not only dictionary words, as for creators' shared fixes (those keep private names out): the team reviews its own
-	// on the Words tab, where a word the dictionary lacks shows as Needs context (coach, 13 Nov: "เนี่ยะ" never showed up).
-	const lang = isAdmin(user.email) ? curatable(heard, fixed) : null;
+	// The admin's own fixes go into Word Hub (Komoray's own list, lib/shared-words.ts) only when hubLang lets them: a
+	// clear misspelling of ordinary words. The rest stays in their My words (coach, 13 Nov).
+	const lang = isAdmin(user.email) ? hubLang(heard, fixed) : null;
 	// Into the list of the video's language (lib/shared-words.ts listFor), "latin" when the video didn't keep it.
 	if (lang) await changeCurated(listFor(lang, typeof body.language === "string" ? body.language : undefined), [{ heard, fixed }]).catch((err) => console.error("Komoray words failed:", err));
 	if (await sharesWords(user.id)) {
