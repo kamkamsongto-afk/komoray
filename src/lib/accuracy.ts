@@ -65,11 +65,11 @@ export function scoreClip(words: Word[], fixes: Fix[] = [], deleted: number[] = 
 	const gone = new Set(deleted);
 	const valid = (f: Fix) => Number.isInteger(f.from) && Number.isInteger(f.to) && f.from >= 0 && f.to < words.length && f.from <= f.to && typeof f.text === "string";
 	// Sorted, and one that overlaps the one before is dropped (as readFixes in lib/edit.ts refuses them).
-	const tidy = (list: Fix[]) =>
-		list
-			.filter(valid)
-			.sort((a, b) => a.from - b.from)
-			.filter((f, i, all) => i === 0 || f.from > all[i - 1].to);
+	const tidy = (list: Fix[]) => {
+		const kept: Fix[] = [];
+		for (const f of list.filter(valid).sort((a, b) => a.from - b.from)) if (!kept.length || f.from > kept[kept.length - 1].to) kept.push(f); // against the last kept one
+		return kept;
+	};
 	const final = tidy(fixes);
 	const ai = tidy(aiFixes ?? []);
 	const allGone = (from: number, to: number) => {
