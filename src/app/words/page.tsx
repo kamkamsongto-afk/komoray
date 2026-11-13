@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 
-type Word = { heard: string; fixed: string; uses: number; updated_at: string };
+// use (lib/word-rules.ts): always = fixed in every new video; ai = only where the sentence fits; off = not used.
+type Word = { heard: string; fixed: string; uses: number; updated_at: string; use?: "always" | "ai" | "off" };
+const USE_LABEL = {
+	always: { text: "Every video", tone: "bg-green-600/10 text-green-700 dark:text-green-400", tip: "It can't be right as heard (or it is a name of yours), so it is fixed in every new video." },
+	ai: { text: "Where it fits", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-400", tip: "It could be right as heard in another sentence (like สวน and ส่วน), so our AI only fixes it where the sentence means it." },
+	off: { text: "Not used", tone: "bg-foreground/10 text-foreground/60", tip: "This fix added or took out words, or only changed spacing. That belongs to one video, so it isn't used again." },
+};
 
 // The personal dictionary: every word the user fixed in a script, applied to their next videos.
 // They can see it, remove words, and download it (it is theirs).
@@ -18,12 +24,15 @@ export default function WordsPage() {
 	const [share, setShare] = useState<boolean | null>(null);
 	const [shareError, setShareError] = useState("");
 
-	useEffect(() => {
-		if (!user) return;
+	const load = () =>
 		fetch("/api/dictionary")
 			.then((res) => res.json() as Promise<{ words?: Word[]; error?: string }>)
 			.then((data) => (data.words ? setWords(data.words) : setError(data.error ?? "Could not load your words")))
 			.catch(() => setError("Could not load your words"));
+
+	useEffect(() => {
+		if (!user) return;
+		void load();
 		fetch("/api/prefs")
 			.then((res) => res.json() as Promise<{ shareWords?: boolean }>)
 			.then((data) => setShare(data.shareWords === true))
@@ -47,6 +56,14 @@ export default function WordsPage() {
 		setWords((list) => list?.map((w) => (w.heard === heard ? { ...w, fixed: clean } : w)) ?? null);
 		const res = await fetch("/api/dictionary", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ heard, fixed: clean }) });
 		if (!res.ok) setError("Could not save that word. Please reload and try again.");
+		else void load(); // how it is used may change with it
+	}
+
+	// The old fixes that are never used (added words, spacing): gone in one go, after asking.
+	const unused = (words ?? []).filter((w) => w.use === "off");
+	async function forgetUnused() {
+		if (!window.confirm(`Remove the ${unused.length} ${unused.length === 1 ? "fix" : "fixes"} that aren't used? Videos you already edited keep theirs.`)) return;
+		for (const w of unused) await forget(w.heard);
 	}
 
 	async function forget(heard: string) {
@@ -136,6 +153,18 @@ export default function WordsPage() {
 							Download (CSV)
 						</button>
 					</div>
+					<p className="text-xs text-foreground/60">
+						<span className="font-medium">Every video</span>: fixed wherever it shows up. <span className="font-medium">Where it fits</span>: could be right as heard
+						in another sentence, so our AI only fixes it where the sentence means it. <span className="font-medium">Not used</span>: added words or spacing, which belong to one video.
+						{unused.length > 0 && (
+							<>
+								{" "}
+								<button onClick={() => void forgetUnused()} className="underline hover:text-foreground">
+									Remove the {unused.length} not used
+								</button>
+							</>
+						)}
+					</p>
 					<ul className="flex flex-col divide-y divide-foreground/10 rounded-xl border border-foreground/15">
 						{shown.map((w) => (
 							<li key={w.heard} className="flex items-center gap-3 px-4 py-2.5">
@@ -168,6 +197,11 @@ export default function WordsPage() {
 										<span className="min-w-0 flex-1 break-words">
 											<span className="text-foreground/50 line-through">{w.heard}</span> → <span className="font-medium">{w.fixed}</span>
 										</span>
+										{w.use && (
+											<span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${USE_LABEL[w.use].tone}`} title={USE_LABEL[w.use].tip}>
+												{USE_LABEL[w.use].text}
+											</span>
+										)}
 										<span className="shrink-0 text-xs text-foreground/50" title="Times you made this fix">
 											×{w.uses}
 										</span>

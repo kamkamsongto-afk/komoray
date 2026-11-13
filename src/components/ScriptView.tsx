@@ -2,6 +2,7 @@
 
 import { Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
 import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
@@ -415,10 +416,20 @@ export function ScriptView({
 		setEditing({ from: start, to: end, text, before: text, original: originalText(start, end) });
 	}
 
-	// Remember a fix in the personal dictionary, keyed by what speech-to-text wrote.
-	function learn(original: string, text: string) {
-		const fixed = text.trim();
-		onLearn?.(original, fixed && norm(fixed) !== norm(original) ? fixed : null);
+	// What saving words from..to as `text` teaches My words (lib/word-rules.ts): only the misspelled words, never
+	// spacing, words added or taken out, numbers or ๆ, which belong to this video (coach, 13 Nov).
+	const lessonOf = (from: number, to: number, text: string) => learnFromFix(words.slice(from, to + 1).map((w) => fixThai(w.text)), text);
+
+	// Remember a fix in the personal dictionary, keyed by what speech-to-text wrote. Back to the original: forget what
+	// the fix there (`before`) had taught.
+	function learn(from: number, to: number, text: string, before = "") {
+		const original = originalText(from, to);
+		if (!text.trim() || norm(text) === norm(original)) {
+			for (const p of before ? lessonOf(from, to, before).pairs : []) onLearn?.(p.heard, null);
+			onLearn?.(original, null);
+			return;
+		}
+		for (const p of lessonOf(from, to, text).pairs) onLearn?.(p.heard, p.fixed);
 	}
 
 	// The words from..to as the script draws them now (fixes in).
@@ -428,13 +439,14 @@ export function ScriptView({
 			.map((w, k) => (k && w.space ? " " : "") + w.text)
 			.join("");
 
-	function saveEdit(text: string) {
+	// remember: also into My words (the box's "Save + My words"); "Save (this video only)" leaves it out.
+	function saveEdit(text: string, remember = true) {
 		if (!editing || text.trim().length > MAX_FIX_LENGTH) return;
 		// Typed in the word next to it too ("ใช่" → "ไม่ใช่" right after "ไม่"): the fix covers that word, never repeats it.
 		const { from, to } = withNeighbours(wordItems, editing.from, editing.to, text, editing.before);
 		const original = from === editing.from && to === editing.to ? editing.original : originalText(from, to);
 		onFixesChange(setFix(fixes, from, to, text, original));
-		learn(original, text);
+		if (remember) learn(from, to, text, editing.before);
 		setEditing(null);
 	}
 
@@ -462,8 +474,8 @@ export function ScriptView({
 		onFixesChange(next);
 		// Only what was replaced as found is learned: "ใช่" → "ไม่ใช่" next to "ไม่" took that word in, and must not
 		// teach the dictionary to put "ไม่" before every "ใช่" (Codex review 13 Nov).
-		const learned = new Map(plain.map((m) => [originalText(m.from, m.to), m.keep ? m.keep.join(replacement.trim()) : replacement]));
-		for (const [original, text] of learned) learn(original, text);
+		const learned = new Map(plain.flatMap((m) => lessonOf(m.from, m.to, m.keep ? m.keep.join(replacement.trim()) : replacement).pairs).map((p) => [p.heard, p.fixed]));
+		for (const [heard, fixed] of learned) onLearn?.(heard, fixed);
 	}
 
 	// Personal dictionary, once per video: fix every word it knows that isn't fixed by hand already.
@@ -487,6 +499,10 @@ export function ScriptView({
 	}, [dictionary]);
 
 	const editTooLong = Boolean(editing && editing.text.trim().length > MAX_FIX_LENGTH);
+	// What this fix would teach My words, worked out as it is typed (the same widening as saveEdit).
+	const editSpan = editing ? withNeighbours(wordItems, editing.from, editing.to, editing.text, editing.before) : null;
+	const editLesson = editing && editSpan && editing.text.trim() ? lessonOf(editSpan.from, editSpan.to, editing.text) : null;
+	const editTeaches = Boolean(onLearn && editLesson?.kind === "spelling" && editLesson.pairs.length);
 	const editingFixed = editing && fixes.some((f) => f.to >= editing.from && f.from <= editing.to);
 	const sameElsewhere = editing ? findMatches(wordItems, editing.before).filter((m) => m.from !== editing.from).length : 0;
 	const findCount = finding ? findMatches(wordItems, finding.find, true).reduce((sum, m) => sum + (m.keep ? m.keep.length - 1 : 1), 0) : 0;
@@ -1120,9 +1136,24 @@ export function ScriptView({
 								aria-label="Fixed text"
 								className="min-w-40 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-base"
 							/>
-							<button type="submit" disabled={editTooLong} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
-								Save
+							<button
+								type="submit"
+								disabled={editTooLong}
+								title={editTeaches ? "Fix it here and in your next videos (Enter)" : undefined}
+								className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+							>
+								{editTeaches ? "Save + My words" : "Save"}
 							</button>
+							{editTeaches && !editTooLong && (
+								<button
+									type="button"
+									onClick={() => saveEdit(editing.text, false)}
+									title="Fix it in this video only. My words stays as it is."
+									className="rounded-lg border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-600/10"
+								>
+									Save (this video only)
+								</button>
+							)}
 							{sameElsewhere > 0 && !editTooLong && (
 								<button
 									type="button"
@@ -1150,6 +1181,12 @@ export function ScriptView({
 								</button>
 							)}
 							{editTooLong && <span className="w-full text-xs font-medium text-red-600">That is too much text to fix at once. Select a shorter part, up to {MAX_FIX_LENGTH} letters.</span>}
+							{editTeaches && editLesson && (
+								<span className="w-full text-xs text-foreground/70">
+									My words will remember: <span className="font-medium">{editLesson.pairs.map((p) => `${p.heard} → ${p.fixed}`).join(", ")}</span>. A word that is right either way is only fixed where the sentence fits.
+								</span>
+							)}
+							{editLesson && editLesson.kind !== "spelling" && editLesson.kind !== "same" && onLearn && <span className="w-full text-xs text-foreground/70">{KIND_NOTE[editLesson.kind]}</span>}
 							<span className="w-full text-xs text-foreground/60">
 								Heard as: {editing.original} · The subtitles show what you type. Enter to save, Esc to cancel.
 							</span>

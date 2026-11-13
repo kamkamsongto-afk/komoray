@@ -203,8 +203,10 @@ export default function EditPage() {
 				}
 			}
 			if (!data.dictionaryApplied) {
-				const dict = (await (await fetch("/api/dictionary")).json().catch(() => ({}))) as { words?: WordFix[] };
-				setDictionary((dict.words ?? []).map(({ heard, fixed }) => ({ heard, fixed })));
+				const dict = (await (await fetch("/api/dictionary")).json().catch(() => ({}))) as { words?: (WordFix & { use?: string })[] };
+				// Only pairs that can't be right as heard are put on every match; real words either way (สวน → ส่วน) go to the
+				// spelling AI, which reads the sentence (api/spelling); the rest stay in the video they came from (lib/word-rules.ts).
+				setDictionary((dict.words ?? []).filter((w) => (w.use ?? "always") === "always").map(({ heard, fixed }) => ({ heard, fixed })));
 			}
 			const rendered = (await (await fetch(`/api/render?key=${encodeURIComponent(saved)}`)).json()) as RenderState;
 			if (rendered.status !== "none") setRender(rendered);

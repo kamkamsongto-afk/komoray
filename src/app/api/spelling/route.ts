@@ -5,6 +5,8 @@ import type { Fix } from "@/lib/edit";
 import { deleteObject, getJson, putIfAbsent, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { sharedFixes } from "@/lib/shared-words";
 import { askForSpelling } from "@/lib/spelling";
+import { realThaiWords } from "@/lib/word-check";
+import { wordUse } from "@/lib/word-rules";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // The AI's spelling fixes (lib/spelling.ts), kept next to the video so a script is only paid for once:
@@ -43,8 +45,14 @@ export async function POST(request: Request) {
 	try {
 		// The creator's own words (My words, most used first): how they spell their names and terms.
 		const { data } = await supabase.from("word_fixes").select("heard, fixed").order("uses", { ascending: false }).limit(HINT_WORDS);
-		const common = await sharedFixes(edit.words.some((w) => /[฀-๿]/.test(w.text)));
-		const found = await askForSpelling(edit.words, state.done, apiKey, data ?? [], common);
+		// Their pairs that are real words either way (สวน → ส่วน) weren't put on by the page (lib/word-rules.ts): the AI
+		// puts them where the sentence fits, first in its list of mistakes to look for. Pairs that are off aren't shown.
+		const mine = (data ?? []).map((w) => ({ ...w, use: wordUse(w.heard, w.fixed, { realWords: realThaiWords }) }));
+		const theirs = mine.filter((w) => w.use === "ai").map(({ heard, fixed }) => ({ heard, fixed, voters: 0 }));
+		// Komoray's list too: a pair that adds or drops words (ใช่ → ไม่ใช่) is never shown, however it got in.
+		const shared = (await sharedFixes(edit.words.some((w) => /[฀-๿]/.test(w.text)))).filter((p) => wordUse(p.heard, p.fixed, { realWords: realThaiWords, shared: true }) !== "off");
+		const common = [...theirs, ...shared];
+		const found = await askForSpelling(edit.words, state.done, apiKey, mine.filter((w) => w.use !== "off"), common);
 		const next: Saved = { script, done: Math.max(state.done + 1, Math.min(count, found.next)), fixes: [...state.fixes, ...found.fixes] };
 		await putObject(siblingKey(key, "spelling.json"), JSON.stringify(next), "application/json");
 		return Response.json({ fixes: next.fixes, remaining: count - next.done });

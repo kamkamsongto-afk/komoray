@@ -2,9 +2,12 @@ import { MAX_FIX_LENGTH, normText } from "@/lib/edit";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { addSharedFix, changeCurated, shareable, sharesWords } from "@/lib/shared-words";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
+import { realThaiWords } from "@/lib/word-check";
+import { wordUse } from "@/lib/word-rules";
 
 // The signed-in user's personal dictionary (table word_fixes, see supabase/migrations/002):
-//   GET     every word they have fixed, newest first
+//   GET     every word they have fixed, newest first, each with `use` (lib/word-rules.ts): always = put on every
+//           match of a new video, ai = only where the spelling AI finds the sentence fits, off = not used
 //   POST    { heard, fixed }  learn a fix (again: counts up `uses`), and give it to Komoray's shared list if they said
 //           yes to that on My words (lib/shared-words.ts: anonymous, ordinary words only)
 //   PATCH   { heard, fixed }  change what a word is fixed to (from the My words page)
@@ -22,7 +25,7 @@ export async function GET() {
 	if (!supabase) return Response.json({ error: "Please sign in" }, { status: 401 });
 	const { data, error } = await supabase.from("word_fixes").select("heard, fixed, uses, updated_at").order("updated_at", { ascending: false }).limit(MAX_WORDS);
 	if (error) return Response.json({ error: error.message }, { status: 500 });
-	return Response.json({ words: data });
+	return Response.json({ words: (data ?? []).map((w) => ({ ...w, use: wordUse(w.heard, w.fixed, { realWords: realThaiWords }) })) });
 }
 
 export async function POST(request: Request) {
@@ -32,6 +35,9 @@ export async function POST(request: Request) {
 	const heard = normText(String(body.heard ?? "")).slice(0, MAX_FIX_LENGTH);
 	const fixed = String(body.fixed ?? "").trim().slice(0, MAX_FIX_LENGTH);
 	if (!heard || !fixed || normText(fixed) === heard) return Response.json({ error: "Nothing to learn" }, { status: 400 });
+	// Spacing, words put in or taken out: they belong to one video (the page doesn't send them; an older tab might).
+	const use = wordUse(heard, fixed, { realWords: realThaiWords });
+	if (use === "off") return Response.json({ error: "That fix stays in its video" }, { status: 400 });
 
 	const { data: before } = await supabase.from("word_fixes").select("uses").eq("heard", heard).maybeSingle();
 	const { error } = await supabase
