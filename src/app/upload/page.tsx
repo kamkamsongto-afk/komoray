@@ -21,6 +21,7 @@ type Access = AccessStatus & { email: string };
 const ANALYZE_POLL_MS = 3000;
 const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
 const LANGUAGE_KEY = "komoray-language"; // the spoken language picked last time (this browser only)
+const KIT_KEY = "komoray-brand-kit"; // the Brand Kit picked last on this computer
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -98,6 +99,32 @@ export default function UploadPage() {
 	useEffect(() => {
 		choice.current = { language, options };
 	});
+	// Their Brand Kits (api/brand): with two or more, the window asks which one; the one picked last time on this
+	// computer comes first, else the starred one.
+	const [kits, setKits] = useState<{ id: string; name: string }[]>([]);
+	useEffect(() => {
+		if (!user) return;
+		void (async () => {
+			const res = await fetch("/api/brand").catch(() => null);
+			const data = res?.ok ? ((await res.json()) as { kits?: { id: string; name: string }[]; defaultId?: string | null }) : null;
+			const list = (data?.kits ?? []).map(({ id, name }) => ({ id, name }));
+			if (list.length < 2) return;
+			let last: string | null = null;
+			try {
+				last = localStorage.getItem(KIT_KEY);
+			} catch {}
+			const kit = list.find((k) => k.id === last)?.id ?? data?.defaultId ?? list[0].id;
+			setKits(list);
+			setOptions((o) => ({ ...o, kit }));
+		})();
+	}, [user]);
+	const changeOptions = (next: Options) => {
+		setOptions(next);
+		if (next.kit)
+			try {
+				localStorage.setItem(KIT_KEY, next.kit);
+			} catch {}
+	};
 	const queue = (on: boolean) => {
 		queuedRef.current = on;
 		setQueued(on);
@@ -287,7 +314,8 @@ export default function UploadPage() {
 				<UploadOptions
 					fileName={message}
 					options={options}
-					onOptionsChange={setOptions}
+					onOptionsChange={changeOptions}
+					kits={kits}
 					language={language}
 					onLanguageChange={setLanguage}
 					defaultLanguage={defaultLanguage}

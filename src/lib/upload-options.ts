@@ -6,7 +6,10 @@
 //   zoom       Auto zoom on (the Brand Kit's kind, else "in") or off
 //   subtitles  subtitles drawn on the video, or none
 //   audio      Audio optimization on (polish_sound in render.py) or off
-export type UploadOptions = { silences: boolean; badTakes: boolean; zoom: boolean; subtitles: boolean; audio: boolean };
+//   kit        which Brand Kit the subtitles start from (api/brand), when the creator has more than one; none: the starred one
+export type UploadOptions = { silences: boolean; badTakes: boolean; zoom: boolean; subtitles: boolean; audio: boolean; kit?: string };
+
+export type UploadToggle = Exclude<keyof UploadOptions, "kit">;
 
 export const DEFAULT_OPTIONS: UploadOptions = { silences: true, badTakes: true, zoom: true, subtitles: true, audio: true };
 
@@ -14,6 +17,14 @@ export const DEFAULT_OPTIONS: UploadOptions = { silences: true, badTakes: true, 
 export function readOptions(value: unknown): UploadOptions | null {
 	if (!value || typeof value !== "object") return null;
 	const v = value as Partial<Record<keyof UploadOptions, unknown>>;
-	const pick = (k: keyof UploadOptions) => (typeof v[k] === "boolean" ? (v[k] as boolean) : DEFAULT_OPTIONS[k]);
-	return { silences: pick("silences"), badTakes: pick("badTakes"), zoom: pick("zoom"), subtitles: pick("subtitles"), audio: pick("audio") };
+	const pick = (k: UploadToggle) => (typeof v[k] === "boolean" ? (v[k] as boolean) : DEFAULT_OPTIONS[k]);
+	const kit = (value as { kit?: unknown }).kit;
+	return {
+		silences: pick("silences"),
+		badTakes: pick("badTakes"),
+		zoom: pick("zoom"),
+		subtitles: pick("subtitles"),
+		audio: pick("audio"),
+		...(typeof kit === "string" && /^[a-z0-9-]{1,40}$/.test(kit) && { kit }),
+	};
 }

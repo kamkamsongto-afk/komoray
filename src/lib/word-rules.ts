@@ -5,7 +5,8 @@
 //   spacing   only spaces changed ("ดึงสติกลับมา" → "ดึงสติ กลับมา"): this video only, never learned
 //   added     whole words typed in (ใช่ → ไม่ใช่) or  removed  (น่า น่าอาย → น่าอาย): what was missed or said
 //             twice at that moment, this video only
-//   style     numbers, English letters or ๆ came in or went (ห้า → ข้อ 5, เหนื่อย เหนื่อย → เหนื่อยๆ): this video only
+//   style     numbers, English letters, signs or ๆ came in or went (ห้า → ข้อ 5, เปอร์เซ็นต์ → %, เหนื่อย เหนื่อย →
+//             เหนื่อยๆ): this video only
 //   rewrite   many words: this video only
 //   spelling  letters wrong inside words ("ดึงงติ" → "ดึงสติ"): learned, only the words that changed, no spaces
 // And a learned pair is used one of three ways (wordUse):
@@ -25,7 +26,8 @@ const MAX_LETTERS = 30;
 const MIN_HEARD = 3; // letters (not counting marks) a learned Thai pair keeps: shorter, it fits too many words
 const MAX_GROWTH = 3; // more letters than this put into a word: words were missed, not misspelled
 const TRAIL = /[.,!?;:…"'“”‘’()]+/g;
-const STYLE = /[0-9๐-๙A-Za-z]/; // numbers and English letters among Thai: how it reads, not how it is spelled
+// Numbers, English letters and signs among Thai (เปอร์เซ็นต์ → %, coach 13 Nov): how it reads, not how it is spelled.
+const STYLE = /[^฀-๿\s]/;
 
 const thaiLetters = (text: string) => [...text.replace(/ํา/g, "ำ").replace(/\s+/g, "").replace(TRAIL, "")];
 const noSpace = (text: string) => text.replace(/\s+/g, "");
@@ -194,6 +196,6 @@ export const KIND_NOTE: Record<Exclude<FixKind, "spelling" | "same">, string> = 
 	spacing: "Only the spacing changed, so this stays in this video.",
 	added: "You added words, so this stays in this video: the speech-to-text missed them here only.",
 	removed: "You took words out, so this stays in this video.",
-	style: "Numbers, English words and ๆ are a matter of style, so this stays in this video.",
+	style: "Numbers, signs, English words and ๆ are a matter of style, so this stays in this video.",
 	rewrite: "That is more than a word or two, so this stays in this video.",
 };

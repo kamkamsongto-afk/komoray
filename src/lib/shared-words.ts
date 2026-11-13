@@ -59,6 +59,15 @@ function distance(a: string, b: string) {
 	return row[b.length];
 }
 
+// What may go into Word Hub by itself, from the admin's fixes or creators' shared ones (coach, 13 Nov: "My words is
+// your own list, Word Hub the shared one, and not every save should land there"): ordinary words (shareable) that
+// are a clear misspelling, the heard side no real word (ผูหญิง → ผู้หญิง). A word right in other sentences (เนี่ย,
+// สวน → ส่วน) stays in the creator's My words. The team still adds any pair by hand on the Word Hub tab.
+export function hubLang(heard: string, fixed: string): Lang | null {
+	const lang = shareable(heard, fixed);
+	return lang && wordUse(heard, fixed, { realWords: realThaiWords, shared: true }) === "always" ? lang : null;
+}
+
 // Did this creator tick "Help make Komoray more accurate"? (their settings, api/prefs)
 export const sharesWords = async (userId: string) => (await getJson<{ shareWords?: boolean }>(`prefs/${userId}.json`).catch(() => null))?.shareWords === true;
 
@@ -70,7 +79,7 @@ async function pairId(lang: Lang, heard: string, fixed: string) {
 // One creator's fix, counted once. R2 has no locks, so two fixes saved at the same moment can lose a vote, or a pair
 // from the list: the next time anyone makes that fix, it is put back (the list is checked every time, not only at 3).
 export async function addSharedFix(userId: string, secret: string, heard: string, fixed: string) {
-	const lang = shareable(heard, fixed);
+	const lang = hubLang(heard, fixed);
 	if (!lang) return;
 	const voter = (await hmac(`shared-words:${secret}`, userId)).slice(0, 16);
 	const key = `shared-words/votes/${lang}/${await pairId(lang, heard.trim(), fixed.trim())}.json`;
@@ -130,8 +139,15 @@ export const isWordList = (list: unknown): list is WordList => typeof list === "
 // Where a pair goes: Thai to "th", others to their video's language when known, else "latin".
 export const listFor = (lang: Lang, language?: string): WordList => (lang === "th" ? "th" : language && language !== "th" && /^[a-z]{2}$/.test(language) ? language : "latin");
 
-// How a pair of Komoray's list is used on everyone's videos: what the team set, else the rules.
-export const effectiveUse = (p: { heard: string; fixed: string; use?: WordUse }) => p.use ?? wordUse(p.heard, p.fixed, { realWords: realThaiWords, shared: true });
+// How a pair of Komoray's list is used on everyone's videos: what the team set, else the rules. A Thai pair whose fixed
+// side has a word the dictionary lacks (ไบโอ, a name) is only the AI's to use until the team approves it: the admin's
+// own fixes come in without the dictionary check, and "Always" goes on every creator's video (13 Nov).
+export function effectiveUse(p: { heard: string; fixed: string; use?: WordUse; reviewed?: boolean }): WordUse {
+	if (p.use) return p.use;
+	const rule = wordUse(p.heard, p.fixed, { realWords: realThaiWords, shared: true });
+	if (rule === "always" && !p.reviewed && THAI.test(p.fixed) && !realThaiWords(p.fixed.replace(/\s+/g, ""))) return "ai";
+	return rule;
+}
 
 // A pair the team typed in: short, Thai or letters only (a team member may add a word the dictionary lacks).
 export function curatable(heard: string, fixed: string): Lang | null {
@@ -212,7 +228,10 @@ export async function sharedFixes(thai: boolean, language?: string): Promise<(Sh
 	const [curated, voted, blocked] = await Promise.all([Promise.all(lists.map(readCurated)).then((l) => l.flat()), readVoted(lang), readBlocked(lang)]);
 	const out: (SharedPair & { use: WordUse })[] = [];
 	const seen = new Set<string>();
-	for (const p of [...curated.map((c) => ({ ...c, voters: 0 })), ...voted.filter((v) => !blocked.has(v.heard)), ...SEED[lang]]) {
+	// Creators' pairs only if they pass today's gate (some got their votes before it, Codex review 13 Nov); the team
+	// can still approve any of them on the Word Hub tab, which makes it the team's own.
+	const theirs = voted.filter((v) => !blocked.has(v.heard) && hubLang(v.heard, v.fixed));
+	for (const p of [...curated.map((c) => ({ ...c, voters: 0 })), ...theirs, ...SEED[lang]]) {
 		if (seen.has(p.heard)) continue;
 		seen.add(p.heard);
 		const use = effectiveUse(p);

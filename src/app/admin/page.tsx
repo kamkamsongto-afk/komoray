@@ -173,7 +173,7 @@ export default function AdminPage() {
 		["videos", "Videos", jobs.length],
 		["feedback", "Feedback", feedback.length],
 		["logs", "Logs", reports.length],
-		["words", "Words", -1],
+		["words", "Word Hub", -1],
 		["accuracy", "Accuracy", -1],
 	];
 

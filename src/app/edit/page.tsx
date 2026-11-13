@@ -182,8 +182,9 @@ export default function EditPage() {
 			// A video without its own look yet starts with the Brand Kit, then what was asked for when uploading
 			// (saved, so Make video uses it too).
 			if (!data.style) {
-				const brand = (await (await fetch("/api/brand")).json().catch(() => ({}))) as { style?: SubtitleStyle | null };
-				let style = brand.style ?? null;
+				const brand = (await (await fetch("/api/brand")).json().catch(() => ({}))) as { style?: SubtitleStyle | null; kits?: { id: string; style: SubtitleStyle }[] };
+				// The Brand Kit picked when uploading, else the starred one.
+				let style = brand.kits?.find((k) => k.id === data.options?.kit)?.style ?? brand.style ?? null;
 				if (style) {
 					// English-only fonts have no Thai letters: a Thai video uses Kanit instead.
 					const thai = data.words.some((w) => /[฀-๿]/.test(w.text));
