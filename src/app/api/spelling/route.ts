@@ -55,7 +55,10 @@ export async function POST(request: Request) {
 		const found = await askForSpelling(edit.words, state.done, apiKey, mine.filter((w) => w.use !== "off"), common);
 		// Its "always" pairs (no real word as heard: ผูหญิง) go on by themselves where whole words read so, before the AI's.
 		const sure = placeAlways(edit.words, state.done, found.next, shared.filter((p) => p.use === "always"));
-		const fixes = [...sure, ...found.fixes.filter((f) => !sure.some((g) => g.from <= f.to && f.from <= g.to))].sort((a, b) => a.from - b.from);
+		// None may overlap another, nor a fix of an earlier part (a run of the last part may have gone past its end).
+		const overlaps = (f: Fix, list: Fix[]) => list.some((g) => g.from <= f.to && f.from <= g.to);
+		const ours = sure.filter((f) => !overlaps(f, state.fixes));
+		const fixes = [...ours, ...found.fixes.filter((f) => !overlaps(f, ours) && !overlaps(f, state.fixes))].sort((a, b) => a.from - b.from);
 		const next: Saved = { script, done: Math.max(state.done + 1, Math.min(count, found.next)), fixes: [...state.fixes, ...fixes] };
 		await putObject(siblingKey(key, "spelling.json"), JSON.stringify(next), "application/json");
 		return Response.json({ fixes: next.fixes, remaining: count - next.done });

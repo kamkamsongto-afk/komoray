@@ -80,6 +80,7 @@ export async function addSharedFix(userId: string, secret: string, heard: string
 		await putObject(key, JSON.stringify(votes), "application/json");
 	}
 	if (votes.voters.length < MIN_VOTERS) return;
+	if ((await readBlocked(lang)).has(votes.heard)) return; // the team took it off (admin Words tab)
 	const listKey = `shared-words/${lang}.json`;
 	const list = (await getJson<{ pairs: SharedPair[] }>(listKey))?.pairs ?? [];
 	if (list.some((p) => p.heard === votes.heard && p.fixed === votes.fixed && p.voters === votes.voters.length)) return;
@@ -190,10 +191,15 @@ export async function updateCurated(list: WordList, changes: CuratedChange[]) {
 // Creators' pairs (shared-words/<th|latin>.json) the team took off: never shown to the AI again.
 const blockedKey = (lang: Lang) => `shared-words/blocked-${lang}.json`;
 export const readBlocked = async (lang: Lang) => new Set((await getJson<{ heards: string[] }>(blockedKey(lang)).catch(() => null))?.heards ?? []);
+// Taken off: out of the list the AI reads too. The anonymous vote counts stay (votes/), so the pair can't come back
+// with the next vote, and a creator who asks (Privacy: email us) is handled by hand.
 export async function blockShared(lang: Lang, heards: string[]) {
 	const now = new Set((await getJson<{ heards: string[] }>(blockedKey(lang)))?.heards ?? []); // no fallback: a hiccup can't empty it
 	for (const h of heards) now.add(tidy(h));
 	await putObject(blockedKey(lang), JSON.stringify({ heards: [...now] }), "application/json");
+	const listKey = `shared-words/${lang}.json`;
+	const list = (await getJson<{ pairs: SharedPair[] }>(listKey))?.pairs;
+	if (list?.some((p) => now.has(p.heard))) await putObject(listKey, JSON.stringify({ pairs: list.filter((p) => !now.has(p.heard)) }), "application/json");
 }
 export const readVoted = async (lang: Lang) => (await getJson<{ pairs: SharedPair[] }>(`shared-words/${lang}.json`).catch(() => null))?.pairs ?? [];
 
