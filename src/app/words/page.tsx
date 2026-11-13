@@ -33,10 +33,11 @@ export default function WordsPage() {
 	useEffect(() => {
 		if (!user) return;
 		void load();
+		// Not read: say so and show neither the box nor the line, rather than "not sharing" for someone who shares (Codex review 13 Nov).
 		fetch("/api/prefs")
-			.then((res) => res.json() as Promise<{ shareWords?: boolean }>)
+			.then((res) => (res.ok ? (res.json() as Promise<{ shareWords?: boolean }>) : Promise.reject(new Error(String(res.status)))))
 			.then((data) => setShare(data.shareWords === true))
-			.catch(() => setShare(false));
+			.catch(() => setShareError("Could not load your sharing choice. Please reload the page."));
 	}, [user]);
 
 	// Coach, 13 Nov: the box stays big until they share; ticking asks to confirm, then it folds into a small line at the
@@ -247,6 +248,7 @@ export default function WordsPage() {
 					</p>
 				</>
 			)}
+			{share === null && shareError && <p className="text-xs text-red-600">{shareError}</p>}
 			{share === true && !shareOpen && (
 				<p className="text-xs text-foreground/50">
 					You share your word fixes to help make Komoray more accurate, without your name.{" "}
