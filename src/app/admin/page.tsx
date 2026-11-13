@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { SignInCard, useUser } from "@/components/Account";
 import { ActivityTable } from "@/components/ActivityTable";
+import { AdminAccuracy } from "@/components/AdminAccuracy";
 import { AdminWords } from "@/components/AdminWords";
 import type { Activity } from "@/lib/admin-activity";
 import { CUTOUT_ON } from "@/lib/cutout";
@@ -25,7 +26,7 @@ type Report = { at: string; email?: string; stage: string; error: string; key?: 
 type Person = { email: string; at: string; used: number; features: Features };
 type Waiting = { email: string; at: string };
 type Answer = { email: string; at: string; easy: number | null; result: number | null; pay: string | null; note: string; file: string };
-type Tab = "people" | "activity" | "videos" | "feedback" | "logs" | "words";
+type Tab = "people" | "activity" | "videos" | "feedback" | "logs" | "words" | "accuracy";
 type ActivityData = { people?: Activity[]; used?: Record<string, number>; shown?: number; total?: number };
 
 const BADGE: Record<Step["status"], string> = {
@@ -173,6 +174,7 @@ export default function AdminPage() {
 		["feedback", "Feedback", feedback.length],
 		["logs", "Logs", reports.length],
 		["words", "Words", -1],
+		["accuracy", "Accuracy", -1],
 	];
 
 	return (
@@ -356,6 +358,8 @@ export default function AdminPage() {
 			)}
 
 			{tab === "words" && <AdminWords />}
+
+			{tab === "accuracy" && <AdminAccuracy />}
 
 			{tab === "logs" && (
 				<section className="flex flex-col gap-3">
