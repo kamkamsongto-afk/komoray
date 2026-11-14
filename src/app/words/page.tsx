@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Check, Info, Pencil, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 
 // use (lib/word-rules.ts): always = fixed in every new video; ai = only where the sentence fits; off = not used.
@@ -34,6 +34,7 @@ export default function WordsPage() {
 	// What the kinds mean: a small box, closable, remembered closed (coach, 14 Nov: not cluttered, can be hidden).
 	// Read once the words arrive (load), since it only shows above them.
 	const [help, setHelp] = useState(false);
+	const helpRead = useRef(false); // read once: reloading the list after an edit must not open it again (review 14 Nov)
 	const showHelp = (on: boolean) => {
 		setHelp(on);
 		try {
@@ -53,6 +54,8 @@ export default function WordsPage() {
 			.then((data) => {
 				if (!data.words) return setError(data.error ?? "Could not load your words");
 				setWords(data.words);
+				if (helpRead.current) return;
+				helpRead.current = true;
 				let hidden = false;
 				try {
 					hidden = localStorage.getItem(HELP_HIDDEN) === "1";
@@ -230,6 +233,7 @@ export default function WordsPage() {
 							value={filter}
 							onChange={(e) => {
 								setFilter(e.target.value);
+								setPicked(new Set()); // rows a search hides must not stay picked for Remove (review 14 Nov)
 								setLimit(PAGE);
 							}}
 							placeholder="Search your words"

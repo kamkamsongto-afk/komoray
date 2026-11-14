@@ -65,6 +65,8 @@ export async function PATCH(request: Request) {
 	if (!heard || !fixed) return Response.json({ error: "Type the word" }, { status: 400 });
 	// As POST: an edit that adds words or only changes spacing belongs to one video. Saved, it went to Not used, which
 	// My words hides, so the word vanished with no way back (coach, 14 Nov). Not saved: the word stays as it was.
+	// Back to what was heard: that is not a fix (review 14 Nov: it got the spacing message, which is not what they did).
+	if (normText(fixed) === heard) return Response.json({ error: "That's how it was heard. To stop fixing this word, remove it." }, { status: 400 });
 	if (wordUse(heard, fixed, { realWords: realThaiWords }) === "off")
 		return Response.json({ error: "Here you can only change the fixed word. Adding words or changing spaces belongs in the script of that video." }, { status: 400 });
 	const { error } = await supabase.from("word_fixes").update({ fixed, updated_at: new Date().toISOString() }).eq("heard", heard);
