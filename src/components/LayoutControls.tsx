@@ -1,9 +1,9 @@
 "use client";
 
-import { ArrowLeft, ArrowLeftRight, ChevronRight, Film, Image as ImageIcon, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, ChevronRight, Copy, Film, Image as ImageIcon, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
-import { layerPlace, moveLayer } from "@/lib/layers";
+import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
@@ -86,6 +86,12 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 		const start = round(Math.max(0, Math.min(now(), total - seconds)));
 		update(l.id, { start, end: round(Math.min(total, start + seconds)) });
 		onReveal?.(l.id, start);
+	};
+	// A copy right after it, opened (coach, 14 Nov: the same in every box).
+	const duplicate = (l: VideoLayout) => {
+		const copy = duplicateOf(l, total);
+		onChange([...layouts, copy]);
+		pick(copy);
 	};
 	const remove = (l: VideoLayout) => setRemoving({ name: layoutName(l), remove: () => onChange(layouts.filter((x) => x.id !== l.id)) });
 
@@ -175,6 +181,9 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									title="Name on the timeline"
 									className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium placeholder:text-foreground placeholder:opacity-100 hover:border-foreground/20 focus:border-foreground/30 focus:outline-none"
 								/>
+								<button onClick={() => duplicate(l)} disabled={layouts.length >= LAYOUT.maxItems} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+									<Copy className="h-3.5 w-3.5" aria-hidden />
+								</button>
 								{trash(l)}
 							</div>
 						</div>

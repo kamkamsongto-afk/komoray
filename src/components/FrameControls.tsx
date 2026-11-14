@@ -1,9 +1,9 @@
 "use client";
 
-import { ArrowLeft, ChevronRight, Film, Image as ImageIcon, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Copy, Film, Image as ImageIcon, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameName, FRAME_SHAPES, type FrameShape, NEW_FRAME, shapePolygon } from "@/lib/frame-me";
-import { layerPlace, moveLayer } from "@/lib/layers";
+import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
@@ -84,6 +84,12 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 		const start = round(Math.max(0, Math.min(now(), total - seconds)));
 		update(f.id, { start, end: round(Math.min(total, start + seconds)) });
 		onReveal?.(f.id, start);
+	};
+	// A copy right after it, opened (coach, 14 Nov: the same in every box).
+	const duplicate = (f: FrameMe) => {
+		const copy = duplicateOf(f, total);
+		onChange([...frames, copy]);
+		pick(copy);
 	};
 	const remove = (f: FrameMe) => setRemoving({ name: frameName(f), remove: () => onChange(frames.filter((x) => x.id !== f.id)) });
 
@@ -185,6 +191,9 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 									title="Name on the timeline"
 									className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium placeholder:text-foreground placeholder:opacity-100 hover:border-foreground/20 focus:border-foreground/30 focus:outline-none"
 								/>
+								<button onClick={() => duplicate(f)} disabled={frames.length >= FRAME.maxItems} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+									<Copy className="h-3.5 w-3.5" aria-hidden />
+								</button>
 								{trash(f)}
 							</div>
 						</div>
