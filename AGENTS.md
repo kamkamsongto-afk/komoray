@@ -71,6 +71,7 @@ git log --oneline -15         # เพิ่งมีใครแก้อะไ
 | `subtitle-style.ts` | `DEFAULT_STYLE`, `FONTS`, `FORMATS` |
 | `behind.ts` (+ ชั้นใน `PlayerFrame.tsx`) | `behind_motion`, `run_repeats`, `build_behind`, `cutout_filters`, `RUN_SPEED`, `ARRIVE_TIME`, `INSERT_FADE`, `INSERT_EDGE_FADE` |
 | `frame-me.ts` (+ `frameMask`, `framePlace`, `FrameEdge`, `BlurBack` ใน `PlayerFrame.tsx`) | `frame_points`, `frame_rect`, `frame_art`, `frame_filters`, `FRAME_RATIO`, `FRAME_ROUND`, `FRAME_FADE` |
+| `layout.ts` (+ `layoutOther`, `LayoutHandle`, `LayoutFileHandle` ใน `PlayerFrame.tsx`) | `layout_boxes`, `layout_ease_expr`, `layout_filters`, `layout_flashes`, `layout_flash_windows`, `LAYOUT_SLIDE`, `LAYOUT_FLASH` |
 
 comment บางจุดในฝั่งเว็บอ้างชื่อเก่าที่ไม่มีใน `render.py` แล้ว เช่น `build_banners`, `MOTION`, `LOOKS` ให้ค้นจากชื่อจริงในตารางนี้
 
