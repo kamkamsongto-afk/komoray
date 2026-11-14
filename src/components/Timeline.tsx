@@ -1,6 +1,6 @@
 "use client";
 
-import { AudioWaveform, ChevronLeft, ChevronRight, Copy, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
+import { AudioWaveform, Clapperboard, Copy, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BANNER, type Banner } from "@/lib/banners";
 import { BEHIND, type CutoutLayers, insertName } from "@/lib/behind";
@@ -54,6 +54,7 @@ type Props = {
 	layouts: VideoLayout[]; // Layout: its own rows under Frame Me
 	onLayoutsChange: (layouts: VideoLayout[]) => void;
 	onOpenLayout: (id: string) => void;
+	onMakePart?: (start: number, end: number) => void; // Make video for only the picked stretch (source seconds). Left out: not now
 	revealed: { id: string; n: number } | null; // picked in a box: pick its strip here and scroll to it (n: each ask)
 	splits: number[]; // where Split divided the sound and the words, seconds of the original video
 	onSplitsChange: (splits: number[]) => void;
@@ -101,7 +102,7 @@ const TICK_STEPS = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 const SHOW_CUTS = "komoray.timelineCuts"; // remembers the Show cuts switch in this browser
 const SMALL_WAVE = "komoray.timelineSmallWave"; // and whether the waveform is folded away
 const DRAG_PX = 4; // the mouse has to move this far before a press becomes a drag (else it is a click)
-const EDGE_PX = 6; // how close to a picked stretch's edge grabs the edge
+const EDGE_PX = 8; // how close to a picked stretch's edge grabs the edge (its handle is 8 px wide)
 const MIN_PICK = 0.05; // seconds
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -170,6 +171,7 @@ export function Timeline({
 	layouts,
 	onLayoutsChange,
 	onOpenLayout,
+	onMakePart,
 	revealed,
 	splits,
 	onSplitsChange,
@@ -353,21 +355,27 @@ export function Timeline({
 		window.addEventListener("pointerup", stop);
 		window.addEventListener("pointercancel", stop);
 	};
-	// The arrows over the waveform: to the start, a kept piece back, a kept piece on, to the end.
+	// The buttons at the waveform's sides: to the start and to the end.
 	const pieceStarts = useMemo(() => segments.map((s) => s.trim / FPS), [segments]);
 	const lastSegment = segments[segments.length - 1];
+	// To the start / to the end also bring the view there: paused, the view only follows the playhead while playing,
+	// so the playhead went off the screen and the buttons looked dead (coach, 14 Nov).
+	const showAt = (t: number) => {
+		const el = scrollRef.current;
+		const x = xOf(t);
+		if (el && (x < el.scrollLeft || x > el.scrollLeft + el.clientWidth - 40)) el.scrollLeft = Math.max(0, x - el.clientWidth / 2);
+	};
 	const goTo = {
-		start: () => onSeek(pieceStarts[0] ?? 0),
-		back: () => {
-			const t = timeRef.current ?? 0;
-			onSeek(pieceStarts.findLast((p) => p < t - 0.3) ?? pieceStarts[0] ?? 0);
+		start: () => {
+			onSeek(pieceStarts[0] ?? 0);
+			if (scrollRef.current) scrollRef.current.scrollLeft = 0;
 		},
-		next: () => {
-			const t = timeRef.current ?? 0;
-			const next = pieceStarts.find((p) => p > t + 0.01);
-			if (next !== undefined) onSeek(next);
+		end: () => {
+			if (!lastSegment) return;
+			const t = Math.max(0, (lastSegment.trim + lastSegment.frames) / FPS - 0.05);
+			onSeek(t);
+			showAt(t);
 		},
-		end: () => lastSegment && onSeek(Math.max(0, (lastSegment.trim + lastSegment.frames) / FPS - 0.05)),
 	};
 	// One press divides the sound and the words here. Inside a word it moves to that word's nearer edge, so no
 	// word is cut in two. Pressed again on the same spot, the split goes away.
@@ -589,7 +597,7 @@ export function Timeline({
 	// Pressing on the ruler moves the playhead (drag to scrub). Anywhere else: a click moves the
 	// playhead (or, in a red cut, picks that cut), a drag picks a stretch, and an edge of the picked
 	// stretch can be dragged to fine-tune it. A click on the zoom strip turns zoom off (or back on) for that piece.
-	type Press = { kind: "scrub" | "pick" | "start" | "end" | "cut"; x: number; at: number; moved: boolean; cut?: [number, number]; side?: "start" | "end"; strip?: boolean; chip?: boolean };
+	type Press = { kind: "scrub" | "pick" | "start" | "end" | "cut"; x: number; at: number; moved: boolean; cut?: [number, number]; side?: "start" | "end"; strip?: boolean; chip?: boolean; shift?: boolean };
 	const press = useRef<Press | null>(null);
 	const xAt = (clientX: number) => {
 		const el = scrollRef.current;
@@ -622,7 +630,7 @@ export function Timeline({
 		const onRuler = y < RULER + 2;
 		const grab = onRuler || nearEdge(x) ? null : cutEdgeAt(x);
 		const kind = onRuler ? "scrub" : (nearEdge(x) ?? (grab ? "cut" : "pick"));
-		press.current = { kind, x, at: timeAt(x), moved: false, cut: grab?.cut, side: grab?.side, strip: zoomOn && y >= ZOOM_TOP - 1 && y <= ZOOM_TOP + ZOOM_STRIP + 1, chip: y >= CHIPS_TOP && y < CHIPS_TOP + CHIPS };
+		press.current = { kind, x, at: timeAt(x), moved: false, cut: grab?.cut, side: grab?.side, strip: zoomOn && y >= ZOOM_TOP - 1 && y <= ZOOM_TOP + ZOOM_STRIP + 1, chip: y >= CHIPS_TOP && y < CHIPS_TOP + CHIPS, shift: e.shiftKey };
 		if (kind === "scrub") onSeek(timeAt(x));
 	};
 	const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -660,6 +668,12 @@ export function Timeline({
 		}
 		if (p.moved) return setSelection((s) => (s && s.end - s.start >= MIN_PICK ? s : null));
 		if (p.kind === "scrub") return;
+		// Shift+click (coach, 14 Nov: dragging was hard): picks from where the playhead is (put there by the last click)
+		// to here, then its edges can be dragged to adjust it.
+		if (p.shift && p.kind === "pick") {
+			const from = timeRef.current ?? 0;
+			if (Math.abs(p.at - from) >= MIN_PICK) return setSelection({ start: Math.min(from, p.at), end: Math.max(from, p.at) });
+		}
 		// The zoom strip: pick the zoom part under the click (or that kept piece), then choose how it zooms.
 		if (p.strip && p.kind === "pick") {
 			const part = zoomParts.find((z) => p.at >= z.start && p.at < z.end) ?? noZoom.find((z) => p.at >= z.start && p.at < z.end);
@@ -701,7 +715,7 @@ export function Timeline({
 		const own = (spans: { start: number; end: number }[]) => spans.some((n) => n.start <= selection.start + 0.001 && n.end >= selection.end - 0.001);
 		const zoom: PartZoom | "off" | null = own(noZoom) ? "off" : (PART_ZOOMS.find((z) => own(zoomParts.filter((n) => n.zoom === z))) ?? null);
 		const zoomOwn = [...noZoom, ...zoomParts].some((n) => n.end > selection.start && n.start < selection.end);
-		return { kept: kept > 1, cut: f1 - f0 - kept > 1, hand, zoom, zoomOwn, seconds: selection.end - selection.start };
+		return { kept: kept > 1, keptSeconds: kept / FPS, cut: f1 - f0 - kept > 1, hand, zoom, zoomOwn, seconds: selection.end - selection.start };
 	}, [selection, segments, handSpans, noZoom, zoomParts]);
 	const cutPicked = useCallback(() => {
 		if (!selection) return;
@@ -824,6 +838,25 @@ export function Timeline({
 								Keep
 							</button>
 						)}
+						{/* Make this part (coach, 14 Nov): a quick look at only this stretch, as the final video makes it. */}
+						{onMakePart && picked.keptSeconds >= 1 && (
+							<button
+								onClick={() => {
+									// Asked first (coach, 14 Nov): it takes a while, and the edges can still be dragged before.
+									const seconds = Math.round(picked.keptSeconds * 10) / 10;
+									if (!window.confirm(`Make this part (${seconds} seconds of your video)?
+
+It takes a little while. You can keep editing meanwhile, and the whole video you made before stays.`)) return;
+									onMakePart(selection.start, selection.end);
+									setSelection(null);
+								}}
+								className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-blue-700"
+								title="Make only this part of the video, to check it quickly. The whole video made before stays."
+							>
+								<Clapperboard className="h-3 w-3 shrink-0" aria-hidden />
+								Make this part
+							</button>
+						)}
 						{picked.hand && (
 							<button
 								onClick={() => {
@@ -912,26 +945,28 @@ export function Timeline({
 			</div>
 
 			<div className="relative">
-			{/* Over the waveform while the mouse is there; always on a phone, which has no mouse. */}
-			<div
-				onPointerEnter={() => setOverWave(true)}
-				onPointerLeave={() => setOverWave(false)}
-				className={`absolute left-1/2 z-[3] -translate-x-1/2 items-center gap-0.5 rounded-full border border-foreground/15 bg-background/95 px-1 py-0.5 shadow ${smallWave ? "hidden" : `max-sm:flex [@media(hover:none)]:flex ${overWave ? "flex" : "hidden"}`}`}
-				style={{ top: WAVE_TOP + wave / 2 - 15 }}
-			>
-				{(
+			{/* To the start / to the end at the timeline's two sides (coach, 14 Nov: the four arrows in the middle of the
+			    waveform were in the way of picking). Only while the mouse is over the waveform; always on a phone. */}
+			{!smallWave &&
+				(
 					[
-						[SkipBack, "To the start", goTo.start],
-						[ChevronLeft, "Back one part", goTo.back],
-						[ChevronRight, "On one part", goTo.next],
-						[SkipForward, "To the end", goTo.end],
+						[SkipBack, "To the start", goTo.start, "left-8"],
+						[SkipForward, "To the end", goTo.end, "right-1"],
 					] as const
-				).map(([Icon, name, go]) => (
-					<button key={name} onClick={go} aria-label={name} title={name} className="flex h-6 w-6 items-center justify-center rounded-full text-foreground/70 hover:bg-foreground/10 hover:text-foreground">
+				).map(([Icon, name, go, side]) => (
+					<button
+						key={name}
+						onClick={go}
+						onPointerEnter={() => setOverWave(true)}
+						onPointerLeave={() => setOverWave(false)}
+						aria-label={name}
+						title={name}
+						className={`absolute ${side} z-[3] h-7 w-7 items-center justify-center rounded-full border border-foreground/15 bg-background/95 text-foreground/70 shadow hover:text-foreground max-sm:flex [@media(hover:none)]:flex ${overWave ? "flex" : "hidden"}`}
+						style={{ top: WAVE_TOP + wave / 2 - 14 }}
+					>
 						<Icon className="h-3.5 w-3.5" aria-hidden />
 					</button>
 				))}
-			</div>
 			{!smallWave && (
 			<button
 				onClick={onOpenZoom}
@@ -1093,7 +1128,16 @@ export function Timeline({
 								top: CHIPS_TOP - 3,
 								height: height - CHIPS_TOP + 3,
 							}}
-						/>
+						>
+							{/* Handles at its edges, so it is plain they can be dragged to adjust it (nearEdge grabs them). */}
+							{[-1, 1].map((side) => (
+								<span
+									key={side}
+									className="absolute top-1/2 h-6 w-2 -translate-y-1/2 rounded-sm bg-blue-600"
+									style={side < 0 ? { left: -5 } : { right: -5 }}
+								/>
+							))}
+						</div>
 					)}
 					<div ref={headRef} className="pointer-events-none absolute top-0 left-0 z-[2]" style={{ height: height }}>
 						<div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[5px] border-t-[7px] border-x-transparent border-t-blue-600" />

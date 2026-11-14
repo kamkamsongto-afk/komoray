@@ -23,6 +23,7 @@ import { FrameControls } from "./FrameControls";
 import type { FrameMe } from "@/lib/frame-me";
 import { LayoutControls } from "./LayoutControls";
 import { LAYOUT, type LayoutDrop, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
+import type { RenderPart } from "@/lib/render-part";
 import { newClipSound } from "@/lib/clip-sound";
 import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
@@ -199,6 +200,7 @@ type Props = {
 	onFramesChange: (frames: FrameMe[]) => void;
 	layouts: VideoLayout[]; // Layout: the screen split, the speaker and a picture or clip (lib/layout.ts)
 	onLayoutsChange: (layouts: VideoLayout[]) => void;
+	onMakePart?: (part: RenderPart) => void; // Make video for a stretch picked on the timeline (seconds of the final video)
 	faces: Faces | null; // where the speaker's face is, for cropping and Auto zoom
 	// Repeated takes are looked for once, when the video is first opened. withoutTakes: the deleted words if the earlier tries were cut.
 	takesApplied?: boolean;
@@ -261,6 +263,7 @@ export function ScriptView({
 	onFramesChange,
 	layouts,
 	onLayoutsChange,
+	onMakePart,
 	faces,
 	takesApplied,
 	onTakesApplied,
@@ -1559,6 +1562,7 @@ export function ScriptView({
 					}}
 					layouts={layouts}
 					onLayoutsChange={onLayoutsChange}
+					onMakePart={onMakePart && ((start, end) => onMakePart({ start: toOutSeconds(start, segments), end: toOutSeconds(end, segments) }))}
 					onOpenLayout={(id) => {
 						setFocusLayout(id);
 						openPanel("layout");

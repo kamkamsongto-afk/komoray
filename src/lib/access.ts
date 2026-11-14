@@ -3,6 +3,7 @@ import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
 import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/features";
 import { BETA_MINUTES, MAX_FILE_GB, MINUTES_PER_VIDEO } from "@/lib/limits";
+import { type JobFiles, PART_JOB, WHOLE_JOB } from "./render-part";
 import { videoDuration } from "@/lib/video-duration";
 
 // Who may use the studio during the beta, and how much. All kept in R2, away from uploads/ so it stays:
@@ -158,12 +159,17 @@ export async function refundBest(usageKey: string, seconds: number) {
 
 // A second render of the same video must wait for the first: each one is paid for.
 export async function renderRunning(key: string) {
-	const [started, done, failed] = await Promise.all([
-		getJson<{ startedAt?: string }>(siblingKey(key, "render.json")),
-		exists(siblingKey(key, "final.mp4")),
-		exists(siblingKey(key, "render-error.json")),
-	]);
-	return Boolean(started?.startedAt && !done && !failed && Date.now() - new Date(started.startedAt).getTime() < JOB_TOO_OLD_MS);
+	// The whole video's job or a part's (Make this part): each has its own files (lib/render-part.ts). One at a time.
+	const running = async (files: JobFiles) => {
+		const [started, done, failed] = await Promise.all([
+			getJson<{ startedAt?: string }>(siblingKey(key, files.job)),
+			exists(siblingKey(key, files.out)),
+			exists(siblingKey(key, files.error)),
+		]);
+		return Boolean(started?.startedAt && !done && !failed && Date.now() - new Date(started.startedAt).getTime() < JOB_TOO_OLD_MS);
+	};
+	const [whole, part] = await Promise.all([running(WHOLE_JOB), running(PART_JOB)]);
+	return whole || part;
 }
 
 // Changes from the admin page must come from our own site.

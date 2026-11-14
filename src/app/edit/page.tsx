@@ -14,6 +14,7 @@ import type { Banner } from "@/lib/banners";
 import { type CutoutLayers, NO_LAYERS } from "@/lib/behind";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
+import type { RenderPart } from "@/lib/render-part";
 import { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { type Pace, PACES, PADDING } from "@/lib/silences";
@@ -62,6 +63,9 @@ type RenderState = {
 	videoUrl?: string;
 	downloadUrl?: string;
 	error?: string;
+	part?: RenderPart; // Make this part: only this stretch of the final video (lib/render-part.ts)
+	wholeUrl?: string; // with a part: the whole video made before, if there is one
+	wholeDownloadUrl?: string;
 };
 
 const POLL_MS = 5000;
@@ -686,7 +690,8 @@ export default function EditPage() {
 		saveNotifyPref(on);
 	}
 
-	async function makeVideo() {
+	// part: only this stretch of the final video, seconds (Make this part on the timeline, coach 14 Nov).
+	async function makeVideo(part?: RenderPart) {
 		if (!key) return;
 		if (!audioRef.current && "AudioContext" in window) audioRef.current = new AudioContext();
 		void audioRef.current?.resume();
@@ -713,13 +718,13 @@ export default function EditPage() {
 		});
 		renderRun.current += 1;
 		renderAccepted.current = false;
-		setRender({ status: "processing" });
+		setRender({ status: "processing", ...(part && { part }) });
 		try {
 			if (!(await savingRef.current)) throw new Error("Your edits could not be saved. Please try again.");
 			const res = await fetch("/api/render", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ key }),
+				body: JSON.stringify({ key, ...(part && { part }) }),
 			});
 			const data = (await res.json()) as { error?: string };
 			if (!res.ok) throw new Error(data.error ?? "Could not start the render");
@@ -922,11 +927,11 @@ export default function EditPage() {
 						</label>
 					</HeaderMenu>
 					<button
-						onClick={makeVideo}
+						onClick={() => void makeVideo()}
 						disabled={render.status === "processing"}
 						className="rounded-lg bg-blue-600 px-5 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 					>
-						{render.status === "processing" ? `Making your video…${render.percent === undefined ? "" : ` ${render.percent}%`}` : render.status === "done" ? "Make video again" : "Make video"}
+						{render.status === "processing" ? `Making your ${render.part ? "part" : "video"}…${render.percent === undefined ? "" : ` ${render.percent}%`}` : render.status === "done" && !render.part ? "Make video again" : "Make video"}
 					</button>
 				</div>
 			</header>
@@ -1020,25 +1025,48 @@ export default function EditPage() {
 						<div className="h-full rounded-full bg-blue-600 transition-[width] duration-500" style={{ width: `${render.percent ?? 0}%` }} />
 					</div>
 					<p className="text-sm text-foreground/70">
-						{render.percent === undefined ? "Getting started…" : `Making your video… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
+						{render.percent === undefined ? "Getting started…" : `Making your ${render.part ? `part (${clock(render.part.start)}–${clock(render.part.end)})` : "video"}… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
 					</p>
 				</div>
 			)}
-			{render.status === "failed" && <p className="text-sm text-red-500">{render.error}</p>}
+			{render.status === "failed" && (
+				<p className="text-sm text-red-500">
+					{render.part ? `This part could not be made: ${render.error}` : render.error}
+					{render.part && render.wholeUrl && (
+						<>
+							{" "}
+							<a href={render.wholeUrl} target="_blank" rel="noreferrer" className="text-foreground/70 underline">
+								Watch your whole video from before
+							</a>
+						</>
+					)}
+				</p>
+			)}
 			{render.status === "done" && render.videoUrl && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
-					<span>Your video is ready!</span>
+					<span>{render.part ? `Your part (${clock(render.part.start)}–${clock(render.part.end)}) is ready!` : "Your video is ready!"}</span>
 					<button onClick={() => setShowReady(true)} className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700">
 						Watch
 					</button>
 					<a href={render.downloadUrl} className="rounded-lg border border-foreground/20 px-3 py-1.5 font-medium hover:bg-foreground/5">
-						Download video
+						Download {render.part ? "part" : "video"}
 					</a>
-					<span className="text-xs text-foreground/50">Changed something after this? Press Make video again.</span>
+					<span className="text-xs text-foreground/50">{render.part ? "Only this part. Make video makes the whole video." : "Changed something after this? Press Make video again."}</span>
+					{render.part && render.wholeUrl && (
+						<span className="flex items-center gap-2 text-xs">
+							Your whole video from before:
+							<a href={render.wholeUrl} target="_blank" rel="noreferrer" className="underline">
+								Watch
+							</a>
+							<a href={render.wholeDownloadUrl} className="underline">
+								Download
+							</a>
+						</span>
+					)}
 				</div>
 			)}
 
-			{showReady && render.status === "done" && render.videoUrl && <VideoReady videoUrl={render.videoUrl} downloadUrl={render.downloadUrl} videoKey={key} onClose={closeReady} />}
+			{showReady && render.status === "done" && render.videoUrl && <VideoReady videoUrl={render.videoUrl} downloadUrl={render.downloadUrl} videoKey={key} onClose={closeReady} part={render.part && `${clock(render.part.start)}–${clock(render.part.end)}`} />}
 
 			<ScriptView
 				videoKey={key}
@@ -1073,6 +1101,7 @@ export default function EditPage() {
 				onFramesChange={changeFrames}
 				layouts={analysis.layouts ?? []}
 				onLayoutsChange={changeLayouts}
+				onMakePart={render.status === "processing" ? undefined : (part) => void makeVideo(part)}
 				cutout={cutout}
 				faces={analysis.faces ?? null}
 				takesApplied={analysis.takesApplied ?? false}

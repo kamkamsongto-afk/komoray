@@ -20,7 +20,7 @@ export type Activity = {
 
 const has = (files: FolderFile[], name: string) => files.some((file) => file.name === name);
 // The video they sent, not one made by us (same rule as the Videos tab in api/admin/jobs).
-export const isUpload = (file: FolderFile) => /\.(mp4|mov)$/i.test(file.name) && !["final.mp4", "proxy.mp4"].includes(file.name) && !file.name.includes("-before.");
+export const isUpload = (file: FolderFile) => /\.(mp4|mov)$/i.test(file.name) && !["final.mp4", "proxy.mp4", "part.mp4"].includes(file.name) && !file.name.includes("-before.");
 
 function emptyRow(email: string | null): Activity {
 	return { email, videos: 0, listened: 0, listenFailed: 0, made: 0, madeFailed: 0, words: 0, fixed: 0, lastActive: null };

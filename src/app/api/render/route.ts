@@ -10,7 +10,8 @@ import type { Banner } from "@/lib/banners";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
 import type { Window } from "@/lib/cutout";
-import { keepSegments } from "@/lib/timeline";
+import { FPS, keepSegments, totalFrames } from "@/lib/timeline";
+import { jobFiles, PART_JOB, PART_RENDER, readRenderPart, type RenderPart, WHOLE_JOB } from "@/lib/render-part";
 import { readStyle } from "@/lib/subtitle-style";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
@@ -30,7 +31,9 @@ async function readKey(key: string | null) {
 
 // Start making the final video.
 export async function POST(request: Request) {
-	const { key: rawKey } = (await request.json()) as { key?: string };
+	// part: only this stretch of the final video, seconds (Make this part, coach 14 Nov). Its job has files of its own
+	// (lib/render-part.ts), so the whole video made before stays, and the admin pages only see whole videos.
+	const { key: rawKey, part: rawPart } = (await request.json()) as { key?: string; part?: unknown };
 	const key = await readKey(rawKey ?? null);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	if (!(await canUseStudio((await currentUser()).user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
@@ -51,26 +54,33 @@ export async function POST(request: Request) {
 		siblingKey(key, "edit.json"),
 	);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
+	const part = rawPart === undefined ? null : readRenderPart(rawPart, totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS);
+	if (rawPart !== undefined && !part) return Response.json({ error: `Pick at least ${PART_RENDER.minSeconds} seconds of the video to make.` }, { status: 400 });
 
 	// Cutout layers only go in where the speaker is cut out for them: else text behind the speaker lands
 	// in front, and a picture fills the screen with no speaker (Codex review, 7 Nov). Layers saved while
 	// Cutout was on for this person are left out once it is turned off on /admin.
 	let layers = edit.cutout && (edit.cutout.texts.length || edit.cutout.inserts.length) ? edit.cutout : undefined;
+	// A part only needs the speaker cut out where its own layers show (review 14 Nov: a part at 0:10 was refused for a
+	// picture at 2:00). render.py leaves out the matte where no layer shows.
+	const inPart = <T extends { start: number; end: number }>(list: T[]) => (part ? list.filter((x) => x.start < part.end && x.end > part.start) : list);
+	const needed = layers && { ...layers, texts: inPart(layers.texts), inserts: inPart(layers.inserts) };
 	if (layers && !(await accessFor((await currentUser()).user?.email)).features.cutout.on) layers = undefined;
 	if (layers) {
 		const done = await getJson<{ windows: Window[] }>(siblingKey(key, "cutout.json"));
-		const need = cutoutWindows(layers, keepSegments(edit.duration, allCuts(edit)));
+		const need = cutoutWindows(needed ?? layers, keepSegments(edit.duration, allCuts(edit)));
 		if (!done || !covered(need, done.windows)) {
 			return Response.json({ error: "Press Cut me out in the Cutout box first: you aren't cut out yet where your text, pictures or clips show." }, { status: 409 });
 		}
 	}
 
-	const finalKey = siblingKey(key, "final.mp4");
-	const errorKey = siblingKey(key, "render-error.json");
+	const files = jobFiles(part);
+	const finalKey = siblingKey(key, files.out);
+	const errorKey = siblingKey(key, files.error);
 	// Clear the previous attempt so the status check can't pick up an old result.
-	const progressKey = siblingKey(key, "render-progress.json");
+	const progressKey = siblingKey(key, files.progress);
 	await Promise.all([deleteObject(finalKey), deleteObject(errorKey), deleteObject(progressKey)]);
-	await putObject(siblingKey(key, "render.json"), JSON.stringify({ startedAt: new Date().toISOString() }), "application/json");
+	await putObject(siblingKey(key, files.job), JSON.stringify({ startedAt: new Date().toISOString(), ...(part && { part }) }), "application/json");
 
 	// The user's own font: Modal gets a short-lived link to the file and the name to ask for.
 	// A banner can have the own font too, while the subtitles don't (banner_events falls back to Kanit without it).
@@ -116,7 +126,7 @@ export async function POST(request: Request) {
 			// Modal just removes every cut, so hand it the deleted words and the timeline's hand cuts as cuts too,
 			// and the words already fixed: it only uses them for subtitles.
 			// faces: frame wide videos around the speaker, as the preview does (lib/framing.ts).
-			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles },
+			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles, ...(part && { part }) },
 			// How the subtitles look, from the editor (lib/subtitle-style.ts).
 			style,
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.
@@ -140,21 +150,36 @@ export async function GET(request: Request) {
 	const key = await readKey(new URL(request.url).searchParams.get("key"));
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 
-	const finalKey = siblingKey(key, "final.mp4");
+	// The newer of the whole video's job and a part's job is the one shown (each has its own files, lib/render-part.ts).
+	// With a part shown, the whole video made before comes too (review 14 Nov: after a part, it could not be opened).
+	const [whole, partJob] = await Promise.all([
+		getJson<{ startedAt?: string }>(siblingKey(key, WHOLE_JOB.job)).catch(() => null),
+		getJson<{ startedAt?: string; part?: unknown }>(siblingKey(key, PART_JOB.job)).catch(() => null),
+	]);
+	const part: RenderPart | null = partJob && (partJob.startedAt ?? "") > (whole?.startedAt ?? "") ? readRenderPart(partJob.part, Infinity) : null;
+	const files = jobFiles(part);
+	const finalKey = siblingKey(key, files.out);
+	const wholeKey = siblingKey(key, WHOLE_JOB.out);
+	const wholeLinks = async () =>
+		part && (await exists(wholeKey))
+			? { wholeUrl: await signedUrl(wholeKey, "GET", LINK_SECONDS), wholeDownloadUrl: await signedUrl(wholeKey, "GET", LINK_SECONDS, undefined, "komoray-video.mp4") }
+			: {};
 	if (await exists(finalKey)) {
 		return Response.json({
 			status: "done",
 			videoUrl: await signedUrl(finalKey, "GET", LINK_SECONDS),
-			downloadUrl: await signedUrl(finalKey, "GET", LINK_SECONDS, undefined, "komoray-video.mp4"),
+			downloadUrl: await signedUrl(finalKey, "GET", LINK_SECONDS, undefined, part ? "komoray-part.mp4" : "komoray-video.mp4"),
+			...(part && { part }),
+			...(await wholeLinks()),
 		});
 	}
 
-	const failure = await getJson<{ error?: string }>(siblingKey(key, "render-error.json"));
-	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Render failed" });
+	const failure = await getJson<{ error?: string }>(siblingKey(key, files.error));
+	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Render failed", ...(part && { part }), ...(await wholeLinks()) });
 
-	const started = await exists(siblingKey(key, "render.json"));
+	const started = await exists(siblingKey(key, files.job));
 	if (!started) return Response.json({ status: "none" });
 	// Only a number shown on the page: a problem reading it must never look like a failed video.
-	const progress = await getJson<{ percent?: number }>(siblingKey(key, "render-progress.json")).catch(() => null);
-	return Response.json({ status: "processing", percent: progress?.percent });
+	const progress = await getJson<{ percent?: number }>(siblingKey(key, files.progress)).catch(() => null);
+	return Response.json({ status: "processing", percent: progress?.percent, ...(part && { part }) });
 }
