@@ -797,6 +797,123 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
     return base
 
 
+# Layout (src/lib/layout.ts): the screen split, the speaker in one part and a picture, clip or colour in the other.
+LAYOUT_SLIDE = 0.5  # seconds the other part takes to slide in, and out (LAYOUT.slide in layout.ts)
+LAYOUT_FLASH = 0.15  # seconds the white flash takes to come up, and to go, at each edge (LAYOUT.flash in layout.ts)
+
+
+def layout_boxes(l: dict, size: tuple[int, int]) -> dict:
+    """The speaker's part, the other part (left, top, width, height px) and where the speaker's whole picture goes once
+    split (its top left corner; it keeps its size, so it stays as sharp). Same as layoutBoxes in layout.ts."""
+    W, H = size
+    stack = l.get("kind") != "side"
+    first = l.get("meFirst") is not False
+    mine = 2 * js_round(float(l.get("split") or 0.5) * (H if stack else W) / 2)  # even px, as layoutBoxes
+    if stack:
+        me = (0, 0 if first else H - mine, W, mine)
+        other = (0, mine if first else 0, W, H - mine)
+    else:
+        me = (0 if first else W - mine, 0, mine, H)
+        other = (mine if first else 0, 0, W - mine, H)
+
+    def along(middle: float, point: float, start: float, length: float, whole: float) -> float:
+        return min(start, max(start + length - whole, middle - point))
+
+    picture = (
+        along(me[0] + me[2] / 2, float(l.get("meX", 0.5)) * W, me[0], me[2], W),
+        along(me[1] + me[3] / 2, float(l.get("meY", 0.4)) * H, me[1], me[3], H),
+    )
+    return {"me": me, "other": other, "picture": picture}
+
+
+def layout_ease_expr(l: dict) -> str:
+    """How far it is split at the frame's time t, as an FFmpeg expression: 0 = all speaker, 1 = split. Only Slide moves,
+    eased in and out; one shorter than both slides slides over half its time each way. Same as layoutProgress."""
+    if l.get("enter", "slide") != "slide":
+        return "1"
+    a, b = float(l["start"]), float(l["end"])
+    d = min(LAYOUT_SLIDE, (b - a) / 2)
+    u = f"clip(min((t-{a:.3f})/{d:.4f},({b:.3f}-t)/{d:.4f}),0,1)"
+    return f"if(lt({u},0.5),4*pow({u},3),1-pow(2-2*{u},3)/2)"
+
+
+def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: list[dict], inputs: list[int | None]) -> str:
+    """Layout: for each layout's time, the picture so far (the speaker and the Cutout layers) is moved, never scaled, so
+    the point (meX, meY) sits in the middle of the speaker's part, and the other part (a project picture or clip filling
+    it, else its colour) comes in from its own edge of the screen. Both move by the same eased amount, so nothing
+    uncovered ever shows between them. Over Cutout, under Frame Me, banners and subtitles, as the preview draws it
+    (PlayerFrame). Two at once: the later in the list on top. inputs: each layout's file input, or None. Returns the new label.
+    Every layout is made from the picture before any layout, so where two overlap the later one simply hides the earlier."""
+    W, H = size
+    parts.append(f"{base}split={len(layouts) + 1}[lym]{''.join(f'[lys{j}]' for j in range(len(layouts)))}")
+    base = "[lym]"
+    for j, l in enumerate(layouts):
+        a, b = float(l["start"]), float(l["end"])
+        d = b - a
+        boxes = layout_boxes(l, size)
+        px, py = boxes["picture"]
+        ox, oy, ow, oh = boxes["other"]
+        stack, first = l.get("kind") != "side", l.get("meFirst") is not False
+        e = layout_ease_expr(l)
+        parts.append(f"[lys{j}]trim=start={a:.3f}:end={b:.3f},split=3[lyk{j}][lyp{j}][lyc{j}]")
+        parts.append(f"[lyk{j}]drawbox=c=black:t=fill[lyb{j}]")
+        # The speaker's picture moved e of the way (layoutPose: picture * p).
+        parts.append(f"[lyb{j}][lyp{j}]overlay=x='{px:.1f}*({e})':y='{py:.1f}*({e})'[lyv{j}]")
+        if inputs[j] is not None:
+            # Fills its part (cover), as the preview's object-fit: cover. A clip or GIF that ends early stays on its last frame.
+            moving = l.get("media") == "video" or str(l.get("file", "")).endswith(".gif")
+            hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
+            # fileZoom times as big as it takes to fill its part, the point (fileX, fileY) in the part's middle as far as it
+            # still covers the part (layoutFilePlace in layout.ts; the crop's x / y are minus its left / top there).
+            # Even sizes, rounded up so it never falls short of the part. Numbers, not ow / oh: those are scale's own.
+            z = min(3.0, max(1.0, float(l.get("fileZoom") or 1)))
+            fx, fy = (min(1.0, max(0.0, float(l.get(k, 0.5)))) for k in ("fileX", "fileY"))
+            grow = f"max({ow}/iw,{oh}/ih)*{z:g}"
+            parts.append(
+                f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale=w='ceil(iw*{grow}/2)*2':h='ceil(ih*{grow}/2)*2',"
+                f"crop={ow}:{oh}:x='clip(iw*{fx:g}-{ow / 2:g},0,iw-{ow})':y='clip(ih*{fy:g}-{oh / 2:g},0,ih-{oh})',setsar=1,"
+                f"format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[lyf{j}]"
+            )
+        else:
+            colour = str(l.get("color") or "#000000").lstrip("#")
+            parts.append(f"[lyc{j}]crop={ow}:{oh}:0:0,drawbox=c=0x{colour}:t=fill[lyf{j}]")
+        if inputs[j] is not None:
+            parts.append(f"[lyc{j}]nullsink")
+        # The other part slid in from its own edge: off by (1 - p) of its size (layoutPose).
+        sign = 1 if first else -1
+        x = f"{ox}" if stack else f"{ox}+{sign * ow}*(1-({e}))"
+        y = f"{oy}+{sign * oh}*(1-({e}))" if stack else f"{oy}"
+        parts.append(f"[lyv{j}][lyf{j}]overlay=x='{x}':y='{y}':eof_action=repeat[lyo{j}]")
+        parts.append(f"{base}[lyo{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[lyx{j}]")
+        base = f"[lyx{j}]"
+    return base
+
+
+def layout_flash_windows(layouts: list[dict]) -> list[float]:
+    """The edges of the Flash layouts, seconds of the final video: a white flash peaks at each one (layoutFlash)."""
+    return [float(l[k]) for l in layouts if l.get("enter") == "flash" for k in ("start", "end")]
+
+
+def layout_flashes(parts: list[str], base: str, edges: list[float]) -> str:
+    """White over the picture from LAYOUT_FLASH before each edge to LAYOUT_FLASH after it, fully white at the edge, as
+    layoutFlash in layout.ts. Two at once are laid one over the other, which layoutFlash adds up the same way.
+    Over the layouts, under Frame Me, banners and subtitles. Returns the new label."""
+    if not edges:
+        return base
+    F = LAYOUT_FLASH
+    parts.append(f"{base}split={len(edges) + 1}[lfm]{''.join(f'[lfs{k}]' for k in range(len(edges)))}")
+    base = "[lfm]"
+    for k, e in enumerate(edges):
+        a, b = max(0.0, e - F), e + F
+        parts.append(
+            f"[lfs{k}]trim=start={a:.3f}:end={b:.3f},drawbox=c=white:t=fill,format=yuva420p,"
+            f"fade=t=in:st={e - F:.3f}:d={F}:alpha=1,fade=t=out:st={e:.3f}:d={F}:alpha=1[lfw{k}]"
+        )
+        parts.append(f"{base}[lfw{k}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[lfo{k}]")
+        base = f"[lfo{k}]"
+    return base
+
+
 def banner_file_size(anim: str, frames_ms: str) -> tuple[float, str]:
     """An uploaded banner's size over time (1 = its Size), as an FFmpeg expression of `frames_ms` (ms since it
     arrived), and the biggest it gets. Same keyframes as BANNER_ANIMS / bannerMotion in banners.ts, and as the
@@ -1584,6 +1701,7 @@ def ffmpeg_command(
     banner_files: list[dict] | None = None,
     part: tuple[int, int] | None = None,
     frames: list[dict] | None = None,
+    layouts: list[dict] | None = None,
 ) -> list[str]:
     """part: only these frames of the final video [from, to), without sound, for picture_parts (made side
     by side, then joined). Every layer goes by the time on the picture, so the part is moved to its place
@@ -1592,10 +1710,15 @@ def ffmpeg_command(
     no_zoom: parts with Auto zoom turned off (source seconds). zoom_parts: parts with their own kind of zoom.
     cutout: {"behind": subtitles file, "matte": path, "inserts": [{"path", "kind", "start", ...}]} (cutout_filters).
     banner_files: uploaded banners, each a banner with "path" (banner_file_filters).
-    frames: Frame Me, each with "art" (frame_art) and, for a picture or clip background, "path" (frame_filters)."""
+    frames: Frame Me, each with "art" (frame_art) and, for a picture or clip background, "path" (frame_filters).
+    layouts: Layout, each with "path" when the other part is a picture or clip (layout_filters)."""
     banner_files = banner_files or []
     # A part only reads the frames that show in it: the others' mask and background would be read for nothing.
     framed = [f for f in frames or [] if not part or (float(f["start"]) * FPS < part[1] and float(f["end"]) * FPS > part[0])]
+    # The same for layouts, with their flash's reach past each edge (layout_flashes).
+    reach = LAYOUT_FLASH * FPS
+    split_up = [l for l in layouts or [] if not part or (float(l["start"]) * FPS - reach < part[1] and float(l["end"]) * FPS + reach > part[0])]
+    showing = [l for l in split_up if not part or (float(l["start"]) * FPS < part[1] and float(l["end"]) * FPS > part[0])]
     aspect = display_aspect(src)
     # The pieces in whole frames of the final video, as the preview has them (StudioPlayer): each piece's
     # picture and sound are exactly `frames` / FPS long, so nothing is held or skipped at the joins.
@@ -1625,6 +1748,10 @@ def ffmpeg_command(
             reads["file"] = extra
             extra += 1
         inputs["frames"].append(reads)
+    inputs["layouts"] = []
+    for l in showing:
+        inputs["layouts"].append(extra if l.get("path") else None)
+        extra += 1 if l.get("path") else 0
     matte_labels = []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
@@ -1684,6 +1811,13 @@ def ffmpeg_command(
         base, plain = "[cvc]", "[cvf]"
     if cutout:
         base = cutout_filters(parts, base, size, cutout, inputs)
+    if showing:
+        # Only the layouts that show in this part; a part may hold just a flash's tail (split_up), drawn below.
+        base = layout_filters(parts, base, size, showing, inputs["layouts"])
+    if split_up:
+        # Only the flashes that reach into this part: one outside it would trim to nothing.
+        edges = [e for e in layout_flash_windows(split_up) if not part or ((e - LAYOUT_FLASH) * FPS < part[1] and (e + LAYOUT_FLASH) * FPS > part[0])]
+        base = layout_flashes(parts, base, edges)
     if framed:
         base = frame_filters(parts, base, size, framed, inputs["frames"], plain)
     if banner_files:
@@ -1724,6 +1858,9 @@ def ffmpeg_command(
             cmd += [*still, "-i", str(f["art"]["border"])]
         if f.get("back") == "file" and f.get("path"):
             cmd += banner_file_input({"path": f["path"], "file": f.get("file", ""), "media": f.get("media")})
+    for l in showing:
+        if l.get("path"):
+            cmd += banner_file_input({"path": l["path"], "file": l.get("file", ""), "media": l.get("media")})
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         # The sound people get when Audio optimization is off or polish_sound failed.
@@ -2023,12 +2160,13 @@ def join_parts(parts: list[Path], sound: Path | None, out: Path, frames: int) ->
 CLIP_SOUND_FADE = 0.25  # CLIP_SOUND.fade in lib/clip-sound.ts
 
 
-def clip_sounds(cutout: dict | None, banner_files: list[dict], frames: list[dict] | None = None) -> list[dict]:
-    """The uploaded clips that sound (a volume, Mute not ticked: lib/clip-sound.ts): Pic/Clip inserts, clip banners and
-    Frame Me clip backgrounds."""
+def clip_sounds(cutout: dict | None, banner_files: list[dict], frames: list[dict] | None = None, layouts: list[dict] | None = None) -> list[dict]:
+    """The uploaded clips that sound (a volume, Mute not ticked: lib/clip-sound.ts): Pic/Clip inserts, clip banners,
+    Frame Me clip backgrounds and Layout clips."""
     clips = [i for i in (cutout or {}).get("inserts") or [] if i.get("kind") == "video"]
     clips += [b for b in banner_files if b.get("media") == "video"]
     clips += [f for f in frames or [] if f.get("back") == "file" and f.get("media") == "video" and f.get("path")]
+    clips += [l for l in layouts or [] if l.get("media") == "video" and l.get("path")]
     return [c for c in clips if not c.get("muted") and float(c.get("volume") or 0) > 0 and has_audio(c["path"])]
 
 
@@ -2164,6 +2302,17 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                     f["back"] = "blur"  # its file is gone: the blurred video, rather than no video
                 frame_list.append(f)
 
+            # Layout (layout.ts): a link to each one's picture or clip comes with Frame Me's (frameFiles, by file name).
+            layout_list = []
+            for n, l in enumerate(edit.get("layouts") or []):
+                link = frame_links.get(l.get("file")) if l.get("file") else None
+                if link:
+                    l = {**l, "path": workdir / f"layout-file-{n}"}
+                    urllib.request.urlretrieve(link, l["path"])
+                else:
+                    l = {k: v for k, v in l.items() if k not in ("file", "media")}  # its file is gone: its colour instead
+                layout_list.append(l)
+
             # The user's logo picture, if this look shows it.
             logo = None
             if style.get("logoUrl"):
@@ -2191,6 +2340,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 banner_files,
                 part,
                 frame_list,
+                layout_list,
             )
             picture = lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY))
             if len(spans) > 1:
@@ -2216,7 +2366,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             else:
                 polished = polishing.result() if polishing else None
                 sound = add_sound(out, polished) if polished else False
-            clips = clip_sounds(cutout, banner_files, frame_list)
+            clips = clip_sounds(cutout, banner_files, frame_list, layout_list)
             if clips:
                 mix_clip_sounds(out, clips)
             report(PROGRESS_SOUND, force=True)

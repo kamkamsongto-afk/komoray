@@ -1,10 +1,11 @@
 "use client";
 
-import { AudioWaveform, ChevronLeft, ChevronRight, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
+import { AudioWaveform, ChevronLeft, ChevronRight, Copy, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Banner } from "@/lib/banners";
-import { type CutoutLayers, insertName } from "@/lib/behind";
-import { type FrameMe, frameName } from "@/lib/frame-me";
+import { BANNER, type Banner } from "@/lib/banners";
+import { BEHIND, type CutoutLayers, insertName } from "@/lib/behind";
+import { FRAME, type FrameMe, frameName } from "@/lib/frame-me";
+import { LAYOUT, layoutName, type VideoLayout } from "@/lib/layout";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, pieceAt, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
 import { loadPeaks, PEAKS_PER_SECOND } from "@/lib/waveform";
@@ -50,19 +51,23 @@ type Props = {
 	frames: FrameMe[]; // Frame Me: its own rows under the Cutout layers
 	onFramesChange: (frames: FrameMe[]) => void;
 	onOpenFrame: (id: string) => void;
+	layouts: VideoLayout[]; // Layout: its own rows under Frame Me
+	onLayoutsChange: (layouts: VideoLayout[]) => void;
+	onOpenLayout: (id: string) => void;
 	revealed: { id: string; n: number } | null; // picked in a box: pick its strip here and scroll to it (n: each ask)
 	splits: number[]; // where Split divided the sound and the words, seconds of the original video
 	onSplitsChange: (splits: number[]) => void;
 };
 
-// Things shown over the video, as strips under the waveform: banners first, then the Cutout layers, then Frame Me, each in rows of their own.
-type LaneKind = "banner" | "text" | "insert" | "frame";
+// Things shown over the video, as strips under the waveform: banners first, then the Cutout layers, then Frame Me, then Layout, each in rows of their own.
+type LaneKind = "banner" | "text" | "insert" | "frame" | "layout";
 type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number };
 const LANE_LOOK: Record<LaneKind, { edge: string; body: string; picked: string; ring: string; name: string }> = {
 	banner: { edge: "bg-fuchsia-500/70", body: "bg-fuchsia-500/30 hover:bg-fuchsia-500/45", picked: "bg-fuchsia-500/55", ring: "ring-fuchsia-600", name: "banner" },
 	text: { edge: "bg-sky-500/70", body: "bg-sky-500/30 hover:bg-sky-500/45", picked: "bg-sky-500/55", ring: "ring-sky-600", name: "text behind you" },
 	insert: { edge: "bg-orange-500/70", body: "bg-orange-500/30 hover:bg-orange-500/45", picked: "bg-orange-500/55", ring: "ring-orange-600", name: "picture or clip" },
 	frame: { edge: "bg-emerald-500/70", body: "bg-emerald-500/30 hover:bg-emerald-500/45", picked: "bg-emerald-500/55", ring: "ring-emerald-600", name: "Frame Me" },
+	layout: { edge: "bg-indigo-500/70", body: "bg-indigo-500/30 hover:bg-indigo-500/45", picked: "bg-indigo-500/55", ring: "ring-indigo-600", name: "layout" },
 };
 // Each item goes in the first row with room, so a row only starts where two overlap.
 function packRows(items: LaneItem[], first: number) {
@@ -162,6 +167,9 @@ export function Timeline({
 	frames,
 	onFramesChange,
 	onOpenFrame,
+	layouts,
+	onLayoutsChange,
+	onOpenLayout,
 	revealed,
 	splits,
 	onSplitsChange,
@@ -249,8 +257,10 @@ export function Timeline({
 		const top = packRows(bannerItems, 0);
 		const middle = packRows(cutoutItems, rowsOf(top, 0));
 		const frameItems = frames.map((f): LaneItem => ({ id: f.id, kind: "frame", label: frameName(f), start: f.start, end: f.end }));
-		return [...top, ...middle, ...packRows(frameItems, rowsOf(middle, rowsOf(top, 0)))];
-	}, [banners, cutoutLayers, frames]);
+		const framed = packRows(frameItems, rowsOf(middle, rowsOf(top, 0)));
+		const layoutItems = layouts.map((l): LaneItem => ({ id: l.id, kind: "layout", label: layoutName(l), start: l.start, end: l.end }));
+		return [...top, ...middle, ...framed, ...packRows(layoutItems, rowsOf(framed, rowsOf(middle, rowsOf(top, 0))))];
+	}, [banners, cutoutLayers, frames, layouts]);
 	const laneRows = lane.length ? Math.max(...lane.map((l) => l.row)) + 1 : 0;
 	const laneHeight = laneRows * LANE_ROW + (laneRows ? 2 : 0);
 	// The strip clicked on the timeline: highlighted, and Delete removes it (coach, 6 Nov: no trip back to the box's ×).
@@ -268,9 +278,35 @@ export function Timeline({
 			if (item.kind === "banner") onBannersChange(apply(banners));
 			else if (item.kind === "text") onCutoutChange({ ...cutoutLayers, texts: apply(cutoutLayers.texts) });
 			else if (item.kind === "frame") onFramesChange(apply(frames));
+			else if (item.kind === "layout") onLayoutsChange(apply(layouts));
 			else onCutoutChange({ ...cutoutLayers, inserts: apply(cutoutLayers.inserts) });
 		},
-		[banners, cutoutLayers, frames, onBannersChange, onCutoutChange, onFramesChange],
+		[banners, cutoutLayers, frames, layouts, onBannersChange, onCutoutChange, onFramesChange, onLayoutsChange],
+	);
+	// Duplicate (coach, 14 Nov): a copy right after it, as long, on top of the others (last in its list), picked.
+	// Near the end of the video it goes as late as still fits. Same settings, a new id.
+	const duplicateItem = useCallback(
+		(item: LaneItem) => {
+			const id = crypto.randomUUID();
+			const tenths = (n: number) => Math.round(n * 10) / 10;
+			const seconds = item.end - item.start;
+			const start = tenths(Math.max(0, Math.min(item.end, total - seconds)));
+			// Not past the most its kind can have: a copy over it would be dropped when saved (the read* checks).
+			let made = false;
+			const copy = <T extends { id: string; start: number; end: number }>(list: T[], most: number) => {
+				const from = list.find((x) => x.id === item.id);
+				if (!from || list.length >= most) return list;
+				made = true;
+				return [...list, { ...from, id, start, end: tenths(Math.min(total, start + seconds)) }];
+			};
+			if (item.kind === "banner") onBannersChange(copy(banners, BANNER.maxBanners));
+			else if (item.kind === "text") onCutoutChange({ ...cutoutLayers, texts: copy(cutoutLayers.texts, BEHIND.maxItems) });
+			else if (item.kind === "insert") onCutoutChange({ ...cutoutLayers, inserts: copy(cutoutLayers.inserts, BEHIND.maxItems) });
+			else if (item.kind === "frame") onFramesChange(copy(frames, FRAME.maxItems));
+			else onLayoutsChange(copy(layouts, LAYOUT.maxItems));
+			if (made) setPickedItem(id);
+		},
+		[banners, cutoutLayers, frames, layouts, total, onBannersChange, onCutoutChange, onFramesChange, onLayoutsChange],
 	);
 	// Every layer asks first: text behind you, pictures and clips (coach, 9 Nov), and banners too (coach, 11 Nov).
 	const [removing, setRemoving] = useState<LaneItem | null>(null);
@@ -309,6 +345,7 @@ export function Timeline({
 			if (moved) return;
 			if (b.kind === "banner") onOpenBanners(b.id);
 			else if (b.kind === "frame") onOpenFrame(b.id);
+			else if (b.kind === "layout") onOpenLayout(b.id);
 			else onOpenCutout(b.id);
 			onSeek(toSource(b.start));
 		};
@@ -677,7 +714,7 @@ export function Timeline({
 		setSelection(null);
 	};
 
-	// Delete / Backspace removes the picked strip, Esc lets it go.
+	// Delete / Backspace removes the picked strip, Ctrl+D (⌘D) duplicates it, Esc lets it go.
 	useEffect(() => {
 		if (!pickedItem) return;
 		const onKey = (e: KeyboardEvent) => {
@@ -687,11 +724,14 @@ export function Timeline({
 			else if ((e.key === "Delete" || e.key === "Backspace") && window.getSelection()?.isCollapsed !== false) {
 				e.preventDefault();
 				removeItem(item);
+			} else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
+				e.preventDefault(); // not the browser's bookmark
+				duplicateItem(item);
 			}
 		};
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [pickedItem, lane, removeItem]);
+	}, [pickedItem, lane, removeItem, duplicateItem]);
 
 	// Delete / Backspace cuts the picked stretch, Esc lets it go (not while typing or with script words highlighted).
 	useEffect(() => {
@@ -960,11 +1000,22 @@ export function Timeline({
 								<button onPointerDown={(e) => startItemDrag(e, b, "start")} aria-label={`When ${b.label} starts`} title="Drag to change when it starts" className={`w-1.5 shrink-0 cursor-ew-resize touch-none rounded-l ${look.edge}`} />
 								<button
 									onPointerDown={(e) => startItemDrag(e, b, false)}
-									title={`${b.label} (${look.name}): drag to change when it shows, click to pick it (Delete removes it)`}
+									title={`${b.label} (${look.name}): drag to change when it shows, click to pick it (Delete removes it, Ctrl+D duplicates it)`}
 									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-[11px] leading-[18px] text-foreground ${picked ? look.picked : look.body}`}
 								>
 									{b.label}
 								</button>
+								{picked && (
+									<button
+										onPointerDown={(e) => e.stopPropagation()}
+										onClick={() => duplicateItem(b)}
+										aria-label={`Duplicate ${b.label}`}
+										title={`Duplicate this ${look.name} (Ctrl+D)`}
+										className="flex w-4 shrink-0 items-center justify-center bg-blue-600 text-white hover:bg-blue-700"
+									>
+										<Copy className="h-2.5 w-2.5" aria-hidden />
+									</button>
+								)}
 								{picked && (
 									<button
 										onPointerDown={(e) => e.stopPropagation()}

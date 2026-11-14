@@ -2,6 +2,7 @@ import { canUseStudio, NO_INVITE } from "@/lib/access";
 import type { Banner } from "@/lib/banners";
 import type { CutoutLayers } from "@/lib/behind";
 import type { FrameMe } from "@/lib/frame-me";
+import type { VideoLayout } from "@/lib/layout";
 import { cleanMediaName, filesInUse, LIBRARY, LIBRARY_TYPES, type LibraryItem, MEDIA_FILE, PROJECT_FILE } from "@/lib/media-library";
 import { deleteObject, getJson, listObjects, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
@@ -15,7 +16,7 @@ import { currentUser, ownsVideo } from "@/lib/supabase/server";
 const UPLOAD_SECONDS = 600;
 const VIEW_SECONDS = 3 * 3600;
 type Library = { items: LibraryItem[] };
-type Edit = { banners?: Banner[]; cutout?: CutoutLayers; frames?: FrameMe[] };
+type Edit = { banners?: Banner[]; cutout?: CutoutLayers; frames?: FrameMe[]; layouts?: VideoLayout[] };
 
 async function ownKey(key: unknown) {
 	return typeof key === "string" && VIDEO_KEY.test(key) && (await ownsVideo(key)) ? key : null;
@@ -104,7 +105,7 @@ export async function DELETE(request: Request) {
 	if (typeof body.file !== "string" || !PROJECT_FILE.test(body.file)) return Response.json({ error: "Unknown file" }, { status: 400 });
 	// Checked on the saved video: a banner or Pic/Clip still showing it would come out empty.
 	if (filesInUse(await getJson<Edit>(siblingKey(key, "edit.json"))).has(body.file)) {
-		return Response.json({ error: "This file is still on your video. Delete it from Banners, Pic/Clip or Frame Me first." }, { status: 409 });
+		return Response.json({ error: "This file is still on your video. Delete it from Banners, Pic/Clip, Frame Me or Layout first." }, { status: 409 });
 	}
 	await deleteObject(siblingKey(key, body.file));
 	const library = await getJson<Library>(libraryKey(key));

@@ -1,12 +1,12 @@
 "use client";
 
-import { Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { Columns2, Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
 import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
-import { filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { addToLibrary, filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { DEFAULT_STYLE, fontMetrics, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -21,6 +21,8 @@ import { BannerControls } from "./BannerControls";
 import { CutoutControls } from "./CutoutControls";
 import { FrameControls } from "./FrameControls";
 import type { FrameMe } from "@/lib/frame-me";
+import { LayoutControls } from "./LayoutControls";
+import { LAYOUT, type LayoutDrop, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
 import { newClipSound } from "@/lib/clip-sound";
 import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
@@ -195,6 +197,8 @@ type Props = {
 	cutout: ReturnType<typeof useCutout>;
 	frames: FrameMe[]; // Frame Me: the speaker inside a shape over a background (lib/frame-me.ts)
 	onFramesChange: (frames: FrameMe[]) => void;
+	layouts: VideoLayout[]; // Layout: the screen split, the speaker and a picture or clip (lib/layout.ts)
+	onLayoutsChange: (layouts: VideoLayout[]) => void;
 	faces: Faces | null; // where the speaker's face is, for cropping and Auto zoom
 	// Repeated takes are looked for once, when the video is first opened. withoutTakes: the deleted words if the earlier tries were cut.
 	takesApplied?: boolean;
@@ -205,7 +209,7 @@ type Props = {
 
 // What can be opened under the video. Nothing is open at first: the editor stays calm, and every
 // setting is a click away (here, or by clicking its part of the timeline).
-type Panel = ControlSection | "banners" | "cutout" | "frame" | "import";
+type Panel = ControlSection | "banners" | "cutout" | "frame" | "layout" | "import";
 const SCRIPT_HEIGHT = "komoray.scriptHeight"; // the script box's dragged height, px
 const PANELS: { id: Panel; icon: LucideIcon; name: string }[] = [
 	{ id: "text", icon: Type, name: "Subtitles" },
@@ -213,6 +217,7 @@ const PANELS: { id: Panel; icon: LucideIcon; name: string }[] = [
 	{ id: "banners", icon: Tag, name: "Banners" },
 	{ id: "cutout", icon: Layers, name: "Cutout" }, // only for people with Cutout on (/admin)
 	{ id: "frame", icon: Shapes, name: "Frame Me" }, // the speaker in a shape, nothing cut out (coach, 12 Nov)
+	{ id: "layout", icon: Columns2, name: "Layout" }, // the screen split: you and a picture or clip (coach, 14 Nov)
 	{ id: "import", icon: FolderInput, name: "Import" }, // pictures and clips kept in the project (Yoshi, 12 Nov)
 	{ id: "shape", icon: Crop, name: "Shape" },
 	{ id: "brand", icon: Palette, name: "Brand" },
@@ -254,6 +259,8 @@ export function ScriptView({
 	cutout,
 	frames,
 	onFramesChange,
+	layouts,
+	onLayoutsChange,
 	faces,
 	takesApplied,
 	onTakesApplied,
@@ -280,6 +287,7 @@ export function ScriptView({
 	const [focusBanner, setFocusBanner] = useState<string | null>(null);
 	const [focusCutout, setFocusCutout] = useState<string | null>(null);
 	const [focusFrame, setFocusFrame] = useState<string | null>(null);
+	const [focusLayout, setFocusLayout] = useState<string | null>(null);
 	// From the timeline: the panels live under the preview.
 	const openPanel = (next: Panel) => {
 		setMode("preview");
@@ -340,6 +348,47 @@ export function ScriptView({
 		jump(toSourceSeconds(start, segments));
 		setRevealed((s) => ({ id, n: (s?.n ?? 0) + 1 }));
 	};
+	// Layout: a picture or clip dropped on the video (coach, 14 Nov). From the computer it goes into Import first.
+	// Into the other part of the layout showing (id), else a new top / bottom layout here, and the Layout box opens on it.
+	const layoutsRef = useRef(layouts);
+	useEffect(() => {
+		layoutsRef.current = layouts;
+	});
+	const [layoutNote, setLayoutNote] = useState("");
+	const [libraryVersion, setLibraryVersion] = useState(0);
+	const dropOnLayout = async (drop: LayoutDrop, id: string | null) => {
+		const key = new URLSearchParams(window.location.search).get("key");
+		if (!key) return;
+		// Where it was dropped, read now: while playing, the upload's wait would move it on (Codex review 14 Nov).
+		const droppedAt = toOutSeconds(timeRef.current, segments);
+		setFocusLayout(id);
+		openPanel("layout");
+		let item = drop.item;
+		if (!item && drop.file) {
+			setLayoutNote(`Adding ${drop.file.name}…`);
+			const added = await addToLibrary(key, drop.file);
+			setLibraryVersion((v) => v + 1);
+			if ("error" in added) return setLayoutNote(added.error);
+			item = added.item;
+		}
+		setLayoutNote("");
+		if (!item) return;
+		const list = layoutsRef.current; // as it is now: the upload took a while
+		const sound = item.media === "video" ? newClipSound("video") : {};
+		if (id && list.some((l) => l.id === id)) {
+			const media = item.media;
+			const file = item.file;
+			onLayoutsChange(list.map((l) => (l.id === id ? { ...l, file, media, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(media === "video" && l.volume === undefined && !l.muted ? sound : {}) } : l)));
+			return;
+		}
+		if (list.length >= LAYOUT.maxItems) return setLayoutNote("That's the most layouts one video can have.");
+		const total = totalFrames(segments) / FPS;
+		const start = Math.round(Math.min(droppedAt, Math.max(0, total - 1)) * 10) / 10;
+		const made = { ...NEW_LAYOUT(start, Math.round(Math.min(total, start + LAYOUT.seconds) * 10) / 10), file: item.file, media: item.media, ...sound };
+		onLayoutsChange([...list, made]);
+		setFocusLayout(made.id);
+		reveal(made.id, start);
+	};
 	// Import: a project file put on the video where it is now, then its box opens on it to place it.
 	const putAsBanner = (item: LibraryItem) => {
 		if (banners.length >= BANNER.maxBanners) return;
@@ -365,6 +414,8 @@ export function ScriptView({
 	};
 	// Frame Me: dragged or resized on the video (while its box is open and the video paused).
 	const changeFrame = (id: string, patch: Partial<FrameMe>) => onFramesChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+	// Layout: you dragged inside your part of the screen (while its box is open and the video paused).
+	const changeLayout = (id: string, patch: Partial<VideoLayout>) => onLayoutsChange(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 	// Project files in Pic/Clip have a link at once (the Cutout check signs them only after the next save).
 	const cutoutFiles = useMemo(
 		() => ({ ...Object.fromEntries(cutoutLayers.inserts.map((i) => [i.file, projectFileSrc(i.file)])), ...cutout.files }),
@@ -947,6 +998,9 @@ export function ScriptView({
 							onBannersChange={onBannersChange}
 							frames={frames}
 							onFrameChange={panel === "frame" ? changeFrame : undefined}
+							layouts={layouts}
+							onLayoutChange={panel === "layout" ? changeLayout : undefined}
+							onLayoutDrop={(drop, id) => void dropOnLayout(drop, id)}
 							faces={faces}
 							noZoom={noZoom}
 							zoomParts={zoomParts}
@@ -970,6 +1024,9 @@ export function ScriptView({
 							onBannersChange={onBannersChange}
 							frames={frames}
 							onFrameChange={panel === "frame" ? changeFrame : undefined}
+							layouts={layouts}
+							onLayoutChange={panel === "layout" ? changeLayout : undefined}
+							onLayoutDrop={(drop, id) => void dropOnLayout(drop, id)}
 							noZoom={noZoom}
 							zoomParts={zoomParts}
 						/>
@@ -1053,7 +1110,7 @@ export function ScriptView({
 									<X className="h-4 w-4" aria-hidden />
 								</button>
 							</div>
-					{panel !== "banners" && panel !== "cutout" && panel !== "frame" && panel !== "import" && (
+					{panel !== "banners" && panel !== "cutout" && panel !== "frame" && panel !== "layout" && panel !== "import" && (
 						<SubtitleControls
 							style={subtitle}
 							onChange={onSubtitleChange}
@@ -1171,11 +1228,23 @@ export function ScriptView({
 							onReveal={reveal}
 						/>
 					)}
+					{panel === "layout" && (
+						<LayoutControls
+							layouts={layouts}
+							onChange={onLayoutsChange}
+							now={() => toOutSeconds(timeRef.current, segments)}
+							total={totalFrames(segments) / FPS}
+							focus={focusLayout}
+							onReveal={reveal}
+							note={layoutNote}
+							libraryVersion={libraryVersion}
+						/>
+					)}
 					{panel === "import" && (
 						<ImportControls
 							onUseAsBanner={putAsBanner}
 							onUseInPicClip={cutout.on ? putInPicClip : undefined}
-							usedNow={filesInUse({ banners, cutout: cutoutLayers, frames })}
+							usedNow={filesInUse({ banners, cutout: cutoutLayers, frames, layouts })}
 						/>
 					)}
 					{panel === "banners" && (
@@ -1487,6 +1556,12 @@ export function ScriptView({
 					onOpenFrame={(id) => {
 						setFocusFrame(id);
 						openPanel("frame");
+					}}
+					layouts={layouts}
+					onLayoutsChange={onLayoutsChange}
+					onOpenLayout={(id) => {
+						setFocusLayout(id);
+						openPanel("layout");
 					}}
 					noZoom={noZoom}
 					zoomParts={zoomParts}

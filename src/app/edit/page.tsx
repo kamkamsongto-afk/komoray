@@ -13,6 +13,7 @@ import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
 import { type CutoutLayers, NO_LAYERS } from "@/lib/behind";
 import type { FrameMe } from "@/lib/frame-me";
+import type { VideoLayout } from "@/lib/layout";
 import { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { type Pace, PACES, PADDING } from "@/lib/silences";
@@ -42,6 +43,7 @@ type Analysis = {
 	banners?: Banner[];
 	cutout?: CutoutLayers; // text behind the speaker, pictures and clips behind them (lib/behind.ts)
 	frames?: FrameMe[]; // Frame Me: the speaker inside a shape over a background (lib/frame-me.ts)
+	layouts?: VideoLayout[]; // Layout: the screen split, the speaker and a picture or clip (lib/layout.ts)
 	manual?: Cut[]; // cut by hand on the timeline
 	keep?: Cut[]; // silences kept by hand on the timeline
 	noZoom?: Cut[]; // parts with Auto zoom turned off on the timeline
@@ -281,6 +283,7 @@ export default function EditPage() {
 			zoomMomentsApplied?: boolean;
 			cutout?: CutoutLayers;
 			frames?: FrameMe[];
+			layouts?: VideoLayout[];
 		}) => {
 			if (!key) return;
 			setSaveError("");
@@ -318,7 +321,7 @@ export default function EditPage() {
 	// Undo / Redo for script and timeline edits (deleted and fixed words, hand cuts, zoom parts) and for
 	// banners and Cutout layers: what they were before each change. Without banners in it, Undo after moving
 	// a banner skipped back to the last fixed word and brought a wrong subtitle back (coach, 11 Nov).
-	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[]; noZoom: Cut[]; zoomParts: ZoomPart[]; banners: Banner[]; cutout: CutoutLayers; frames: FrameMe[] };
+	type Snapshot = { deleted: number[]; fixes: Fix[]; manual: Cut[]; keep: Cut[]; noZoom: Cut[]; zoomParts: ZoomPart[]; banners: Banner[]; cutout: CutoutLayers; frames: FrameMe[]; layouts: VideoLayout[] };
 	const analysisRef = useRef(analysis);
 	useEffect(() => {
 		analysisRef.current = analysis;
@@ -327,6 +330,7 @@ export default function EditPage() {
 	const cutoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const bannersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const framesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const layoutsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const refreshCutoutRef = useRef(cutout.refresh);
 	useEffect(() => {
 		refreshCutoutRef.current = cutout.refresh;
@@ -335,7 +339,7 @@ export default function EditPage() {
 	const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
 	const snapshot = (): Snapshot => {
 		const a = analysisRef.current;
-		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [], noZoom: a?.noZoom ?? [], zoomParts: a?.zoomParts ?? [], banners: a?.banners ?? [], cutout: a?.cutout ?? NO_LAYERS, frames: a?.frames ?? [] };
+		return { deleted: a?.deleted ?? [], fixes: a?.fixes ?? [], manual: a?.manual ?? [], keep: a?.keep ?? [], noZoom: a?.noZoom ?? [], zoomParts: a?.zoomParts ?? [], banners: a?.banners ?? [], cutout: a?.cutout ?? NO_LAYERS, frames: a?.frames ?? [], layouts: a?.layouts ?? [] };
 	};
 	// Banners and Cutout layers change on every key typed and every step of a drag: changes from the same
 	// place less than BURST_MS apart are one step to undo.
@@ -362,6 +366,7 @@ export default function EditPage() {
 			if (bannersTimer.current) clearTimeout(bannersTimer.current);
 			if (cutoutTimer.current) clearTimeout(cutoutTimer.current);
 			if (framesTimer.current) clearTimeout(framesTimer.current);
+			if (layoutsTimer.current) clearTimeout(layoutsTimer.current);
 			setAnalysis((a) => (a ? { ...a, ...snap } : a));
 			save(snap);
 			void savingRef.current?.then(() => refreshCutoutRef.current());
@@ -604,6 +609,17 @@ export default function EditPage() {
 		[save, remember],
 	);
 
+	// Layout: dragged and slid like Frame Me, so saved a moment after the last change too.
+	const changeLayouts = useCallback(
+		(layouts: VideoLayout[]) => {
+			remember("layouts");
+			setAnalysis((a) => (a ? { ...a, layouts } : a));
+			if (layoutsTimer.current) clearTimeout(layoutsTimer.current);
+			layoutsTimer.current = setTimeout(() => save({ layouts }), STYLE_SAVE_DELAY_MS);
+		},
+		[save, remember],
+	);
+
 	// Key moments (api/zoom-moments): the AI picks where to zoom and how, instead of zooming every take
 	// (coach, 6 Nov). Put in by itself once if Auto zoom was ticked when uploading, or with Find key moments.
 	// They replace the zoom parts, and the rest of the video stops zooming. Saved, so only paid for once.
@@ -680,7 +696,8 @@ export default function EditPage() {
 		if (bannersTimer.current) clearTimeout(bannersTimer.current);
 		if (cutoutTimer.current) clearTimeout(cutoutTimer.current);
 		if (framesTimer.current) clearTimeout(framesTimer.current);
-		styleTimer.current = bannersTimer.current = cutoutTimer.current = framesTimer.current = null;
+		if (layoutsTimer.current) clearTimeout(layoutsTimer.current);
+		styleTimer.current = bannersTimer.current = cutoutTimer.current = framesTimer.current = layoutsTimer.current = null;
 		save({
 			deleted: analysis?.deleted ?? [],
 			fixes: analysis?.fixes ?? [],
@@ -692,6 +709,7 @@ export default function EditPage() {
 			zoomParts: analysis?.zoomParts ?? [],
 			...(analysis?.cutout && { cutout: analysis.cutout }),
 			...(analysis?.frames && { frames: analysis.frames }),
+			...(analysis?.layouts && { layouts: analysis.layouts }),
 		});
 		renderRun.current += 1;
 		renderAccepted.current = false;
@@ -1053,6 +1071,8 @@ export default function EditPage() {
 				onCutoutChange={changeCutout}
 				frames={analysis.frames ?? []}
 				onFramesChange={changeFrames}
+				layouts={analysis.layouts ?? []}
+				onLayoutsChange={changeLayouts}
 				cutout={cutout}
 				faces={analysis.faces ?? null}
 				takesApplied={analysis.takesApplied ?? false}
