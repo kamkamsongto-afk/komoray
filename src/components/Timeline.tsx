@@ -1,6 +1,6 @@
 "use client";
 
-import { AudioWaveform, ChevronLeft, ChevronRight, Copy, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
+import { AudioWaveform, ChevronLeft, ChevronRight, Clapperboard, Copy, Pause, Play, Repeat2, RotateCcw, Scissors, SkipBack, SkipForward, Undo2, X, ZoomIn } from "lucide-react";
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BANNER, type Banner } from "@/lib/banners";
 import { BEHIND, type CutoutLayers, insertName } from "@/lib/behind";
@@ -54,6 +54,7 @@ type Props = {
 	layouts: VideoLayout[]; // Layout: its own rows under Frame Me
 	onLayoutsChange: (layouts: VideoLayout[]) => void;
 	onOpenLayout: (id: string) => void;
+	onMakePart?: (start: number, end: number) => void; // Make video for only the picked stretch (source seconds). Left out: not now
 	revealed: { id: string; n: number } | null; // picked in a box: pick its strip here and scroll to it (n: each ask)
 	splits: number[]; // where Split divided the sound and the words, seconds of the original video
 	onSplitsChange: (splits: number[]) => void;
@@ -170,6 +171,7 @@ export function Timeline({
 	layouts,
 	onLayoutsChange,
 	onOpenLayout,
+	onMakePart,
 	revealed,
 	splits,
 	onSplitsChange,
@@ -701,7 +703,7 @@ export function Timeline({
 		const own = (spans: { start: number; end: number }[]) => spans.some((n) => n.start <= selection.start + 0.001 && n.end >= selection.end - 0.001);
 		const zoom: PartZoom | "off" | null = own(noZoom) ? "off" : (PART_ZOOMS.find((z) => own(zoomParts.filter((n) => n.zoom === z))) ?? null);
 		const zoomOwn = [...noZoom, ...zoomParts].some((n) => n.end > selection.start && n.start < selection.end);
-		return { kept: kept > 1, cut: f1 - f0 - kept > 1, hand, zoom, zoomOwn, seconds: selection.end - selection.start };
+		return { kept: kept > 1, keptSeconds: kept / FPS, cut: f1 - f0 - kept > 1, hand, zoom, zoomOwn, seconds: selection.end - selection.start };
 	}, [selection, segments, handSpans, noZoom, zoomParts]);
 	const cutPicked = useCallback(() => {
 		if (!selection) return;
@@ -822,6 +824,20 @@ export function Timeline({
 							>
 								<Undo2 className="h-3 w-3 shrink-0" aria-hidden />
 								Keep
+							</button>
+						)}
+						{/* Make this part (coach, 14 Nov): a quick look at only this stretch, as the final video makes it. */}
+						{onMakePart && picked.keptSeconds >= 1 && (
+							<button
+								onClick={() => {
+									onMakePart(selection.start, selection.end);
+									setSelection(null);
+								}}
+								className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-blue-700"
+								title="Make only this part of the video, to check it quickly. The whole video made before stays."
+							>
+								<Clapperboard className="h-3 w-3 shrink-0" aria-hidden />
+								Make this part
 							</button>
 						)}
 						{picked.hand && (

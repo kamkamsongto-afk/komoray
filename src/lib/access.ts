@@ -3,6 +3,7 @@ import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
 import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/features";
 import { BETA_MINUTES, MAX_FILE_GB, MINUTES_PER_VIDEO } from "@/lib/limits";
+import { readRenderPart, renderOutput } from "./render-part";
 import { videoDuration } from "@/lib/video-duration";
 
 // Who may use the studio during the beta, and how much. All kept in R2, away from uploads/ so it stays:
@@ -158,9 +159,10 @@ export async function refundBest(usageKey: string, seconds: number) {
 
 // A second render of the same video must wait for the first: each one is paid for.
 export async function renderRunning(key: string) {
-	const [started, done, failed] = await Promise.all([
-		getJson<{ startedAt?: string }>(siblingKey(key, "render.json")),
-		exists(siblingKey(key, "final.mp4")),
+	// A part (Make this part) is written to part.mp4, the whole video to final.mp4 (lib/render-part.ts).
+	const started = await getJson<{ startedAt?: string; part?: unknown }>(siblingKey(key, "render.json"));
+	const [done, failed] = await Promise.all([
+		exists(siblingKey(key, renderOutput(readRenderPart(started?.part, Infinity)))),
 		exists(siblingKey(key, "render-error.json")),
 	]);
 	return Boolean(started?.startedAt && !done && !failed && Date.now() - new Date(started.startedAt).getTime() < JOB_TOO_OLD_MS);

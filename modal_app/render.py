@@ -2142,6 +2142,18 @@ def run_parts(cmds: list[list[str]], cwd: Path, frames: list[int], on_part, cost
     return next((r for r in results if r[0] != 0), (0, ""))
 
 
+def cut_sound(sound: Path, start: float, end: float) -> Path:
+    """The whole video's sound from start to end seconds, for a part of it (render's "part"). Encoded again: a copy
+    could only cut at the sound's own blocks (~21 ms), and the part's sound would not start with its picture."""
+    out = sound.with_name("part-sound.m4a")
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(sound), "-af", f"atrim=start={start:.6f}:end={end:.6f},asetpts=PTS-STARTPTS"]
+    cmd += ["-c:a", "aac", "-b:a", "320k", str(out)]
+    result = subprocess.run(cmd, cwd=sound.parent, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed cutting the sound: {result.stderr[-600:]}")
+    return out
+
+
 def join_parts(parts: list[Path], sound: Path | None, out: Path, frames: int) -> None:
     """The parts one after the other, and the sound, into the final video. Copied: nothing is encoded again."""
     listing = out.with_name("parts.txt")
@@ -2181,9 +2193,14 @@ def mix_clip_sounds(video: Path, clips: list[dict]) -> None:
     for k, c in enumerate(clips):
         a, b = float(c["start"]), float(c["end"])
         d, v = b - a, min(1.0, float(c["volume"]))
+        # A part of the video (render's "part"): skip = seconds of the clip already played before the part starts, and
+        # cut = it goes on past the part's end. Those edges are the part's, not the clip's, so they aren't faded.
+        skip, cut = float(c.get("skip") or 0), bool(c.get("cut"))
+        fade_in = "" if skip > 0 else f"afade=t=in:st=0:d={CLIP_SOUND_FADE},"
+        fade_out = "" if cut else f"afade=t=out:st={max(0.0, d - CLIP_SOUND_FADE):.3f}:d={CLIP_SOUND_FADE},"
         parts.append(
-            f"[{k + 1}:a]atrim=duration={d:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume={v:.2f},"
-            f"afade=t=in:st=0:d={CLIP_SOUND_FADE},afade=t=out:st={max(0.0, d - CLIP_SOUND_FADE):.3f}:d={CLIP_SOUND_FADE},adelay=delays={round(a * 1000)}:all=1[c{k}]"
+            f"[{k + 1}:a]atrim=start={skip:.3f}:duration={d:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume={v:.2f},"
+            f"{fade_in}{fade_out}adelay=delays={round(a * 1000)}:all=1[c{k}]"
         )
     # normalize=0: each sound keeps its own level (amix would otherwise lower all of them); duration=first: the video's length.
     parts.append(f"[m]{''.join(f'[c{k}]' for k in range(len(clips)))}amix=inputs={len(clips) + 1}:normalize=0:duration=first:dropout_transition=0[a]")
@@ -2242,9 +2259,15 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             # uses most of the machine but not all of it (8 CPUs made it no faster than 4, measured 11 Nov).
             frames = sum(count for _, _, count in frame_segments(keeps))
             spans = picture_parts(frames)  # made again below with the cutout layers: the same count, 1 or more
+            # Make this part (coach, 14 Nov): only the final video's frames [lo, hi), made as the parts above are, so it
+            # comes out exactly like that stretch of the whole video. Its sound is the whole video's, cut to it.
+            lo = hi = None
+            if edit.get("part"):
+                lo = max(0, min(frames - 1, js_round(float(edit["part"]["start"]) * FPS)))
+                hi = max(lo + 1, min(frames, js_round(float(edit["part"]["end"]) * FPS)))
             amount, polish = float(style.get("audioAmount", 1)), bool(style.get("audio", True))
             polishing = None
-            if len(spans) > 1:  # the parts have no sound: this makes it, polished or not
+            if len(spans) > 1 or lo is not None:  # the parts have no sound: this makes it, polished or not
                 polishing = sound_worker.submit(parts_sound, src, keeps, workdir, polish, amount)
             elif polish:
                 polishing = sound_worker.submit(polish_sound, src, keeps, workdir / "sound.m4a", amount)
@@ -2343,7 +2366,19 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 layout_list,
             )
             picture = lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY))
-            if len(spans) > 1:
+            if lo is not None:
+                # The part's frames in pieces side by side, as for a whole video of its length, moved to where it is.
+                busy = [(max(0, a - lo), min(hi - lo, b - lo)) for a, b in cutout_busy(cutout, frames) if a < hi and b > lo]
+                spans = [(a + lo, b + lo, on) for a, b, on in picture_parts(hi - lo, busy)]
+                files = [workdir / f"part-{n}.mp4" for n in range(len(spans))]
+                code, errors = run_parts(
+                    [command(f, (a, b), cutout if on else None) for f, (a, b, on) in zip(files, spans)],
+                    workdir,
+                    [b - a for a, b, _ in spans],
+                    picture,
+                    [(b - a) * (CUTOUT_COST if on else 1) for a, b, on in spans],
+                )
+            elif len(spans) > 1:
                 # A part without a cutout layer is made without the matte: the same picture there, much faster.
                 spans = picture_parts(frames, cutout_busy(cutout, frames))
                 files = [workdir / f"part-{n}.mp4" for n in range(len(spans))]
@@ -2360,13 +2395,24 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 raise RuntimeError(f"ffmpeg failed: {errors[-1500:]}")
 
             report(PROGRESS_PICTURE, force=True)
-            if len(spans) > 1:
+            if lo is not None:
+                track, sound = polishing.result()
+                join_parts(files, track and cut_sound(track, lo / FPS, hi / FPS), out, hi - lo)
+            elif len(spans) > 1:
                 track, sound = polishing.result()
                 join_parts(files, track, out, frames)
             else:
                 polished = polishing.result() if polishing else None
                 sound = add_sound(out, polished) if polished else False
             clips = clip_sounds(cutout, banner_files, frame_list, layout_list)
+            if lo is not None:
+                # Only the clips that sound in the part, moved to its start (mix_clip_sounds: skip, cut).
+                a0, b0 = lo / FPS, hi / FPS
+                clips = [
+                    {**c, "start": max(0.0, float(c["start"]) - a0), "end": min(b0, float(c["end"])) - a0, "skip": max(0.0, a0 - float(c["start"])), "cut": float(c["end"]) > b0}
+                    for c in clips
+                    if float(c["start"]) < b0 and float(c["end"]) > a0
+                ]
             if clips:
                 mix_clip_sounds(out, clips)
             report(PROGRESS_SOUND, force=True)

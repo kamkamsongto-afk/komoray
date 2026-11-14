@@ -10,7 +10,8 @@ import type { Banner } from "@/lib/banners";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
 import type { Window } from "@/lib/cutout";
-import { keepSegments } from "@/lib/timeline";
+import { FPS, keepSegments, totalFrames } from "@/lib/timeline";
+import { PART_RENDER, readRenderPart, renderOutput } from "@/lib/render-part";
 import { readStyle } from "@/lib/subtitle-style";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
@@ -30,7 +31,9 @@ async function readKey(key: string | null) {
 
 // Start making the final video.
 export async function POST(request: Request) {
-	const { key: rawKey } = (await request.json()) as { key?: string };
+	// part: only this stretch of the final video, seconds (Make this part, coach 14 Nov). It goes to part.mp4, so the
+	// whole video made before (final.mp4) stays, and the admin pages only count whole videos.
+	const { key: rawKey, part: rawPart } = (await request.json()) as { key?: string; part?: unknown };
 	const key = await readKey(rawKey ?? null);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	if (!(await canUseStudio((await currentUser()).user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
@@ -51,6 +54,8 @@ export async function POST(request: Request) {
 		siblingKey(key, "edit.json"),
 	);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
+	const part = rawPart === undefined ? null : readRenderPart(rawPart, totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS);
+	if (rawPart !== undefined && !part) return Response.json({ error: `Pick at least ${PART_RENDER.minSeconds} seconds of the video to make.` }, { status: 400 });
 
 	// Cutout layers only go in where the speaker is cut out for them: else text behind the speaker lands
 	// in front, and a picture fills the screen with no speaker (Codex review, 7 Nov). Layers saved while
@@ -65,12 +70,12 @@ export async function POST(request: Request) {
 		}
 	}
 
-	const finalKey = siblingKey(key, "final.mp4");
+	const finalKey = siblingKey(key, renderOutput(part));
 	const errorKey = siblingKey(key, "render-error.json");
 	// Clear the previous attempt so the status check can't pick up an old result.
 	const progressKey = siblingKey(key, "render-progress.json");
 	await Promise.all([deleteObject(finalKey), deleteObject(errorKey), deleteObject(progressKey)]);
-	await putObject(siblingKey(key, "render.json"), JSON.stringify({ startedAt: new Date().toISOString() }), "application/json");
+	await putObject(siblingKey(key, "render.json"), JSON.stringify({ startedAt: new Date().toISOString(), ...(part && { part }) }), "application/json");
 
 	// The user's own font: Modal gets a short-lived link to the file and the name to ask for.
 	// A banner can have the own font too, while the subtitles don't (banner_events falls back to Kanit without it).
@@ -116,7 +121,7 @@ export async function POST(request: Request) {
 			// Modal just removes every cut, so hand it the deleted words and the timeline's hand cuts as cuts too,
 			// and the words already fixed: it only uses them for subtitles.
 			// faces: frame wide videos around the speaker, as the preview does (lib/framing.ts).
-			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles },
+			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles, ...(part && { part }) },
 			// How the subtitles look, from the editor (lib/subtitle-style.ts).
 			style,
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.
@@ -140,12 +145,16 @@ export async function GET(request: Request) {
 	const key = await readKey(new URL(request.url).searchParams.get("key"));
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 
-	const finalKey = siblingKey(key, "final.mp4");
+	// The last job says whether it made a part (part.mp4) or the whole video (final.mp4, also for jobs from before).
+	const job = await getJson<{ part?: unknown }>(siblingKey(key, "render.json")).catch(() => null);
+	const part = readRenderPart(job?.part, Infinity);
+	const finalKey = siblingKey(key, renderOutput(part));
 	if (await exists(finalKey)) {
 		return Response.json({
 			status: "done",
 			videoUrl: await signedUrl(finalKey, "GET", LINK_SECONDS),
-			downloadUrl: await signedUrl(finalKey, "GET", LINK_SECONDS, undefined, "komoray-video.mp4"),
+			downloadUrl: await signedUrl(finalKey, "GET", LINK_SECONDS, undefined, part ? "komoray-part.mp4" : "komoray-video.mp4"),
+			...(part && { part }),
 		});
 	}
 
