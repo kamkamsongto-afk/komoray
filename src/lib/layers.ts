@@ -36,3 +36,21 @@ export function layerPlace<T extends Timed>(list: T[], id: string, same: (a: T, 
 
 // Banners: the uploaded ones (pictures, clips) are always under the word banners, so each only swaps with its own kind.
 export const sameBannerPass = (a: { kind: string }, b: { kind: string }) => (a.kind === "file") === (b.kind === "file");
+
+// Copies of a thing on the timeline (coach, 14 Nov: the same everywhere, from its box, the timeline's button,
+// Ctrl+D, or Ctrl+C then Ctrl+V). Every setting kept, a new id, as long as it was; it goes last in its list, so on top.
+const tenths = (n: number) => Math.round(n * 10) / 10;
+
+// Right after it; near the end of the video, as late as still fits.
+export function duplicateOf<T extends Timed>(item: T, total: number): T {
+	const seconds = item.end - item.start;
+	const start = tenths(Math.max(0, Math.min(item.end, total - seconds)));
+	return { ...item, id: crypto.randomUUID(), start, end: tenths(Math.min(total, start + seconds)) };
+}
+
+// Where the playhead is (`at`, seconds of the final video); near the end, as late as still fits.
+export function pasteOf<T extends Timed>(item: T, at: number, total: number): T {
+	const seconds = item.end - item.start;
+	const start = tenths(Math.max(0, Math.min(at, total - seconds)));
+	return { ...item, id: crypto.randomUUID(), start, end: tenths(Math.min(total, start + seconds)) };
+}

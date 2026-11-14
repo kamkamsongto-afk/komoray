@@ -5,6 +5,7 @@ import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEff
 import { BANNER, type Banner } from "@/lib/banners";
 import { BEHIND, type CutoutLayers, insertName } from "@/lib/behind";
 import { FRAME, type FrameMe, frameName } from "@/lib/frame-me";
+import { duplicateOf, pasteOf } from "@/lib/layers";
 import { LAYOUT, layoutName, type VideoLayout } from "@/lib/layout";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, pieceAt, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
@@ -287,29 +288,70 @@ export function Timeline({
 	);
 	// Duplicate (coach, 14 Nov): a copy right after it, as long, on top of the others (last in its list), picked.
 	// Near the end of the video it goes as late as still fits. Same settings, a new id.
+	// The thing a strip stands for, from its own list.
+	type Thing = { id: string; start: number; end: number };
+	const thingOf = useCallback(
+		(kind: LaneKind, id: string): Thing | undefined =>
+			(kind === "banner" ? banners : kind === "text" ? cutoutLayers.texts : kind === "insert" ? cutoutLayers.inserts : kind === "frame" ? frames : layouts).find((x) => x.id === id),
+		[banners, cutoutLayers, frames, layouts],
+	);
+	// A copy added last in its list (on top), and picked. Not past the most its kind can have: a copy over it would be
+	// dropped when saved (the read* checks). false: there was no room.
+	const addThing = useCallback(
+		(kind: LaneKind, thing: Thing) => {
+			const room = (list: Thing[], most: number) => list.length < most;
+			const full =
+				kind === "banner"
+					? !room(banners, BANNER.maxBanners)
+					: kind === "text"
+						? !room(cutoutLayers.texts, BEHIND.maxItems)
+						: kind === "insert"
+							? !room(cutoutLayers.inserts, BEHIND.maxItems)
+							: kind === "frame"
+								? !room(frames, FRAME.maxItems)
+								: !room(layouts, LAYOUT.maxItems);
+			if (full) return false;
+			if (kind === "banner") onBannersChange([...banners, thing as Banner]);
+			else if (kind === "text") onCutoutChange({ ...cutoutLayers, texts: [...cutoutLayers.texts, thing as CutoutLayers["texts"][number]] });
+			else if (kind === "insert") onCutoutChange({ ...cutoutLayers, inserts: [...cutoutLayers.inserts, thing as CutoutLayers["inserts"][number]] });
+			else if (kind === "frame") onFramesChange([...frames, thing as FrameMe]);
+			else onLayoutsChange([...layouts, thing as VideoLayout]);
+			setPickedItem(thing.id);
+			return true;
+		},
+		[banners, cutoutLayers, frames, layouts, onBannersChange, onCutoutChange, onFramesChange, onLayoutsChange],
+	);
+	// Duplicate (the strip's button, Ctrl+D): right after it (lib/layers.ts).
 	const duplicateItem = useCallback(
 		(item: LaneItem) => {
-			const id = crypto.randomUUID();
-			const tenths = (n: number) => Math.round(n * 10) / 10;
-			const seconds = item.end - item.start;
-			const start = tenths(Math.max(0, Math.min(item.end, total - seconds)));
-			// Not past the most its kind can have: a copy over it would be dropped when saved (the read* checks).
-			let made = false;
-			const copy = <T extends { id: string; start: number; end: number }>(list: T[], most: number) => {
-				const from = list.find((x) => x.id === item.id);
-				if (!from || list.length >= most) return list;
-				made = true;
-				return [...list, { ...from, id, start, end: tenths(Math.min(total, start + seconds)) }];
-			};
-			if (item.kind === "banner") onBannersChange(copy(banners, BANNER.maxBanners));
-			else if (item.kind === "text") onCutoutChange({ ...cutoutLayers, texts: copy(cutoutLayers.texts, BEHIND.maxItems) });
-			else if (item.kind === "insert") onCutoutChange({ ...cutoutLayers, inserts: copy(cutoutLayers.inserts, BEHIND.maxItems) });
-			else if (item.kind === "frame") onFramesChange(copy(frames, FRAME.maxItems));
-			else onLayoutsChange(copy(layouts, LAYOUT.maxItems));
-			if (made) setPickedItem(id);
+			const thing = thingOf(item.kind, item.id);
+			if (thing) addThing(item.kind, duplicateOf(thing, total));
 		},
-		[banners, cutoutLayers, frames, layouts, total, onBannersChange, onCutoutChange, onFramesChange, onLayoutsChange],
+		[thingOf, addThing, total],
 	);
+	// Ctrl+C on a picked strip, then Ctrl+V where the playhead is, as often as wanted (coach, 14 Nov). What was copied
+	// is kept as it was then, so it can be pasted even after the original is changed or deleted.
+	const [copied, setCopied] = useState<{ kind: LaneKind; thing: Thing; label: string } | null>(null);
+	const [copyNote, setCopyNote] = useState("");
+	useEffect(() => {
+		if (!copyNote) return;
+		const timer = setTimeout(() => setCopyNote(""), 2500);
+		return () => clearTimeout(timer);
+	}, [copyNote]);
+	const copyItem = useCallback(
+		(item: LaneItem) => {
+			const thing = thingOf(item.kind, item.id);
+			if (!thing) return;
+			setCopied({ kind: item.kind, thing, label: item.label });
+			setCopyNote(`Copied. Move the playhead and press ${navigator.platform.startsWith("Mac") ? "⌘V" : "Ctrl+V"} to paste.`);
+		},
+		[thingOf],
+	);
+	const pasteCopied = useCallback(() => {
+		if (!copied) return;
+		const ok = addThing(copied.kind, pasteOf(copied.thing, toOutSeconds(timeRef.current ?? 0, segments), total));
+		setCopyNote(ok ? `Pasted ${copied.label}.` : `That's the most of these one video can have.`);
+	}, [copied, addThing, segments, timeRef, total]);
 	// Every layer asks first: text behind you, pictures and clips (coach, 9 Nov), and banners too (coach, 11 Nov).
 	const [removing, setRemoving] = useState<LaneItem | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
@@ -728,7 +770,7 @@ export function Timeline({
 		setSelection(null);
 	};
 
-	// Delete / Backspace removes the picked strip, Ctrl+D (⌘D) duplicates it, Esc lets it go.
+	// Delete / Backspace removes the picked strip, Ctrl+D (⌘D) duplicates it, Ctrl+C (⌘C) copies it, Esc lets it go.
 	useEffect(() => {
 		if (!pickedItem) return;
 		const onKey = (e: KeyboardEvent) => {
@@ -741,11 +783,28 @@ export function Timeline({
 			} else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
 				e.preventDefault(); // not the browser's bookmark
 				duplicateItem(item);
+			} else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c" && window.getSelection()?.isCollapsed !== false) {
+				// Not while words are highlighted: then Ctrl+C copies the words, as always.
+				e.preventDefault();
+				copyItem(item);
 			}
 		};
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [pickedItem, lane, removeItem, duplicateItem]);
+	}, [pickedItem, lane, removeItem, duplicateItem, copyItem]);
+	// Ctrl+V (⌘V): what was copied, where the playhead is. Not while typing in a box: there it pastes text, as always.
+	useEffect(() => {
+		if (!copied) return;
+		const onKey = (e: KeyboardEvent) => {
+			if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return;
+			if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "v") {
+				e.preventDefault();
+				pasteCopied();
+			}
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [copied, pasteCopied]);
 
 	// Delete / Backspace cuts the picked stretch, Esc lets it go (not while typing or with script words highlighted).
 	useEffect(() => {
@@ -815,6 +874,11 @@ export function Timeline({
 					<Scissors className="h-3 w-3 shrink-0" aria-hidden />
 					Split
 				</button>
+				{copyNote && (
+					<span role="status" className="rounded-md bg-blue-600/10 px-2 py-0.5 text-xs text-foreground/80">
+						{copyNote}
+					</span>
+				)}
 				{selection && picked ? (
 					<span className="flex items-center gap-1.5">
 						<span className="text-xs tabular-nums text-foreground/60">{picked.seconds.toFixed(1)}s picked</span>
@@ -1035,7 +1099,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 								<button onPointerDown={(e) => startItemDrag(e, b, "start")} aria-label={`When ${b.label} starts`} title="Drag to change when it starts" className={`w-1.5 shrink-0 cursor-ew-resize touch-none rounded-l ${look.edge}`} />
 								<button
 									onPointerDown={(e) => startItemDrag(e, b, false)}
-									title={`${b.label} (${look.name}): drag to change when it shows, click to pick it (Delete removes it, Ctrl+D duplicates it)`}
+									title={`${b.label} (${look.name}): drag to change when it shows, click to pick it (Delete removes it, Ctrl+D duplicates it, Ctrl+C copies it)`}
 									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-[11px] leading-[18px] text-foreground ${picked ? look.picked : look.body}`}
 								>
 									{b.label}

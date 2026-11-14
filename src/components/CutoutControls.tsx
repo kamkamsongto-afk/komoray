@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, Droplets, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, Droplets, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { BACKDROP, PIC_MOTION, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
@@ -13,7 +13,7 @@ import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 import { clipLength, hasClearParts } from "@/lib/media-library";
-import { layerPlace, moveLayer } from "@/lib/layers";
+import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 
 type Props = {
 	focus: string | null; // the layer just clicked on the timeline: open it here
@@ -193,8 +193,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			<Trash2 className="h-3.5 w-3.5" aria-hidden />
 		</button>
 	);
-	// The top of one open thing: back to the list, what it is, delete.
-	const header = (back: string, icon: React.ReactNode, title: string, name: string, remove: () => void) => (
+	// The top of one open thing: back to the list, what it is, duplicate, delete. copy: a duplicate right after it,
+	// opened (coach, 14 Nov: the same in every box); left out at the most there can be.
+	const header = (back: string, icon: React.ReactNode, title: string, name: string, remove: () => void, copy?: () => void) => (
 		<div className="flex flex-col gap-1">
 			<button onClick={() => setOpen(null)} className="inline-flex items-center gap-1 self-start rounded-md px-1 py-0.5 text-xs text-foreground/70 hover:bg-foreground/5 hover:text-foreground">
 				<ArrowLeft className="h-3.5 w-3.5" aria-hidden /> {back}
@@ -202,6 +203,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			<div className="flex items-center gap-1.5">
 				{icon}
 				<span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
+				<button onClick={copy} disabled={!copy} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+					<Copy className="h-3.5 w-3.5" aria-hidden />
+				</button>
 				{trash(name, () => {
 					remove();
 					setOpen(null);
@@ -411,7 +415,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 
 			{openText && [openText].map((t) => (
 				<div key={t.id} className="flex flex-col gap-2">
-					{header("All texts", <Type className="h-4 w-4 shrink-0 text-foreground/50" aria-hidden />, t.text.replace(/\n/g, " "), `"${t.text.replace(/\n/g, " ")}"`, () => setTexts(layers.texts.filter((x) => x.id !== t.id)))}
+					{header("All texts", <Type className="h-4 w-4 shrink-0 text-foreground/50" aria-hidden />, t.text.replace(/\n/g, " "), `"${t.text.replace(/\n/g, " ")}"`, () => setTexts(layers.texts.filter((x) => x.id !== t.id)), layers.texts.length < BEHIND.maxItems ? () => {
+						const copy = duplicateOf(t, total);
+						setTexts([...layers.texts, copy]);
+						pick(copy);
+					} : undefined)}
 					<LayerTools
 						onMoveHere={() => moveHere(t, updateText)}
 						onUp={() => setTexts(moveLayer(layers.texts, t.id, true))}
@@ -519,7 +527,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			)}
 			{openInsert && [openInsert].map((i) => (
 						<div key={i.id} className="flex flex-col gap-2">
-							{header("All pictures and clips", <ImagePlus className="h-4 w-4 shrink-0 text-foreground/50" aria-hidden />, insertName(i), `"${insertName(i)}"`, () => setInserts(layers.inserts.filter((x) => x.id !== i.id)))}
+							{header("All pictures and clips", <ImagePlus className="h-4 w-4 shrink-0 text-foreground/50" aria-hidden />, insertName(i), `"${insertName(i)}"`, () => setInserts(layers.inserts.filter((x) => x.id !== i.id)), layers.inserts.length < BEHIND.maxItems ? () => {
+								const copy = duplicateOf(i, total);
+								setInserts([...layers.inserts, copy]);
+								pick(copy);
+							} : undefined)}
 							<LayerTools
 								onMoveHere={() => moveHere(i, updateInsert)}
 								onUp={() => setInserts(moveLayer(layers.inserts, i.id, true))}
