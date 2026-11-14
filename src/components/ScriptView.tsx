@@ -359,6 +359,8 @@ export function ScriptView({
 	const dropOnLayout = async (drop: LayoutDrop, id: string | null) => {
 		const key = new URLSearchParams(window.location.search).get("key");
 		if (!key) return;
+		// Where it was dropped, read now: while playing, the upload's wait would move it on (Codex review 14 Nov).
+		const droppedAt = toOutSeconds(timeRef.current, segments);
 		setFocusLayout(id);
 		openPanel("layout");
 		let item = drop.item;
@@ -381,7 +383,7 @@ export function ScriptView({
 		}
 		if (list.length >= LAYOUT.maxItems) return setLayoutNote("That's the most layouts one video can have.");
 		const total = totalFrames(segments) / FPS;
-		const start = Math.round(Math.min(toOutSeconds(timeRef.current, segments), Math.max(0, total - 1)) * 10) / 10;
+		const start = Math.round(Math.min(droppedAt, Math.max(0, total - 1)) * 10) / 10;
 		const made = { ...NEW_LAYOUT(start, Math.round(Math.min(total, start + LAYOUT.seconds) * 10) / 10), file: item.file, media: item.media, ...sound };
 		onLayoutsChange([...list, made]);
 		setFocusLayout(made.id);
