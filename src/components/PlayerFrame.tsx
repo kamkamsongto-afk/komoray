@@ -7,7 +7,7 @@ import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileS
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
-import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
+import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -307,6 +307,36 @@ function LayoutHandle({ l, box, W, H, scale, onChange }: { l: VideoLayout; box: 
 			}}
 			onPointerUp={() => (drag.current = null)}
 			className={`absolute outline-2 -outline-offset-2 outline-blue-400 outline-dashed ${l.kind === "side" ? "cursor-ew-resize" : "cursor-ns-resize"}`}
+			style={{ left: box.x * scale, top: box.y * scale, width: box.w * scale, height: box.h * scale, touchAction: "none" }}
+		/>
+	);
+}
+
+// Layout, while paused with its box open: drag the picture or clip in the other part to show another bit of it.
+// place: where it is in the part now (layoutFilePlace), video px.
+function LayoutFileHandle({ l, box, place, scale, onChange }: { l: VideoLayout; box: { x: number; y: number; w: number; h: number }; place: { w: number; h: number }; scale: number; onChange: (id: string, patch: Partial<VideoLayout>) => void }) {
+	const drag = useRef<{ x: number; y: number; fileX: number; fileY: number } | null>(null);
+	const moved = useRef(false); // a drag that ends on it must not also press play
+	return (
+		<div
+			title="Drag to move your picture inside its part"
+			onClick={(e) => moved.current && e.stopPropagation()}
+			onPointerDown={(e) => {
+				e.stopPropagation();
+				e.currentTarget.setPointerCapture(e.pointerId);
+				moved.current = false;
+				drag.current = { x: e.clientX, y: e.clientY, fileX: l.fileX ?? 0.5, fileY: l.fileY ?? 0.5 };
+			}}
+			onPointerMove={(e) => {
+				const d = drag.current;
+				if (!d) return;
+				moved.current = true;
+				// Dragging right brings a point further left into the middle; one that can't come further stays put.
+				const clamp = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
+				onChange(l.id, { fileX: clamp(d.fileX - (e.clientX - d.x) / (place.w * scale)), fileY: clamp(d.fileY - (e.clientY - d.y) / (place.h * scale)) });
+			}}
+			onPointerUp={() => (drag.current = null)}
+			className="absolute cursor-move outline-2 -outline-offset-2 outline-amber-400 outline-dashed"
 			style={{ left: box.x * scale, top: box.y * scale, width: box.w * scale, height: box.h * scale, touchAction: "none" }}
 		/>
 	);
@@ -671,17 +701,23 @@ export function PlayerFrame({
 			}
 		: {};
 	const at = (b: { x: number; y: number; w: number; h: number }): CSSProperties => ({ position: "absolute", left: b.x * scale, top: b.y * scale, width: b.w * scale, height: b.h * scale });
+	// The other part: its picture or clip at its size and place (layoutFilePlace, once its shape is known), else its colour.
 	function layoutOther(l: VideoLayout, box: { x: number; y: number; w: number; h: number }) {
 		const src = l.file ? projectFileSrc(l.file) : "";
-		const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+		const ratio = l.file ? ratios[l.file] : undefined;
+		const seen = (r: number) => l.file && setRatios((all) => (all[l.file as string] === r ? all : { ...all, [l.file as string]: r }));
+		const place = ratio ? layoutFilePlace(l, box.w, box.h, ratio) : null;
+		const fill: CSSProperties = place
+			? { position: "absolute", maxWidth: "none", left: place.x * scale, top: place.y * scale, width: place.w * scale, height: place.h * scale }
+			: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 		return (
 			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
 				{src &&
 					(l.media === "video" ? (
-						<InsertClip src={src} at={outTime - l.start} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(l)} length={l.end - l.start} />
+						<InsertClip src={src} at={outTime - l.start} playing={playing} style={fill} onRatio={seen} volume={soundOf(l)} length={l.end - l.start} />
 					) : (
 						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-						<img src={src} alt="" style={fill} />
+						<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
 					))}
 			</div>
 		);
@@ -718,6 +754,9 @@ export function PlayerFrame({
 							{/* Flash: white over the picture at the edges of a Flash layout, as layout_flashes (render.py). */}
 							{flash > 0 && <div className="pointer-events-none absolute inset-0 bg-white" style={{ opacity: flash }} />}
 							{split && pose && onLayoutChange && !playing && <LayoutHandle l={split} box={pose.me} W={W} H={H} scale={scale} onChange={onLayoutChange} />}
+							{split && pose && split.file && ratios[split.file] && onLayoutChange && !playing && (
+								<LayoutFileHandle l={split} box={pose.other} place={layoutFilePlace(split, pose.other.w, pose.other.h, ratios[split.file])} scale={scale} onChange={onLayoutChange} />
+							)}
 						</div>
 					</div>
 					{framed && <FrameEdge f={framed} W={W} H={H} scale={scale} box={boxRef} onChange={playing ? undefined : onFrameChange} />}

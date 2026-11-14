@@ -66,7 +66,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 
 	const update = (id: string, patch: Partial<VideoLayout>) => onChange(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 	// A clip: quietly on at first, so people hear it plays (as Frame Me, coach 12 Nov). A picture has no sound.
-	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
+	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
 	const add = (kind: LayoutKind) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const layout = NEW_LAYOUT(start, round(Math.min(total, start + LAYOUT.seconds)), kind);
@@ -258,6 +258,19 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									</button>
 								))}
 							</div>
+							{l.file && (
+								// Its size and which bit of it shows (coach, 14 Nov). fileX / fileY: the point of it in the part's middle,
+								// so sliding right moves it right and the number goes down. Drag it on the video too.
+								<div className="flex flex-col gap-1.5 rounded-md bg-foreground/5 p-1.5">
+									{row("Size", range(l.fileZoom ?? 1, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 0.01, percent(l.fileZoom ?? 1), (fileZoom) => update(l.id, { fileZoom })))}
+									{row("Left / right", range(1 - (l.fileX ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileX ?? 0.5)), (v) => update(l.id, { fileX: Math.round((1 - v) * 1000) / 1000 })))}
+									{row("Up / down", range(1 - (l.fileY ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileY ?? 0.5)), (v) => update(l.id, { fileY: Math.round((1 - v) * 1000) / 1000 })))}
+									<p className="text-xs text-foreground/60">Pause the video and drag your picture to move it. It always fills its part, so it moves only where it is bigger than the part: make it bigger to move it both ways.</p>
+									<button onClick={() => update(l.id, { fileZoom: undefined, fileX: undefined, fileY: undefined })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+										Fit and center
+									</button>
+								</div>
+							)}
 							{l.file && (
 								<button onClick={() => update(l.id, { file: undefined, media: undefined, volume: undefined, muted: undefined })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
 									Use a color instead

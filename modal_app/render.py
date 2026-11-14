@@ -863,8 +863,15 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
             # Fills its part (cover), as the preview's object-fit: cover. A clip or GIF that ends early stays on its last frame.
             moving = l.get("media") == "video" or str(l.get("file", "")).endswith(".gif")
             hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
+            # fileZoom times as big as it takes to fill its part, the point (fileX, fileY) in the part's middle as far as it
+            # still covers the part (layoutFilePlace in layout.ts; the crop's x / y are minus its left / top there).
+            # Even sizes, rounded up so it never falls short of the part. Numbers, not ow / oh: those are scale's own.
+            z = min(3.0, max(1.0, float(l.get("fileZoom") or 1)))
+            fx, fy = (min(1.0, max(0.0, float(l.get(k, 0.5)))) for k in ("fileX", "fileY"))
+            grow = f"max({ow}/iw,{oh}/ih)*{z:g}"
             parts.append(
-                f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={ow}:{oh}:force_original_aspect_ratio=increase,crop={ow}:{oh},setsar=1,"
+                f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale=w='ceil(iw*{grow}/2)*2':h='ceil(ih*{grow}/2)*2',"
+                f"crop={ow}:{oh}:x='clip(iw*{fx:g}-{ow / 2:g},0,iw-{ow})':y='clip(ih*{fy:g}-{oh / 2:g},0,ih-{oh})',setsar=1,"
                 f"format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[lyf{j}]"
             )
         else:

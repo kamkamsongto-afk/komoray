@@ -31,6 +31,12 @@ export type VideoLayout = {
 	media?: "image" | "video";
 	volume?: number; // a clip's own sound (lib/clip-sound.ts)
 	muted?: boolean;
+	// The picture or clip in its part (coach, 14 Nov): fileZoom times as big as it takes to fill the part (1 = just fills
+	// it), and the point of it (fileX, fileY: share of its width / height) put in the part's middle, as far as it still
+	// covers the part. Left out: 1, and its middle (layouts saved before).
+	fileZoom?: number;
+	fileX?: number;
+	fileY?: number;
 	name?: string;
 };
 
@@ -41,6 +47,7 @@ export const LAYOUT = {
 	flash: 0.15, // seconds the white flash takes to come up, and to go, at each edge. LAYOUT_FLASH in render.py
 	maxItems: 10,
 	seconds: 5,
+	fileZoom: { min: 1, max: 3 },
 };
 
 export const LAYOUT_KINDS: { id: LayoutKind; name: string }[] = [
@@ -118,6 +125,15 @@ export function layoutPose(l: VideoLayout, p: number, W: number, H: number) {
 	return { me, other: { ...other, ...slid }, picture: { x: p * picture.x, y: p * picture.y } };
 }
 
+// Where the picture or clip goes inside its part (w x h px), from its width / height (ratio): left, top, width, height
+// px from the part's corner. Same as the scale and crop in layout_filters (render.py).
+export function layoutFilePlace(l: VideoLayout, w: number, h: number, ratio: number) {
+	const size = Math.max(w / ratio, h) * (l.fileZoom ?? 1); // its height; its width is ratio times that
+	const [fw, fh] = [size * ratio, size];
+	const along = (part: number, whole: number, point: number) => Math.min(0, Math.max(part - whole, part / 2 - point * whole));
+	return { x: along(w, fw, l.fileX ?? 0.5), y: along(h, fh, l.fileY ?? 0.5), w: fw, h: fh };
+}
+
 // Dropped on the video: a file from the computer, or a project file dragged from the Layout box (LAYOUT_DRAG).
 export type LayoutDrop = { file?: File; item?: { file: string; media: "image" | "video" } };
 export const LAYOUT_DRAG = "application/x-komoray-media";
@@ -156,6 +172,9 @@ export function readLayouts(value: unknown): VideoLayout[] | null {
 			enter: LAYOUT_ENTERS.some((e) => e.id === l.enter) ? (l.enter as LayoutEnter) : "slide",
 			...(file && { file, media: clip ? ("video" as const) : ("image" as const) }),
 			...readClipSound(l, clip),
+			...(file && Number(l.fileZoom) > LAYOUT.fileZoom.min && { fileZoom: round(num(l.fileZoom, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 1), 100) }),
+			...(file && l.fileX !== undefined && { fileX: round(num(l.fileX, 0, 1, 0.5)) }),
+			...(file && l.fileY !== undefined && { fileY: round(num(l.fileY, 0, 1, 0.5)) }),
 			...(typeof l.name === "string" && l.name.trim() && { name: l.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});
 	}

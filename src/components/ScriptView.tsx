@@ -378,7 +378,7 @@ export function ScriptView({
 		if (id && list.some((l) => l.id === id)) {
 			const media = item.media;
 			const file = item.file;
-			onLayoutsChange(list.map((l) => (l.id === id ? { ...l, file, media, ...(media === "video" && l.volume === undefined && !l.muted ? sound : {}) } : l)));
+			onLayoutsChange(list.map((l) => (l.id === id ? { ...l, file, media, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(media === "video" && l.volume === undefined && !l.muted ? sound : {}) } : l)));
 			return;
 		}
 		if (list.length >= LAYOUT.maxItems) return setLayoutNote("That's the most layouts one video can have.");
