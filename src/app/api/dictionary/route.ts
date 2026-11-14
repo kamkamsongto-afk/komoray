@@ -68,13 +68,17 @@ export async function PATCH(request: Request) {
 	return Response.json({ ok: true });
 }
 
+const MAX_REMOVE = 500;
+
 export async function DELETE(request: Request) {
 	const supabase = await signedIn();
 	if (!supabase) return Response.json({ error: "Please sign in" }, { status: 401 });
-	const body = (await request.json().catch(() => ({}))) as { heard?: unknown };
-	const heard = normText(String(body.heard ?? ""));
-	if (!heard) return Response.json({ error: "Which word?" }, { status: 400 });
-	const { error } = await supabase.from("word_fixes").delete().eq("heard", heard);
+	// heard: one word; heards: several picked on My words at once (up to MAX_REMOVE). Only the user's own rows (RLS).
+	const body = (await request.json().catch(() => ({}))) as { heard?: unknown; heards?: unknown };
+	const list = Array.isArray(body.heards) ? body.heards.slice(0, MAX_REMOVE) : [body.heard];
+	const heards = [...new Set(list.map((h) => normText(String(h ?? ""))).filter(Boolean))];
+	if (!heards.length) return Response.json({ error: "Which word?" }, { status: 400 });
+	const { error } = await supabase.from("word_fixes").delete().in("heard", heards);
 	if (error) return Response.json({ error: error.message }, { status: 500 });
 	return Response.json({ ok: true });
 }
