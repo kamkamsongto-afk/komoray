@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { accessFor, canUseStudio, NO_INVITE, renderRunning } from "@/lib/access";
+import { accessFor, canUseStudio, JOB_TOO_OLD_MS, NO_INVITE, renderRunning } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
 import { logoKey } from "@/lib/logo";
@@ -177,8 +177,12 @@ export async function GET(request: Request) {
 	const failure = await getJson<{ error?: string }>(siblingKey(key, files.error));
 	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Render failed", ...(part && { part }), ...(await wholeLinks()) });
 
-	const started = await exists(siblingKey(key, files.job));
-	if (!started) return Response.json({ status: "none" });
+	const job = part ? partJob : whole;
+	if (!job?.startedAt) return Response.json({ status: "none" });
+	// Older than any job runs (Modal stops it at 30 min) and nothing came back: it died without saying so, and the
+	// page waited forever with Make video locked (coach, 14 Nov: stuck at 96%). Say so, so it can be made again.
+	if (Date.now() - new Date(job.startedAt).getTime() > JOB_TOO_OLD_MS)
+		return Response.json({ status: "failed", error: "This stopped before it finished. Please press Make video again.", ...(part && { part }), ...(await wholeLinks()) });
 	// Only a number shown on the page: a problem reading it must never look like a failed video.
 	const progress = await getJson<{ percent?: number }>(siblingKey(key, files.progress)).catch(() => null);
 	return Response.json({ status: "processing", percent: progress?.percent, ...(part && { part }) });

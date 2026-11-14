@@ -1875,11 +1875,24 @@ def ffmpeg_command(
     return cmd
 
 
+PUT_TIMEOUT = 300  # seconds an upload may take before it is given up and tried again
+PUT_TRIES = 2
+
+
 def put(url: str, data: bytes, content_type: str) -> None:
-    req = urllib.request.Request(url, data=data, method="PUT", headers={"Content-Type": content_type})
-    with urllib.request.urlopen(req) as res:
-        if res.status >= 300:
-            raise RuntimeError(f"upload failed ({res.status})")
+    """Uploads to a signed link. With a timeout and a second try: with neither, a stalled connection held the job
+    until Modal stopped it at 30 min, with no video and no error saved, and the page sat at 96% (coach, 14 Nov)."""
+    for attempt in range(1, PUT_TRIES + 1):
+        try:
+            req = urllib.request.Request(url, data=data, method="PUT", headers={"Content-Type": content_type})
+            with urllib.request.urlopen(req, timeout=PUT_TIMEOUT) as res:
+                if res.status >= 300:
+                    raise RuntimeError(f"upload failed ({res.status})")
+            return
+        except Exception:
+            if attempt == PUT_TRIES:
+                raise
+            time.sleep(2)
 
 
 PROGRESS_EVERY = 3  # seconds between reports: the page looks about this often
