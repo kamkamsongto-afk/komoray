@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Check, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 
@@ -12,6 +13,8 @@ const USE_LABEL = {
 	off: { text: "Not used", tone: "bg-foreground/10 text-foreground/60", tip: "This fix added or took out words, or only changed spacing. That belongs to one video, so it isn't used again." },
 };
 
+const PAGE = 50; // rows shown at first, and added by Show more
+
 // The personal dictionary: every word the user fixed in a script, applied to their next videos.
 // They can see it, remove words, and download it (it is theirs).
 export default function WordsPage() {
@@ -19,6 +22,12 @@ export default function WordsPage() {
 	const [words, setWords] = useState<Word[] | null>(null);
 	const [error, setError] = useState("");
 	const [filter, setFilter] = useState("");
+	// Coach, 14 Nov: a long list was endless and scary. Now like the admin's Words tab: a kind to look at, a sort,
+	// PAGE rows at a time, and several picked at once to remove.
+	const [kind, setKind] = useState<"all" | "always" | "ai" | "off">("all");
+	const [sort, setSort] = useState<"used" | "new" | "az">("used");
+	const [limit, setLimit] = useState(PAGE);
+	const [picked, setPicked] = useState<Set<string>>(new Set());
 	const [editing, setEditing] = useState<{ heard: string; text: string } | null>(null);
 	// Giving fixes to Komoray's shared list (lib/shared-words.ts): off until they tick it.
 	const [share, setShare] = useState<boolean | null>(null);
@@ -80,13 +89,29 @@ export default function WordsPage() {
 	const unused = (words ?? []).filter((w) => w.use === "off");
 	async function forgetUnused() {
 		if (!window.confirm(`Remove the ${unused.length} ${unused.length === 1 ? "fix" : "fixes"} that aren't used? Videos you already edited keep theirs.`)) return;
-		for (const w of unused) await forget(w.heard);
+		await forgetMany(unused.map((w) => w.heard));
 	}
 
 	async function forget(heard: string) {
-		setWords((list) => list?.filter((w) => w.heard !== heard) ?? null);
-		const res = await fetch("/api/dictionary", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ heard }) });
-		if (!res.ok) setError("Could not remove that word. Please reload and try again.");
+		await forgetMany([heard]);
+	}
+
+	// One ask to the server for all of them (picked on the page, or the ones not used).
+	async function forgetMany(heards: string[]) {
+		if (!heards.length) return;
+		const gone = new Set(heards);
+		setWords((list) => list?.filter((w) => !gone.has(w.heard)) ?? null);
+		setPicked((p) => new Set([...p].filter((h) => !gone.has(h))));
+		const res = await fetch("/api/dictionary", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ heards }) }).catch(() => null);
+		if (!res?.ok) {
+			setError("Could not remove those words. Please try again.");
+			void load(); // the list as it really is
+		}
+	}
+	function forgetPicked() {
+		const n = picked.size;
+		if (!window.confirm(`Remove ${n} ${n === 1 ? "word" : "words"}? Videos you already edited keep theirs.`)) return;
+		void forgetMany([...picked]);
 	}
 
 	function download() {
@@ -107,10 +132,23 @@ export default function WordsPage() {
 		);
 	}
 
-	const shown = (words ?? []).filter((w) => !filter.trim() || `${w.heard} ${w.fixed}`.toLowerCase().includes(filter.trim().toLowerCase()));
+	const searched = (words ?? []).filter((w) => !filter.trim() || `${w.heard} ${w.fixed}`.toLowerCase().includes(filter.trim().toLowerCase()));
+	const countOf = (k: "always" | "ai" | "off") => searched.filter((w) => w.use === k).length;
+	const shown = searched
+		.filter((w) => kind === "all" || w.use === kind)
+		.sort((a, b) => (sort === "az" ? a.heard.localeCompare(b.heard) : sort === "new" ? b.updated_at.localeCompare(a.updated_at) : b.uses - a.uses || a.heard.localeCompare(b.heard)));
+	const page = shown.slice(0, limit);
+	const pill = (on: boolean) => `rounded-md px-2.5 py-1 text-sm whitespace-nowrap ${on ? "bg-background font-medium shadow-sm" : "text-foreground/70 hover:text-foreground"}`;
+	const pick = (heard: string, on: boolean) =>
+		setPicked((p) => {
+			const next = new Set(p);
+			if (on) next.add(heard);
+			else next.delete(heard);
+			return next;
+		});
 
 	return (
-		<main className="font-sans mx-auto flex min-h-screen max-w-xl flex-col gap-6 p-4 sm:p-8">
+		<main className="font-sans mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-4 sm:p-8">
 			<AccountBar user={user} />
 			<div className="flex flex-col gap-2">
 				<h1 className="text-3xl font-bold tracking-tight">My words</h1>
@@ -159,94 +197,162 @@ export default function WordsPage() {
 			)}
 
 			{words && words.length > 0 && (
-				<>
+				<section className="flex flex-col gap-3">
 					<div className="flex flex-wrap items-center gap-2">
 						<input
 							value={filter}
-							onChange={(e) => setFilter(e.target.value)}
+							onChange={(e) => {
+								setFilter(e.target.value);
+								setLimit(PAGE);
+							}}
 							placeholder="Search your words"
 							aria-label="Search your words"
 							className="min-w-40 flex-1 rounded-md border border-foreground/20 bg-background px-3 py-1.5"
 						/>
+						<select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort" className="rounded-md border border-foreground/20 bg-background px-2 py-1.5 text-sm">
+							<option value="used">Most used</option>
+							<option value="new">Newest</option>
+							<option value="az">A–Z</option>
+						</select>
 						<button onClick={download} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
 							Download (CSV)
 						</button>
 					</div>
-					<p className="text-xs text-foreground/60">
-						<span className="font-medium">Every video</span>: fixed wherever it shows up. <span className="font-medium">Where it fits</span>: could be right as heard
-						in another sentence, so our AI only fixes it where the sentence means it. <span className="font-medium">Not used</span>: added words or spacing, which belong to one video.
-						{unused.length > 0 && (
-							<>
-								{" "}
-								<button onClick={() => void forgetUnused()} className="underline hover:text-foreground">
-									Remove the {unused.length} not used
-								</button>
-							</>
-						)}
-					</p>
-					<ul className="flex flex-col divide-y divide-foreground/10 rounded-xl border border-foreground/15">
-						{shown.map((w) => (
-							<li key={w.heard} className="flex items-center gap-3 px-4 py-2.5">
-								{editing?.heard === w.heard ? (
-									<form
-										className="flex min-w-0 flex-1 items-center gap-2"
-										onSubmit={(e) => {
-											e.preventDefault();
-											void change(w.heard, editing.text);
-										}}
-									>
-										<span className="shrink-0 text-foreground/50 line-through">{w.heard}</span> →
-										<input
-											autoFocus
-											value={editing.text}
-											onChange={(e) => setEditing({ heard: w.heard, text: e.target.value })}
-											onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
-											aria-label={`Fix for ${w.heard}`}
-											className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1"
-										/>
-										<button type="submit" className="shrink-0 rounded-md bg-foreground px-2 py-1 text-sm text-background">
-											Save
-										</button>
-										<button type="button" onClick={() => setEditing(null)} className="shrink-0 rounded-md px-2 py-1 text-sm text-foreground/60">
-											Cancel
-										</button>
-									</form>
-								) : (
-									<>
-										<span className="min-w-0 flex-1 break-words">
-											<span className="text-foreground/50 line-through">{w.heard}</span> → <span className="font-medium">{w.fixed}</span>
-										</span>
-										{w.use && (
-											<span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${USE_LABEL[w.use].tone}`} title={USE_LABEL[w.use].tip}>
-												{USE_LABEL[w.use].text}
-											</span>
-										)}
-										<span className="shrink-0 text-xs text-foreground/50" title="Times you made this fix">
-											×{w.uses}
-										</span>
-										<button
-											onClick={() => setEditing({ heard: w.heard, text: w.fixed })}
-											className="shrink-0 rounded-md px-2 py-1 text-sm text-foreground/60 hover:bg-foreground/5"
-											aria-label={`Edit ${w.fixed}`}
-										>
-											Edit
-										</button>
-									</>
-								)}
-								<button
-									onClick={() => void forget(w.heard)}
-									className="shrink-0 rounded-md px-2 py-1 text-sm text-foreground/60 hover:bg-red-500/10 hover:text-red-600"
-									aria-label={`Remove ${w.fixed}`}
-								>
-									Remove
-								</button>
-							</li>
+					{/* The kinds, with what each means on hover, instead of a paragraph above the list. */}
+					<div className="flex flex-wrap gap-1 self-start rounded-lg bg-foreground/5 p-0.5">
+						{(["all", "always", "ai", "off"] as const).map((k) => (
+							<button
+								key={k}
+								onClick={() => {
+									setKind(k);
+									setLimit(PAGE);
+									setPicked(new Set());
+								}}
+								title={k === "all" ? undefined : USE_LABEL[k].tip}
+								className={pill(kind === k)}
+							>
+								{k === "all" ? "All" : USE_LABEL[k].text} ({k === "all" ? searched.length : countOf(k)})
+							</button>
 						))}
-					</ul>
-					<p className="text-xs text-foreground/50">
-						{words.length} {words.length === 1 ? "word" : "words"}. Removing a word only stops future fixes; videos you already edited keep theirs.
-					</p>
-				</>
+					</div>
+					{kind === "off" && unused.length > 0 && (
+						<p className="text-xs text-foreground/60">
+							These added words or only changed spacing, which belong to one video, so they aren&apos;t used again.{" "}
+							<button onClick={() => void forgetUnused()} className="underline hover:text-foreground">
+								Remove all {unused.length}
+							</button>
+						</p>
+					)}
+
+					{picked.size > 0 && (
+						<div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-blue-600/40 bg-background p-2 text-sm shadow">
+							<span className="font-medium">{picked.size} picked</span>
+							<button onClick={forgetPicked} className="rounded-md border border-red-600/40 px-2.5 py-1 text-red-600 hover:bg-red-600/10">
+								Remove
+							</button>
+							<button onClick={() => setPicked(new Set())} className="ml-auto text-foreground/60 hover:text-foreground">
+								Clear
+							</button>
+						</div>
+					)}
+
+					<div className="overflow-x-auto rounded-xl border border-foreground/15">
+						<table className="w-full text-left text-sm">
+							<thead className="text-xs text-foreground/60">
+								<tr>
+									<th className="w-8 px-2 py-1.5">
+										<input
+											type="checkbox"
+											aria-label="Pick all shown"
+											checked={page.length > 0 && page.every((w) => picked.has(w.heard))}
+											onChange={(e) => setPicked(e.target.checked ? new Set(page.map((w) => w.heard)) : new Set())}
+										/>
+									</th>
+									<th className="py-1.5 pr-2 font-medium">Heard → Fixed</th>
+									<th className="py-1.5 pr-2 font-medium">Used</th>
+									<th className="py-1.5 pr-2 font-medium" title="Times you made this fix">
+										Times
+									</th>
+									<th className="w-16 py-1.5" />
+								</tr>
+							</thead>
+							<tbody>
+								{page.map((w) => (
+									<tr key={w.heard} className="border-t border-foreground/10 align-middle">
+										<td className="px-2 py-1">
+											<input type="checkbox" aria-label={`Pick ${w.heard}`} checked={picked.has(w.heard)} onChange={(e) => pick(w.heard, e.target.checked)} />
+										</td>
+										<td className="py-1 pr-2">
+											{editing?.heard === w.heard ? (
+												<form
+													className="flex flex-wrap items-center gap-1"
+													onSubmit={(e) => {
+														e.preventDefault();
+														void change(w.heard, editing.text);
+													}}
+												>
+													<span className="text-foreground/50 line-through">{w.heard}</span> →
+													<input
+														autoFocus
+														value={editing.text}
+														onChange={(e) => setEditing({ heard: w.heard, text: e.target.value })}
+														onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
+														aria-label={`Fix for ${w.heard}`}
+														className="w-36 rounded border border-foreground/20 bg-background px-1.5 py-0.5"
+													/>
+													<button type="submit" aria-label="Save" className="rounded p-1 text-green-600 hover:bg-green-600/10">
+														<Check className="h-4 w-4" aria-hidden />
+													</button>
+													<button type="button" aria-label="Cancel" onClick={() => setEditing(null)} className="rounded p-1 text-foreground/50 hover:bg-foreground/5">
+														<X className="h-4 w-4" aria-hidden />
+													</button>
+												</form>
+											) : (
+												<span className="break-words">
+													<span className="text-foreground/50 line-through">{w.heard}</span> → <span className="font-medium">{w.fixed}</span>
+												</span>
+											)}
+										</td>
+										<td className="whitespace-nowrap py-1 pr-2">
+											{w.use && (
+												<span className={`rounded-full px-2 py-0.5 text-xs ${USE_LABEL[w.use].tone}`} title={USE_LABEL[w.use].tip}>
+													{USE_LABEL[w.use].text}
+												</span>
+											)}
+										</td>
+										<td className="py-1 pr-2 text-xs text-foreground/50 tabular-nums">×{w.uses}</td>
+										<td className="whitespace-nowrap py-1 text-right">
+											<button onClick={() => setEditing({ heard: w.heard, text: w.fixed })} aria-label={`Edit ${w.fixed}`} title="Edit" className="rounded-md p-1.5 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
+												<Pencil className="h-4 w-4" aria-hidden />
+											</button>
+											<button onClick={() => void forget(w.heard)} aria-label={`Remove ${w.fixed}`} title="Remove" className="rounded-md p-1.5 text-foreground/50 hover:bg-red-600/10 hover:text-red-600">
+												<Trash2 className="h-4 w-4" aria-hidden />
+											</button>
+										</td>
+									</tr>
+								))}
+								{shown.length === 0 && (
+									<tr>
+										<td colSpan={5} className="px-3 py-3 text-sm text-foreground/60">
+											No words here.
+										</td>
+									</tr>
+								)}
+							</tbody>
+						</table>
+					</div>
+					<div className="flex flex-wrap items-center gap-3 text-xs text-foreground/50">
+						<span>
+							{shown.length > page.length ? `Showing ${page.length} of ${shown.length}` : `${shown.length} ${shown.length === 1 ? "word" : "words"}`}
+							{shown.length !== words.length && ` (${words.length} in all)`}. Removing a word only stops future fixes; videos you already edited keep theirs.
+						</span>
+						{shown.length > page.length && (
+							<button onClick={() => setLimit(limit + PAGE)} className="rounded-lg border border-foreground/20 px-3 py-1 text-sm text-foreground hover:bg-foreground/5">
+								Show {Math.min(PAGE, shown.length - page.length)} more
+							</button>
+						)}
+					</div>
+				</section>
 			)}
 			{share === null && shareError && <p className="text-xs text-red-600">{shareError}</p>}
 			{share === true && !shareOpen && (
