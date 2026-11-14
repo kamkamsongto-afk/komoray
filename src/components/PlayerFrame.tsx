@@ -2,12 +2,12 @@
 
 import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
-import { layoutAt, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
+import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -149,6 +149,9 @@ type Props = {
 	// onLayoutChange: the speaker dragged inside their part, while paused (left out: they can't be moved here).
 	layouts?: VideoLayout[];
 	onLayoutChange?: (id: string, patch: Partial<VideoLayout>) => void;
+	// A picture or clip dropped on the video (from the computer, or from the Layout box): into the other part of the
+	// layout showing now (its id), or a new layout here (null). Left out: nothing can be dropped here.
+	onLayoutDrop?: (drop: LayoutDrop, id: string | null) => void;
 };
 
 // Frame Me's Blur background: the picture as it is drawn now, copied small on every screen refresh and blurred by CSS
@@ -335,6 +338,7 @@ export function PlayerFrame({
 	onFrameChange,
 	layouts,
 	onLayoutChange,
+	onLayoutDrop,
 }: Props) {
 	const line = subtitle.subtitles ? saying : null; // subtitles turned off: none drawn, like the final video (build_subtitles)
 	const boxRef = useRef<HTMLDivElement>(null);
@@ -638,6 +642,34 @@ export function PlayerFrame({
 	const split = layoutAt(layouts, outTime);
 	const pose = split ? layoutPose(split, layoutProgress(split, outTime), W, H) : null;
 	const flash = layoutFlash(layouts, outTime);
+	const [dropping, setDropping] = useState(false); // a file is being dragged over the video
+	const canDrop = (e: ReactDragEvent) => Boolean(onLayoutDrop) && (e.dataTransfer.types.includes("Files") || e.dataTransfer.types.includes(LAYOUT_DRAG));
+	const dropProps = onLayoutDrop
+		? {
+				onDragOver: (e: ReactDragEvent) => {
+					if (!canDrop(e)) return;
+					e.preventDefault();
+					e.dataTransfer.dropEffect = "copy";
+					setDropping(true);
+				},
+				onDragLeave: (e: ReactDragEvent) => {
+					if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+				},
+				onDrop: (e: ReactDragEvent) => {
+					if (!canDrop(e)) return;
+					e.preventDefault();
+					setDropping(false);
+					const file = e.dataTransfer.files[0];
+					let item: LayoutDrop["item"];
+					try {
+						item = JSON.parse(e.dataTransfer.getData(LAYOUT_DRAG) || "null") ?? undefined;
+					} catch {
+						item = undefined;
+					}
+					if (file || item) onLayoutDrop?.({ file, item }, split?.id ?? null);
+				},
+			}
+		: {};
 	const at = (b: { x: number; y: number; w: number; h: number }): CSSProperties => ({ position: "absolute", left: b.x * scale, top: b.y * scale, width: b.w * scale, height: b.h * scale });
 	function layoutOther(l: VideoLayout, box: { x: number; y: number; w: number; h: number }) {
 		const src = l.file ? projectFileSrc(l.file) : "";
@@ -660,6 +692,7 @@ export function PlayerFrame({
 			<div
 				ref={boxRef}
 				onClick={onToggle}
+				{...dropProps}
 				className="relative w-full cursor-pointer overflow-hidden rounded-lg bg-black"
 				style={{ aspectRatio: `${W} / ${H}` }}
 			>
@@ -898,6 +931,12 @@ export function PlayerFrame({
 						</div>
 					)}
 				</div>
+				{dropping && (
+					// Where it will go: the other part of the layout showing now, else a new layout here.
+					<div className="pointer-events-none absolute z-[3] flex items-center justify-center bg-blue-500/30 text-center text-sm font-medium text-white outline-4 -outline-offset-4 outline-blue-400 outline-dashed" style={pose ? at(pose.other) : { inset: 0 }}>
+						<span className="rounded bg-black/60 px-2 py-1">{pose ? "Drop to put it here" : "Drop to split the screen with it"}</span>
+					</div>
+				)}
 				{debugCount !== null && (
 					<span className="pointer-events-none absolute top-2 left-2 z-[2] rounded bg-red-600 px-2 py-0.5 text-xs text-white">
 						Recording · {debugCount}

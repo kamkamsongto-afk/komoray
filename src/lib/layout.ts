@@ -118,6 +118,10 @@ export function layoutPose(l: VideoLayout, p: number, W: number, H: number) {
 	return { me, other: { ...other, ...slid }, picture: { x: p * picture.x, y: p * picture.y } };
 }
 
+// Dropped on the video: a file from the computer, or a project file dragged from the Layout box (LAYOUT_DRAG).
+export type LayoutDrop = { file?: File; item?: { file: string; media: "image" | "video" } };
+export const LAYOUT_DRAG = "application/x-komoray-media";
+
 export const layoutName = (l: VideoLayout) => l.name?.trim() || LAYOUT_KINDS.find((k) => k.id === l.kind)?.name || "Layout";
 
 // ---- checking what the browser sends ----

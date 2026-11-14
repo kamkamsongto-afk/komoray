@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ArrowLeftRight, ChevronRight, Film, Image as ImageIcon, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { LAYOUT, LAYOUT_COLORS, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
+import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
 import { layerPlace, moveLayer } from "@/lib/layers";
 import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
@@ -17,6 +17,8 @@ type Props = {
 	total: number; // length of the final video, seconds
 	focus: string | null; // a layout to open here
 	onReveal?: (id: string, start: number) => void; // the blue line to its start
+	note?: string; // a file dropped on the video: being added to Import, or why it couldn't be
+	libraryVersion?: number; // goes up when Import got a new file: the pictures here are asked for again
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -37,7 +39,7 @@ function KindIcon({ kind, meFirst = true, split = 0.5, size = 22 }: { kind: Layo
 // The editor's Layout box (coach, 14 Nov): for a stretch of the video, the screen is split, you in one part and a
 // picture or clip from Import in the other, top / bottom or side by side, sliding in or with a flash.
 // Drawn by PlayerFrame, made by layout_filters (render.py).
-export function LayoutControls({ layouts, onChange, now, total, focus, onReveal }: Props) {
+export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0 }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	const [focused, setFocused] = useState(focus);
 	if (focus !== focused) {
@@ -59,7 +61,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal 
 		return () => {
 			gone = true;
 		};
-	}, []);
+	}, [libraryVersion]);
 	const files = (library ?? []).filter((i) => i.media === "image" || /\.mp4$/.test(i.file));
 
 	const update = (id: string, patch: Partial<VideoLayout>) => onChange(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -126,9 +128,10 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal 
 
 	return (
 		<div className="flex flex-col gap-2 p-3 pt-1">
+			{note && <p className="rounded-md bg-blue-500/10 px-2 py-1 text-xs">{note}</p>}
 			{!openLayout && (
 				<>
-					<p className="text-xs text-foreground/60">Split the screen: you in one part, your own picture or clip in the other. Nothing is cut out, so it&apos;s ready right away.</p>
+					<p className="text-xs text-foreground/60">Split the screen: you in one part, your own picture or clip in the other. Nothing is cut out, so it&apos;s ready right away. Or drop a picture or clip on the video.</p>
 					<span className="text-xs font-medium text-foreground/80">Add a layout where the video is now</span>
 					{kinds(null, add, layouts.length >= LAYOUT.maxItems)}
 					{layouts.length >= LAYOUT.maxItems && <p className="text-xs text-foreground/60">That&apos;s the most layouts one video can have.</p>}
@@ -233,6 +236,12 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal 
 									<button
 										key={item.file}
 										onClick={() => pickFile(l, item)}
+										draggable
+										// Can also be dragged onto the video (PlayerFrame drops it in the other part).
+										onDragStart={(e) => {
+											e.dataTransfer.setData(LAYOUT_DRAG, JSON.stringify({ file: item.file, media: item.media }));
+											e.dataTransfer.effectAllowed = "copy";
+										}}
 										title={item.name}
 										aria-pressed={l.file === item.file}
 										className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${l.file === item.file ? "border-blue-600" : "border-transparent hover:border-foreground/30"}`}
@@ -269,7 +278,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal 
 								</div>
 							)}
 							<p className="flex items-center gap-1 text-xs text-foreground/60">
-								<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Add your pictures and clips in Import, then pick one here.{library === null && " Loading…"}
+								<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Pick one here, drag it onto the video, or drop a picture or clip from your computer on the video.{library === null && " Loading…"}
 							</p>
 						</div>
 					</div>

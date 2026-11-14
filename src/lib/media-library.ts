@@ -91,3 +91,19 @@ export function clipLength(file: File): Promise<number | null> {
 		video.src = url;
 	});
 }
+
+// One file into the project's Import, as the Import box does it (ask for a link, send the file there, list it):
+// for a picture or clip dropped straight on the video (Layout, coach 14 Nov). In the browser only.
+export async function addToLibrary(key: string, file: File): Promise<{ item: LibraryItem } | { error: string }> {
+	const type = LIBRARY_TYPES[file.type];
+	if (!type) return { error: `${file.name}: use a JPG, PNG, WebP or GIF picture, or an MP4 clip` };
+	if (file.size > LIBRARY.maxBytes[type.media]) return { error: `${file.name}: too big (up to ${LIBRARY.maxBytes[type.media] / 1_000_000} MB)` };
+	const [clear, seconds] = await Promise.all([hasClearParts(file), type.media === "video" ? clipLength(file) : null]);
+	const res = await fetch("/api/library", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, contentType: file.type, size: file.size }) }).catch(() => null);
+	const data = (await res?.json().catch(() => null)) as { uploadUrl?: string; file?: string; error?: string } | null;
+	if (!res?.ok || !data?.uploadUrl || !data.file) return { error: `${file.name}: ${data?.error ?? "could not upload"}` };
+	const put = await fetch(data.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file }).catch(() => null);
+	const done = put?.ok ? await fetch("/api/library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, file: data.file, name: file.name, clear, seconds }) }).catch(() => null) : null;
+	const listed = (await done?.json().catch(() => null)) as { item?: LibraryItem } | null;
+	return done?.ok && listed?.item ? { item: listed.item } : { error: `${file.name}: the upload stopped` };
+}

@@ -6,7 +6,7 @@ import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
 import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
-import { filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { addToLibrary, filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { DEFAULT_STYLE, fontMetrics, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -22,7 +22,7 @@ import { CutoutControls } from "./CutoutControls";
 import { FrameControls } from "./FrameControls";
 import type { FrameMe } from "@/lib/frame-me";
 import { LayoutControls } from "./LayoutControls";
-import type { VideoLayout } from "@/lib/layout";
+import { LAYOUT, type LayoutDrop, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
 import { newClipSound } from "@/lib/clip-sound";
 import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
@@ -347,6 +347,45 @@ export function ScriptView({
 	const reveal = (id: string, start: number) => {
 		jump(toSourceSeconds(start, segments));
 		setRevealed((s) => ({ id, n: (s?.n ?? 0) + 1 }));
+	};
+	// Layout: a picture or clip dropped on the video (coach, 14 Nov). From the computer it goes into Import first.
+	// Into the other part of the layout showing (id), else a new top / bottom layout here, and the Layout box opens on it.
+	const layoutsRef = useRef(layouts);
+	useEffect(() => {
+		layoutsRef.current = layouts;
+	});
+	const [layoutNote, setLayoutNote] = useState("");
+	const [libraryVersion, setLibraryVersion] = useState(0);
+	const dropOnLayout = async (drop: LayoutDrop, id: string | null) => {
+		const key = new URLSearchParams(window.location.search).get("key");
+		if (!key) return;
+		setFocusLayout(id);
+		openPanel("layout");
+		let item = drop.item;
+		if (!item && drop.file) {
+			setLayoutNote(`Adding ${drop.file.name}…`);
+			const added = await addToLibrary(key, drop.file);
+			setLibraryVersion((v) => v + 1);
+			if ("error" in added) return setLayoutNote(added.error);
+			item = added.item;
+		}
+		setLayoutNote("");
+		if (!item) return;
+		const list = layoutsRef.current; // as it is now: the upload took a while
+		const sound = item.media === "video" ? newClipSound("video") : {};
+		if (id && list.some((l) => l.id === id)) {
+			const media = item.media;
+			const file = item.file;
+			onLayoutsChange(list.map((l) => (l.id === id ? { ...l, file, media, ...(media === "video" && l.volume === undefined && !l.muted ? sound : {}) } : l)));
+			return;
+		}
+		if (list.length >= LAYOUT.maxItems) return setLayoutNote("That's the most layouts one video can have.");
+		const total = totalFrames(segments) / FPS;
+		const start = Math.round(Math.min(toOutSeconds(timeRef.current, segments), Math.max(0, total - 1)) * 10) / 10;
+		const made = { ...NEW_LAYOUT(start, Math.round(Math.min(total, start + LAYOUT.seconds) * 10) / 10), file: item.file, media: item.media, ...sound };
+		onLayoutsChange([...list, made]);
+		setFocusLayout(made.id);
+		reveal(made.id, start);
 	};
 	// Import: a project file put on the video where it is now, then its box opens on it to place it.
 	const putAsBanner = (item: LibraryItem) => {
@@ -959,6 +998,7 @@ export function ScriptView({
 							onFrameChange={panel === "frame" ? changeFrame : undefined}
 							layouts={layouts}
 							onLayoutChange={panel === "layout" ? changeLayout : undefined}
+							onLayoutDrop={(drop, id) => void dropOnLayout(drop, id)}
 							faces={faces}
 							noZoom={noZoom}
 							zoomParts={zoomParts}
@@ -984,6 +1024,7 @@ export function ScriptView({
 							onFrameChange={panel === "frame" ? changeFrame : undefined}
 							layouts={layouts}
 							onLayoutChange={panel === "layout" ? changeLayout : undefined}
+							onLayoutDrop={(drop, id) => void dropOnLayout(drop, id)}
 							noZoom={noZoom}
 							zoomParts={zoomParts}
 						/>
@@ -1193,6 +1234,8 @@ export function ScriptView({
 							total={totalFrames(segments) / FPS}
 							focus={focusLayout}
 							onReveal={reveal}
+							note={layoutNote}
+							libraryVersion={libraryVersion}
 						/>
 					)}
 					{panel === "import" && (
