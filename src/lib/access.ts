@@ -14,7 +14,7 @@ import { videoDuration } from "@/lib/video-duration";
 // Minutes count the length of the original video, once, when Find silences is pressed. Deleting the
 // video gives nothing back; a failed job does (refundListen).
 const LISTENS_PER_VIDEO = 3; // the first, and Wrong language? twice. Each one pays speech-to-text again
-const JOB_TOO_OLD_MS = 30 * 60 * 1000; // a job still running after this has died (same as the admin page)
+export const JOB_TOO_OLD_MS = 30 * 60 * 1000; // a job still running after this has died (same as the admin page)
 
 export const NO_INVITE = "Komoray is invite-only for now. Your invite will come by email.";
 
