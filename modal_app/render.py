@@ -2193,14 +2193,14 @@ def mix_clip_sounds(video: Path, clips: list[dict]) -> None:
     for k, c in enumerate(clips):
         a, b = float(c["start"]), float(c["end"])
         d, v = b - a, min(1.0, float(c["volume"]))
-        # A part of the video (render's "part"): skip = seconds of the clip already played before the part starts, and
-        # cut = it goes on past the part's end. Those edges are the part's, not the clip's, so they aren't faded.
-        skip, cut = float(c.get("skip") or 0), bool(c.get("cut"))
-        fade_in = "" if skip > 0 else f"afade=t=in:st=0:d={CLIP_SOUND_FADE},"
-        fade_out = "" if cut else f"afade=t=out:st={max(0.0, d - CLIP_SOUND_FADE):.3f}:d={CLIP_SOUND_FADE},"
+        # A part of the video (render's "part"): full = how long the clip shows in the whole video, skip = how much of
+        # that was before the part. Faded over its whole showing, as in the whole video, then cut to the part: a part
+        # starting mid-fade sounds as that moment of the whole video does (review 14 Nov).
+        full, skip = float(c.get("full") or d), float(c.get("skip") or 0)
         parts.append(
-            f"[{k + 1}:a]atrim=start={skip:.3f}:duration={d:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume={v:.2f},"
-            f"{fade_in}{fade_out}adelay=delays={round(a * 1000)}:all=1[c{k}]"
+            f"[{k + 1}:a]atrim=duration={full:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume={v:.2f},"
+            f"afade=t=in:st=0:d={CLIP_SOUND_FADE},afade=t=out:st={max(0.0, full - CLIP_SOUND_FADE):.3f}:d={CLIP_SOUND_FADE},"
+            f"atrim=start={skip:.6f}:duration={d:.3f},asetpts=PTS-STARTPTS,adelay=delays={round(a * 1000)}:all=1[c{k}]"
         )
     # normalize=0: each sound keeps its own level (amix would otherwise lower all of them); duration=first: the video's length.
     parts.append(f"[m]{''.join(f'[c{k}]' for k in range(len(clips)))}amix=inputs={len(clips) + 1}:normalize=0:duration=first:dropout_transition=0[a]")
@@ -2406,10 +2406,10 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 sound = add_sound(out, polished) if polished else False
             clips = clip_sounds(cutout, banner_files, frame_list, layout_list)
             if lo is not None:
-                # Only the clips that sound in the part, moved to its start (mix_clip_sounds: skip, cut).
+                # Only the clips that sound in the part, moved to its start (mix_clip_sounds: skip, full).
                 a0, b0 = lo / FPS, hi / FPS
                 clips = [
-                    {**c, "start": max(0.0, float(c["start"]) - a0), "end": min(b0, float(c["end"])) - a0, "skip": max(0.0, a0 - float(c["start"])), "cut": float(c["end"]) > b0}
+                    {**c, "start": max(0.0, float(c["start"]) - a0), "end": min(b0, float(c["end"])) - a0, "skip": max(0.0, a0 - float(c["start"])), "full": float(c["end"]) - float(c["start"])}
                     for c in clips
                     if float(c["start"]) < b0 and float(c["end"]) > a0
                 ]

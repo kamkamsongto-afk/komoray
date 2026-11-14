@@ -1,16 +1,20 @@
-// Make this part (coach, 14 Nov): Make video for only a stretch of the final video, to check it quickly. The job
-// (api/render) keeps it in part.mp4, so the whole video made before (final.mp4) stays, and the admin pages, which
-// count final.mp4 as a made video, don't count a part. render.json says which one the last job made ({ part }).
-// render.py makes it from the same pieces as the whole video, so it looks exactly like that stretch of it.
+// Make this part (coach, 14 Nov): Make video for only a stretch of the final video, to check it quickly.
+// A part job has files of its own next to the video, apart from the whole video's: so the whole video made before
+// (final.mp4) stays and can still be watched, and the admin pages, which read the whole video's files (render.json,
+// final.mp4, render-error.json), never see a part (review 14 Nov: a failed part showed there as a failed video).
+// render.py makes a part from the same pieces as the whole video, so it looks exactly like that stretch of it.
 
 export type RenderPart = { start: number; end: number }; // seconds of the final video
 
-export const PART_RENDER = { file: "part.mp4", minSeconds: 1 };
+export const PART_RENDER = { minSeconds: 1 };
 
-// The file a job writes: part.mp4 for a part, final.mp4 for the whole video.
-export const renderOutput = (part: RenderPart | null | undefined) => (part ? PART_RENDER.file : "final.mp4");
+// The files of a job: the record written when it starts, the video, its error and its progress.
+export type JobFiles = { job: string; out: string; error: string; progress: string };
+export const WHOLE_JOB: JobFiles = { job: "render.json", out: "final.mp4", error: "render-error.json", progress: "render-progress.json" };
+export const PART_JOB: JobFiles = { job: "part.json", out: "part.mp4", error: "part-error.json", progress: "part-progress.json" };
+export const jobFiles = (part: RenderPart | null | undefined) => (part ? PART_JOB : WHOLE_JOB);
 
-// A part as the browser sent it (or as render.json has it), inside a final video of `total` seconds; null if it isn't one.
+// A part as the browser sent it (or as part.json has it), inside a final video of `total` seconds; null if it isn't one.
 export function readRenderPart(value: unknown, total: number): RenderPart | null {
 	if (!value || typeof value !== "object") return null;
 	const raw = value as { start?: unknown; end?: unknown };

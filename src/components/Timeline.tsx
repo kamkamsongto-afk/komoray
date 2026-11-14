@@ -958,6 +958,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 						key={name}
 						onClick={go}
 						onPointerEnter={() => setOverWave(true)}
+						onPointerLeave={() => setOverWave(false)}
 						aria-label={name}
 						title={name}
 						className={`absolute ${side} z-[3] h-7 w-7 items-center justify-center rounded-full border border-foreground/15 bg-background/95 text-foreground/70 shadow hover:text-foreground max-sm:flex [@media(hover:none)]:flex ${overWave ? "flex" : "hidden"}`}

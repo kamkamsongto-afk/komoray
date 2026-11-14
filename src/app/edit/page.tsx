@@ -64,6 +64,8 @@ type RenderState = {
 	downloadUrl?: string;
 	error?: string;
 	part?: RenderPart; // Make this part: only this stretch of the final video (lib/render-part.ts)
+	wholeUrl?: string; // with a part: the whole video made before, if there is one
+	wholeDownloadUrl?: string;
 };
 
 const POLL_MS = 5000;
@@ -1027,7 +1029,19 @@ export default function EditPage() {
 					</p>
 				</div>
 			)}
-			{render.status === "failed" && <p className="text-sm text-red-500">{render.error}</p>}
+			{render.status === "failed" && (
+				<p className="text-sm text-red-500">
+					{render.part ? `This part could not be made: ${render.error}` : render.error}
+					{render.part && render.wholeUrl && (
+						<>
+							{" "}
+							<a href={render.wholeUrl} target="_blank" rel="noreferrer" className="text-foreground/70 underline">
+								Watch your whole video from before
+							</a>
+						</>
+					)}
+				</p>
+			)}
 			{render.status === "done" && render.videoUrl && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
 					<span>{render.part ? `Your part (${clock(render.part.start)}–${clock(render.part.end)}) is ready!` : "Your video is ready!"}</span>
@@ -1038,6 +1052,17 @@ export default function EditPage() {
 						Download {render.part ? "part" : "video"}
 					</a>
 					<span className="text-xs text-foreground/50">{render.part ? "Only this part. Make video makes the whole video." : "Changed something after this? Press Make video again."}</span>
+					{render.part && render.wholeUrl && (
+						<span className="flex items-center gap-2 text-xs">
+							Your whole video from before:
+							<a href={render.wholeUrl} target="_blank" rel="noreferrer" className="underline">
+								Watch
+							</a>
+							<a href={render.wholeDownloadUrl} className="underline">
+								Download
+							</a>
+						</span>
+					)}
 				</div>
 			)}
 
