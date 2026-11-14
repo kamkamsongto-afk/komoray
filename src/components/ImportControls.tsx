@@ -135,7 +135,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow }: Props
 								<button
 									onClick={() => setRemoving(item)}
 									disabled={used}
-									title={used ? "It is on your video: delete it from Banners, Pic/Clip or Frame Me first" : "Delete from this project"}
+									title={used ? "It is on your video: delete it from Banners, Pic/Clip, Frame Me or Layout first" : "Delete from this project"}
 									aria-label={`Delete ${item.name}`}
 									className="rounded p-1 text-foreground/50 hover:bg-red-500/10 hover:text-red-600 disabled:opacity-30"
 								>
@@ -171,7 +171,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow }: Props
 									<button
 										onClick={() => setRemoving(item)}
 										disabled={used}
-										title={used ? "It is on your video: delete it from Banners, Pic/Clip or Frame Me first" : "Delete from this project"}
+										title={used ? "It is on your video: delete it from Banners, Pic/Clip, Frame Me or Layout first" : "Delete from this project"}
 										aria-label={`Delete ${item.name}`}
 										className="rounded p-0.5 text-foreground/50 hover:bg-red-500/10 hover:text-red-600 disabled:opacity-30"
 									>

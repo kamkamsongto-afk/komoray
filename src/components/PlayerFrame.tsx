@@ -7,6 +7,7 @@ import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileS
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
+import { layoutAt, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -144,6 +145,10 @@ type Props = {
 	// onFrameChange: the frame dragged or resized on the video, while paused (left out: it can't be moved here).
 	frames?: FrameMe[];
 	onFrameChange?: (id: string, patch: Partial<FrameMe>) => void;
+	// Layout (lib/layout.ts): the screen split, the speaker in one part and a picture, clip or colour in the other.
+	// onLayoutChange: the speaker dragged inside their part, while paused (left out: they can't be moved here).
+	layouts?: VideoLayout[];
+	onLayoutChange?: (id: string, patch: Partial<VideoLayout>) => void;
 };
 
 // Frame Me's Blur background: the picture as it is drawn now, copied small on every screen refresh and blurred by CSS
@@ -297,6 +302,8 @@ export function PlayerFrame({
 	cutout,
 	frames,
 	onFrameChange,
+	layouts,
+	onLayoutChange,
 }: Props) {
 	const line = subtitle.subtitles ? saying : null; // subtitles turned off: none drawn, like the final video (build_subtitles)
 	const boxRef = useRef<HTMLDivElement>(null);
@@ -352,6 +359,7 @@ export function PlayerFrame({
 	const pictureRef = useRef<HTMLDivElement>(null); // the picture, for Frame Me's Blur background
 	const speakerDrag = useRef<{ corner: boolean; x: number; y: number; ax: number; ay: number; from: number; scale: number; speakerX: number; lift: number } | null>(null);
 	const speakerMoved = useRef(false); // a drag that ends on the speaker must not also press play
+	const layoutDrag = useRef<{ x: number; y: number; meX: number; meY: number } | null>(null);
 	// The final video's size (9:16, 1:1 or 16:9); everything on it is laid out at full size and shrunk.
 	const { width: W, height: H } = outputSize(subtitle);
 	const scale = boxWidth / W;
@@ -594,6 +602,56 @@ export function PlayerFrame({
 			</div>
 		);
 	}
+	// Layout: the one showing now (the later one in the list when two overlap), laid out on the full-size video
+	// (layoutPose) and shrunk by scale, as layout_filters puts it on the final video (render.py). Under Frame Me there,
+	// so here it is inside Frame Me's shape: a frame over a split screen frames all of it.
+	const split = layoutAt(layouts, outTime);
+	const pose = split ? layoutPose(split, layoutProgress(split, outTime), W, H) : null;
+	const flash = layoutFlash(layouts, outTime);
+	const at = (b: { x: number; y: number; w: number; h: number }): CSSProperties => ({ position: "absolute", left: b.x * scale, top: b.y * scale, width: b.w * scale, height: b.h * scale });
+	function layoutOther(l: VideoLayout, box: { x: number; y: number; w: number; h: number }) {
+		const src = l.file ? projectFileSrc(l.file) : "";
+		const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+		return (
+			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
+				{src &&
+					(l.media === "video" ? (
+						<InsertClip src={src} at={outTime - l.start} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(l)} length={l.end - l.start} />
+					) : (
+						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+						<img src={src} alt="" style={fill} />
+					))}
+			</div>
+		);
+	}
+	// While paused with its box open: drag yourself inside your part (meX side by side, meY top / bottom).
+	function layoutHandle(l: VideoLayout, box: { x: number; y: number; w: number; h: number }) {
+		if (!onLayoutChange || playing) return null;
+		return (
+			<div
+				title="Drag to move yourself inside your part"
+				onClick={(e) => speakerMoved.current && e.stopPropagation()}
+				onPointerDown={(e) => {
+					e.stopPropagation();
+					e.currentTarget.setPointerCapture(e.pointerId);
+					speakerMoved.current = false;
+					layoutDrag.current = { x: e.clientX, y: e.clientY, meX: l.meX, meY: l.meY };
+				}}
+				onPointerMove={(e) => {
+					const d = layoutDrag.current;
+					if (!d) return;
+					speakerMoved.current = true;
+					// Dragging right brings a point further left into the middle of the part.
+					const clamp = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
+					if (l.kind === "side") onLayoutChange(l.id, { meX: clamp(d.meX - (e.clientX - d.x) / (W * scale)) });
+					else onLayoutChange(l.id, { meY: clamp(d.meY - (e.clientY - d.y) / (H * scale)) });
+				}}
+				onPointerUp={() => (layoutDrag.current = null)}
+				className={`outline-2 -outline-offset-2 outline-blue-400 outline-dashed ${l.kind === "side" ? "cursor-ew-resize" : "cursor-ns-resize"}`}
+				style={{ ...at(box), touchAction: "none" }}
+			/>
+		);
+	}
 	return (
 		// As wide as fits, but never taller than --player-h (ScriptView keeps it clear of the timeline), else ~70% of the screen.
 		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: `calc(var(--player-h, 70vh) * ${W} / ${H})` }}>
@@ -610,14 +668,21 @@ export function PlayerFrame({
 					{/* Always the same elements, with or without a frame: a new canvas would lose the picture the engine draws on. */}
 					<div className="absolute inset-0" style={framed ? frameMask(framed) : undefined}>
 						<div className="absolute inset-0" style={framed ? framePlace(framed) : undefined}>
-							<div
-								ref={pictureRef}
-								className="absolute inset-0"
-								style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: `${ZOOM_ORIGIN.x * 100}% ${ZOOM_ORIGIN.y * 100}%` } : undefined}
-							>
-								{children}
+							{/* Layout moves the speaker (and the Cutout layers with them) into their part: always this element, moved or not. */}
+							<div className="absolute inset-0" style={pose ? { transform: `translate(${pose.picture.x * scale}px, ${pose.picture.y * scale}px)` } : undefined}>
+								<div
+									ref={pictureRef}
+									className="absolute inset-0"
+									style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: `${ZOOM_ORIGIN.x * 100}% ${ZOOM_ORIGIN.y * 100}%` } : undefined}
+								>
+									{children}
+								</div>
+								{cutout && cutoutLayers(cutout)}
 							</div>
-							{cutout && cutoutLayers(cutout)}
+							{split && pose && layoutOther(split, pose.other)}
+							{/* Flash: white over the picture at the edges of a Flash layout, as layout_flashes (render.py). */}
+							{flash > 0 && <div className="pointer-events-none absolute inset-0 bg-white" style={{ opacity: flash }} />}
+							{split && pose && layoutHandle(split, pose.me)}
 						</div>
 					</div>
 					{framed && <FrameEdge f={framed} W={W} H={H} scale={scale} box={boxRef} onChange={playing ? undefined : onFrameChange} />}

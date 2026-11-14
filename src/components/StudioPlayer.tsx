@@ -26,7 +26,7 @@ const SAMPLE_MS = 250; // debug mode: how often the engine's state is written do
 // The final video, played by our own engine (lib/player/engine.ts) on a canvas: smooth cuts on
 // every browser, including Safari on iPhone, iPad and Mac. Same controls and subtitles as PreviewPlayer.
 export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlayer(
-	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, frames, onFrameChange, faces, noZoom, zoomParts, cutout },
+	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, frames, onFrameChange, layouts, onLayoutChange, faces, noZoom, zoomParts, cutout },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -170,6 +170,8 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 			onBannersChange={onBannersChange}
 			frames={frames}
 			onFrameChange={onFrameChange}
+			layouts={layouts}
+			onLayoutChange={onLayoutChange}
 			subtitle={subtitle}
 			onSubtitleChange={onSubtitleChange}
 			onToggle={toggle}

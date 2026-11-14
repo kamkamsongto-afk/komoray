@@ -5,6 +5,7 @@
 import type { Banner } from "./banners";
 import type { CutoutLayers } from "./behind";
 import type { FrameMe } from "./frame-me";
+import type { VideoLayout } from "./layout";
 
 export type LibraryItem = {
 	file: string; // its name in the video's folder
@@ -39,11 +40,12 @@ export const cleanMediaName = (name: unknown) =>
 		.slice(0, LIBRARY.maxName);
 
 // The files this video uses now: deleting one of them would leave a hole in the video.
-export function filesInUse(edit: { banners?: Banner[]; cutout?: CutoutLayers; frames?: FrameMe[] } | null) {
+export function filesInUse(edit: { banners?: Banner[]; cutout?: CutoutLayers; frames?: FrameMe[]; layouts?: VideoLayout[] } | null) {
 	const used = new Set<string>();
 	for (const b of edit?.banners ?? []) if (b.kind === "file" && b.file) used.add(b.file);
 	for (const i of edit?.cutout?.inserts ?? []) used.add(i.file);
 	for (const f of edit?.frames ?? []) if (f.back === "file" && f.file) used.add(f.file);
+	for (const l of edit?.layouts ?? []) if (l.file) used.add(l.file);
 	return used;
 }
 
