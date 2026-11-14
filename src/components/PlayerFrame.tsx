@@ -278,6 +278,37 @@ function FrameEdge({ f, W, H, scale, box, onChange }: { f: FrameMe; W: number; H
 	);
 }
 
+// Layout, while paused with its box open: drag yourself inside your part (meX side by side, meY top / bottom).
+// box: the speaker's part on the full-size video; W x H: the final video, shrunk by scale.
+function LayoutHandle({ l, box, W, H, scale, onChange }: { l: VideoLayout; box: { x: number; y: number; w: number; h: number }; W: number; H: number; scale: number; onChange: (id: string, patch: Partial<VideoLayout>) => void }) {
+	const drag = useRef<{ x: number; y: number; meX: number; meY: number } | null>(null);
+	const moved = useRef(false); // a drag that ends on it must not also press play
+	return (
+		<div
+			title="Drag to move yourself inside your part"
+			onClick={(e) => moved.current && e.stopPropagation()}
+			onPointerDown={(e) => {
+				e.stopPropagation();
+				e.currentTarget.setPointerCapture(e.pointerId);
+				moved.current = false;
+				drag.current = { x: e.clientX, y: e.clientY, meX: l.meX, meY: l.meY };
+			}}
+			onPointerMove={(e) => {
+				const d = drag.current;
+				if (!d) return;
+				moved.current = true;
+				// Dragging right brings a point further left into the middle of the part.
+				const clamp = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
+				if (l.kind === "side") onChange(l.id, { meX: clamp(d.meX - (e.clientX - d.x) / (W * scale)) });
+				else onChange(l.id, { meY: clamp(d.meY - (e.clientY - d.y) / (H * scale)) });
+			}}
+			onPointerUp={() => (drag.current = null)}
+			className={`absolute outline-2 -outline-offset-2 outline-blue-400 outline-dashed ${l.kind === "side" ? "cursor-ew-resize" : "cursor-ns-resize"}`}
+			style={{ left: box.x * scale, top: box.y * scale, width: box.w * scale, height: box.h * scale, touchAction: "none" }}
+		/>
+	);
+}
+
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
 // (drawn at full 1080x1920 and shrunk, so sizes match the final video; drag it to move it),
 // the play button and the time bar.
@@ -359,7 +390,6 @@ export function PlayerFrame({
 	const pictureRef = useRef<HTMLDivElement>(null); // the picture, for Frame Me's Blur background
 	const speakerDrag = useRef<{ corner: boolean; x: number; y: number; ax: number; ay: number; from: number; scale: number; speakerX: number; lift: number } | null>(null);
 	const speakerMoved = useRef(false); // a drag that ends on the speaker must not also press play
-	const layoutDrag = useRef<{ x: number; y: number; meX: number; meY: number } | null>(null);
 	// The final video's size (9:16, 1:1 or 16:9); everything on it is laid out at full size and shrunk.
 	const { width: W, height: H } = outputSize(subtitle);
 	const scale = boxWidth / W;
@@ -624,34 +654,6 @@ export function PlayerFrame({
 			</div>
 		);
 	}
-	// While paused with its box open: drag yourself inside your part (meX side by side, meY top / bottom).
-	function layoutHandle(l: VideoLayout, box: { x: number; y: number; w: number; h: number }) {
-		if (!onLayoutChange || playing) return null;
-		return (
-			<div
-				title="Drag to move yourself inside your part"
-				onClick={(e) => speakerMoved.current && e.stopPropagation()}
-				onPointerDown={(e) => {
-					e.stopPropagation();
-					e.currentTarget.setPointerCapture(e.pointerId);
-					speakerMoved.current = false;
-					layoutDrag.current = { x: e.clientX, y: e.clientY, meX: l.meX, meY: l.meY };
-				}}
-				onPointerMove={(e) => {
-					const d = layoutDrag.current;
-					if (!d) return;
-					speakerMoved.current = true;
-					// Dragging right brings a point further left into the middle of the part.
-					const clamp = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
-					if (l.kind === "side") onLayoutChange(l.id, { meX: clamp(d.meX - (e.clientX - d.x) / (W * scale)) });
-					else onLayoutChange(l.id, { meY: clamp(d.meY - (e.clientY - d.y) / (H * scale)) });
-				}}
-				onPointerUp={() => (layoutDrag.current = null)}
-				className={`outline-2 -outline-offset-2 outline-blue-400 outline-dashed ${l.kind === "side" ? "cursor-ew-resize" : "cursor-ns-resize"}`}
-				style={{ ...at(box), touchAction: "none" }}
-			/>
-		);
-	}
 	return (
 		// As wide as fits, but never taller than --player-h (ScriptView keeps it clear of the timeline), else ~70% of the screen.
 		<div className="mx-auto flex w-full flex-col gap-2" style={{ maxWidth: `calc(var(--player-h, 70vh) * ${W} / ${H})` }}>
@@ -682,7 +684,7 @@ export function PlayerFrame({
 							{split && pose && layoutOther(split, pose.other)}
 							{/* Flash: white over the picture at the edges of a Flash layout, as layout_flashes (render.py). */}
 							{flash > 0 && <div className="pointer-events-none absolute inset-0 bg-white" style={{ opacity: flash }} />}
-							{split && pose && layoutHandle(split, pose.me)}
+							{split && pose && onLayoutChange && !playing && <LayoutHandle l={split} box={pose.me} W={W} H={H} scale={scale} onChange={onLayoutChange} />}
 						</div>
 					</div>
 					{framed && <FrameEdge f={framed} W={W} H={H} scale={scale} box={boxRef} onChange={playing ? undefined : onFrameChange} />}

@@ -82,14 +82,15 @@ export function layoutProgress(l: VideoLayout, t: number) {
 }
 
 // The white flash over the picture at final-video second t, 0..1: up to full at each edge of a Flash layout, from
-// LAYOUT.flash before it to LAYOUT.flash after it. Same as layout_flashes in render.py.
+// LAYOUT.flash before it to LAYOUT.flash after it. Same as layout_flashes in render.py, which lays one white flash over
+// another: two at once add up the same way here (1 - what each lets through), not the stronger one (Codex review 14 Nov).
 export function layoutFlash(layouts: VideoLayout[] | undefined, t: number) {
-	let most = 0;
+	let through = 1;
 	for (const l of layouts ?? []) {
 		if (l.enter !== "flash") continue;
-		for (const edge of [l.start, l.end]) most = Math.max(most, 1 - Math.abs(t - edge) / LAYOUT.flash);
+		for (const edge of [l.start, l.end]) through *= 1 - Math.max(0, 1 - Math.abs(t - edge) / LAYOUT.flash);
 	}
-	return most;
+	return 1 - through;
 }
 
 type Box = { x: number; y: number; w: number; h: number };

@@ -889,7 +889,8 @@ def layout_flash_windows(layouts: list[dict]) -> list[float]:
 
 def layout_flashes(parts: list[str], base: str, edges: list[float]) -> str:
     """White over the picture from LAYOUT_FLASH before each edge to LAYOUT_FLASH after it, fully white at the edge, as
-    layoutFlash in layout.ts. Over the layouts, under Frame Me, banners and subtitles. Returns the new label."""
+    layoutFlash in layout.ts. Two at once are laid one over the other, which layoutFlash adds up the same way.
+    Over the layouts, under Frame Me, banners and subtitles. Returns the new label."""
     if not edges:
         return base
     F = LAYOUT_FLASH
@@ -1807,7 +1808,9 @@ def ffmpeg_command(
         # Only the layouts that show in this part; a part may hold just a flash's tail (split_up), drawn below.
         base = layout_filters(parts, base, size, showing, inputs["layouts"])
     if split_up:
-        base = layout_flashes(parts, base, layout_flash_windows(split_up))
+        # Only the flashes that reach into this part: one outside it would trim to nothing.
+        edges = [e for e in layout_flash_windows(split_up) if not part or ((e - LAYOUT_FLASH) * FPS < part[1] and (e + LAYOUT_FLASH) * FPS > part[0])]
+        base = layout_flashes(parts, base, edges)
     if framed:
         base = frame_filters(parts, base, size, framed, inputs["frames"], plain)
     if banner_files:
