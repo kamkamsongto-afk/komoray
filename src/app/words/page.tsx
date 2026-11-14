@@ -1,17 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import { Check, Info, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 
 // use (lib/word-rules.ts): always = fixed in every new video; ai = only where the sentence fits; off = not used.
 type Word = { heard: string; fixed: string; uses: number; updated_at: string; use?: "always" | "ai" | "off" };
+// Names from the coach, 14 Nov (were Every video / Where it fits). Which kind a fix is comes from the dictionary when it
+// is saved (wordUse): heard isn't a real word -> always; it is one (สวน) -> ai. Our AI only comes in on the next video.
 const USE_LABEL = {
-	always: { text: "Every video", tone: "bg-green-600/10 text-green-700 dark:text-green-400", tip: "It can't be right as heard (or it is a name of yours), so it is fixed in every new video." },
-	ai: { text: "Where it fits", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-400", tip: "It could be right as heard in another sentence (like สวน and ส่วน), so our AI only fixes it where the sentence means it." },
-	off: { text: "Not used", tone: "bg-foreground/10 text-foreground/60", tip: "This fix added or took out words, or only changed spacing. That belongs to one video, so it isn't used again." },
+	always: { text: "All my videos", tone: "bg-green-600/10 text-green-700 dark:text-green-400", tip: "Can't be right as heard (or it's a name of yours), so it's fixed everywhere in your new videos." },
+	ai: { text: "Word context", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-400", tip: "Sounds like another real word (like สวน and ส่วน), so our AI reads the sentence first and fixes it only where it fits." },
+	off: { text: "Not used", tone: "bg-foreground/10 text-foreground/60", tip: "An old fix that added words or only changed spacing. That belongs to one video, so it isn't used again." },
 };
+const HELP_HIDDEN = "komoray.wordsHelpHidden"; // the short explanation above the list was closed, in this browser
 
 const PAGE = 50; // rows shown at first, and added by Show more
 
@@ -28,6 +31,17 @@ export default function WordsPage() {
 	const [sort, setSort] = useState<"used" | "new" | "az">("used");
 	const [limit, setLimit] = useState(PAGE);
 	const [picked, setPicked] = useState<Set<string>>(new Set());
+	// What the kinds mean: a small box, closable, remembered closed (coach, 14 Nov: not cluttered, can be hidden).
+	// Read once the words arrive (load), since it only shows above them.
+	const [help, setHelp] = useState(false);
+	const showHelp = (on: boolean) => {
+		setHelp(on);
+		try {
+			localStorage.setItem(HELP_HIDDEN, on ? "0" : "1");
+		} catch {
+			// not remembered, that's fine
+		}
+	};
 	const [editing, setEditing] = useState<{ heard: string; text: string } | null>(null);
 	// Giving fixes to Komoray's shared list (lib/shared-words.ts): off until they tick it.
 	const [share, setShare] = useState<boolean | null>(null);
@@ -36,7 +50,17 @@ export default function WordsPage() {
 	const load = () =>
 		fetch("/api/dictionary")
 			.then((res) => res.json() as Promise<{ words?: Word[]; error?: string }>)
-			.then((data) => (data.words ? setWords(data.words) : setError(data.error ?? "Could not load your words")))
+			.then((data) => {
+				if (!data.words) return setError(data.error ?? "Could not load your words");
+				setWords(data.words);
+				let hidden = false;
+				try {
+					hidden = localStorage.getItem(HELP_HIDDEN) === "1";
+				} catch {
+					// no storage: shown
+				}
+				setHelp(!hidden);
+			})
 			.catch(() => setError("Could not load your words"));
 
 	useEffect(() => {
@@ -79,10 +103,12 @@ export default function WordsPage() {
 		setEditing(null);
 		const clean = fixed.trim();
 		if (!clean) return;
+		setError("");
 		setWords((list) => list?.map((w) => (w.heard === heard ? { ...w, fixed: clean } : w)) ?? null);
-		const res = await fetch("/api/dictionary", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ heard, fixed: clean }) });
-		if (!res.ok) setError("Could not save that word. Please reload and try again.");
-		else void load(); // how it is used may change with it
+		const res = await fetch("/api/dictionary", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ heard, fixed: clean }) }).catch(() => null);
+		// Not saved (an edit that adds words, say): the server's reason, and the word back as it is saved.
+		if (!res?.ok) setError(((await res?.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not save that word. Please try again.");
+		void load(); // as saved; how it is used may change with it
 	}
 
 	// The old fixes that are never used (added words, spacing): gone in one go, after asking.
@@ -135,7 +161,8 @@ export default function WordsPage() {
 	const searched = (words ?? []).filter((w) => !filter.trim() || `${w.heard} ${w.fixed}`.toLowerCase().includes(filter.trim().toLowerCase()));
 	const countOf = (k: "always" | "ai" | "off") => searched.filter((w) => w.use === k).length;
 	const shown = searched
-		.filter((w) => kind === "all" || w.use === kind)
+		// All: the fixes in use. Not used (old fixes from before 13 Nov: none come in now) only on its own, from the line under the list.
+		.filter((w) => (kind === "all" ? w.use !== "off" : w.use === kind))
 		.sort((a, b) => (sort === "az" ? a.heard.localeCompare(b.heard) : sort === "new" ? b.updated_at.localeCompare(a.updated_at) : b.uses - a.uses || a.heard.localeCompare(b.heard)));
 	const page = shown.slice(0, limit);
 	const pill = (on: boolean) => `rounded-md px-2.5 py-1 text-sm whitespace-nowrap ${on ? "bg-background font-medium shadow-sm" : "text-foreground/70 hover:text-foreground"}`;
@@ -218,30 +245,64 @@ export default function WordsPage() {
 							Download (CSV)
 						</button>
 					</div>
-					{/* The kinds, with what each means on hover, instead of a paragraph above the list. */}
-					<div className="flex flex-wrap gap-1 self-start rounded-lg bg-foreground/5 p-0.5">
-						{(["all", "always", "ai", "off"] as const).map((k) => (
+					{/* The kinds, with what each means on hover; the ⓘ opens a short explanation that can be closed. */}
+					{kind !== "off" && (
+						<div className="flex flex-wrap items-center gap-2">
+							<div className="flex flex-wrap gap-1 rounded-lg bg-foreground/5 p-0.5">
+								{(["all", "always", "ai"] as const).map((k) => (
+									<button
+										key={k}
+										onClick={() => {
+											setKind(k);
+											setLimit(PAGE);
+											setPicked(new Set());
+										}}
+										title={k === "all" ? undefined : USE_LABEL[k].tip}
+										className={pill(kind === k)}
+									>
+										{k === "all" ? "All" : USE_LABEL[k].text} ({k === "all" ? countOf("always") + countOf("ai") : countOf(k)})
+									</button>
+								))}
+							</div>
+							{!help && (
+								<button onClick={() => showHelp(true)} aria-label="What these mean" title="What these mean" className="rounded-full p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
+									<Info className="h-4 w-4" aria-hidden />
+								</button>
+							)}
+						</div>
+					)}
+					{kind !== "off" && help && (
+						<div className="relative flex flex-col gap-1 rounded-lg bg-foreground/5 py-2 pr-8 pl-3 text-xs text-foreground/70">
+							<button onClick={() => showHelp(false)} aria-label="Hide this" title="Hide this" className="absolute top-1.5 right-1.5 rounded p-0.5 text-foreground/50 hover:bg-foreground/10 hover:text-foreground">
+								<X className="h-3.5 w-3.5" aria-hidden />
+							</button>
+							<span>
+								<span className="font-medium text-foreground">{USE_LABEL.always.text}</span>: {USE_LABEL.always.tip}
+							</span>
+							<span>
+								<span className="font-medium text-foreground">{USE_LABEL.ai.text}</span>: {USE_LABEL.ai.tip}
+							</span>
+						</div>
+					)}
+					{kind === "off" && (
+						<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/60">
 							<button
-								key={k}
 								onClick={() => {
-									setKind(k);
+									setKind("all");
 									setLimit(PAGE);
 									setPicked(new Set());
 								}}
-								title={k === "all" ? undefined : USE_LABEL[k].tip}
-								className={pill(kind === k)}
+								className="rounded-md border border-foreground/20 px-2 py-0.5 text-sm text-foreground hover:bg-foreground/5"
 							>
-								{k === "all" ? "All" : USE_LABEL[k].text} ({k === "all" ? searched.length : countOf(k)})
+								← Back to my words
 							</button>
-						))}
-					</div>
-					{kind === "off" && unused.length > 0 && (
-						<p className="text-xs text-foreground/60">
-							These added words or only changed spacing, which belong to one video, so they aren&apos;t used again.{" "}
-							<button onClick={() => void forgetUnused()} className="underline hover:text-foreground">
-								Remove all {unused.length}
-							</button>
-						</p>
+							<span>Old fixes that added words or only changed spacing. They belong to one video, so they aren&apos;t used again.</span>
+							{unused.length > 0 && (
+								<button onClick={() => void forgetUnused()} className="underline hover:text-foreground">
+									Remove all {unused.length}
+								</button>
+							)}
+						</div>
 					)}
 
 					{picked.size > 0 && (
@@ -344,7 +405,7 @@ export default function WordsPage() {
 					<div className="flex flex-wrap items-center gap-3 text-xs text-foreground/50">
 						<span>
 							{shown.length > page.length ? `Showing ${page.length} of ${shown.length}` : `${shown.length} ${shown.length === 1 ? "word" : "words"}`}
-							{shown.length !== words.length && ` (${words.length} in all)`}. Removing a word only stops future fixes; videos you already edited keep theirs.
+							. Removing a word only stops future fixes; videos you already edited keep theirs.
 						</span>
 						{shown.length > page.length && (
 							<button onClick={() => setLimit(limit + PAGE)} className="rounded-lg border border-foreground/20 px-3 py-1 text-sm text-foreground hover:bg-foreground/5">
@@ -352,6 +413,21 @@ export default function WordsPage() {
 							</button>
 						)}
 					</div>
+					{kind !== "off" && unused.length > 0 && (
+						<p className="text-xs text-foreground/50">
+							{unused.length} old {unused.length === 1 ? "fix isn't" : "fixes aren't"} used.{" "}
+							<button
+								onClick={() => {
+									setKind("off");
+									setLimit(PAGE);
+									setPicked(new Set());
+								}}
+								className="underline hover:text-foreground"
+							>
+								See them
+							</button>
+						</p>
+					)}
 				</section>
 			)}
 			{share === null && shareError && <p className="text-xs text-red-600">{shareError}</p>}
