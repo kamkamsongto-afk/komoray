@@ -1,7 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { type PointerEvent, type ReactNode, useEffect, useId, useState } from "react";
+import { FRAME_SHAPES, type FrameShape, shapePolygon } from "@/lib/frame-me";
+import { LAYOUT_KINDS, type LayoutKind } from "@/lib/layout";
 
 // The small things people can try on the home page. Nothing here touches a real video.
 
@@ -218,5 +220,116 @@ export function HelloWord() {
 		<div className="k-lang" lang={code}>
 			{word}
 		</div>
+	);
+}
+
+// ---- Step out of the rectangle: Frame Me, Cutout, Layout (the shapes and names are the studio's own) ----
+
+// A card that leans toward the mouse, for a little depth. Touch screens and reduced motion: it stays flat.
+function TiltCard({ children }: { children: ReactNode }) {
+	const move = (e: PointerEvent<HTMLElement>) => {
+		if (e.pointerType !== "mouse") return;
+		const box = e.currentTarget.getBoundingClientRect();
+		e.currentTarget.style.setProperty("--tx", ((e.clientX - box.left) / box.width - 0.5).toFixed(3));
+		e.currentTarget.style.setProperty("--ty", ((e.clientY - box.top) / box.height - 0.5).toFixed(3));
+	};
+	const leave = (e: PointerEvent<HTMLElement>) => {
+		e.currentTarget.style.setProperty("--tx", "0");
+		e.currentTarget.style.setProperty("--ty", "0");
+	};
+	return (
+		<article className="k-card k-tilt" onPointerMove={move} onPointerLeave={leave}>
+			{children}
+		</article>
+	);
+}
+
+// Plays through the choices by itself until someone picks one.
+function useAuto<T>(options: T[], ms: number): [T, (value: T) => void] {
+	const [picked, setPicked] = useState<T | null>(null);
+	const tick = useTick(ms);
+	return [picked ?? options[tick % options.length], setPicked];
+}
+
+const FRAME_DEMO: FrameShape[] = ["circle", "heart", "star", "rounded"];
+const FRAME_CHIPS = FRAME_DEMO.map((id): [FrameShape, string] => [id, FRAME_SHAPES.find((s) => s.id === id)?.name ?? id]);
+// The picture is 1 wide and 2 tall; the face sits about here in it.
+const FACE = { x: 0.53, y: 0.44, zoom: 1.45 };
+
+export function FrameCard() {
+	const [shape, setShape] = useAuto(FRAME_DEMO, 2400);
+	const clip = useId();
+	const w = 100;
+	const h = w * (FRAME_SHAPES.find((s) => s.id === shape)?.ratio ?? 1);
+	const points = shapePolygon(shape, w, h);
+	const pw = w * FACE.zoom;
+	return (
+		<TiltCard>
+			<div className="k-vis">
+				<div className="k-frame k-stage">
+					<Image className="k-frameback" src="/landing/home.webp" alt="" width={448} height={896} unoptimized />
+					<svg key={shape} className="k-frameme" viewBox={`-4 -4 ${w + 8} ${h + 8}`} aria-hidden>
+						<clipPath id={clip}>
+							<polygon points={points} />
+						</clipPath>
+						<image href="/landing/home.webp" x={w / 2 - FACE.x * pw} y={h / 2 - FACE.y * pw * 2} width={pw} height={pw * 2} preserveAspectRatio="none" clipPath={`url(#${clip})`} />
+						<polygon points={points} fill="none" stroke="#B9F36A" strokeWidth="2.5" strokeLinejoin="round" />
+					</svg>
+				</div>
+			</div>
+			<h3>Frame Me</h3>
+			<p>Step into a circle, a heart, a star. Seven shapes, your color on the edge, a blur, a picture or a clip behind.</p>
+			<Chips options={FRAME_CHIPS} value={shape} onPick={setShape} />
+		</TiltCard>
+	);
+}
+
+type Behind = "run" | "slam" | "heartbeat";
+const BEHINDS: [Behind, string][] = [["run", "Run"], ["slam", "Drop and slam"], ["heartbeat", "Heartbeat"]];
+const BEHIND_DEMO: Behind[] = ["run", "slam", "heartbeat"];
+
+export function CutoutCard() {
+	const [motion, setMotion] = useAuto(BEHIND_DEMO, 4200);
+	return (
+		<TiltCard>
+			<div className="k-vis">
+				<div className="k-frame k-stage">
+					<Image src="/landing/city.webp" alt="" width={448} height={896} unoptimized />
+					<div key={motion} className={`k-behind k-behind-${motion}`} aria-hidden>
+						{motion === "run" ? "NEW DROP · NEW DROP · NEW DROP · " : "WOW"}
+					</div>
+					<Image className="k-cutme" src="/landing/city-cut.webp" alt="" width={448} height={896} unoptimized />
+				</div>
+			</div>
+			<h3>Cutout</h3>
+			<p>Words, a picture or a clip that sit behind you. No green screen.</p>
+			<Chips options={BEHINDS} value={motion} onPick={setMotion} />
+		</TiltCard>
+	);
+}
+
+const LAYOUT_CHIPS = LAYOUT_KINDS.map((k): [LayoutKind, string] => [k.id, k.name]);
+const LAYOUT_DEMO: LayoutKind[] = ["stack", "side"];
+
+export function LayoutCard() {
+	const [kind, setKind] = useAuto(LAYOUT_DEMO, 6400);
+	// Split for most of each turn, whole again for a moment, so the slide shows both ways.
+	const split = useTick(1600) % 4 !== 3;
+	return (
+		<TiltCard>
+			<div className="k-vis">
+				<div className={`k-frame k-stage k-layout k-layout-${kind} ${split ? "k-layout-on" : ""}`}>
+					<div className="k-layme">
+						<Image src="/landing/kitchen.webp" alt="" width={448} height={896} unoptimized />
+					</div>
+					<div className="k-layother">
+						<Image src="/landing/mountain-wide.webp" alt="" width={870} height={490} unoptimized />
+					</div>
+				</div>
+			</div>
+			<h3>Layout</h3>
+			<p>Split the screen with a picture or a clip. It slides in, flashes in, or cuts.</p>
+			<Chips options={LAYOUT_CHIPS} value={kind} onPick={setKind} />
+		</TiltCard>
 	);
 }

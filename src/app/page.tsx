@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { HeroVideo } from "@/components/HeroVideo";
-import { HelloWord, LooksCard, PaceCard, ScriptDemo, ShapeCard, WordsDemo } from "@/components/LandingDemos";
+import { CutoutCard, FrameCard, HelloWord, LayoutCard, LooksCard, PaceCard, ScriptDemo, ShapeCard, WordsDemo } from "@/components/LandingDemos";
 import { WaitlistForm } from "@/components/WaitlistForm";
 import "./landing.css";
 
@@ -37,6 +37,7 @@ export default function Home() {
 					<div className="k-navlinks">
 						<a href="#script">Script</a>
 						<a href="#words">My words</a>
+						<a href="#effects">Effects</a>
 						<a href="#studio">Studio</a>
 						<a className="k-pill" href="#access">
 							Get early access
@@ -105,6 +106,23 @@ export default function Home() {
 						<p className="k-lead2">Names, brands, the words only you use. Correct one, and Komoray remembers it for your next video. Your words stay yours.</p>
 					</div>
 					<WordsDemo />
+				</div>
+			</section>
+
+			<section className="k-sec" id="effects" style={{ paddingTop: 0 }}>
+				<div className="k-wrap">
+					<p className="k-mono k-eyebrow">New in the studio</p>
+					<h2 className="k-h2">
+						Step out of
+						<br />
+						the <span className="k-lime">rectangle.</span>
+					</h2>
+					<div className="k-grid">
+						<FrameCard />
+						<CutoutCard />
+						<LayoutCard />
+					</div>
+					<p className="k-mono k-small">Illustrative images</p>
 				</div>
 			</section>
 
