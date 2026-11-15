@@ -675,7 +675,7 @@ export function PlayerFrame({
 	// (layoutPose) and shrunk by scale, as layout_filters puts it on the final video (render.py). Under Frame Me there,
 	// so here it is inside Frame Me's shape: a frame over a split screen frames all of it.
 	const split = layoutAt(layouts, outTime);
-	const pose = split ? layoutPose(split, layoutProgress(split, outTime), W, H) : null;
+	const pose = split ? layoutPose(split, layoutProgress(split, outTime, layouts), W, H) : null;
 	const flash = layoutFlash(layouts, outTime);
 	const [dropping, setDropping] = useState(false); // a file is being dragged over the video
 	const canDrop = (e: ReactDragEvent) => Boolean(onLayoutDrop) && (e.dataTransfer.types.includes("Files") || e.dataTransfer.types.includes(LAYOUT_DRAG));

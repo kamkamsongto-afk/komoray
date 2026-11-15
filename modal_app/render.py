@@ -800,6 +800,7 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
 # Layout (src/lib/layout.ts): the screen split, the speaker in one part and a picture, clip or colour in the other.
 LAYOUT_SLIDE = 0.5  # seconds the other part takes to slide in, and out (LAYOUT.slide in layout.ts)
 LAYOUT_FLASH = 0.15  # seconds the white flash takes to come up, and to go, at each edge (LAYOUT.flash in layout.ts)
+LAYOUT_JOIN = 0.05  # seconds: a layout starting this close after another ends joins it, no slide between (LAYOUT.join)
 
 
 def layout_boxes(l: dict, size: tuple[int, int]) -> dict:
@@ -826,18 +827,36 @@ def layout_boxes(l: dict, size: tuple[int, int]) -> dict:
     return {"me": me, "other": other, "picture": picture}
 
 
-def layout_ease_expr(l: dict) -> str:
+def layout_joins(l: dict, layouts: list[dict]) -> tuple[bool, bool]:
+    """Whether another layout covers l's start, and its end, so l doesn't slide there: one ending where l starts (within
+    LAYOUT_JOIN), or showing across that moment. End to end, two layouts slid out and back in, and the whole speaker
+    flashed between them (coach, 15 Nov). Same as layoutJoins in layout.ts."""
+    a, b = float(l["start"]), float(l["end"])
+    others = [(float(m["start"]), float(m["end"])) for m in layouts if m is not l]
+    return (
+        any(s < a and e >= a - LAYOUT_JOIN for s, e in others),
+        any(e > b and s <= b + LAYOUT_JOIN for s, e in others),
+    )
+
+
+def layout_ease_expr(l: dict, layouts: list[dict]) -> str:
     """How far it is split at the frame's time t, as an FFmpeg expression: 0 = all speaker, 1 = split. Only Slide moves,
-    eased in and out; one shorter than both slides slides over half its time each way. Same as layoutProgress."""
+    eased in and out, and not at an edge another layout covers (layout_joins); one shorter than its slides slides over
+    its time shared between them. layouts: all of them, l among them. Same as layoutProgress."""
     if l.get("enter", "slide") != "slide":
         return "1"
     a, b = float(l["start"]), float(l["end"])
-    d = min(LAYOUT_SLIDE, (b - a) / 2)
-    u = f"clip(min((t-{a:.3f})/{d:.4f},({b:.3f}-t)/{d:.4f}),0,1)"
+    join_start, join_end = layout_joins(l, layouts)
+    slides = (0 if join_start else 1) + (0 if join_end else 1)
+    if not slides:
+        return "1"
+    d = min(LAYOUT_SLIDE, (b - a) / slides)
+    sides = ([] if join_start else [f"(t-{a:.3f})/{d:.4f}"]) + ([] if join_end else [f"({b:.3f}-t)/{d:.4f}"])
+    u = f"clip({sides[0] if len(sides) == 1 else f'min({sides[0]},{sides[1]})'},0,1)"
     return f"if(lt({u},0.5),4*pow({u},3),1-pow(2-2*{u},3)/2)"
 
 
-def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: list[dict], inputs: list[int | None]) -> str:
+def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: list[dict], inputs: list[int | None], every: list[dict] | None = None) -> str:
     """Layout: for each layout's time, the picture so far (the speaker and the Cutout layers) is moved, never scaled, so
     the point (meX, meY) sits in the middle of the speaker's part, and the other part (a project picture or clip filling
     it, else its colour) comes in from its own edge of the screen. Both move by the same eased amount, so nothing
@@ -854,7 +873,7 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
         px, py = boxes["picture"]
         ox, oy, ow, oh = boxes["other"]
         stack, first = l.get("kind") != "side", l.get("meFirst") is not False
-        e = layout_ease_expr(l)
+        e = layout_ease_expr(l, every or layouts)  # every: the whole video's layouts, which layout_joins needs
         parts.append(f"[lys{j}]trim=start={a:.3f}:end={b:.3f},split=3[lyk{j}][lyp{j}][lyc{j}]")
         parts.append(f"[lyk{j}]drawbox=c=black:t=fill[lyb{j}]")
         # The speaker's picture moved e of the way (layoutPose: picture * p).
@@ -1813,7 +1832,8 @@ def ffmpeg_command(
         base = cutout_filters(parts, base, size, cutout, inputs)
     if showing:
         # Only the layouts that show in this part; a part may hold just a flash's tail (split_up), drawn below.
-        base = layout_filters(parts, base, size, showing, inputs["layouts"])
+        # All the video's layouts too: whether a layout slides at an edge depends on one that may sit in the next part.
+        base = layout_filters(parts, base, size, showing, inputs["layouts"], layouts)
     if split_up:
         # Only the flashes that reach into this part: one outside it would trim to nothing.
         edges = [e for e in layout_flash_windows(split_up) if not part or ((e - LAYOUT_FLASH) * FPS < part[1] and (e + LAYOUT_FLASH) * FPS > part[0])]
