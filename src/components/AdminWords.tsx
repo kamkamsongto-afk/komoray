@@ -1,13 +1,15 @@
 "use client";
 
 import { Check, Pencil, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { LANGUAGES } from "@/lib/languages";
 import type { WordRow } from "@/lib/shared-words";
 import type { WordUse } from "@/lib/word-rules";
 
+type Pair = { heard: string; fixed: string };
+
 // "heard → fixed" on each line; also ->, >, =, a tab or a comma between them (as people paste from a sheet or a chat).
-function readLines(text: string) {
+function readLines(text: string): Pair[] {
 	return text
 		.split(/\r?\n/)
 		.map((line) => line.split(/\s*(?:→|->|>|=|\t|,)\s*/))
@@ -41,7 +43,8 @@ export function AdminWords() {
 	const [sort, setSort] = useState<"used" | "az">("used");
 	const [type, setType] = useState<WordUse | "all">("all"); // only Safe, Needs context or Suspicious (coach, 13 Nov)
 	const [filter, setFilter] = useState("");
-	const [paste, setPaste] = useState("");
+	// The pairs being added, one row each (coach, 15 Nov: no arrow to hunt for). The last row stays empty for the next pair.
+	const [draft, setDraft] = useState<Pair[]>([{ heard: "", fixed: "" }]);
 	const [note, setNote] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -86,12 +89,35 @@ export function AdminWords() {
 		return data;
 	}
 
-	async function add(pairs: { heard: string; fixed: string }[]) {
-		if (!pairs.length) return setNote("Nothing to add. Write one pair a line: ผูหญิง → ผู้หญิง");
+	async function add(pairs: Pair[], fromDraft = false) {
+		if (!pairs.length) return setNote("Nothing to add. Fill in Wrong and Right: ผูหญิง, ผู้หญิง");
 		const data = await call("POST", { list, pairs });
 		if (!data) return;
 		setNote(`Added ${data.added}.${data.skipped?.length ? ` Skipped ${data.skipped.length} (numbers, symbols or longer than 30 letters): ${data.skipped.slice(0, 5).join(" · ")}` : ""}`);
-		setPaste("");
+		if (fromDraft) setDraft([{ heard: "", fixed: "" }]);
+	}
+
+	// One box changed. A box given several lines (pasted from a sheet or a chat) becomes that many rows; a box given
+	// "wrong > right" (or →, ->, =, a tab, a comma) fills both of its row's boxes. Always one empty row at the end.
+	function typeIn(row: number, side: keyof Pair, value: string) {
+		const lines = value.split(/\r?\n/);
+		const pairs = readLines(value);
+		const next = [...draft];
+		if (pairs.length) next.splice(row, 1, ...pairs);
+		else if (lines.length > 1) next.splice(row, 1, ...lines.filter((l) => l.trim()).map((l, k) => ({ ...(k ? { heard: "", fixed: "" } : draft[row]), [side]: l.trim() })));
+		else next[row] = { ...draft[row], [side]: value };
+		// Empty rows at the end go, then one is added: an emptied row in the middle stays, so the box being typed in stays put.
+		while (next.length && !next[next.length - 1].heard && !next[next.length - 1].fixed) next.pop();
+		setDraft([...next, { heard: "", fixed: "" }]);
+	}
+	const draftPairs = draft.map((p) => ({ heard: p.heard.trim(), fixed: p.fixed.trim() })).filter((p) => p.heard && p.fixed);
+	const halfDone = draft.filter((p) => !p.heard.trim() !== !p.fixed.trim()).length;
+	// Enter: from Wrong to its Right, from Right to the next row's Wrong.
+	function enter(e: KeyboardEvent<HTMLInputElement>, row: number, side: keyof Pair) {
+		if (e.key !== "Enter") return;
+		e.preventDefault();
+		const to = side === "heard" ? `${row}-fixed` : `${row + 1}-heard`;
+		requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-draft="${to}"]`)?.focus());
 	}
 
 	async function addMyWords() {
@@ -148,16 +174,41 @@ export function AdminWords() {
 			<details className="rounded-xl border border-foreground/15 p-3">
 				<summary className="cursor-pointer text-sm font-medium">Add pairs to {listName(list)}</summary>
 				<div className="mt-2 flex flex-col gap-2">
-					<textarea
-						value={paste}
-						onChange={(e) => setPaste(e.target.value)}
-						rows={4}
-						placeholder={"One pair a line, wrong → right:\nผูหญิง → ผู้หญิง\nควคุม → ควบคุม"}
-						className="rounded-md border border-foreground/20 bg-background px-3 py-2 text-sm"
-					/>
+					<p className="text-xs text-foreground/60">Type the wrong word and the right one. Enter goes to the next box. You can also type wrong &gt; right in one box, or paste lines from a sheet.</p>
+					<div className="grid max-w-lg grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 text-sm">
+						<span className="text-xs text-foreground/60">Wrong</span>
+						<span />
+						<span className="text-xs text-foreground/60">Right</span>
+						{draft.map((p, i) => (
+							<Fragment key={i}>
+								<input
+									data-draft={`${i}-heard`}
+									value={p.heard}
+									onChange={(e) => typeIn(i, "heard", e.target.value)}
+									onKeyDown={(e) => enter(e, i, "heard")}
+									placeholder={i === 0 ? "ผูหญิง" : ""}
+									aria-label={`Wrong, row ${i + 1}`}
+									className="rounded-md border border-foreground/20 bg-background px-3 py-1.5"
+								/>
+								<span className="text-foreground/40" aria-hidden>
+									→
+								</span>
+								<input
+									data-draft={`${i}-fixed`}
+									value={p.fixed}
+									onChange={(e) => typeIn(i, "fixed", e.target.value)}
+									onKeyDown={(e) => enter(e, i, "fixed")}
+									placeholder={i === 0 ? "ผู้หญิง" : ""}
+									aria-label={`Right, row ${i + 1}`}
+									className="rounded-md border border-foreground/20 bg-background px-3 py-1.5"
+								/>
+							</Fragment>
+						))}
+					</div>
+					{halfDone > 0 && <p className="text-xs text-amber-600">{halfDone === 1 ? "One row is" : `${halfDone} rows are`} missing a word and won&apos;t be added.</p>}
 					<div className="flex flex-wrap gap-2">
-						<button onClick={() => void add(readLines(paste))} disabled={busy} className="rounded-lg bg-foreground px-3 py-1.5 text-sm text-background disabled:opacity-50">
-							Add
+						<button onClick={() => void add(draftPairs, true)} disabled={busy || !draftPairs.length} className="rounded-lg bg-foreground px-3 py-1.5 text-sm text-background disabled:opacity-50">
+							Add {draftPairs.length > 1 ? `${draftPairs.length} pairs` : ""}
 						</button>
 						<button onClick={() => void addMyWords()} disabled={busy} className="rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5 disabled:opacity-50" title="Every word on your My words page, except the ones that aren't used">
 							Add all my words

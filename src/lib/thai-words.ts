@@ -13,13 +13,29 @@ const THAI_MARK_FIRST = /^[ัำ-ฺ็-๎]/; // a vowel or tone mark that can
 
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
+// English said inside Thai comes in pieces too, glued end to start with no gap: "cre" "at" "or", "b" "a" "ck" "g" "d"
+// (VID20261112103855, 15 Nov), and Highlight lit each piece in turn. Pieces of Latin letters with no gap at all between
+// them are one word, unless the next starts with a capital after a small letter (a new word, a name). Only in a
+// mostly-Thai transcript: in English, words said in a row can also touch.
+const LATIN_PIECE = /^\p{Script=Latin}+$/u;
+const LATIN_GLUE = 0.01; // seconds: pieces this close are glued; Deepgram gives the same time to both
+const THAI_SHARE = 0.3; // share of pieces that are Thai for a transcript to count as Thai
+const startsNewWord = (prev: string, next: string) => /\p{Ll}$/u.test(prev) && /^\p{Lu}/u.test(next);
+
 // For each word: the positions (in `words`) of the pieces it was made from.
 export function thaiWordGroups(words: Word[]): number[][] {
 	const groups: number[][] = [];
+	const thai = words.length > 0 && words.filter((w) => THAI.test(w.text)).length / words.length >= THAI_SHARE;
 	let i = 0;
 	while (i < words.length) {
 		// A run: Thai pieces right after one another.
 		let j = i;
+		if (thai && LATIN_PIECE.test(words[i].text)) {
+			while (j + 1 < words.length && LATIN_PIECE.test(words[j + 1].text) && words[j + 1].start - words[j].end <= LATIN_GLUE && !startsNewWord(words[j].text, words[j + 1].text)) j++;
+			groups.push(Array.from({ length: j - i + 1 }, (_, k) => i + k));
+			i = j + 1;
+			continue;
+		}
 		if (THAI.test(words[i].text)) {
 			// A piece that starts with a vowel or tone mark ("ส" "่วน") belongs to the one before it, however long the gap:
 			// alone it can't be read, and the gap was cut as silence (VID20261112093656, 13 Nov).

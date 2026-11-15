@@ -45,6 +45,7 @@ export const LAYOUT = {
 	me: { x: 0.5, y: 0.4 }, // where a face sits in the framed video (FACE_HEIGHT in framing.ts)
 	slide: 0.5, // seconds the other part takes to slide in, and out. LAYOUT_SLIDE in render.py
 	flash: 0.15, // seconds the white flash takes to come up, and to go, at each edge. LAYOUT_FLASH in render.py
+	join: 0.05, // seconds: a layout starting this close after another ends joins it, no slide between. LAYOUT_JOIN in render.py
 	maxItems: 10,
 	seconds: 5,
 	fileZoom: { min: 1, max: 3 },
@@ -79,13 +80,28 @@ export const layoutAt = (layouts: VideoLayout[] | undefined, t: number) => layou
 
 const ease = (u: number) => (u < 0.5 ? 4 * u ** 3 : 1 - (-2 * u + 2) ** 3 / 2);
 
-// How far it is split at final-video second t: 0 = the whole screen is the speaker, 1 = split. Only Slide moves;
-// a layout shorter than both slides slides over half its time each way. Same as layout_ease_expr in render.py.
-export function layoutProgress(l: VideoLayout, t: number) {
+// Which edges of l another layout already covers, so l doesn't slide there: one ending where l starts (within
+// LAYOUT.join), or showing across that moment. Two layouts end to end once slid out and back in, and the whole
+// speaker flashed between them (coach, 15 Nov). Same as layout_joins in render.py.
+export function layoutJoins(l: VideoLayout, layouts: VideoLayout[] | undefined) {
+	const others = (layouts ?? []).filter((m) => m !== l);
+	return {
+		start: others.some((m) => m.start < l.start && m.end >= l.start - LAYOUT.join),
+		end: others.some((m) => m.end > l.end && m.start <= l.end + LAYOUT.join),
+	};
+}
+
+// How far it is split at final-video second t: 0 = the whole screen is the speaker, 1 = split. Only Slide moves, and
+// not at an edge another layout covers (layoutJoins); a layout shorter than its slides slides over its time shared
+// between them. layouts: all of them, l among them. Same as layout_ease_expr in render.py.
+export function layoutProgress(l: VideoLayout, t: number, layouts: VideoLayout[] | undefined) {
 	if (t < l.start || t >= l.end) return 0;
 	if (l.enter !== "slide") return 1;
-	const d = Math.min(LAYOUT.slide, (l.end - l.start) / 2);
-	return ease(Math.max(0, Math.min(1, (t - l.start) / d, (l.end - t) / d)));
+	const join = layoutJoins(l, layouts);
+	const slides = (join.start ? 0 : 1) + (join.end ? 0 : 1);
+	if (!slides) return 1;
+	const d = Math.min(LAYOUT.slide, (l.end - l.start) / slides);
+	return ease(Math.max(0, Math.min(1, join.start ? 1 : (t - l.start) / d, join.end ? 1 : (l.end - t) / d)));
 }
 
 // The white flash over the picture at final-video second t, 0..1: up to full at each edge of a Flash layout, from
