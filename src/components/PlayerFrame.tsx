@@ -246,8 +246,13 @@ function FrameEdge({ f, W, H, scale, box, onChange }: { f: FrameMe; W: number; H
 		// The point of the speaker in the frame's middle: dragging right brings a point further left there.
 		else if (d.mode === "me") onChange(f.id, { meX: clamp(d.from.meX - dx / d.from.zoom, 0, 1), meY: clamp(d.from.meY - dy / d.from.zoom, 0, 1) });
 		else {
+			// The shape and the picture in it grow together (coach, 15 Nov), so the same part of the speaker stays in the
+			// shape; Size and Zoom in the box still set them one at a time. The growth stops where either one hits its limit.
 			const middle = middleOf(d.from);
-			onChange(f.id, { size: clamp((d.from.size * Math.hypot(e.clientX - middle.x, e.clientY - middle.y)) / d.reach, FRAME.size.min, FRAME.size.max) });
+			const lo = Math.max(FRAME.size.min / d.from.size, FRAME.zoom.min / d.from.zoom);
+			const hi = Math.min(FRAME.size.max / d.from.size, FRAME.zoom.max / d.from.zoom);
+			const grow = Math.min(hi, Math.max(lo, Math.hypot(e.clientX - middle.x, e.clientY - middle.y) / d.reach));
+			onChange(f.id, { size: clamp(d.from.size * grow, FRAME.size.min, FRAME.size.max), zoom: clamp(d.from.zoom * grow, FRAME.zoom.min, FRAME.zoom.max) });
 		}
 	};
 	const stop = () => (drag.current = null);
@@ -261,7 +266,7 @@ function FrameEdge({ f, W, H, scale, box, onChange }: { f: FrameMe; W: number; H
 			)}
 			{onChange && (
 				<div
-					title="Drag to move the frame. Drag the corner to resize it. Drag the dot to move yourself inside it."
+					title="Drag to move the frame. Drag the corner to resize it with you inside. Drag the dot to move yourself inside it."
 					onClick={(e) => moved.current && e.stopPropagation()}
 					onPointerDown={(e) => start(e, "move")}
 					{...handle}
