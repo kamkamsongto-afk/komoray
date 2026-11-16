@@ -286,6 +286,7 @@ export function ScriptView({
 	const gone = useMemo(() => new Set(deleted), [deleted]);
 	// Preview = the final video (cuts, 9:16, subtitles), built live in the browser. Original = the raw upload.
 	const [mode, setMode] = useState<"preview" | "original">("preview");
+	const [speed, setSpeed] = useState(1); // the preview's; outlives the player, which is made again after the Original
 	const [panel, setPanel] = useState<Panel | null>(null);
 	const [focusBanner, setFocusBanner] = useState<string | null>(null);
 	const [focusCutout, setFocusCutout] = useState<string | null>(null);
@@ -448,6 +449,8 @@ export function ScriptView({
 			selected.forEach((i) => (remove ? next.add(i) : next.delete(i)));
 			onChange([...next].sort((a, b) => a - b));
 			window.getSelection()?.removeAllRanges();
+			// Clicking a deleted word plays it in the Original; once it is back, back to the edited video at that spot (coach 15 Nov).
+			if (!remove) setMode("preview");
 		},
 		[deleted, selected, onChange],
 	);
@@ -1007,6 +1010,8 @@ export function ScriptView({
 							faces={faces}
 							noZoom={noZoom}
 							zoomParts={zoomParts}
+							speed={speed}
+							onSpeedChange={setSpeed}
 							onFail={(error) => {
 								reportError("studio player", error.message);
 								setStudioFailed(true);
@@ -1463,7 +1468,10 @@ export function ScriptView({
 						)}
 						{!selected.length && deleted.length > 0 && (
 							<button
-								onClick={() => onChange([])}
+								onClick={() => {
+								onChange([]);
+								setMode("preview");
+							}}
 								className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5"
 							>
 								<Undo2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
