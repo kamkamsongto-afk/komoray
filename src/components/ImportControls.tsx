@@ -10,6 +10,7 @@ type Props = {
 	onUseAsBanner: (item: LibraryItem) => void; // over the speaker, where the video is now
 	onUseInPicClip?: (item: LibraryItem) => void; // behind the speaker (Cutout). Left out: Cutout isn't on for this person
 	usedNow: Set<string>; // files on the video right now (they can't be deleted)
+	onUploading?: (busy: boolean, added?: boolean) => void; // the Import button's dot (ScriptView): blinks while uploading, green once in
 };
 
 const size = (bytes: number) => (bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`);
@@ -17,7 +18,7 @@ const videoKey = () => new URLSearchParams(window.location.search).get("key");
 
 // The editor's Import box: pictures and clips kept in this project, to use as a banner or in Pic/Clip as
 // often as you like without uploading again (lib/media-library.ts).
-export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow }: Props) {
+export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploading }: Props) {
 	const [items, setItems] = useState<LibraryItem[] | null>(null);
 	const [note, setNote] = useState("");
 	const [uploading, setUploading] = useState<string | null>(null); // "2 of 5"
@@ -44,6 +45,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow }: Props
 		const key = videoKey();
 		if (!key) return;
 		setNote("");
+		onUploading?.(true);
 		const failed: string[] = [];
 		for (const [n, file] of files.entries()) {
 			setUploading(files.length > 1 ? `${n + 1} of ${files.length}` : "");
@@ -59,6 +61,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow }: Props
 			if (!done?.ok) failed.push(`${file.name}: the upload stopped`);
 		}
 		setUploading(null);
+		onUploading?.(false, failed.length < files.length);
 		if (failed.length) setNote(failed.join(" · "));
 		await load();
 	}
