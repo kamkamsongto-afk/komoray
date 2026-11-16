@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { signInWithGoogle, useUser } from "@/components/Account";
+import { HomeLogo } from "@/components/HomeLogo";
 import { EXTRA_PACKS, type PaddleEnv, PLANS, type PricesView } from "@/lib/billing";
 
 // Paddle.js from Paddle's own CDN (not an npm package): the global it sets up, as far as this page uses it.
@@ -94,11 +95,13 @@ export default function PricingPage() {
 
 	return (
 		<main className="font-sans mx-auto flex min-h-screen max-w-5xl flex-col gap-8 p-6">
-			<header className="flex flex-col items-center gap-3 pt-6 text-center">
+			{/* The same logo as every page: dark letters on the light theme, white on the dark one (coach 16 Nov). */}
+			<HomeLogo className="self-start" />
+			<header className="flex flex-col items-center gap-3 text-center">
 				<h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Pick your plan</h1>
 				<p className="text-foreground/70">One counter: minutes. Making a video and translating use the same minutes. Never charged automatically for more.</p>
 				{config?.ready && config.environment === "sandbox" && (
-					<p className="rounded-full bg-amber-500/15 px-3 py-1 text-xs text-amber-700 dark:text-amber-300">Test mode: no real money. Card 4242 4242 4242 4242, any future date, any 3 digits.</p>
+					<p className="rounded-full bg-amber-500/20 px-3 py-1 text-xs text-foreground">Test mode: no real money. Card 4242 4242 4242 4242, any future date, any 3 digits.</p>
 				)}
 				{config && !config.ready && <p className="text-sm text-foreground/60">Buying isn&apos;t open yet.</p>}
 				<div className="flex gap-1 rounded-full bg-foreground/10 p-1 text-sm" role="tablist" aria-label="Billing">
