@@ -1068,9 +1068,10 @@ ZOOM = 1.12
 SMOOTH_PERIOD = 12
 SMOOTH_FADE = 0.75
 PART_GLIDE = 0.8  # seconds a zoom part's push in (or pull back) takes (PART_GLIDE in src/lib/zoom.ts)
-# Seconds a Zoom in part takes to go back at its end, a Zoom out part to come in at its start (at most half the part):
-# they jumped 12% in one frame there (coach 16 Nov). PART_EASE in src/lib/zoom.ts.
-PART_EASE = 0.5
+# A Zoom in part stays close until the next cut, a Zoom out part is close from the cut before, so the jump is hidden by
+# the cut, if that cut is this many seconds away at most (coach 16 Nov: jumping at the edge looked jerky, gliding back
+# added a zoom nobody asked for). PART_HOLD in src/lib/zoom.ts.
+PART_HOLD = 2
 PART_ZOOMS = ("in", "out", "smooth", "cuts")
 CUT_FADE = 0.004  # seconds of sound faded in and out at every cut
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
@@ -1590,9 +1591,10 @@ def no_zoom_frames(segments: list[tuple[int, int, int]], spans: list[dict] | Non
     return merged
 
 
-def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple[int, int, str]]:
-    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind).
-    A part across a cut is one run, so its zoom carries on over the cut. Same as zoomPartFrames in src/lib/zoom.ts."""
+def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple[int, int, str, int, int]]:
+    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind, at, span).
+    A part across a cut is one run, so its zoom carries on over the cut. at, span: where its own push in (or pull back)
+    starts and how long it was before PART_HOLD moved its edge to a cut. Same as zoomPartFrames in src/lib/zoom.ts."""
     runs = []
     for n in parts or []:
         if n.get("zoom") not in PART_ZOOMS:
@@ -1611,27 +1613,37 @@ def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | N
                 run = [lo, hi, n["zoom"]]
         if run:
             runs.append(tuple(run))
-    return sorted(runs)
+    runs = [[lo, hi, kind, lo, hi - lo] for lo, hi, kind in sorted(runs, key=lambda r: r[0])]
+    cuts = [start for start, _, _ in segments[1:]]
+    hold = PART_HOLD * FPS
+
+    def free(a: int, b: int, me: list) -> bool:  # no other part in the way
+        return not any(r is not me and r[0] < b and r[1] > a for r in runs)
+
+    for r in runs:
+        if r[2] == "in":
+            cut = next((c for c in cuts if c >= r[1]), None)
+            if cut is not None and cut - r[1] <= hold and free(r[1], cut, r):
+                r[1] = cut
+        elif r[2] == "out":
+            cut = next((c for c in reversed(cuts) if c <= r[0]), None)
+            if cut is not None and r[0] - cut <= hold and free(cut, r[0], r):
+                r[0] = cut
+    return [tuple(r) for r in runs]
 
 
-def part_zoom_expr(start: int, run: tuple[int, int, str], amount: float = ZOOM) -> str:
+def part_zoom_expr(start: int, run: tuple[int, int, str, int, int], amount: float = ZOOM) -> str:
     """A zoom part's zoom as an ffmpeg expression of the frame number (`in` counts from 1) of a shot
     starting at output frame `start`. Same as partZoom in src/lib/zoom.ts."""
-    lo, hi, kind = run
+    lo, hi, kind, at, span = run
     frame = f"(in-1+{start})"
     length = hi - lo
     if kind == "smooth":
         return f"(1+{amount - 1:.4f}*sin(PI*({frame}-{lo})/{length}))"
-    ease = min(PART_EASE * FPS, length / 2)
-    glide = min(length - ease, PART_GLIDE * FPS)
-
-    def smooth(x: str) -> str:  # eased 0..1: starts and ends gently
-        c = f"min(1,max(0,{x}))"
-        return f"({c}*{c}*(3-2*{c}))"
-
-    if kind == "in":
-        return f"(1+{amount - 1:.4f}*{smooth(f'({frame}-{lo})/{glide}')}*{smooth(f'({hi - 1}-{frame})/{ease}')})"
-    return f"(1+{amount - 1:.4f}*{smooth(f'({frame}-{lo})/{ease}')}*(1-{smooth(f'({frame}-{lo}-{ease})/{glide}')}))"
+    # From where the part starts (at), over its own length at most; held before it (out) or after it (in), see PART_HOLD.
+    x = f"min(1,max(0,({frame}-{at})/{min(span, PART_GLIDE * FPS)}))"
+    k = f"({x}*{x}*(3-2*{x}))"
+    return f"(1+{amount - 1:.4f}*{k if kind == 'in' else f'(1-{k})'})"
 
 
 def zoom_shots(
