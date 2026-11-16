@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { covered } from "./behind";
 import { clock, type CutoutTier, finishSeconds, slowSeconds, type Window } from "./cutout";
 import { type LocalTier, localSupport, makeLocalMatte } from "./cutout-local";
+import { putWithProgress } from "./put-file";
 
 // The editor's side of Cutout (lib/cutout.ts, lib/behind.ts): is it on for this person, how far the
 // speaker's cutout is, and the calls that start one or upload a picture or clip.
@@ -189,7 +190,8 @@ export function useCutout(key: string | null, videoSeconds = 0) {
 
 	// Uploads a picture or clip next to the video. Its name in R2, or an error to show.
 	const upload = useCallback(
-		async (file: File): Promise<{ file: string; kind: "image" | "video" } | { error: string }> => {
+		// onProgress: how much of it is up, 0-100 (coach 16 Nov: a big clip uploaded with no sign it was moving).
+		async (file: File, onProgress?: (percent: number) => void): Promise<{ file: string; kind: "image" | "video" } | { error: string }> => {
 			if (!key) return { error: "No video" };
 			const res = await fetch("/api/cutout/insert", {
 				method: "POST",
@@ -198,8 +200,11 @@ export function useCutout(key: string | null, videoSeconds = 0) {
 			}).catch(() => null);
 			const data = (await res?.json().catch(() => ({}))) as { uploadUrl?: string; file?: string; kind?: "image" | "video"; error?: string } | undefined;
 			if (!res?.ok || !data?.uploadUrl || !data.file || !data.kind) return { error: data?.error ?? "Could not upload. Please try again." };
-			const put = await fetch(data.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file }).catch(() => null);
-			if (!put?.ok) return { error: "The upload stopped. Please try again." };
+			const sent = await putWithProgress(data.uploadUrl, file, onProgress ?? (() => {})).then(
+				() => true,
+				() => false,
+			);
+			if (!sent) return { error: "The upload stopped. Please try again." };
 			local.current[data.file] = URL.createObjectURL(file);
 			setState((s) => ({ ...s, files: { ...s.files, ...local.current } }));
 			return { file: data.file, kind: data.kind };

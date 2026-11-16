@@ -27,6 +27,7 @@ type Props = {
 	thai: boolean; // Thai video: only fonts with Thai letters
 	onReveal?: (id: string, start: number) => void; // show it: the blue line to its start, its strip picked on the timeline
 	onPickImported?: (item: LibraryItem) => void; // a file already in Import, into Pic/Clip without uploading it again (coach 15 Nov)
+	onUploading?: (busy: boolean, added?: boolean) => void; // the Import button's dot (ScriptView), as the Import box's uploads
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -48,7 +49,7 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
-export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal, onPickImported }: Props) {
+export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal, onPickImported, onUploading }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
@@ -70,7 +71,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [askSlow, setAskSlow] = useState(false);
 	const closeAskSlow = useCallback(() => setAskSlow(false), []);
 	const [changing, setChanging] = useState(false); // once cut out, the three qualities fold away until asked for
-	const [uploading, setUploading] = useState(false);
+	const [uploading, setUploading] = useState<number | null>(null); // percent sent, null: not uploading
 	const [notice, setNotice] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
 	// From Import: the project's files, asked for when the list is opened (again each time: one may have just gone in).
@@ -137,12 +138,20 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 
 	async function addInsert(file: File) {
 		setNotice("");
-		setUploading(true);
+		// Too big: said at once, before anything else (coach 16 Nov: a 150 MB+ clip sat there with no word). The server
+		// checks again (api/cutout/insert).
+		const kind = file.type.startsWith("video/") ? "video" : "image";
+		if (file.size > INSERT.maxBytes[kind]) {
+			return setNotice(`${file.name} is ${Math.round(file.size / 1_000_000)} MB. ${kind === "video" ? "Clips" : "Pictures"} can be up to ${Math.round(INSERT.maxBytes[kind] / 1_000_000)} MB.`);
+		}
+		setUploading(0);
+		onUploading?.(true);
 		// A clip shows for as long as it plays (within what may be cut out); a picture for a few seconds.
-		const clipSeconds = file.type.startsWith("video/") ? await clipLength(file) : null;
+		const clipSeconds = kind === "video" ? await clipLength(file) : null;
 		const seeThrough = await hasClearParts(file);
-		const done = await cutout.upload(file);
-		setUploading(false);
+		const done = await cutout.upload(file, (percent) => setUploading(percent));
+		setUploading(null);
+		onUploading?.(false, !("error" in done));
 		if ("error" in done) return setNotice(done.error);
 		const start = startAt();
 		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
@@ -401,10 +410,10 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								fileRef.current?.click();
 							}}
 							aria-pressed={picView === "add"}
-							disabled={uploading || layers.inserts.length >= BEHIND.maxItems}
+							disabled={uploading !== null || layers.inserts.length >= BEHIND.maxItems}
 							className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "add" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
 						>
-							<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading ? "Uploading…" : "Add picture or clip"}
+							<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading ${uploading}%` : "Add picture or clip"}
 						</button>
 						<button
 							onClick={openLibrary}
@@ -436,8 +445,13 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						}}
 					/>
 					{picView === "add" && (
-						<button onClick={() => fileRef.current?.click()} disabled={uploading || layers.inserts.length >= BEHIND.maxItems} className="rounded-md border border-dashed border-foreground/30 px-2 py-6 text-sm text-foreground/70 hover:bg-foreground/5 disabled:opacity-40">
-							{uploading ? "Uploading…" : "Choose a picture or clip from your computer (JPG, PNG, WebP, GIF, MP4, MOV)"}
+						<button onClick={() => fileRef.current?.click()} disabled={uploading !== null || layers.inserts.length >= BEHIND.maxItems} className="relative overflow-hidden rounded-md border border-dashed border-foreground/30 px-2 py-6 text-sm text-foreground/70 hover:bg-foreground/5 disabled:opacity-60">
+							{uploading !== null && <span className="absolute inset-y-0 left-0 bg-blue-600/15 transition-all" style={{ width: `${uploading}%` }} aria-hidden />}
+							<span className="relative">
+								{uploading !== null
+									? `Uploading… ${uploading}%`
+									: `Choose a picture or clip from your computer (JPG, PNG, WebP, GIF up to ${INSERT.maxBytes.image / 1_000_000} MB, MP4, MOV up to ${INSERT.maxBytes.video / 1_000_000} MB)`}
+							</span>
 						</button>
 					)}
 					{picView === "timeline" && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}

@@ -1179,7 +1179,8 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
         best, best_score = len(run), -math.inf
         for k in range(1, len(run) + 1):
             first, last = every[k], every[k - 1]
-            if first["text"] in THAI_NO_START or first["text"] in THAI_ENDINGS or first["text"].startswith("ๆ"):
+            # glue: typed onto the word before it ("ของ|โค้ช" from a fix): a line never starts there (bestBreak in timeline.ts).
+            if first.get("glue") or first["text"] in THAI_NO_START or first["text"] in THAI_ENDINGS or first["text"].startswith("ๆ"):
                 continue
             if k < len(run) and (letters_of(run[:k]) < max(3, max_letters * 0.4) or not fits(every[k:])):
                 continue
@@ -1369,7 +1370,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         if mid is None:
             continue
         half = (w["end"] - w["start"]) / 2 * FPS
-        placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half, "space": w.get("space")})
+        placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half, "space": w.get("space"), "glue": w.get("glue")})
 
     # Group words into short lines.
     gap_frames = LINE_BREAK_GAP * FPS
