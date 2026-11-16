@@ -2502,6 +2502,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
 
 
 PROXY_SIDE = 540  # px, the short side; the preview is at most ~440px wide on screen
+PREVIEW_DOWNLOADED, PREVIEW_MADE = 30, 92  # percent of the preview job each step ends at (proxy): then it goes up
 PROXY_KEYFRAME_FRAMES = 15  # a full picture every half second at 30 fps
 PROXY_AUDIO_RATE = 24000  # Hz, mono, 16-bit: plenty for speech, and no codec to decode in the browser
 
@@ -2634,16 +2635,23 @@ def proxy(
     faces_url: str | None = None,
     thumb_url: str | None = None,
     clean_audio_url: str | None = None,
+    progress_url: str | None = None,
 ) -> dict:
-    """The editor's preview copy: same timing as the original, just smaller and quick to jump around in."""
+    """The editor's preview copy: same timing as the original, just smaller and quick to jump around in.
+    progress_url: how far it is (0-99), for the upload page's percentage (coach 16 Nov: a bar that only ran made
+    people think it hung). Downloading is the first PREVIEW_DOWNLOADED %, making the picture up to PREVIEW_MADE %."""
+    report = progress_reporter(progress_url)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
             src, out, pcm = workdir / "source", workdir / "proxy.mp4", workdir / "proxy-audio.pcm"
-            urllib.request.urlretrieve(video_url, src)
-            result = subprocess.run(proxy_command(src, out, pcm, has_audio(src)), capture_output=True, text=True)
-            if result.returncode != 0:
-                raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
+            urllib.request.urlretrieve(video_url, src, lambda blocks, size, total: total > 0 and report(PREVIEW_DOWNLOADED * min(1.0, blocks * size / total)))
+            report(PREVIEW_DOWNLOADED, force=True)
+            frames = max(1, round(duration_of(src) * FPS))
+            code, errors = run_counting_frames(proxy_command(src, out, pcm, has_audio(src)), workdir, frames, lambda part: report(PREVIEW_DOWNLOADED + min(1.0, part) * (PREVIEW_MADE - PREVIEW_DOWNLOADED)))
+            if code != 0:
+                raise RuntimeError(f"ffmpeg failed: {errors[-1500:]}")
+            report(PREVIEW_MADE, force=True)
             # Out at once: the editor plays (and draws the wave, offers the speed) from these two. They waited for the
             # faces, the thumb and the optimized sound before, ~45 s of 85 s on a 4.4-minute video (coach 16 Nov).
             # Both at once (the website plays once both exist, lib/proxy.ts previewFiles): one after the other took
@@ -2691,7 +2699,7 @@ def start(body: dict) -> dict:
             return {"error": str(err)}
         return {"ok": True}
     if body.get("kind") == "proxy":
-        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"))
+        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"), body.get("progressUrl"))
     elif body.get("kind") == "faces":
         call = faces.spawn(body["videoUrl"], body["facesUrl"], body.get("thumbUrl"))
     else:

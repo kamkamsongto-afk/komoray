@@ -3,7 +3,7 @@ import { refundListen, settleDeadListen, startListening } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
 import { isLanguage } from "@/lib/languages";
-import { CLEAN_SOUND, facesFor, mediaUrl, previewFiles, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
+import { CLEAN_SOUND, facesFor, mediaUrl, previewFiles, previewPercent, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import type { Faces } from "@/lib/framing";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
@@ -106,7 +106,9 @@ export async function GET(request: Request) {
 				: proxy === "done"
 					? await facesFor(key, env)
 					: { faces: null, pending: false };
-		return Response.json({ status: "done", editKey, ...edit, videoUrl, studio, proxy, cleanPending, faces, facesPending });
+		// The upload page's percentage while the preview is made (it waits for it before opening the AI studio).
+		const preparing = proxy === "done" ? 100 : await previewPercent(key);
+		return Response.json({ status: "done", editKey, ...edit, videoUrl, studio, proxy, cleanPending, faces, facesPending, preparing });
 	}
 
 	const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));
@@ -114,5 +116,6 @@ export async function GET(request: Request) {
 	if (await settleDeadListen(key)) return Response.json({ status: "failed", error: "This took too long and stopped. Your minutes are back. Please try again." });
 
 	const started = await exists(siblingKey(key, "analyze.json"));
-	return Response.json({ status: started ? "processing" : "none" });
+	// Still listening: the preview is being made meanwhile, and its number is what the upload page shows.
+	return Response.json({ status: started ? "processing" : "none", preparing: started ? await previewPercent(key) : 0 });
 }

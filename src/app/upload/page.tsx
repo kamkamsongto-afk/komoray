@@ -132,7 +132,8 @@ export default function UploadPage() {
 	};
 	const [analyzing, setAnalyzing] = useState(false);
 	const [opening, setOpening] = useState(false); // the script is ready and the AI studio is loading
-	const [preparing, setPreparing] = useState(false); // listened: waiting for the preview so the AI studio opens ready
+	const [preparing, setPreparing] = useState(false);
+	const [prepared, setPrepared] = useState(0); // how far the preview is, 0-100 (api/analyze preparing): the bar after the upload // listened: waiting for the preview so the AI studio opens ready
 	const [analysisError, setAnalysisError] = useState("");
 	const [dragging, setDragging] = useState(false);
 	const [again, setAgain] = useState(false); // from the editor: listen to this video again, in another language
@@ -269,18 +270,21 @@ export default function UploadPage() {
 			while (Date.now() < giveUpAt) {
 				await wait(ANALYZE_POLL_MS);
 				const poll = await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`);
-				const data = (await poll.json()) as { status?: string; error?: string };
+				const data = (await poll.json()) as { status?: string; error?: string; preparing?: number };
+				setPrepared((p) => Math.max(p, data.preparing ?? 0));
 				if (data.status === "done") {
 					// Wait for the preview too, so the AI studio opens ready to play, with the wave and the speed (coach 16 Nov:
 					// it opened after listening, then made you wait about a minute more). Never stuck here: a failed preview
 					// or a long wait opens it anyway, and the AI studio waits for the preview by itself as before.
 					setPreparing(true);
 					const readyBy = Date.now() + PREVIEW_WAIT_MS;
-					let preview = data as { studio?: unknown; proxy?: string };
+					let preview = data as { studio?: unknown; proxy?: string; preparing?: number };
 					while (!preview.studio && preview.proxy !== "failed" && Date.now() < readyBy) {
 						await wait(ANALYZE_POLL_MS);
 						preview = (await (await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`)).json().catch(() => ({}))) as typeof preview;
+						setPrepared((p) => Math.max(p, preview.preparing ?? 0));
 					}
+					setPrepared(100);
 					setOpening(true); // keeps the waiting screen up until the next page has loaded
 					return openEditor(videoKey);
 				}
@@ -348,6 +352,9 @@ export default function UploadPage() {
 				<UploadWorking
 					stage={status === "uploading" ? "upload" : opening ? "open" : preparing ? "prepare" : "listen"}
 					progress={progress}
+					// One number from start to end (coach 16 Nov: a bar that only ran for a minute looked hung): the upload is the
+					// first 60%, the preview being made the rest. Still listening holds it below 100.
+					percent={status === "uploading" ? Math.round(progress * 0.6) : Math.min(opening ? 100 : preparing ? 99 : 98, 60 + Math.round(prepared * 0.4))}
 					fileName={message}
 					onCancel={queued ? () => queue(false) : undefined}
 				/>
