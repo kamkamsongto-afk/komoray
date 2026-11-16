@@ -62,6 +62,7 @@ type RenderState = {
 	status: "none" | "processing" | "done" | "failed";
 	videoUrl?: string;
 	downloadUrl?: string;
+	stopped?: boolean; // Stop was pressed (api/render DELETE): said in grey, not as an error
 	error?: string;
 	part?: RenderPart; // Make this part: only this stretch of the final video (lib/render-part.ts)
 	wholeUrl?: string; // with a part: the whole video made before, if there is one
@@ -741,6 +742,19 @@ export default function EditPage() {
 		}
 	}
 
+	// Stop (coach 15 Nov: Make video pressed by mistake). Closing the page never stopped Modal.
+	async function stopVideo() {
+		if (!key || render.status !== "processing") return;
+		const part = render.part;
+		renderRun.current += 1; // a status answer on its way is about the job being stopped
+		const res = await fetch(`/api/render?key=${encodeURIComponent(key)}${part ? "&part=1" : ""}`, { method: "DELETE" }).catch(() => null);
+		const data = (await res?.json().catch(() => null)) as { status?: string } | null;
+		if (data?.status === "stopped") return setRender({ status: "failed", stopped: true, error: "Stopped. Your edits are all here: press Make video when you're ready.", ...(part && { part }) });
+		// It had just finished (or failed) as Stop was pressed: show what it is now.
+		const now = (await (await fetch(`/api/render?key=${encodeURIComponent(key)}`)).json().catch(() => null)) as RenderState | null;
+		if (now) setRender(now);
+	}
+
 	if (user === undefined) return <main className="min-h-screen" />;
 	if (user === null) {
 		return (
@@ -1029,13 +1043,18 @@ export default function EditPage() {
 					<div className="h-2 w-full overflow-hidden rounded-full bg-foreground/10">
 						<div className="h-full rounded-full bg-blue-600 transition-[width] duration-500" style={{ width: `${render.percent ?? 0}%` }} />
 					</div>
-					<p className="text-sm text-foreground/70">
-						{render.percent === undefined ? "Getting started…" : `Making your ${render.part ? `part (${clock(render.part.start)}–${clock(render.part.end)})` : "video"}… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
+					<p className="flex flex-wrap items-center gap-2 text-sm text-foreground/70">
+						<span>
+							{render.percent === undefined ? "Getting started…" : `Making your ${render.part ? `part (${clock(render.part.start)}–${clock(render.part.end)})` : "video"}… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
+						</span>
+						<button onClick={() => void stopVideo()} className="rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5" title="Stop making it. Closing the page doesn't stop it.">
+							Stop
+						</button>
 					</p>
 				</div>
 			)}
 			{render.status === "failed" && (
-				<p className="text-sm text-red-500">
+				<p className={`text-sm ${render.stopped ? "text-foreground/60" : "text-red-500"}`}>
 					{render.part ? `This part could not be made: ${render.error}` : render.error}
 					{render.part && render.wholeUrl && (
 						<>
