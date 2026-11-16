@@ -6,7 +6,7 @@ import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
 import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
-import { addToLibrary, filesInUse, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { addToLibrary, filesInUse, type LibraryItem, loadLibrary, projectFileSrc } from "@/lib/media-library";
 import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { DEFAULT_STYLE, fontMetrics, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -336,6 +336,11 @@ export function ScriptView({
 	// The dot on the Import button, as on Cutout (coach 15 Nov): blinks while files go in (also those dropped for a
 	// layout), green once one is in until the button is pressed. A count: two uploads can overlap.
 	const [importBusy, setImportBusy] = useState(0);
+	// Asked for as the editor opens, so the Import box (and Layout, Pic/Clip) show the files at once (coach 15 Nov).
+	useEffect(() => {
+		const key = new URLSearchParams(window.location.search).get("key");
+		if (key) void loadLibrary(key);
+	}, []);
 	const [importNews, setImportNews] = useState(false);
 	const importUploading = (busy: boolean, added = false) => {
 		setImportBusy((n) => Math.max(0, n + (busy ? 1 : -1)));
@@ -381,6 +386,7 @@ export function ScriptView({
 			importUploading(true);
 			const added = await addToLibrary(key, drop.file);
 			importUploading(false, !("error" in added));
+			void loadLibrary(key, true); // the Import box shows it at once next time it opens
 			setLibraryVersion((v) => v + 1);
 			if ("error" in added) return setLayoutNote(added.error);
 			item = added.item;
