@@ -18,6 +18,9 @@ export type ZoomPart = Span & { zoom: PartZoom };
 export const PART_ZOOMS: PartZoom[] = ["in", "out", "smooth", "cuts"];
 export const ZOOM_NAMES: Record<PartZoom, string> = { in: "Zoom in", out: "Zoom out", smooth: "Back and forth", cuts: "Jump cut" };
 export const PART_GLIDE = 0.8; // seconds a part's push in (or pull back) takes, or the whole part if shorter
+// Seconds a Zoom in part takes to go back at its end, and a Zoom out part to come in at its start (at most half the part).
+// Without it they jumped 12% in one frame there (coach 16 Nov, VID20261115110615). Same as PART_EASE in render.py.
+export const PART_EASE = 0.5;
 export const MAX_ZOOM_PARTS = 300;
 
 // Parts checked as they come from the browser (or the AI): real kinds, inside the video, not over each other.
@@ -76,9 +79,15 @@ export function partZoom(run: { from: number; to: number; zoom: PartZoom }, f: n
 	if (run.zoom === "cuts") return amount;
 	const length = run.to - run.from;
 	if (run.zoom === "smooth") return 1 + (amount - 1) * Math.sin((Math.PI * (f - run.from)) / length);
-	const x = Math.min(1, (f - run.from) / Math.min(length, PART_GLIDE * FPS));
-	const k = x * x * (3 - 2 * x); // eased: starts and ends gently
-	return 1 + (amount - 1) * (run.zoom === "in" ? k : 1 - k);
+	// eased: starts and ends gently. ease = the part's way in (or out) at its edge, glide = the push in (or pull back).
+	const smooth = (x: number) => {
+		const c = Math.min(1, Math.max(0, x));
+		return c * c * (3 - 2 * c);
+	};
+	const ease = Math.min(PART_EASE * FPS, length / 2);
+	const glide = Math.min(length - ease, PART_GLIDE * FPS);
+	if (run.zoom === "in") return 1 + (amount - 1) * smooth((f - run.from) / glide) * smooth((run.to - 1 - f) / ease);
+	return 1 + (amount - 1) * smooth((f - run.from) / ease) * (1 - smooth((f - run.from - ease) / glide));
 }
 
 export const SMOOTH_FADE = 0.75; // seconds to glide out before (and back in after) a part with no zoom

@@ -1068,6 +1068,9 @@ ZOOM = 1.12
 SMOOTH_PERIOD = 12
 SMOOTH_FADE = 0.75
 PART_GLIDE = 0.8  # seconds a zoom part's push in (or pull back) takes (PART_GLIDE in src/lib/zoom.ts)
+# Seconds a Zoom in part takes to go back at its end, a Zoom out part to come in at its start (at most half the part):
+# they jumped 12% in one frame there (coach 16 Nov). PART_EASE in src/lib/zoom.ts.
+PART_EASE = 0.5
 PART_ZOOMS = ("in", "out", "smooth", "cuts")
 CUT_FADE = 0.004  # seconds of sound faded in and out at every cut
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
@@ -1619,9 +1622,16 @@ def part_zoom_expr(start: int, run: tuple[int, int, str], amount: float = ZOOM) 
     length = hi - lo
     if kind == "smooth":
         return f"(1+{amount - 1:.4f}*sin(PI*({frame}-{lo})/{length}))"
-    x = f"min(1,({frame}-{lo})/{min(length, PART_GLIDE * FPS)})"
-    k = f"({x}*{x}*(3-2*{x}))"
-    return f"(1+{amount - 1:.4f}*{k if kind == 'in' else f'(1-{k})'})"
+    ease = min(PART_EASE * FPS, length / 2)
+    glide = min(length - ease, PART_GLIDE * FPS)
+
+    def smooth(x: str) -> str:  # eased 0..1: starts and ends gently
+        c = f"min(1,max(0,{x}))"
+        return f"({c}*{c}*(3-2*{c}))"
+
+    if kind == "in":
+        return f"(1+{amount - 1:.4f}*{smooth(f'({frame}-{lo})/{glide}')}*{smooth(f'({hi - 1}-{frame})/{ease}')})"
+    return f"(1+{amount - 1:.4f}*{smooth(f'({frame}-{lo})/{ease}')}*(1-{smooth(f'({frame}-{lo}-{ease})/{glide}')}))"
 
 
 def zoom_shots(
