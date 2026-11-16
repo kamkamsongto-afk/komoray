@@ -479,7 +479,7 @@ export function PlayerFrame({
 	// middle and never pushes the others: pushing made the whole line shake, like a seizure. Same in
 	// bounce_events in render.py.
 	const motion = motionScale(
-		subtitle.motion,
+		subtitle.motion === "pop" && line?.afterPause === false ? "none" : subtitle.motion, // pops only after a pause (timeline.ts)
 		FPS,
 		line ? frame - line.from : 0,
 		line ? line.parts.map((p) => p.from - line.from) : [],

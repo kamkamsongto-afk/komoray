@@ -28,6 +28,10 @@ const START_BONUS = 8; // frames: a phrase start or a polite ending is worth a p
 const THAI_LETTER_EM = 0.44; // how wide a Thai letter is, in text sizes: to work out what letter spacing costs
 const THAI_PAUSE = 0.15; // a pause this long inside a Thai line gets a space
 const LINE_BREAK_GAP = 0.5;
+// Pop only for a line said after a pause this long (seconds). Lines said straight on just change: quick speech made a
+// new line pop every 0.6 s, which looked like the subtitles flickering (coach 16 Nov, VID20261115124127 4:14). Same as
+// POP_PAUSE in render.py.
+const POP_PAUSE = 0.3;
 
 // Auto zoom (lib/zoom.ts) grows the picture around this point when no face was found: a little above
 // the middle, where the face usually is. Same as ZOOM_ORIGIN in render.py.
@@ -39,7 +43,8 @@ export type Segment = { from: number; trim: number; frames: number };
 // row2 = the part that starts the second row (Two lines look), if the line is split.
 // piece = the stretch of the original video this line is in, once the video has been Split: dragging the line
 // moves that stretch's subtitles only. position = where that stretch's subtitles were moved to, if they were.
-export type Line = { from: number; to: number; text: string; parts: { text: string; from: number }[]; row2?: number; piece?: [number, number]; position?: number };
+// afterPause: the first line, or one said after a pause (POP_PAUSE): only these pop in (motion.ts).
+export type Line = { from: number; to: number; text: string; parts: { text: string; from: number }[]; row2?: number; piece?: [number, number]; position?: number; afterPause?: boolean };
 
 // The stretch between the Splits around second t of the original video.
 export function pieceAt(splits: number[], t: number, end: number): [number, number] {
@@ -242,6 +247,8 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		const source = lineSource(line[0].start, segments);
 		const position = source === null ? undefined : spots.find((s) => source >= s.start && source < s.end)?.position;
 		const piece = source !== null && splits.length ? pieceAt(splits, source, videoEnd) : undefined;
-		return { from: line[0].start, to, text: texts.join(""), parts: texts.map((text, k) => ({ text, from: line[k].start })), row2, piece, position };
+		const before = groups[i - 1];
+		const afterPause = !before || line[0].start - before[before.length - 1].end >= POP_PAUSE * FPS;
+		return { from: line[0].start, to, text: texts.join(""), parts: texts.map((text, k) => ({ text, from: line[k].start })), row2, piece, position, afterPause };
 	});
 }

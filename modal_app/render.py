@@ -93,6 +93,9 @@ LINE_LIMITS = {
 }
 THAI_PAUSE = 0.15  # a pause this long inside a Thai line gets a space
 LINE_BREAK_GAP = 0.5  # a pause this long starts a new subtitle line
+# Pop only for a line said after a pause this long: lines said straight on just change, or quick speech popped a new
+# line every 0.6 s and looked like flickering (coach 16 Nov). Same as POP_PAUSE in timeline.ts.
+POP_PAUSE = 0.3
 
 # The editor's fonts (FONTS in src/lib/subtitle-style.ts) by their name inside the font file.
 FONTS = {
@@ -1065,6 +1068,10 @@ ZOOM = 1.12
 SMOOTH_PERIOD = 12
 SMOOTH_FADE = 0.75
 PART_GLIDE = 0.8  # seconds a zoom part's push in (or pull back) takes (PART_GLIDE in src/lib/zoom.ts)
+# A Zoom in part stays close until the next cut, a Zoom out part is close from the cut before, so the jump is hidden by
+# the cut, if that cut is this many seconds away at most (coach 16 Nov: jumping at the edge looked jerky, gliding back
+# added a zoom nobody asked for). PART_HOLD in src/lib/zoom.ts.
+PART_HOLD = 2
 PART_ZOOMS = ("in", "out", "smooth", "cuts")
 CUT_FADE = 0.004  # seconds of sound faded in and out at every cut
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
@@ -1393,8 +1400,10 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     draw_box = look == "box" and (float(style.get("boxRadius") or 0) > 0 or motion == "bounce")
     box_fill = f"\\1c{ass_colour(style.get('boxColor', '#000000'))}\\1a{alpha_of(float(style.get('boxOpacity', 0.75)))}"
     text_layer = 1 if draw_box else 0
+    all_motion = motion
     for i, line in enumerate(lines):
         start = line[0]["start"]
+        motion = all_motion if all_motion != "pop" or i == 0 or start - lines[i - 1][-1]["end"] >= POP_PAUSE * FPS else "none"
         # A piece moved on its own (spots, dragged in the preview): this line's distance from the bottom.
         source = source_at(start, segments)
         spot = next((s for s in spots if source is not None and s["start"] <= source < s["end"]), None)
@@ -1582,9 +1591,10 @@ def no_zoom_frames(segments: list[tuple[int, int, int]], spans: list[dict] | Non
     return merged
 
 
-def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple[int, int, str]]:
-    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind).
-    A part across a cut is one run, so its zoom carries on over the cut. Same as zoomPartFrames in src/lib/zoom.ts."""
+def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple[int, int, str, int, int]]:
+    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind, at, span).
+    A part across a cut is one run, so its zoom carries on over the cut. at, span: where its own push in (or pull back)
+    starts and how long it was before PART_HOLD moved its edge to a cut. Same as zoomPartFrames in src/lib/zoom.ts."""
     runs = []
     for n in parts or []:
         if n.get("zoom") not in PART_ZOOMS:
@@ -1603,18 +1613,35 @@ def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | N
                 run = [lo, hi, n["zoom"]]
         if run:
             runs.append(tuple(run))
-    return sorted(runs)
+    runs = [[lo, hi, kind, lo, hi - lo] for lo, hi, kind in sorted(runs, key=lambda r: r[0])]
+    cuts = [start for start, _, _ in segments[1:]]
+    hold = PART_HOLD * FPS
+
+    def free(a: int, b: int, me: list) -> bool:  # no other part in the way
+        return not any(r is not me and r[0] < b and r[1] > a for r in runs)
+
+    for r in runs:
+        if r[2] == "in":
+            cut = next((c for c in cuts if c >= r[1]), None)
+            if cut is not None and cut - r[1] <= hold and free(r[1], cut, r):
+                r[1] = cut
+        elif r[2] == "out":
+            cut = next((c for c in reversed(cuts) if c <= r[0]), None)
+            if cut is not None and r[0] - cut <= hold and free(cut, r[0], r):
+                r[0] = cut
+    return [tuple(r) for r in runs]
 
 
-def part_zoom_expr(start: int, run: tuple[int, int, str], amount: float = ZOOM) -> str:
+def part_zoom_expr(start: int, run: tuple[int, int, str, int, int], amount: float = ZOOM) -> str:
     """A zoom part's zoom as an ffmpeg expression of the frame number (`in` counts from 1) of a shot
     starting at output frame `start`. Same as partZoom in src/lib/zoom.ts."""
-    lo, hi, kind = run
+    lo, hi, kind, at, span = run
     frame = f"(in-1+{start})"
     length = hi - lo
     if kind == "smooth":
         return f"(1+{amount - 1:.4f}*sin(PI*({frame}-{lo})/{length}))"
-    x = f"min(1,({frame}-{lo})/{min(length, PART_GLIDE * FPS)})"
+    # From where the part starts (at), over its own length at most; held before it (out) or after it (in), see PART_HOLD.
+    x = f"min(1,max(0,({frame}-{at})/{min(span, PART_GLIDE * FPS)}))"
     k = f"({x}*{x}*(3-2*{x}))"
     return f"(1+{amount - 1:.4f}*{k if kind == 'in' else f'(1-{k})'})"
 
