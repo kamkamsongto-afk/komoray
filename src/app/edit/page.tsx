@@ -18,6 +18,7 @@ import type { RenderPart } from "@/lib/render-part";
 import { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { type Pace, PACES, PADDING } from "@/lib/silences";
+import { ding } from "@/lib/ding";
 import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpans, type WordFix } from "@/lib/edit";
 import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
 import { TRANSLATIONS } from "@/lib/languages";
@@ -82,23 +83,6 @@ const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
 const NOTIFY_PREF = "komoray.desktopNotify"; // remembers the checkbox in this browser
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
-
-// Two soft rising tones, made in the browser so there is no sound file to load.
-function ding(audio: AudioContext | null) {
-	if (!audio) return;
-	[880, 1320].forEach((freq, i) => {
-		const osc = audio.createOscillator();
-		const gain = audio.createGain();
-		const at = audio.currentTime + i * 0.18;
-		osc.frequency.value = freq;
-		gain.gain.setValueAtTime(0.0001, at);
-		gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
-		gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
-		osc.connect(gain).connect(audio.destination);
-		osc.start(at);
-		osc.stop(at + 0.4);
-	});
-}
 
 // Let people work in another tab while the video renders: play a sound, flag the browser tab,
 // and pop up a desktop notification only if they ticked the box.

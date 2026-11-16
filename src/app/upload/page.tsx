@@ -13,6 +13,7 @@ import { browserLanguage, isLanguage } from "@/lib/languages";
 import { MAX_FILE_GB } from "@/lib/limits";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
+import { ding } from "@/lib/ding";
 import { DEFAULT_OPTIONS, type UploadOptions as Options } from "@/lib/upload-options";
 
 type Status = "idle" | "uploading" | "done" | "error";
@@ -20,6 +21,7 @@ type Access = AccessStatus & { email: string };
 
 const ANALYZE_POLL_MS = 3000;
 const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
+const DING_MS = 700; // the ding's two tones, before the AI studio opens
 const PREVIEW_WAIT_MS = 3 * 60 * 1000; // the longest the preview is waited for before the AI studio opens anyway
 const LANGUAGE_KEY = "komoray-language"; // the spoken language picked last time (this browser only)
 const KIT_KEY = "komoray-brand-kit"; // the Brand Kit picked last on this computer
@@ -183,12 +185,21 @@ export default function UploadPage() {
 		};
 	}, []);
 
+	// The ding when the AI studio is ready (coach 16 Nov: people wait in another tab). Browsers only allow sound after a
+	// click, so it is made on the one that picks the file (or presses Find silences) and kept until then.
+	const soundRef = useRef<AudioContext | null>(null);
+	const wakeSound = () => {
+		if (!soundRef.current && "AudioContext" in window) soundRef.current = new AudioContext();
+		void soundRef.current?.resume().catch(() => {});
+	};
+
 	// The script is ready: on to the full-screen editor.
 	function openEditor(videoKey: string) {
 		window.location.assign(`/edit?key=${encodeURIComponent(videoKey)}`);
 	}
 
 	async function handleFile(file: File) {
+		wakeSound();
 		setStatus("uploading");
 		setProgress(0);
 		setMessage(file.name);
@@ -250,6 +261,7 @@ export default function UploadPage() {
 	// start=false: it is already running (e.g. reopened from My projects), just wait for the result.
 	async function findSilences(videoKey = key, start = true) {
 		if (!videoKey) return;
+		if (start) wakeSound();
 		setAnalyzing(true);
 		setAnalysisError("");
 		try {
@@ -286,6 +298,9 @@ export default function UploadPage() {
 					}
 					setPrepared(100);
 					setOpening(true); // keeps the waiting screen up until the next page has loaded
+					ding(soundRef.current);
+					if (document.hidden) document.title = "✅ Ready · Komoray";
+					await wait(DING_MS); // the next page would cut the sound off
 					return openEditor(videoKey);
 				}
 				if (data.status === "failed") throw new Error(data.error ?? "Analysis failed");
