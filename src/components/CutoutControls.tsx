@@ -54,10 +54,15 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [focused, setFocused] = useState(focus);
 	// Two lists instead of one long mixed one (coach, 9 Nov).
 	const [tab, setTab] = useState<"text" | "inserts" | "motion">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
+	// Pic/Clip shows one thing at a time (coach 15 Nov): adding from the computer, from Import, or what is on the timeline.
+	const [picView, setPicView] = useState<"add" | "import" | "timeline">(layers.inserts.length ? "timeline" : "add");
 	if (focus !== focused) {
 		setFocused(focus);
 		setOpen(focus);
-		if (layers.inserts.some((i) => i.id === focus)) setTab("inserts");
+		if (layers.inserts.some((i) => i.id === focus)) {
+			setTab("inserts");
+			setPicView("timeline");
+		}
 		else if (layers.texts.some((t) => t.id === focus)) setTab("text");
 	}
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
@@ -70,10 +75,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const fileRef = useRef<HTMLInputElement>(null);
 	// From Import: the project's files, asked for when the list is opened (again each time: one may have just gone in).
 	const [library, setLibrary] = useState<LibraryItem[] | null>(null);
-	const [showLibrary, setShowLibrary] = useState(false);
 	const openLibrary = () => {
-		if (showLibrary) return setShowLibrary(false);
-		setShowLibrary(true);
+		setPicView("import");
 		const key = new URLSearchParams(window.location.search).get("key");
 		fetch(`/api/library?key=${encodeURIComponent(key ?? "")}`)
 			.then((r) => (r.ok ? (r.json() as Promise<{ items?: LibraryItem[] }>) : null))
@@ -147,6 +150,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		const insert: Insert = { ...newClipSound(done.kind), id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
 		setOpen(insert.id);
 		setTab("inserts");
+		setPicView("timeline");
 		setInserts([...layers.inserts, insert]);
 		onReveal?.(insert.id, insert.start);
 	}
@@ -391,23 +395,36 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			)}
 			{tab === "inserts" && (
 				<>
-					<span className="flex items-center gap-2">
-					<button onClick={() => fileRef.current?.click()} disabled={uploading || layers.inserts.length >= BEHIND.maxItems} className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
-						<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading ? "Uploading…" : "Add picture or clip"}
-					</button>
-					{onPickImported && (
+					<div className="grid grid-cols-2 gap-1">
+						<button
+							onClick={() => {
+								setPicView("add");
+								fileRef.current?.click();
+							}}
+							aria-pressed={picView === "add"}
+							disabled={uploading || layers.inserts.length >= BEHIND.maxItems}
+							className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "add" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
+						>
+							<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading ? "Uploading…" : "Add picture or clip"}
+						</button>
 						<button
 							onClick={openLibrary}
-							disabled={layers.inserts.length >= BEHIND.maxItems}
-							aria-pressed={showLibrary}
+							disabled={!onPickImported || layers.inserts.length >= BEHIND.maxItems}
+							aria-pressed={picView === "import"}
 							title="Use a picture or clip already in Import"
-							className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${showLibrary ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
+							className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "import" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
 						>
 							<FolderInput className="h-3.5 w-3.5" aria-hidden /> From Import
 						</button>
-					)}
-					{layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
-					</span>
+						<button
+							onClick={() => setPicView("timeline")}
+							aria-pressed={picView === "timeline"}
+							className={`col-span-2 inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm ${picView === "timeline" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
+						>
+							<ImagePlus className="h-3.5 w-3.5" aria-hidden /> Pic or clip on Timeline
+							{layers.inserts.length > 0 && <span className="text-xs text-foreground/50 tabular-nums">{layers.inserts.length}</span>}
+						</button>
+					</div>
 					<input
 						ref={fileRef}
 						type="file"
@@ -419,7 +436,14 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							if (file) void addInsert(file);
 						}}
 					/>
-					{showLibrary && onPickImported && (
+					{picView === "add" && (
+						<button onClick={() => fileRef.current?.click()} disabled={uploading || layers.inserts.length >= BEHIND.maxItems} className="rounded-md border border-dashed border-foreground/30 px-2 py-6 text-sm text-foreground/70 hover:bg-foreground/5 disabled:opacity-40">
+							{uploading ? "Uploading…" : "Choose a picture or clip from your computer (JPG, PNG, WebP, GIF, MP4, MOV)"}
+						</button>
+					)}
+					{picView === "timeline" && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
+					{picView === "timeline" && !layers.inserts.length && <p className="text-xs text-foreground/60">Nothing on the timeline yet. Add a picture or clip, or pick one from Import.</p>}
+					{picView === "import" && onPickImported && (
 						library === null ? (
 							<p className="text-xs text-foreground/60">Loading…</p>
 						) : library.length === 0 ? (
@@ -430,7 +454,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									<button
 										key={item.file}
 										onClick={() => {
-											setShowLibrary(false);
+											setPicView("timeline");
 											setTab("inserts");
 											onPickImported(item);
 										}}
@@ -536,7 +560,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				</div>
 			))}
 
-			{listing && tab === "inserts" && layers.inserts.length > 0 && (
+			{listing && tab === "inserts" && picView === "timeline" && layers.inserts.length > 0 && (
 				<div className={view === "grid" ? "grid grid-cols-3 gap-1.5" : "flex flex-col gap-1"}>
 					{byTime(layers.inserts).map((i) => {
 						const url = cutout.files[i.file];
