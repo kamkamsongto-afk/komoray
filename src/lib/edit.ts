@@ -161,7 +161,9 @@ function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut
 	return pieces.map((piece, k) => {
 		const from = at((spoken * done) / letters);
 		done += spokenLetters(piece);
-		return { ...run[0], text: piece, start: from.time, end: endOf(from.word, at((spoken * done) / letters)), ...(spaced[k] ? { space: true } : {}) };
+		// glue: cut out of words typed together ("ของโค้ช"), so a subtitle line never breaks before it (coach 16 Nov).
+		const glue = k > 0 && !spaced[k];
+		return { ...run[0], text: piece, start: from.time, end: endOf(from.word, at((spoken * done) / letters)), ...(spaced[k] ? { space: true } : {}), ...(glue ? { glue: true } : {}) };
 	});
 }
 
