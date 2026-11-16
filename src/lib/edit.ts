@@ -108,11 +108,25 @@ const spokenLetters = (text: string) => Math.max(1, text.replace(/[\u0E31\u0E34-
 const PAUSE_INSIDE_FIX = 0.05; // seconds between two words that counts as a pause, not words said in a row
 const CUTTABLE_PAUSE = PACES.tight.minSilence; // the shortest pause any pace cuts (lib/silences.ts)
 
+// Cuts Thai typed with no spaces into words: newmm (lib/newmm.ts). Passed in, not imported: its dictionary is 1.5 MB, so
+// the editor loads it only for a video with Thai fixes, and the render route always has it.
+export type ThaiCut = (text: string) => string[];
+const THAI_LETTER = /[฀-๿]/;
+
 // A fix with spaces in it is several words, each with its own time, or the Highlight look and Bounce
 // treat the whole phrase as one word. The time is shared by letters over when the words were really
 // said (never the pauses between them, which may be cut). space: the user typed a space before it.
-function splitFix<W extends Span & { text: string }>(run: W[], text: string): W[] {
-	const pieces = text.trim().split(/\s+/);
+// Thai typed with no spaces is several words too, once cut (coach 15 Nov: a retyped line lit up as one block).
+function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut?: ThaiCut): W[] {
+	const pieces: string[] = [];
+	const spaced: boolean[] = [];
+	for (const [n, chunk] of text.trim().split(/\s+/).entries()) {
+		const words = cut && THAI_LETTER.test(chunk) ? cut(chunk).filter((w) => w.trim()) : [chunk];
+		for (const [k, word] of (words.length ? words : [chunk]).entries()) {
+			pieces.push(word);
+			spaced.push(n > 0 && k === 0);
+		}
+	}
 	if (pieces.length === 1) {
 		// One word over a pause: timed on its longest stretch of speech, not across the pause. Subtitles place a word
 		// at its middle, and the middle of "ส|่วน|ใหญ่" (263.00-264.04 s) fell in the 263.35-263.62 s silence that was cut,
@@ -147,12 +161,13 @@ function splitFix<W extends Span & { text: string }>(run: W[], text: string): W[
 	return pieces.map((piece, k) => {
 		const from = at((spoken * done) / letters);
 		done += spokenLetters(piece);
-		return { ...run[0], text: piece, start: from.time, end: endOf(from.word, at((spoken * done) / letters)), ...(k ? { space: true } : {}) };
+		return { ...run[0], text: piece, start: from.time, end: endOf(from.word, at((spoken * done) / letters)), ...(spaced[k] ? { space: true } : {}) };
 	});
 }
 
 // The words as they should read in subtitles: a fix takes the place of the words it covers.
-export function fixedWords<W extends Span & { text: string }>(words: W[], fixes: Fix[] = []): W[] {
+// cut: Thai typed with no spaces becomes its words (left out: such a fix stays one word).
+export function fixedWords<W extends Span & { text: string }>(words: W[], fixes: Fix[] = [], cut?: ThaiCut): W[] {
 	const byStart = new Map(fixes.map((f) => [f.from, f]));
 	const out: W[] = [];
 	for (let i = 0; i < words.length; i++) {
@@ -161,7 +176,7 @@ export function fixedWords<W extends Span & { text: string }>(words: W[], fixes:
 			out.push(words[i]);
 			continue;
 		}
-		out.push(...splitFix(words.slice(fix.from, fix.to + 1), fix.text));
+		out.push(...splitFix(words.slice(fix.from, fix.to + 1), fix.text, cut));
 		i = fix.to;
 	}
 	return out;

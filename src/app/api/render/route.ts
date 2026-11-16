@@ -5,6 +5,7 @@ import { fontKeys, type OwnFont } from "@/lib/font-info";
 import { logoKey } from "@/lib/logo";
 import type { Faces } from "@/lib/framing";
 import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
+import { cutThaiWords } from "@/lib/newmm";
 import { type CutoutLayers, covered, cutoutWindows } from "@/lib/behind";
 import type { Banner } from "@/lib/banners";
 import type { FrameMe } from "@/lib/frame-me";
@@ -154,7 +155,7 @@ export async function POST(request: Request) {
 			// Modal just removes every cut, so hand it the deleted words and the timeline's hand cuts as cuts too,
 			// and the words already fixed: it only uses them for subtitles.
 			// faces: frame wide videos around the speaker, as the preview does (lib/framing.ts).
-			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles, ...(part && { part }) },
+			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes, cutThaiWords), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles, ...(part && { part }) },
 			// How the subtitles look, from the editor (lib/subtitle-style.ts).
 			style,
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.
