@@ -2645,10 +2645,14 @@ def proxy(
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
             # Out at once: the editor plays (and draws the wave, offers the speed) from these two. They waited for the
             # faces, the thumb and the optimized sound before, ~45 s of 85 s on a 4.4-minute video (coach 16 Nov).
-            # Sound first: the website takes proxy.mp4 existing to mean it can play (lib/proxy.ts).
-            if audio_url:
-                put(audio_url, pcm.read_bytes(), "application/octet-stream")
-            put(output_url, out.read_bytes(), "video/mp4")
+            # Both at once (the website plays once both exist, lib/proxy.ts previewFiles): one after the other took
+            # 16 s more on a 7.5-minute video (staging, 16 Nov).
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                ups = [pool.submit(put, output_url, out.read_bytes(), "video/mp4")]
+                if audio_url:
+                    ups.append(pool.submit(put, audio_url, pcm.read_bytes(), "application/octet-stream"))
+                for up in ups:
+                    up.result()  # an upload that failed fails the preview, as before
             # Where the face is, from the small copy (quick). Without it the video is framed in the middle.
             if faces_url:
                 try:

@@ -20,6 +20,7 @@ type Access = AccessStatus & { email: string };
 
 const ANALYZE_POLL_MS = 3000;
 const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
+const PREVIEW_WAIT_MS = 3 * 60 * 1000; // the longest the preview is waited for before the AI studio opens anyway
 const LANGUAGE_KEY = "komoray-language"; // the spoken language picked last time (this browser only)
 const KIT_KEY = "komoray-brand-kit"; // the Brand Kit picked last on this computer
 
@@ -131,6 +132,7 @@ export default function UploadPage() {
 	};
 	const [analyzing, setAnalyzing] = useState(false);
 	const [opening, setOpening] = useState(false); // the script is ready and the AI studio is loading
+	const [preparing, setPreparing] = useState(false); // listened: waiting for the preview so the AI studio opens ready
 	const [analysisError, setAnalysisError] = useState("");
 	const [dragging, setDragging] = useState(false);
 	const [again, setAgain] = useState(false); // from the editor: listen to this video again, in another language
@@ -269,6 +271,16 @@ export default function UploadPage() {
 				const poll = await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`);
 				const data = (await poll.json()) as { status?: string; error?: string };
 				if (data.status === "done") {
+					// Wait for the preview too, so the AI studio opens ready to play, with the wave and the speed (coach 16 Nov:
+					// it opened after listening, then made you wait about a minute more). Never stuck here: a failed preview
+					// or a long wait opens it anyway, and the AI studio waits for the preview by itself as before.
+					setPreparing(true);
+					const readyBy = Date.now() + PREVIEW_WAIT_MS;
+					let preview = data as { studio?: unknown; proxy?: string };
+					while (!preview.studio && preview.proxy !== "failed" && Date.now() < readyBy) {
+						await wait(ANALYZE_POLL_MS);
+						preview = (await (await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`)).json().catch(() => ({}))) as typeof preview;
+					}
 					setOpening(true); // keeps the waiting screen up until the next page has loaded
 					return openEditor(videoKey);
 				}
@@ -334,7 +346,7 @@ export default function UploadPage() {
 			)}
 			{(analyzing || queued || opening) && (
 				<UploadWorking
-					stage={status === "uploading" ? "upload" : opening ? "open" : "listen"}
+					stage={status === "uploading" ? "upload" : opening ? "open" : preparing ? "prepare" : "listen"}
 					progress={progress}
 					fileName={message}
 					onCancel={queued ? () => queue(false) : undefined}

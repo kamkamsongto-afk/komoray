@@ -3,16 +3,19 @@
 import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 
-type Stage = "upload" | "listen" | "open";
+// prepare: the preview being made, so the AI studio opens ready to work (coach 16 Nov: it opened, then made you wait again).
+type Stage = "upload" | "listen" | "prepare" | "open";
 
 const STEPS: { id: Stage; name: string }[] = [
 	{ id: "upload", name: "Upload" },
 	{ id: "listen", name: "Listen" },
+	{ id: "prepare", name: "Preview" },
 	{ id: "open", name: "AI studio" },
 ];
 const TITLES: Record<Stage, string> = {
 	upload: "Uploading your video",
 	listen: "Komoray is listening to your video",
+	prepare: "Getting your AI studio ready",
 	open: "Opening your AI studio",
 };
 
