@@ -2650,7 +2650,8 @@ def start(body: dict) -> dict:
     if body.get("kind") == "cancel":
         # Stop pressed on the page (api/render DELETE, coach 15 Nov): end that job, so we don't pay for a video nobody wants.
         try:
-            modal.FunctionCall.from_id(str(body.get("callId", ""))).cancel()
+            # terminate_containers: its machine goes at once. Without it ffmpeg ran on ~23 s after the cancel (staging, 16 Nov).
+            modal.FunctionCall.from_id(str(body.get("callId", ""))).cancel(terminate_containers=True)
         except Exception as err:  # already finished, or not ours to find: nothing left to stop
             return {"error": str(err)}
         return {"ok": True}

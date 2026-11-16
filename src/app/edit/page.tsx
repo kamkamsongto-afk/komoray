@@ -147,6 +147,9 @@ export default function EditPage() {
 	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
 	// False from the press until the server has taken the job. Until then it still answers about the last video.
 	const renderAccepted = useRef(true);
+	// Stop pressed and on its way: the bar holds still and the button says so (it ran on 30% → 43% while Modal was told).
+	const [stopping, setStopping] = useState(false);
+	const stoppingRef = useRef(false);
 	const [unchanged, setUnchanged] = useState(false); // the last press changed nothing: the video before came back (api/render)
 	const [showReady, setShowReady] = useState(false); // the finished-video window: opens by itself when a render finishes
 	const closeReady = useCallback(() => setShowReady(false), []);
@@ -256,7 +259,7 @@ export default function EditPage() {
 			const run = renderRun.current;
 			const res = await fetch(`/api/render?key=${encodeURIComponent(key)}`);
 			const data = (await res.json()) as RenderState;
-			if (run !== renderRun.current) return;
+			if (run !== renderRun.current || stoppingRef.current) return;
 			if (data.status === "processing" && data.percent !== undefined) setRender((s) => (s.status === "processing" ? { ...s, percent: Math.max(s.percent ?? 0, data.percent ?? 0) } : s));
 			if (data.status === "done" || data.status === "failed") {
 				setRender(data);
@@ -751,7 +754,11 @@ export default function EditPage() {
 		if (!key || render.status !== "processing") return;
 		const part = render.part;
 		renderRun.current += 1; // a status answer on its way is about the job being stopped
+		stoppingRef.current = true;
+		setStopping(true);
 		const res = await fetch(`/api/render?key=${encodeURIComponent(key)}${part ? "&part=1" : ""}`, { method: "DELETE" }).catch(() => null);
+		stoppingRef.current = false;
+		setStopping(false);
 		const data = (await res?.json().catch(() => null)) as { status?: string; error?: string } | null;
 		// Never quiet: a Stop that didn't reach us looked like it had worked.
 		if (!res?.ok || !data?.status) {
@@ -1058,8 +1065,8 @@ export default function EditPage() {
 						<span>
 							{render.percent === undefined ? "Getting started…" : `Making your ${render.part ? `part (${clock(render.part.start)}–${clock(render.part.end)})` : "video"}… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
 						</span>
-						<button onClick={() => void stopVideo()} className="rounded-md bg-foreground px-3 py-1 text-xs font-medium text-background hover:opacity-85" title="Stop making it. Closing the page doesn't stop it.">
-							Stop
+						<button onClick={() => void stopVideo()} disabled={stopping} className="rounded-md bg-foreground px-3 py-1 text-xs font-medium text-background hover:opacity-85 disabled:opacity-60" title="Stop making it. Closing the page doesn't stop it.">
+							{stopping ? "Stopping…" : "Stop"}
 						</button>
 					</p>
 				</div>
