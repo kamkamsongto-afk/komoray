@@ -19,6 +19,7 @@ import { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { type Pace, PACES, PADDING } from "@/lib/silences";
 import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpans, type WordFix } from "@/lib/edit";
+import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
 import { TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -800,10 +801,12 @@ export default function EditPage() {
 	const filename = key.split("/").pop() ?? key;
 
 	// The subtitles of the final video as a file, same lines and timing as the preview.
-	function downloadSrt() {
+	async function downloadSrt() {
 		if (!analysis) return;
 		const segments = keepSegments(analysis.duration, allCuts(analysis));
-		saveSrt(toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? []), segments, subtitle.look, subtitle.size, subtitle.letterSpacing)), "");
+		// Thai typed in is cut into words, as in the video (lib/thai-cut.ts).
+		const cut = fixesNeedThaiCut(analysis.fixes) ? await loadThaiCut() : undefined;
+		saveSrt(toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? [], cut), segments, subtitle.look, subtitle.size, subtitle.letterSpacing)), "");
 	}
 
 	function saveSrt(srt: string, suffix: string) {
@@ -938,7 +941,7 @@ export default function EditPage() {
 						</Link>
 					</HeaderMenu>
 					<HeaderMenu icon={Download} label="Export" title="Subtitles files, translations, notifications">
-						<button onClick={downloadSrt} className="inline-flex items-center gap-1 self-start rounded border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
+						<button onClick={() => void downloadSrt()} className="inline-flex items-center gap-1 self-start rounded border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
 							<Download className="h-3 w-3 shrink-0" aria-hidden />
 							Subtitles (.srt)
 						</button>

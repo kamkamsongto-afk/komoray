@@ -3,6 +3,7 @@
 import { Columns2, Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
+import { fixesNeedThaiCut, useThaiCut } from "@/lib/thai-cut";
 import { allCuts, findInside, type Fix, fixedWords, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
@@ -352,9 +353,11 @@ export function ScriptView({
 		() => keepSegments(duration, allCuts({ duration, words, cuts, deleted, manual, keep })),
 		[duration, words, cuts, deleted, manual, keep],
 	);
+	// Thai typed in becomes its words once newmm is here (loaded only for a video with Thai fixes, lib/thai-cut.ts).
+	const thaiCut = useThaiCut(fixesNeedThaiCut(fixes));
 	const lines = useMemo(
-		() => subtitleLines(fixedWords(words, fixes), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots),
-		[words, fixes, segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots],
+		() => subtitleLines(fixedWords(words, fixes, thaiCut), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots),
+		[words, fixes, thaiCut, segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots],
 	);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);

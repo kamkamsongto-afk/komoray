@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { allCuts, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
+import { cutThaiWords } from "@/lib/newmm";
 import { translationName } from "@/lib/languages";
 import { accessFor, NO_INVITE } from "@/lib/access";
 import { getJson, listObjects, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
 	const style = readStyle(edit.style);
-	const lines = subtitleLines(fixedWords(edit.words, edit.fixes), keepSegments(edit.duration, allCuts(edit)), style.look, style.size, style.letterSpacing);
+	const lines = subtitleLines(fixedWords(edit.words, edit.fixes, cutThaiWords), keepSegments(edit.duration, allCuts(edit)), style.look, style.size, style.letterSpacing);
 	const texts = lines.map((l) => l.text.trim());
 
 	const savedKey = siblingKey(key, `translation-${language}.json`);
