@@ -2643,6 +2643,12 @@ def proxy(
             result = subprocess.run(proxy_command(src, out, pcm, has_audio(src)), capture_output=True, text=True)
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
+            # Out at once: the editor plays (and draws the wave, offers the speed) from these two. They waited for the
+            # faces, the thumb and the optimized sound before, ~45 s of 85 s on a 4.4-minute video (coach 16 Nov).
+            # Sound first: the website takes proxy.mp4 existing to mean it can play (lib/proxy.ts).
+            if audio_url:
+                put(audio_url, pcm.read_bytes(), "application/octet-stream")
+            put(output_url, out.read_bytes(), "video/mp4")
             # Where the face is, from the small copy (quick). Without it the video is framed in the middle.
             if faces_url:
                 try:
@@ -2655,12 +2661,9 @@ def proxy(
                     put(thumb_url, (workdir / "thumb.jpg").read_bytes(), "image/jpeg")
                 except Exception as err:
                     print("thumb failed:", err)
-            # Sound first: the website takes proxy.mp4 existing to mean everything is there.
+            # The optimized sound comes last: until then the editor plays the sound as recorded (engine.setCleanAudio).
             if clean_audio_url:
                 put(clean_audio_url, clean_preview(src, pcm, workdir / "proxy-audio-clean.pcm"), "application/octet-stream")
-            if audio_url:
-                put(audio_url, pcm.read_bytes(), "application/octet-stream")
-            put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "bytes": out.stat().st_size, "audioBytes": pcm.stat().st_size}
     except Exception as err:
         if error_url:

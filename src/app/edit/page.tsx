@@ -54,6 +54,7 @@ type Analysis = {
 	pace?: Pace;
 	faces?: Faces | null; // where the speaker's face is (found by Modal after the preview copy)
 	facesPending?: boolean;
+	cleanPending?: boolean; // the preview plays, its optimized sound is still being made (lib/proxy.ts previewFiles)
 	videoUrl: string; // the small preview copy once it exists, else the original
 	studio?: StudioMedia | null; // the preview copy and its sound, for the editor's own player
 	proxy?: "done" | "processing" | "failed" | "none";
@@ -235,7 +236,7 @@ export default function EditPage() {
 
 	// The preview copy (or where the face is) is still being worked out: play the original / frame the
 	// middle until it is ready, then switch.
-	const proxyPending = analysis?.proxy === "processing" || Boolean(analysis?.facesPending);
+	const proxyPending = analysis?.proxy === "processing" || Boolean(analysis?.facesPending) || Boolean(analysis?.cleanPending);
 	useEffect(() => {
 		if (!key || !proxyPending) return;
 		const timer = setInterval(async () => {
@@ -246,7 +247,9 @@ export default function EditPage() {
 				if (!a) return a;
 				// Links already in use stay: new ones (new signatures) would restart the player.
 				const media = a.proxy === "done" ? {} : { videoUrl: data.videoUrl!, studio: data.studio, proxy: data.proxy };
-				return { ...a, ...media, faces: data.faces ?? null, facesPending: data.facesPending };
+				// The optimized sound, once made, joins the links in use (the player takes it without starting again).
+				const clean = a.proxy === "done" && a.studio && !a.studio.cleanAudioUrl && data.studio?.cleanAudioUrl ? { studio: { ...a.studio, cleanAudioUrl: data.studio.cleanAudioUrl } } : {};
+				return { ...a, ...media, ...clean, faces: data.faces ?? null, facesPending: data.facesPending, cleanPending: data.cleanPending };
 			});
 		}, PROXY_POLL_MS);
 		return () => clearInterval(timer);

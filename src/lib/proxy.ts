@@ -37,6 +37,13 @@ export async function proxyStatus(key: string): Promise<ProxyStatus> {
 	return running ? "processing" : "none";
 }
 
+// What the editor can use now (coach 16 Nov: the wave and the speed waited ~85 s for everything): it plays once the
+// preview and its sound are there, and the optimized sound joins later (cleanPending) or never (an old or failed one).
+export async function previewFiles(key: string) {
+	const [video, audio, clean] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm")), exists(siblingKey(key, CLEAN_SOUND))]);
+	return { playable: video && audio, clean };
+}
+
 export const proxyUrl = (key: string, seconds = LINK_SECONDS) => signedUrl(siblingKey(key, "proxy.mp4"), "GET", seconds);
 
 // Links for the editor's own player, read through /api/media on our site (see there why).
