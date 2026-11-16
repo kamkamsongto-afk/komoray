@@ -2534,8 +2534,7 @@ def proxy_command(src: Path, out: Path, pcm: Path, audio: bool) -> list[str]:
     sound = "0:a:0" if audio else "1:a:0"
     cmd += ["-map", "0:v:0", "-map", sound, "-c:a", "aac", "-b:a", "128k"]
     cmd += ["-vf", f"scale='if(gt(iw,ih),-2,{side})':'if(gt(iw,ih),{side},-2)',fps={FPS},format=yuv420p"]
-    # crf 27 (was 26): ~12-16% smaller, so it is ready a little sooner. 28 made it ~45% smaller and it looked broken up (coach 16 Nov)
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-tune", "fastdecode", "-bf", "0"]
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-tune", "fastdecode", "-bf", "0"]
     cmd += ["-g", str(PROXY_KEYFRAME_FRAMES), "-keyint_min", str(PROXY_KEYFRAME_FRAMES), "-sc_threshold", "0"]
     cmd += ["-movflags", "+faststart", str(out)]
     # On the picture's clock: phone files often start their sound after the picture (122 ms on a real clip),

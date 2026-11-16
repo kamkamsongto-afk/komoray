@@ -233,7 +233,9 @@ export default function EditPage() {
 				const media = a.proxy === "done" ? {} : { videoUrl: data.videoUrl!, studio: data.studio, proxy: data.proxy };
 				// The optimized sound, once made, joins the links in use (the player takes it without starting again).
 				const clean = a.proxy === "done" && a.studio && !a.studio.cleanAudioUrl && data.studio?.cleanAudioUrl ? { studio: { ...a.studio, cleanAudioUrl: data.studio.cleanAudioUrl } } : {};
-				return { ...a, ...media, ...clean, faces: data.faces ?? null, facesPending: data.facesPending, cleanPending: data.cleanPending };
+				// The same faces again keep the object in use: a new one each time made the player redraw every poll.
+				const faces = JSON.stringify(data.faces ?? null) === JSON.stringify(a.faces ?? null) ? a.faces : (data.faces ?? null);
+				return { ...a, ...media, ...clean, faces, facesPending: data.facesPending, cleanPending: data.cleanPending };
 			});
 		}, PROXY_POLL_MS);
 		return () => clearInterval(timer);
