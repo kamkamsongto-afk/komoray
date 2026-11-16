@@ -872,7 +872,7 @@ export function PlayerFrame({
 						const box: CSSProperties = {
 							display: "flex",
 							flexDirection: "column",
-							alignItems: "center",
+							alignItems: b.align === "left" ? "flex-start" : b.align === "right" ? "flex-end" : "center", // row_shifts in render.py
 							boxSizing: "content-box",
 							minHeight: Math.max(...rows.map((row) => row.size)) * size,
 							background: b.noBox ? "transparent" : `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,

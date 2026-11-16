@@ -165,6 +165,8 @@ FONT_FILES = {
     "titan": ("TitanOne-Regular.ttf", 1.145),
 }
 LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or logo in a corner (LOGO in PlayerFrame.tsx)
+# Over every banner (layers 3, 5, ... one pair each, banner_events) and subtitle, as the preview draws it last (coach 15 Nov).
+LOGO_LAYER = 100
 
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
@@ -296,10 +298,19 @@ def banner_pose(b: dict, t: float) -> tuple[float, float, float, float]:
     return min(1.0, fade_in, (end - t) / BANNER["fade"]), scale, slide[0] * left, slide[1] * left
 
 
-def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity, layer=2) -> list[str]:
+def row_shifts(align, widths: list[float]) -> list[float]:
+    """How far each row's middle is from the box's, px: 0 when centred; left / right, every row starts / ends where the
+    widest does (the box is the widest row plus its padding), as the preview's alignItems puts them (coach 15 Nov)."""
+    widest = max(widths)
+    side = {"left": -1, "right": 1}.get(align, 0)
+    return [side * (widest - w) / 2 for w in widths]
+
+
+def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity, layer=2, shifts=None) -> list[str]:
     """A banner of several rows that grows as it arrives (Pop, Bounce, Pulse), frame by frame: the box and every row
     grow around the box's middle, as in the preview. Once it stops growing (Pop, Bounce), one plain event each.
-    layer: its box's ASS layer, its letters one above (banner_events)."""
+    layer: its box's ASS layer, its letters one above (banner_events). shifts: each row's middle from the box's (row_shifts)."""
+    shifts = shifts or [0.0] * len(rows)
     start, end = float(b.get("start", 0)), float(b.get("end", 0))
     anim = b.get("anim") or "fade"
     keys = BANNER_ANIMS.get(anim, {}).get("keys")
@@ -317,18 +328,18 @@ def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, mid
         when = f"{ass_time(f / FPS)},{ass_time((f + 1) / FPS)}"
         if not b.get("noBox"):
             events.append(f"Dialogue: {layer},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{colour}\\1a{alpha_of(fill_opacity * opacity)}\\pos({centre + dx:.1f},{box_middle + dy:.1f})\\fscx{scale * 100:.2f}\\fscy{scale * 100:.2f}\\p1}}{box}{{\\p0}}")
-        for (row_text, _), middle, look in zip(rows, middles, looks):
+        for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
             y = box_middle + (middle - box_middle) * scale + dy
             grow = size * scale * 100
-            events.append(f"Dialogue: {layer + 1},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + shift * scale + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
     if last / FPS < end:
         # Settled: still until the end, then the fade out, as banner_motion does it.
         rest = f"{ass_time(last / FPS)},{ass_time(end)}"
         fade = int(BANNER["fade"] * 1000)
         if not b.get("noBox"):
             events.append(f"Dialogue: {layer},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
-        for (row_text, _), middle, look in zip(rows, middles, looks):
-            events.append(f"Dialogue: {layer + 1},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}\\pos({centre:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
+        for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
+            events.append(f"Dialogue: {layer + 1},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}\\pos({centre + shift:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
     return events
 
 
@@ -387,7 +398,9 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         for row_height in heights:
             middles.append(at + row_height / 2)
             at += row_height + gap
-        box_width = max(text_width(row_text, row_style, row_size * size) for row_text, row_size in rows) + 2 * pad_x
+        widths = [text_width(row_text, row_style, row_size * size) for row_text, row_size in rows]
+        box_width = max(widths) + 2 * pad_x
+        shifts = row_shifts(b.get("align"), widths)
         box = rounded_box(box_width, tall, radius)
         named = f"\\fn{name}" if name else ""
         looks = []
@@ -400,12 +413,12 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         if len(rows) > 1 and grows:
             # Growing as one piece: libass grows each line around its own middle, so the rows would come apart
             # from the box. Here every frame puts them where the box's growth takes them (banner_pose).
-            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2)
+            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2, shifts)
             continue
         if not b.get("noBox"):
             events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
-        for (row_text, _), middle, look in zip(rows, middles, looks):
-            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre, middle, seconds, size)}}}{row_text}")
+        for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
+            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size)}}}{row_text}")
     return events
 
 
@@ -1373,7 +1386,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     if logo:
         total = sum(frames for _, _, frames in segments) / FPS
         logo_font = font_tag(logo, own_font, LOGO["size"])
-        events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{{{logo_font}}}{logo}")
+        events.append(f"Dialogue: {LOGO_LAYER},{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{{{logo_font}}}{logo}")
     logo_align = {"top-left": 7, "top-right": 9, "bottom-left": 1, "bottom-right": 3}.get(style.get("logoAt"), 7)
     # Round corners: libass's own box is always square, so the box is drawn under the letters instead.
     # Bounce too: each word is its own subtitle, but the line has one box.
@@ -1842,20 +1855,20 @@ def ffmpeg_command(
         base = frame_filters(parts, base, size, framed, inputs["frames"], plain)
     if banner_files:
         base = banner_file_filters(parts, base, size, banner_files, inputs["banners"])
+    parts.append(
+        f"{base}fps={FPS},"
+        # shaping=complex: Thai tone marks sit above the vowels (simple shaping draws them on top of each other).
+        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}{'[sv]' if logo else '[outv]'}"
+    )
     if logo:
         # Same place as the preview (PlayerFrame): LOGO side / top px from its corner, size px wide.
+        # After the subtitles, so it is over the text banners too, as in the preview (LOGO_LAYER; coach 15 Nov).
         side, edge = LOGO["side"], LOGO["top"]
         x = f"main_w-overlay_w-{side}" if str(logo["at"]).endswith("right") else str(side)
         y = f"main_h-overlay_h-{edge}" if str(logo["at"]).startswith("bottom") else str(edge)
         opacity = min(1.0, max(0.2, float(logo["opacity"])))
         parts.append(f"[1:v]scale={int(logo['size'])}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[lg]")
-        parts.append(f"{base}[lg]overlay={x}:{y}:format=auto[cl]")
-        base = "[cl]"
-    parts.append(
-        f"{base}fps={FPS},"
-        # shaping=complex: Thai tone marks sit above the vowels (simple shaping draws them on top of each other).
-        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}[outv]"
-    )
+        parts.append(f"[sv][lg]overlay={x}:{y}:format=auto[outv]")
 
     jump = ["-ss", str(seek)] if seek else []
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *jump, "-i", str(src)]
