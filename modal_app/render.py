@@ -93,6 +93,9 @@ LINE_LIMITS = {
 }
 THAI_PAUSE = 0.15  # a pause this long inside a Thai line gets a space
 LINE_BREAK_GAP = 0.5  # a pause this long starts a new subtitle line
+# Pop only for a line said after a pause this long: lines said straight on just change, or quick speech popped a new
+# line every 0.6 s and looked like flickering (coach 16 Nov). Same as POP_PAUSE in timeline.ts.
+POP_PAUSE = 0.3
 
 # The editor's fonts (FONTS in src/lib/subtitle-style.ts) by their name inside the font file.
 FONTS = {
@@ -1393,8 +1396,10 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     draw_box = look == "box" and (float(style.get("boxRadius") or 0) > 0 or motion == "bounce")
     box_fill = f"\\1c{ass_colour(style.get('boxColor', '#000000'))}\\1a{alpha_of(float(style.get('boxOpacity', 0.75)))}"
     text_layer = 1 if draw_box else 0
+    all_motion = motion
     for i, line in enumerate(lines):
         start = line[0]["start"]
+        motion = all_motion if all_motion != "pop" or i == 0 or start - lines[i - 1][-1]["end"] >= POP_PAUSE * FPS else "none"
         # A piece moved on its own (spots, dragged in the preview): this line's distance from the bottom.
         source = source_at(start, segments)
         spot = next((s for s in spots if source is not None and s["start"] <= source < s["end"]), None)
