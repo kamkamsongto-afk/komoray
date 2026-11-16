@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Copy, ImagePlus, Megaphone, Plus, Star, Tag, X } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ChevronDown, ChevronRight, Copy, ImagePlus, Megaphone, Plus, Star, Tag, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import type { OwnFont } from "@/lib/font-info";
@@ -490,6 +490,30 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					{!b.noBox && swatches(b, "Box colour", "color", b.color ?? brand)}
 					{swatches(b, "Text", "ink", b.ink ?? bannerInk(b.color ?? brand))}
 					{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
+					{(b.text.includes("\n") || (b.kind === "price" && cleanBannerText(b.sub))) && (
+						// Its rows to one side of the box (coach 15 Nov). One row fills the box, so only for two or more.
+						<div className="flex items-center gap-2 text-xs text-foreground/70">
+							<span className="w-16 shrink-0">Align</span>
+							{(
+								[
+									[undefined, AlignCenter, "Center"],
+									["left", AlignLeft, "Left"],
+									["right", AlignRight, "Right"],
+								] as const
+							).map(([align, Icon, name]) => (
+								<button
+									key={name}
+									onClick={() => update(b.id, { align })}
+									aria-pressed={b.align === align}
+									title={name}
+									aria-label={`Align ${name.toLowerCase()}`}
+									className={`rounded-md border p-1 ${b.align === align ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
+								>
+									<Icon className="h-3.5 w-3.5" aria-hidden />
+								</button>
+							))}
+						</div>
+					)}
 					{(b.text.includes("\n") || (b.kind === "price" && cleanBannerText(b.sub))) &&
 						range(b, "Line gap", b.lineGap ?? 0, BANNER_LINE_GAP.min, BANNER_LINE_GAP.max, 2, String(b.lineGap ?? 0), (n) => update(b.id, { lineGap: n }))}
 					{!b.noBox && range(b, "Corners", b.radius ?? 0, BANNER_RADIUS.min, BANNER_RADIUS.max, 2, String(b.radius ?? 0), (n) => update(b.id, { radius: n }))}
