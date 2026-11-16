@@ -19,6 +19,9 @@ type Props = Omit<PreviewProps, "src"> & {
 	// Cutout layers (lib/behind.ts) and links to their pictures and clips. The speaker is only cut out
 	// when media is the stacked preview copy (proxy-cutout.mp4).
 	cutout?: { layers: CutoutLayers; files: Record<string, string>; onInsert?: (id: string, patch: Partial<Insert>) => void };
+	// Kept by the page, not here: the player is made again after the Original, and the speed went back to 1x (coach 15 Nov).
+	speed: number;
+	onSpeedChange: (speed: number) => void;
 };
 
 const SAMPLE_MS = 250; // debug mode: how often the engine's state is written down
@@ -26,7 +29,7 @@ const SAMPLE_MS = 250; // debug mode: how often the engine's state is written do
 // The final video, played by our own engine (lib/player/engine.ts) on a canvas: smooth cuts on
 // every browser, including Safari on iPhone, iPad and Mac. Same controls and subtitles as PreviewPlayer.
 export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlayer(
-	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, frames, onFrameChange, layouts, onLayoutChange, onLayoutDrop, faces, noZoom, zoomParts, cutout },
+	{ media, segments, lines, subtitle, onSubtitleChange, onTime, onPlayingChange, onFail, banners, onBannersChange, frames, onFrameChange, layouts, onLayoutChange, onLayoutDrop, faces, noZoom, zoomParts, cutout, speed, onSpeedChange },
 	ref,
 ) {
 	const pieces = useMemo(() => toPieces(segments), [segments]);
@@ -42,7 +45,11 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 	const [busy, setBusy] = useState(false);
 	const [outTime, setOutTime] = useState(0);
 	const [debugCount, setDebugCount] = useState<number | null>(null);
-	const [speed, setSpeed] = useState(1);
+	const speedRef = useRef(speed);
+	useEffect(() => {
+		speedRef.current = speed;
+		engineRef.current?.setRate(speed);
+	}, [speed]);
 	// Keep the latest callbacks without restarting the engine when they change.
 	const piecesRef = useRef(pieces);
 	const onTimeRef = useRef(onTime);
@@ -84,6 +91,7 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 			log: (what, detail) => debug.log(what, detail),
 		});
 		engine.setSound(soundRef.current);
+		engine.setRate(speedRef.current);
 		engineRef.current = engine;
 		if (media.stacked) engine.setPerson(personRef.current);
 		engine
@@ -180,10 +188,7 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 			debugCount={debugCount}
 			busy={!loaded || busy}
 			speed={speed}
-			onSpeedChange={(next) => {
-				setSpeed(next);
-				engineRef.current?.setRate(next);
-			}}
+			onSpeedChange={onSpeedChange}
 			cutout={cutout && (media.stacked || cutout.layers.texts.length || cutout.layers.inserts.length) ? { ...cutout, person: media.stacked ? <canvas ref={personRef} className="absolute inset-0 h-full w-full" /> : null } : undefined}
 		>
 			<canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
