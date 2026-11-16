@@ -35,6 +35,7 @@ export type Banner = {
 	ownFont?: OwnFont; // font "own": the account's uploaded font when it was picked (its name and height)
 	lineGap?: number;
 	noBox?: boolean; // letters only, no background (coach, 11 Nov). Added 11 Nov
+	align?: "left" | "right"; // its rows inside the box; left out: centred (coach 15 Nov). Same in banner_events
 	// kind "file": banner-<id>.<ext> next to the video. text is then only its name (the Timeline shows it).
 	// Always placed by x / y; scale 1 = BANNER_FILE.width of the video's width.
 	file?: string;
@@ -185,6 +186,7 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(typeof raw.anim === "string" && raw.anim in BANNER_ANIMS && raw.anim !== "fade" && { anim: raw.anim as BannerAnim }),
 			...(font && { font: font.font, ...(font.ownFont && { ownFont: font.ownFont }) }),
 			...(!file && raw.noBox === true && { noBox: true }),
+			...(!file && (raw.align === "left" || raw.align === "right") && { align: raw.align }),
 			...(!file && Number.isFinite(gap) && gap !== 0 && { lineGap: Math.round(Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, gap))) }),
 			// An uploaded banner always sits where it was put (at first: the middle, near the top).
 			...(file && { file, media: file.endsWith(".mp4") ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),

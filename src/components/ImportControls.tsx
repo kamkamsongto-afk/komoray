@@ -2,7 +2,7 @@
 
 import { Film, ImageIcon, Layers, Plus, Tag, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clipLength, hasClearParts, LIBRARY, LIBRARY_ACCEPT, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { clipLength, hasClearParts, knownLibrary, LIBRARY, LIBRARY_ACCEPT, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 
@@ -19,26 +19,26 @@ const videoKey = () => new URLSearchParams(window.location.search).get("key");
 // The editor's Import box: pictures and clips kept in this project, to use as a banner or in Pic/Clip as
 // often as you like without uploading again (lib/media-library.ts).
 export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploading }: Props) {
-	const [items, setItems] = useState<LibraryItem[] | null>(null);
+	// What this tab already knows at once (the editor asked as it opened), then the fresh list.
+	const [items, setItems] = useState<LibraryItem[] | null>(() => (typeof window === "undefined" ? null : (knownLibrary(videoKey()) ?? null)));
 	const [note, setNote] = useState("");
 	const [uploading, setUploading] = useState<string | null>(null); // "2 of 5"
 	const [removing, setRemoving] = useState<LibraryItem | null>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
 	const [view, setView] = useListView("komoray.importView");
 
-	const load = useCallback(
-		() =>
-			fetch(`/api/library?key=${encodeURIComponent(videoKey() ?? "")}`)
-				.then(async (res) => (res.ok ? ((await res.json()) as { items?: LibraryItem[] }) : {}))
-				.then((data: { items?: LibraryItem[] }) => setItems(data.items ?? []))
-				.catch(() => setItems([])),
-		[],
-	);
+	// fresh: after an upload or a delete, not an answer asked before it.
+	const load = useCallback(async (fresh = false) => {
+		const key = videoKey();
+		if (key) setItems(await loadLibrary(key, fresh));
+	}, []);
 	useEffect(() => {
-		void fetch(`/api/library?key=${encodeURIComponent(videoKey() ?? "")}`)
-			.then(async (res) => (res.ok ? ((await res.json()) as { items?: LibraryItem[] }) : {}))
-			.then((data: { items?: LibraryItem[] }) => setItems(data.items ?? []))
-			.catch(() => setItems([]));
+		let gone = false;
+		const key = videoKey();
+		if (key) void loadLibrary(key).then((list) => !gone && setItems(list));
+		return () => {
+			gone = true;
+		};
 	}, []);
 
 	async function upload(files: File[]) {
@@ -63,7 +63,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 		setUploading(null);
 		onUploading?.(false, failed.length < files.length);
 		if (failed.length) setNote(failed.join(" · "));
-		await load();
+		await load(true);
 	}
 
 	async function remove(item: LibraryItem) {
@@ -72,7 +72,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 		const res = await fetch("/api/library", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, file: item.file }) }).catch(() => null);
 		const data = (await res?.json().catch(() => null)) as { error?: string } | null;
 		if (!res?.ok) setNote(data?.error ?? "Could not delete it. Please try again.");
-		await load();
+		await load(true);
 	}
 
 	const full = (items?.length ?? 0) >= LIBRARY.maxItems;
@@ -98,7 +98,15 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 			/>
 			{note && <p className="text-xs text-red-500">{note}</p>}
 			{items === null ? (
-				<p className="text-xs text-foreground/60">Loading…</p>
+				// Shaped like the files to come, so it reads as "on its way", not "empty".
+				<div className="flex flex-col gap-2" aria-busy="true">
+					<ul className="grid grid-cols-2 gap-2">
+						{[0, 1, 2, 3].map((n) => (
+							<li key={n} className="aspect-video animate-pulse rounded-md bg-foreground/10" />
+						))}
+					</ul>
+					<p className="text-xs text-foreground/60">Loading your files…</p>
+				</div>
 			) : items.length === 0 ? (
 				<p className="text-xs text-foreground/60">
 					Bring in the pictures and clips you use often (JPG, PNG, WebP, GIF up to {LIBRARY.maxBytes.image / 1_000_000} MB, MP4 up to {LIBRARY.maxBytes.video / 1_000_000} MB). They stay in this project: use each one as a banner or in Pic/Clip as often as you like.

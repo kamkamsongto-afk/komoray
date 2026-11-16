@@ -107,3 +107,26 @@ export async function addToLibrary(key: string, file: File): Promise<{ item: Lib
 	const listed = (await done?.json().catch(() => null)) as { item?: LibraryItem } | null;
 	return done?.ok && listed?.item ? { item: listed.item } : { error: `${file.name}: the upload stopped` };
 }
+
+// The Import list, kept in this tab per video (coach 15 Nov: the box stood empty for 3–4 s each time it opened, as if
+// the files had gone). The editor asks for it as it opens; the box shows what it has at once, then the fresh list.
+// One question at a time per video: a second asker gets the one on its way, unless it wants a list from after a
+// change (fresh: just uploaded or deleted). Only the latest question's answer is kept.
+const libraries = new Map<string, { items?: LibraryItem[]; asking?: Promise<LibraryItem[]>; n: number }>();
+export const knownLibrary = (key: string | null) => (key ? libraries.get(key)?.items : undefined);
+export function loadLibrary(key: string, fresh = false): Promise<LibraryItem[]> {
+	const kept = libraries.get(key) ?? { n: 0 };
+	if (kept.asking && !fresh) return kept.asking;
+	const n = kept.n + 1;
+	const asking = fetch(`/api/library?key=${encodeURIComponent(key)}`)
+		.then(async (res) => (res.ok ? (((await res.json()) as { items?: LibraryItem[] }).items ?? null) : null))
+		.catch(() => null)
+		.then((items) => {
+			const now = libraries.get(key);
+			if (now?.n !== n) return now?.asking ?? now?.items ?? items ?? [];
+			libraries.set(key, { items: items ?? now.items ?? [], n });
+			return items ?? now.items ?? [];
+		});
+	libraries.set(key, { ...kept, asking, n });
+	return asking;
+}
