@@ -165,6 +165,8 @@ FONT_FILES = {
     "titan": ("TitanOne-Regular.ttf", 1.145),
 }
 LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or logo in a corner (LOGO in PlayerFrame.tsx)
+# Over every banner (layers 3, 5, ... one pair each, banner_events) and subtitle, as the preview draws it last (coach 15 Nov).
+LOGO_LAYER = 100
 
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
@@ -1373,7 +1375,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     if logo:
         total = sum(frames for _, _, frames in segments) / FPS
         logo_font = font_tag(logo, own_font, LOGO["size"])
-        events.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{{{logo_font}}}{logo}")
+        events.append(f"Dialogue: {LOGO_LAYER},{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{{{logo_font}}}{logo}")
     logo_align = {"top-left": 7, "top-right": 9, "bottom-left": 1, "bottom-right": 3}.get(style.get("logoAt"), 7)
     # Round corners: libass's own box is always square, so the box is drawn under the letters instead.
     # Bounce too: each word is its own subtitle, but the line has one box.
@@ -1842,20 +1844,20 @@ def ffmpeg_command(
         base = frame_filters(parts, base, size, framed, inputs["frames"], plain)
     if banner_files:
         base = banner_file_filters(parts, base, size, banner_files, inputs["banners"])
+    parts.append(
+        f"{base}fps={FPS},"
+        # shaping=complex: Thai tone marks sit above the vowels (simple shaping draws them on top of each other).
+        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}{'[sv]' if logo else '[outv]'}"
+    )
     if logo:
         # Same place as the preview (PlayerFrame): LOGO side / top px from its corner, size px wide.
+        # After the subtitles, so it is over the text banners too, as in the preview (LOGO_LAYER; coach 15 Nov).
         side, edge = LOGO["side"], LOGO["top"]
         x = f"main_w-overlay_w-{side}" if str(logo["at"]).endswith("right") else str(side)
         y = f"main_h-overlay_h-{edge}" if str(logo["at"]).startswith("bottom") else str(edge)
         opacity = min(1.0, max(0.2, float(logo["opacity"])))
         parts.append(f"[1:v]scale={int(logo['size'])}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[lg]")
-        parts.append(f"{base}[lg]overlay={x}:{y}:format=auto[cl]")
-        base = "[cl]"
-    parts.append(
-        f"{base}fps={FPS},"
-        # shaping=complex: Thai tone marks sit above the vowels (simple shaping draws them on top of each other).
-        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}[outv]"
-    )
+        parts.append(f"[sv][lg]overlay={x}:{y}:format=auto[outv]")
 
     jump = ["-ss", str(seek)] if seek else []
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *jump, "-i", str(src)]
