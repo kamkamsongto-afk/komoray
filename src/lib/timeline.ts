@@ -4,7 +4,7 @@
 import type { SubtitleSpot } from "./subtitle-style";
 
 type Span = { start: number; end: number };
-type Word = { text: string; start: number; end: number; space?: boolean }; // space: typed by the user (fixedWords)
+type Word = { text: string; start: number; end: number; space?: boolean; glue?: boolean }; // space: typed by the user, glue: typed onto the word before (fixedWords)
 
 export const FPS = 30;
 export const WIDTH = 1080;
@@ -191,12 +191,12 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	const maxFrames = (thai ? limits.thaiSeconds : limits.seconds) * FPS;
 	const gapFrames = LINE_BREAK_GAP * FPS;
 
-	const placed: { text: string; start: number; end: number; space?: boolean }[] = [];
+	const placed: { text: string; start: number; end: number; space?: boolean; glue?: boolean }[] = [];
 	for (const w of words) {
 		const mid = placeFrame((w.start + w.end) / 2, segments);
 		if (mid === null) continue;
 		const half = ((w.end - w.start) / 2) * FPS;
-		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half, space: w.space });
+		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half, space: w.space, glue: w.glue });
 	}
 
 	type Placed = (typeof placed)[number];
@@ -212,7 +212,8 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		for (let k = 1; k <= run.length; k++) {
 			const first = all[k];
 			const last = all[k - 1];
-			if (THAI_NO_START.has(first.text) || THAI_ENDINGS.has(first.text) || first.text.startsWith("ๆ")) continue;
+			// glue: typed onto the word before it, with no space ("ของ|โค้ช" from a fix): a line never starts there.
+			if (first.glue || THAI_NO_START.has(first.text) || THAI_ENDINGS.has(first.text) || first.text.startsWith("ๆ")) continue;
 			if (k < run.length && (lettersOf(run.slice(0, k)) < Math.max(3, maxLetters * 0.4) || !fits(all.slice(k)))) continue;
 			const score = first.start - last.end + (THAI_STARTS.has(first.text) ? START_BONUS : 0) + (THAI_ENDINGS.has(last.text) ? START_BONUS : 0) + 0.3 * k;
 			if (score >= bestScore) [best, bestScore] = [k, score];
