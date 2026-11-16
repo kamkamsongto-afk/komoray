@@ -18,6 +18,7 @@ import type { RenderPart } from "@/lib/render-part";
 import { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { type Pace, PACES, PADDING } from "@/lib/silences";
+import { ding } from "@/lib/ding";
 import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpans, type WordFix } from "@/lib/edit";
 import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
 import { TRANSLATIONS } from "@/lib/languages";
@@ -54,6 +55,7 @@ type Analysis = {
 	pace?: Pace;
 	faces?: Faces | null; // where the speaker's face is (found by Modal after the preview copy)
 	facesPending?: boolean;
+	cleanPending?: boolean; // the preview plays, its optimized sound is still being made (lib/proxy.ts previewFiles)
 	videoUrl: string; // the small preview copy once it exists, else the original
 	studio?: StudioMedia | null; // the preview copy and its sound, for the editor's own player
 	proxy?: "done" | "processing" | "failed" | "none";
@@ -81,23 +83,6 @@ const PAGE_TITLE = "Komoray — AI Studio for Talking Heads";
 const NOTIFY_PREF = "komoray.desktopNotify"; // remembers the checkbox in this browser
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
-
-// Two soft rising tones, made in the browser so there is no sound file to load.
-function ding(audio: AudioContext | null) {
-	if (!audio) return;
-	[880, 1320].forEach((freq, i) => {
-		const osc = audio.createOscillator();
-		const gain = audio.createGain();
-		const at = audio.currentTime + i * 0.18;
-		osc.frequency.value = freq;
-		gain.gain.setValueAtTime(0.0001, at);
-		gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02);
-		gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
-		osc.connect(gain).connect(audio.destination);
-		osc.start(at);
-		osc.stop(at + 0.4);
-	});
-}
 
 // Let people work in another tab while the video renders: play a sound, flag the browser tab,
 // and pop up a desktop notification only if they ticked the box.
@@ -235,7 +220,7 @@ export default function EditPage() {
 
 	// The preview copy (or where the face is) is still being worked out: play the original / frame the
 	// middle until it is ready, then switch.
-	const proxyPending = analysis?.proxy === "processing" || Boolean(analysis?.facesPending);
+	const proxyPending = analysis?.proxy === "processing" || Boolean(analysis?.facesPending) || Boolean(analysis?.cleanPending);
 	useEffect(() => {
 		if (!key || !proxyPending) return;
 		const timer = setInterval(async () => {
@@ -246,7 +231,11 @@ export default function EditPage() {
 				if (!a) return a;
 				// Links already in use stay: new ones (new signatures) would restart the player.
 				const media = a.proxy === "done" ? {} : { videoUrl: data.videoUrl!, studio: data.studio, proxy: data.proxy };
-				return { ...a, ...media, faces: data.faces ?? null, facesPending: data.facesPending };
+				// The optimized sound, once made, joins the links in use (the player takes it without starting again).
+				const clean = a.proxy === "done" && a.studio && !a.studio.cleanAudioUrl && data.studio?.cleanAudioUrl ? { studio: { ...a.studio, cleanAudioUrl: data.studio.cleanAudioUrl } } : {};
+				// The same faces again keep the object in use: a new one each time made the player redraw every poll.
+				const faces = JSON.stringify(data.faces ?? null) === JSON.stringify(a.faces ?? null) ? a.faces : (data.faces ?? null);
+				return { ...a, ...media, ...clean, faces, facesPending: data.facesPending, cleanPending: data.cleanPending };
 			});
 		}, PROXY_POLL_MS);
 		return () => clearInterval(timer);

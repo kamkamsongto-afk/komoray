@@ -2502,6 +2502,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
 
 
 PROXY_SIDE = 540  # px, the short side; the preview is at most ~440px wide on screen
+PREVIEW_DOWNLOADED, PREVIEW_MADE = 30, 92  # percent of the preview job each step ends at (proxy): then it goes up
 PROXY_KEYFRAME_FRAMES = 15  # a full picture every half second at 30 fps
 PROXY_AUDIO_RATE = 24000  # Hz, mono, 16-bit: plenty for speech, and no codec to decode in the browser
 
@@ -2633,16 +2634,33 @@ def proxy(
     faces_url: str | None = None,
     thumb_url: str | None = None,
     clean_audio_url: str | None = None,
+    progress_url: str | None = None,
 ) -> dict:
-    """The editor's preview copy: same timing as the original, just smaller and quick to jump around in."""
+    """The editor's preview copy: same timing as the original, just smaller and quick to jump around in.
+    progress_url: how far it is (0-99), for the upload page's percentage (coach 16 Nov: a bar that only ran made
+    people think it hung). Downloading is the first PREVIEW_DOWNLOADED %, making the picture up to PREVIEW_MADE %."""
+    report = progress_reporter(progress_url)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
             src, out, pcm = workdir / "source", workdir / "proxy.mp4", workdir / "proxy-audio.pcm"
-            urllib.request.urlretrieve(video_url, src)
-            result = subprocess.run(proxy_command(src, out, pcm, has_audio(src)), capture_output=True, text=True)
-            if result.returncode != 0:
-                raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
+            urllib.request.urlretrieve(video_url, src, lambda blocks, size, total: total > 0 and report(PREVIEW_DOWNLOADED * min(1.0, blocks * size / total)))
+            report(PREVIEW_DOWNLOADED, force=True)
+            frames = max(1, round(duration_of(src) * FPS))
+            code, errors = run_counting_frames(proxy_command(src, out, pcm, has_audio(src)), workdir, frames, lambda part: report(PREVIEW_DOWNLOADED + min(1.0, part) * (PREVIEW_MADE - PREVIEW_DOWNLOADED)))
+            if code != 0:
+                raise RuntimeError(f"ffmpeg failed: {errors[-1500:]}")
+            report(PREVIEW_MADE, force=True)
+            # Out at once: the editor plays (and draws the wave, offers the speed) from these two. They waited for the
+            # faces, the thumb and the optimized sound before, ~45 s of 85 s on a 4.4-minute video (coach 16 Nov).
+            # Both at once (the website plays once both exist, lib/proxy.ts previewFiles): one after the other took
+            # 16 s more on a 7.5-minute video (staging, 16 Nov).
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                ups = [pool.submit(put, output_url, out.read_bytes(), "video/mp4")]
+                if audio_url:
+                    ups.append(pool.submit(put, audio_url, pcm.read_bytes(), "application/octet-stream"))
+                for up in ups:
+                    up.result()  # an upload that failed fails the preview, as before
             # Where the face is, from the small copy (quick). Without it the video is framed in the middle.
             if faces_url:
                 try:
@@ -2655,12 +2673,9 @@ def proxy(
                     put(thumb_url, (workdir / "thumb.jpg").read_bytes(), "image/jpeg")
                 except Exception as err:
                     print("thumb failed:", err)
-            # Sound first: the website takes proxy.mp4 existing to mean everything is there.
+            # The optimized sound comes last: until then the editor plays the sound as recorded (engine.setCleanAudio).
             if clean_audio_url:
                 put(clean_audio_url, clean_preview(src, pcm, workdir / "proxy-audio-clean.pcm"), "application/octet-stream")
-            if audio_url:
-                put(audio_url, pcm.read_bytes(), "application/octet-stream")
-            put(output_url, out.read_bytes(), "video/mp4")
             return {"ok": True, "bytes": out.stat().st_size, "audioBytes": pcm.stat().st_size}
     except Exception as err:
         if error_url:
@@ -2683,7 +2698,7 @@ def start(body: dict) -> dict:
             return {"error": str(err)}
         return {"ok": True}
     if body.get("kind") == "proxy":
-        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"))
+        call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"), body.get("progressUrl"))
     elif body.get("kind") == "faces":
         call = faces.spawn(body["videoUrl"], body["facesUrl"], body.get("thumbUrl"))
     else:

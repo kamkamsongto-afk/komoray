@@ -3,7 +3,8 @@ import { refundListen, settleDeadListen, startListening } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { signedCallbackUrl } from "@/lib/callback";
 import { isLanguage } from "@/lib/languages";
-import { CLEAN_SOUND, facesFor, mediaUrl, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
+import { CLEAN_SOUND, facesFor, mediaUrl, previewFiles, previewPercent, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
+import type { Faces } from "@/lib/framing";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
 import { startTranscription } from "@/lib/transcribe";
@@ -81,8 +82,12 @@ export async function GET(request: Request) {
 		// videoUrl: what the Script view plays next to the transcript. The preview copy when it is
 		// ready, else the original. Videos from before preview copies get one the first time they open.
 		const env = getCloudflareContext().env as unknown as AnalyzeEnv;
-		let proxy = await proxyStatus(key);
-		if (proxy === "none") proxy = await startProxy(key, env);
+		let made = await proxyStatus(key);
+		if (made === "none") made = await startProxy(key, env);
+		// It plays as soon as the preview and its sound are there; the optimized sound follows (cleanPending).
+		const files = await previewFiles(key);
+		const proxy = files.playable ? "done" : made;
+		const cleanPending = files.playable && !files.clean && made === "processing";
 		const videoUrl = proxy === "done" ? await proxyUrl(key, LINK_SECONDS) : await signedUrl(key, "GET", LINK_SECONDS);
 		// The editor's own player reads the preview copy and its sound through /api/media.
 		const studio =
@@ -90,12 +95,20 @@ export async function GET(request: Request) {
 				? {
 						videoUrl: await mediaUrl(key, "proxy.mp4", env.RENDER_TOKEN, LINK_SECONDS),
 						audioUrl: await mediaUrl(key, "proxy-audio.pcm", env.RENDER_TOKEN, LINK_SECONDS),
-						cleanAudioUrl: await mediaUrl(key, CLEAN_SOUND, env.RENDER_TOKEN, LINK_SECONDS),
+						...(files.clean && { cleanAudioUrl: await mediaUrl(key, CLEAN_SOUND, env.RENDER_TOKEN, LINK_SECONDS) }),
 					}
 				: null;
-		// Where the speaker's face is, once the preview copy exists (found in it).
-		const { faces, pending: facesPending } = proxy === "done" ? await facesFor(key, env) : { faces: null, pending: proxy === "processing" };
-		return Response.json({ status: "done", editKey, ...edit, videoUrl, studio, proxy, faces, facesPending });
+		// Where the speaker's face is, once the preview copy exists (found in it, after it is out: pending meanwhile).
+		// While Modal is still on the preview, it is finding them: only read, never ask for them again (facesFor would).
+		const { faces, pending: facesPending } =
+			made === "processing"
+				? await getJson<Faces>(siblingKey(key, "faces.json")).then((found) => ({ faces: found, pending: !found }))
+				: proxy === "done"
+					? await facesFor(key, env)
+					: { faces: null, pending: false };
+		// The upload page's percentage while the preview is made (it waits for it before opening the AI studio).
+		const preparing = proxy === "done" ? 100 : await previewPercent(key);
+		return Response.json({ status: "done", editKey, ...edit, videoUrl, studio, proxy, cleanPending, faces, facesPending, preparing });
 	}
 
 	const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));
@@ -103,5 +116,6 @@ export async function GET(request: Request) {
 	if (await settleDeadListen(key)) return Response.json({ status: "failed", error: "This took too long and stopped. Your minutes are back. Please try again." });
 
 	const started = await exists(siblingKey(key, "analyze.json"));
-	return Response.json({ status: started ? "processing" : "none" });
+	// Still listening: the preview is being made meanwhile, and its number is what the upload page shows.
+	return Response.json({ status: started ? "processing" : "none", preparing: started ? await previewPercent(key) : 0 });
 }

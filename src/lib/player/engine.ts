@@ -96,6 +96,16 @@ export class StudioEngine {
 		if (media.cleanAudioUrl) this.clean = new RangeSource(media.cleanAudioUrl, onFetch("clean"));
 	}
 
+	// The optimized sound, once Modal has made it: the preview plays before it now (coach 16 Nov, the wave and the speed
+	// waited for it). The sound already queued has none of it, so the clock starts again from here, as setRate does.
+	setCleanAudio(url: string) {
+		if (this.clean || this.destroyed) return;
+		this.clean = new RangeSource(url, (info) => this.events.log("fetch", { kind: "clean", ...info }));
+		this.stopClock();
+		this.applySound();
+		this.emitState();
+	}
+
 	// Same mix as polish_sound in render.py.
 	setSound(blend: number) {
 		this.blend = blend;

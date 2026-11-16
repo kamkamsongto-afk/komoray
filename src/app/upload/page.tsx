@@ -13,6 +13,7 @@ import { browserLanguage, isLanguage } from "@/lib/languages";
 import { MAX_FILE_GB } from "@/lib/limits";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
+import { ding } from "@/lib/ding";
 import { DEFAULT_OPTIONS, type UploadOptions as Options } from "@/lib/upload-options";
 
 type Status = "idle" | "uploading" | "done" | "error";
@@ -20,6 +21,8 @@ type Access = AccessStatus & { email: string };
 
 const ANALYZE_POLL_MS = 3000;
 const ANALYZE_GIVE_UP_MS = 30 * 60 * 1000;
+const DING_MS = 700; // the ding's two tones, before the AI studio opens
+const PREVIEW_WAIT_MS = 3 * 60 * 1000; // the longest the preview is waited for before the AI studio opens anyway
 const LANGUAGE_KEY = "komoray-language"; // the spoken language picked last time (this browser only)
 const KIT_KEY = "komoray-brand-kit"; // the Brand Kit picked last on this computer
 
@@ -131,6 +134,8 @@ export default function UploadPage() {
 	};
 	const [analyzing, setAnalyzing] = useState(false);
 	const [opening, setOpening] = useState(false); // the script is ready and the AI studio is loading
+	const [preparing, setPreparing] = useState(false);
+	const [prepared, setPrepared] = useState(0); // how far the preview is, 0-100 (api/analyze preparing): the bar after the upload // listened: waiting for the preview so the AI studio opens ready
 	const [analysisError, setAnalysisError] = useState("");
 	const [dragging, setDragging] = useState(false);
 	const [again, setAgain] = useState(false); // from the editor: listen to this video again, in another language
@@ -180,12 +185,21 @@ export default function UploadPage() {
 		};
 	}, []);
 
+	// The ding when the AI studio is ready (coach 16 Nov: people wait in another tab). Browsers only allow sound after a
+	// click, so it is made on the one that picks the file (or presses Find silences) and kept until then.
+	const soundRef = useRef<AudioContext | null>(null);
+	const wakeSound = () => {
+		if (!soundRef.current && "AudioContext" in window) soundRef.current = new AudioContext();
+		void soundRef.current?.resume().catch(() => {});
+	};
+
 	// The script is ready: on to the full-screen editor.
 	function openEditor(videoKey: string) {
 		window.location.assign(`/edit?key=${encodeURIComponent(videoKey)}`);
 	}
 
 	async function handleFile(file: File) {
+		wakeSound();
 		setStatus("uploading");
 		setProgress(0);
 		setMessage(file.name);
@@ -247,6 +261,7 @@ export default function UploadPage() {
 	// start=false: it is already running (e.g. reopened from My projects), just wait for the result.
 	async function findSilences(videoKey = key, start = true) {
 		if (!videoKey) return;
+		if (start) wakeSound();
 		setAnalyzing(true);
 		setAnalysisError("");
 		try {
@@ -267,9 +282,25 @@ export default function UploadPage() {
 			while (Date.now() < giveUpAt) {
 				await wait(ANALYZE_POLL_MS);
 				const poll = await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`);
-				const data = (await poll.json()) as { status?: string; error?: string };
+				const data = (await poll.json()) as { status?: string; error?: string; preparing?: number };
+				setPrepared((p) => Math.max(p, data.preparing ?? 0));
 				if (data.status === "done") {
+					// Wait for the preview too, so the AI studio opens ready to play, with the wave and the speed (coach 16 Nov:
+					// it opened after listening, then made you wait about a minute more). Never stuck here: a failed preview
+					// or a long wait opens it anyway, and the AI studio waits for the preview by itself as before.
+					setPreparing(true);
+					const readyBy = Date.now() + PREVIEW_WAIT_MS;
+					let preview = data as { studio?: unknown; proxy?: string; preparing?: number };
+					while (!preview.studio && preview.proxy !== "failed" && Date.now() < readyBy) {
+						await wait(ANALYZE_POLL_MS);
+						preview = (await (await fetch(`/api/analyze?key=${encodeURIComponent(videoKey)}`)).json().catch(() => ({}))) as typeof preview;
+						setPrepared((p) => Math.max(p, preview.preparing ?? 0));
+					}
+					setPrepared(100);
 					setOpening(true); // keeps the waiting screen up until the next page has loaded
+					ding(soundRef.current);
+					if (document.hidden) document.title = "✅ Ready · Komoray";
+					await wait(DING_MS); // the next page would cut the sound off
 					return openEditor(videoKey);
 				}
 				if (data.status === "failed") throw new Error(data.error ?? "Analysis failed");
@@ -334,8 +365,11 @@ export default function UploadPage() {
 			)}
 			{(analyzing || queued || opening) && (
 				<UploadWorking
-					stage={status === "uploading" ? "upload" : opening ? "open" : "listen"}
+					stage={status === "uploading" ? "upload" : opening ? "open" : preparing ? "prepare" : "listen"}
 					progress={progress}
+					// One number from start to end (coach 16 Nov: a bar that only ran for a minute looked hung): the upload is the
+					// first 60%, the preview being made the rest. Still listening holds it below 100.
+					percent={status === "uploading" ? Math.round(progress * 0.6) : Math.min(opening ? 100 : preparing ? 99 : 98, 60 + Math.round(prepared * 0.4))}
 					fileName={message}
 					onCancel={queued ? () => queue(false) : undefined}
 				/>

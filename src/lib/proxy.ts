@@ -37,6 +37,13 @@ export async function proxyStatus(key: string): Promise<ProxyStatus> {
 	return running ? "processing" : "none";
 }
 
+// What the editor can use now (coach 16 Nov: the wave and the speed waited ~85 s for everything): it plays once the
+// preview and its sound are there, and the optimized sound joins later (cleanPending) or never (an old or failed one).
+export async function previewFiles(key: string) {
+	const [video, audio, clean] = await Promise.all([exists(siblingKey(key, "proxy.mp4")), exists(siblingKey(key, "proxy-audio.pcm")), exists(siblingKey(key, CLEAN_SOUND))]);
+	return { playable: video && audio, clean };
+}
+
 export const proxyUrl = (key: string, seconds = LINK_SECONDS) => signedUrl(siblingKey(key, "proxy.mp4"), "GET", seconds);
 
 // Links for the editor's own player, read through /api/media on our site (see there why).
@@ -77,9 +84,14 @@ export async function facesFor(key: string, env: ProxyEnv): Promise<{ faces: Fac
 }
 
 // Ask Modal to make the preview copy. Never throws: without it the editor just plays the original.
+// How far Modal is with the preview, 0-99 (proxy in render.py), for the upload page's percentage. Never fails a page.
+const PREVIEW_PROGRESS = "proxy-progress.json";
+export const previewPercent = async (key: string) => (await getJson<{ percent?: number }>(siblingKey(key, PREVIEW_PROGRESS)).catch(() => null))?.percent ?? 0;
+
 export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatus> {
 	try {
 		await deleteObject(siblingKey(key, "proxy-error.json")).catch(() => {}); // from now on an error means this attempt failed
+		await deleteObject(siblingKey(key, PREVIEW_PROGRESS)).catch(() => {}); // a last attempt's number must not show
 		await putObject(siblingKey(key, "proxy.json"), JSON.stringify({ startedAt: new Date().toISOString(), withClean: true }), "application/json");
 		const res = await fetch(env.RENDER_URL, {
 			method: "POST",
@@ -95,6 +107,7 @@ export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatu
 				facesUrl: await signedUrl(siblingKey(key, "faces.json"), "PUT", LINK_SECONDS, "application/json"),
 				thumbUrl: await signedUrl(siblingKey(key, "thumb.jpg"), "PUT", LINK_SECONDS, "image/jpeg"),
 				errorUrl: await signedUrl(siblingKey(key, "proxy-error.json"), "PUT", LINK_SECONDS, "application/json"),
+				progressUrl: await signedUrl(siblingKey(key, PREVIEW_PROGRESS), "PUT", LINK_SECONDS, "application/json"),
 			}),
 		});
 		const data = (await res.json().catch(() => ({}))) as { callId?: string; error?: string };

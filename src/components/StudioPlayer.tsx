@@ -118,6 +118,11 @@ export const StudioPlayer = forwardRef<PreviewHandle, Props>(function StudioPlay
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
+	// The optimized sound arrived after the player started (lib/proxy.ts previewFiles).
+	useEffect(() => {
+		if (media.cleanAudioUrl) engineRef.current?.setCleanAudio(media.cleanAudioUrl);
+	}, [media.cleanAudioUrl, loaded]);
+
 	// Words deleted or restored.
 	useEffect(() => {
 		if (piecesRef.current === pieces) return;
