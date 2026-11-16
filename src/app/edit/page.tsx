@@ -748,8 +748,15 @@ export default function EditPage() {
 		const part = render.part;
 		renderRun.current += 1; // a status answer on its way is about the job being stopped
 		const res = await fetch(`/api/render?key=${encodeURIComponent(key)}${part ? "&part=1" : ""}`, { method: "DELETE" }).catch(() => null);
-		const data = (await res?.json().catch(() => null)) as { status?: string } | null;
-		if (data?.status === "stopped") return setRender({ status: "failed", stopped: true, error: "Stopped. Your edits are all here: press Make video when you're ready.", ...(part && { part }) });
+		const data = (await res?.json().catch(() => null)) as { status?: string; error?: string } | null;
+		// Never quiet: a Stop that didn't reach us looked like it had worked.
+		if (!res?.ok || !data?.status) {
+			const error = data?.error ?? `server error ${res?.status ?? "(no answer)"}`;
+			setSaveError(`It could not be stopped (${error}). Please press Stop again.`);
+			reportError("stop video", error, { key });
+			return;
+		}
+		if (data.status === "stopped") return setRender({ status: "failed", stopped: true, error: "Stopped. Your edits are all here: press Make video when you're ready.", ...(part && { part }) });
 		// It had just finished (or failed) as Stop was pressed: show what it is now.
 		const now = (await (await fetch(`/api/render?key=${encodeURIComponent(key)}`)).json().catch(() => null)) as RenderState | null;
 		if (now) setRender(now);
@@ -1047,7 +1054,7 @@ export default function EditPage() {
 						<span>
 							{render.percent === undefined ? "Getting started…" : `Making your ${render.part ? `part (${clock(render.part.start)}–${clock(render.part.end)})` : "video"}… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
 						</span>
-						<button onClick={() => void stopVideo()} className="rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5" title="Stop making it. Closing the page doesn't stop it.">
+						<button onClick={() => void stopVideo()} className="rounded-md bg-foreground px-3 py-1 text-xs font-medium text-background hover:opacity-85" title="Stop making it. Closing the page doesn't stop it.">
 							Stop
 						</button>
 					</p>
