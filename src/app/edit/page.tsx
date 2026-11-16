@@ -173,9 +173,12 @@ export default function EditPage() {
 		setDesktopNotify(granted && readNotifyPref());
 	}, []);
 
+	// Loads once per signed-in account, not per user object: Supabase hands out a new one each time the tab is shown again,
+	// and loading again then put the last video's Download back over a Make video just pressed (coach 15 Nov).
+	const userId = user?.id;
 	useEffect(() => {
 		const saved = new URLSearchParams(window.location.search).get("key");
-		if (!user) return;
+		if (!userId) return;
 		if (!saved) return void window.location.replace("/projects");
 		void (async () => {
 			const res = await fetch(`/api/analyze?key=${encodeURIComponent(saved)}`);
@@ -217,10 +220,12 @@ export default function EditPage() {
 				// spelling AI, which reads the sentence (api/spelling); the rest stay in the video they came from (lib/word-rules.ts).
 				setDictionary((dict.words ?? []).filter((w) => (w.use ?? "always") === "always").map(({ heard, fixed }) => ({ heard, fixed })));
 			}
+			const run = renderRun.current;
 			const rendered = (await (await fetch(`/api/render?key=${encodeURIComponent(saved)}`)).json()) as RenderState;
-			if (rendered.status !== "none") setRender(rendered);
+			// Make video pressed while this was on its way: the answer is about the video it is replacing.
+			if (run === renderRun.current && rendered.status !== "none") setRender(rendered);
 		})();
-	}, [user]);
+	}, [userId]);
 
 	// The preview copy (or where the face is) is still being worked out: play the original / frame the
 	// middle until it is ready, then switch.
