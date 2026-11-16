@@ -1237,6 +1237,7 @@ export function ScriptView({
 							thai={thaiClip}
 							focus={focusCutout}
 							onReveal={reveal}
+							onPickImported={putInPicClip}
 						/>
 					)}
 					{panel === "frame" && (
