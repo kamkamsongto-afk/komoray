@@ -333,6 +333,14 @@ export function ScriptView({
 		}
 	}, [cutout.status, cutout.version, seenNow, seenKey]);
 	const cutoutWait = waitLabel(cutout);
+	// The dot on the Import button, as on Cutout (coach 15 Nov): blinks while files go in (also those dropped for a
+	// layout), green once one is in until the button is pressed. A count: two uploads can overlap.
+	const [importBusy, setImportBusy] = useState(0);
+	const [importNews, setImportNews] = useState(false);
+	const importUploading = (busy: boolean, added = false) => {
+		setImportBusy((n) => Math.max(0, n + (busy ? 1 : -1)));
+		if (added) setImportNews(true);
+	};
 	// Don't start the <video> player for a moment only to swap it for ours.
 	const deciding = Boolean(studio) && canStudio === null;
 	const segments = useMemo(
@@ -370,7 +378,9 @@ export function ScriptView({
 		let item = drop.item;
 		if (!item && drop.file) {
 			setLayoutNote(`Adding ${drop.file.name}…`);
+			importUploading(true);
 			const added = await addToLibrary(key, drop.file);
+			importUploading(false, !("error" in added));
 			setLibraryVersion((v) => v + 1);
 			if ("error" in added) return setLayoutNote(added.error);
 			item = added.item;
@@ -1075,6 +1085,7 @@ export function ScriptView({
 									title={p.name}
 									onClick={() => {
 										if (p.id === "cutout") markCutoutSeen();
+										if (p.id === "import") setImportNews(false);
 										setPanel(panel === p.id ? null : p.id);
 									}}
 									className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-3 ${
@@ -1085,6 +1096,8 @@ export function ScriptView({
 										<p.icon className="h-[18px] w-[18px]" aria-hidden />
 										{p.id === "cutout" && cutoutBusy && <span title="Cutting you out" className="absolute -top-1 -right-1 h-2 w-2 animate-pulse rounded-full bg-blue-500" />}
 										{p.id === "cutout" && cutoutNews && <span title="Your cutout is ready" className="absolute -top-1.5 -right-1.5 h-3 w-3 animate-pulse rounded-full bg-green-500 ring-2 ring-background" />}
+										{p.id === "import" && importBusy > 0 && <span title="Uploading" className="absolute -top-1 -right-1 h-2 w-2 animate-pulse rounded-full bg-blue-500" />}
+										{p.id === "import" && importBusy === 0 && importNews && <span title="Your files are in" className="absolute -top-1.5 -right-1.5 h-3 w-3 animate-pulse rounded-full bg-green-500 ring-2 ring-background" />}
 									</span>
 									{p.id === "cutout" && cutout.timeLeft !== null && cutout.timeLeft > 0 ? <span className="tabular-nums">{clock(cutout.timeLeft)}</span> : p.name}
 								</button>
@@ -1254,6 +1267,7 @@ export function ScriptView({
 							onUseAsBanner={putAsBanner}
 							onUseInPicClip={cutout.on ? putInPicClip : undefined}
 							usedNow={filesInUse({ banners, cutout: cutoutLayers, frames, layouts })}
+							onUploading={importUploading}
 						/>
 					)}
 					{panel === "banners" && (
