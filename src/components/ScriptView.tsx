@@ -1246,6 +1246,7 @@ export function ScriptView({
 							onReveal={reveal}
 							note={layoutNote}
 							libraryVersion={libraryVersion}
+							onImportFile={(file, id) => void dropOnLayout({ file }, id)}
 						/>
 					)}
 					{panel === "import" && (

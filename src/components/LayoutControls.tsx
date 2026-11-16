@@ -1,10 +1,10 @@
 "use client";
 
-import { ArrowLeft, ArrowLeftRight, ChevronRight, Copy, Film, Image as ImageIcon, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft, ArrowLeftRight, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
-import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { LIBRARY_ACCEPT, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
 import { ConfirmDelete } from "./ConfirmDelete";
@@ -19,6 +19,7 @@ type Props = {
 	onReveal?: (id: string, start: number) => void; // the blue line to its start
 	note?: string; // a file dropped on the video: being added to Import, or why it couldn't be
 	libraryVersion?: number; // goes up when Import got a new file: the pictures here are asked for again
+	onImportFile?: (file: File, id: string) => void; // a file from the computer: into Import, then into this layout's other part
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -39,7 +40,10 @@ function KindIcon({ kind, meFirst = true, split = 0.5, size = 22 }: { kind: Layo
 // The editor's Layout box (coach, 14 Nov): for a stretch of the video, the screen is split, you in one part and a
 // picture or clip from Import in the other, top / bottom or side by side, sliding in or with a flash.
 // Drawn by PlayerFrame, made by layout_filters (render.py).
-export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0 }: Props) {
+export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0, onImportFile }: Props) {
+	// Import file (coach 15 Nov): one hidden picker, told which layout it is for when its button is pressed.
+	const fileRef = useRef<HTMLInputElement>(null);
+	const importFor = useRef<string | null>(null);
 	const [open, setOpen] = useState<string | null>(focus);
 	const [focused, setFocused] = useState(focus);
 	if (focus !== focused) {
@@ -135,6 +139,17 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 	return (
 		<div className="flex flex-col gap-2 p-3 pt-1">
 			{note && <p className="rounded-md bg-blue-500/10 px-2 py-1 text-xs">{note}</p>}
+			<input
+				ref={fileRef}
+				type="file"
+				accept={LIBRARY_ACCEPT}
+				className="hidden"
+				onChange={(e) => {
+					const file = e.target.files?.[0];
+					e.target.value = "";
+					if (file && importFor.current) onImportFile?.(file, importFor.current);
+				}}
+			/>
 			{!openLayout && (
 				<>
 					<p className="text-xs text-foreground/60">Split the screen: you in one part, your own picture or clip in the other. Nothing is cut out, so it&apos;s ready right away. Or drop a picture or clip on the video.</p>
@@ -280,11 +295,26 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									</button>
 								</div>
 							)}
-							{l.file && (
-								<button onClick={() => update(l.id, { file: undefined, media: undefined, volume: undefined, muted: undefined })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
-									Use a color instead
-								</button>
-							)}
+							<div className="flex flex-wrap items-center gap-1">
+								{onImportFile && (
+									<button
+										onClick={() => {
+											importFor.current = l.id;
+											fileRef.current?.click();
+										}}
+										title="A picture or clip from your computer. It goes into Import too."
+										className="inline-flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5"
+									>
+										<Upload className="h-3 w-3 shrink-0" aria-hidden />
+										Import file
+									</button>
+								)}
+								{l.file && (
+									<button onClick={() => update(l.id, { file: undefined, media: undefined, volume: undefined, muted: undefined })} className="rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+										Use a color instead
+									</button>
+								)}
+							</div>
 							{!l.file && (
 								<div className="flex flex-wrap items-center gap-1">
 									{LAYOUT_COLORS.map((c) => (
