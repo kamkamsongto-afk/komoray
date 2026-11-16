@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, Droplets, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, Droplets, Film, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { BACKDROP, PIC_MOTION, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
@@ -12,7 +12,7 @@ import { ClipSound } from "./ClipSound";
 import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
 import { ViewSwitch, useListView } from "./ViewSwitch";
-import { clipLength, hasClearParts } from "@/lib/media-library";
+import { clipLength, hasClearParts, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 
 type Props = {
@@ -26,6 +26,7 @@ type Props = {
 	videoUrl: string | null; // the preview copy, which Fast and Balanced read on this device
 	thai: boolean; // Thai video: only fonts with Thai letters
 	onReveal?: (id: string, start: number) => void; // show it: the blue line to its start, its strip picked on the timeline
+	onPickImported?: (item: LibraryItem) => void; // a file already in Import, into Pic/Clip without uploading it again (coach 15 Nov)
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -47,7 +48,7 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
-export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal }: Props) {
+export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal, onPickImported }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
@@ -67,6 +68,18 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [uploading, setUploading] = useState(false);
 	const [notice, setNotice] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
+	// From Import: the project's files, asked for when the list is opened (again each time: one may have just gone in).
+	const [library, setLibrary] = useState<LibraryItem[] | null>(null);
+	const [showLibrary, setShowLibrary] = useState(false);
+	const openLibrary = () => {
+		if (showLibrary) return setShowLibrary(false);
+		setShowLibrary(true);
+		const key = new URLSearchParams(window.location.search).get("key");
+		fetch(`/api/library?key=${encodeURIComponent(key ?? "")}`)
+			.then((r) => (r.ok ? (r.json() as Promise<{ items?: LibraryItem[] }>) : null))
+			.then((data) => setLibrary(data?.items ?? []))
+			.catch(() => setLibrary([]));
+	};
 
 	const [choice, setPicked] = useState<CutoutTier>(CUTOUT_ON[0]);
 	// A quality this device can't run is never the one picked.
@@ -382,6 +395,17 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					<button onClick={() => fileRef.current?.click()} disabled={uploading || layers.inserts.length >= BEHIND.maxItems} className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
 						<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading ? "Uploading…" : "Add picture or clip"}
 					</button>
+					{onPickImported && (
+						<button
+							onClick={openLibrary}
+							disabled={layers.inserts.length >= BEHIND.maxItems}
+							aria-pressed={showLibrary}
+							title="Use a picture or clip already in Import"
+							className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${showLibrary ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
+						>
+							<FolderInput className="h-3.5 w-3.5" aria-hidden /> From Import
+						</button>
+					)}
 					{layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
 					</span>
 					<input
@@ -395,6 +419,38 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							if (file) void addInsert(file);
 						}}
 					/>
+					{showLibrary && onPickImported && (
+						library === null ? (
+							<p className="text-xs text-foreground/60">Loading…</p>
+						) : library.length === 0 ? (
+							<p className="text-xs text-foreground/60">Nothing in Import yet. Add files in the Import box, then pick them here.</p>
+						) : (
+							<div className="grid grid-cols-4 gap-1">
+								{library.map((item) => (
+									<button
+										key={item.file}
+										onClick={() => {
+											setShowLibrary(false);
+											setTab("inserts");
+											onPickImported(item);
+										}}
+										title={item.name}
+										className="relative aspect-[9/16] overflow-hidden rounded-md border-2 border-transparent bg-black hover:border-foreground/30"
+									>
+										{item.media === "video" ? (
+											<>
+												<video src={`${projectFileSrc(item.file)}#t=0.5`} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+												<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
+											</>
+										) : (
+											// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+											<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
+										)}
+									</button>
+								))}
+							</div>
+						)
+					)}
 				</>
 			)}
 			</>}
