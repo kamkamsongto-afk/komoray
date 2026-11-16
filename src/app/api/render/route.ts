@@ -25,7 +25,7 @@ import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_
 const LINK_SECONDS = 3600;
 // Part of every video's fingerprint (below). Change it whenever render.py makes the same edits look different
 // (a fix or a new look): else a press that changed nothing hands back the video made before the fix.
-const RENDER_REV = "2026-11-16";
+const RENDER_REV = "2026-11-16b"; // b: Pop only after a pause, zoom parts glide at their edges
 
 async function fingerprintOf(parts: unknown) {
 	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(parts)));
