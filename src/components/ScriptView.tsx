@@ -1247,6 +1247,10 @@ export function ScriptView({
 							focus={focusCutout}
 							onReveal={reveal}
 							onPickImported={putInPicClip}
+							onUploading={(busy, added) => {
+								importUploading(busy, added);
+								if (added) void loadLibrary(new URLSearchParams(window.location.search).get("key") ?? "", true); // it shows in Import too
+							}}
 						/>
 					)}
 					{panel === "frame" && (

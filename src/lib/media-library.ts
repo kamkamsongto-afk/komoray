@@ -74,20 +74,22 @@ export async function hasClearParts(file: File) {
 	return false;
 }
 
-// How long a clip plays, seconds (null if the browser can't tell).
+// How long a clip plays, seconds (null if the browser can't tell). Never waits more than CLIP_LENGTH_WAIT_MS: a file
+// the browser can't open may say nothing at all, and the upload behind it sat there with no word (coach 16 Nov).
+const CLIP_LENGTH_WAIT_MS = 5000;
 export function clipLength(file: File): Promise<number | null> {
 	return new Promise((resolve) => {
 		const video = document.createElement("video");
 		const url = URL.createObjectURL(file);
+		const done = (seconds: number | null) => {
+			clearTimeout(timer);
+			resolve(seconds);
+			URL.revokeObjectURL(url);
+		};
+		const timer = setTimeout(() => done(null), CLIP_LENGTH_WAIT_MS);
 		video.preload = "metadata";
-		video.onloadedmetadata = () => {
-			resolve(Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null);
-			URL.revokeObjectURL(url);
-		};
-		video.onerror = () => {
-			resolve(null);
-			URL.revokeObjectURL(url);
-		};
+		video.onloadedmetadata = () => done(Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null);
+		video.onerror = () => done(null);
 		video.src = url;
 	});
 }
