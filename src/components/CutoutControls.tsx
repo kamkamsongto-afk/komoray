@@ -12,7 +12,7 @@ import { ClipSound } from "./ClipSound";
 import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
 import { ViewSwitch, useListView } from "./ViewSwitch";
-import { clipLength, hasClearParts, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 
 type Props = {
@@ -78,10 +78,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const openLibrary = () => {
 		setPicView("import");
 		const key = new URLSearchParams(window.location.search).get("key");
-		fetch(`/api/library?key=${encodeURIComponent(key ?? "")}`)
-			.then((r) => (r.ok ? (r.json() as Promise<{ items?: LibraryItem[] }>) : null))
-			.then((data) => setLibrary(data?.items ?? []))
-			.catch(() => setLibrary([]));
+		if (!key) return setLibrary([]);
+		setLibrary((list) => list ?? knownLibrary(key) ?? null);
+		void loadLibrary(key).then(setLibrary);
 	};
 
 	const [choice, setPicked] = useState<CutoutTier>(CUTOUT_ON[0]);

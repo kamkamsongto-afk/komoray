@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowLeftRight, ChevronRight, Copy, Film, Image as ImageIcon
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
-import { LIBRARY_ACCEPT, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { knownLibrary, LIBRARY_ACCEPT, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
 import { ConfirmDelete } from "./ConfirmDelete";
@@ -53,15 +53,13 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
 	// The project's pictures and clips (Import), for the other part. Asked for once the box opens.
-	const [library, setLibrary] = useState<LibraryItem[] | null>(null);
+	const [library, setLibrary] = useState<LibraryItem[] | null>(() => (typeof window === "undefined" ? null : (knownLibrary(new URLSearchParams(window.location.search).get("key")) ?? null)));
 	useEffect(() => {
 		const key = new URLSearchParams(window.location.search).get("key");
 		if (!key) return;
 		let gone = false;
-		fetch(`/api/library?key=${encodeURIComponent(key)}`)
-			.then((r) => (r.ok ? (r.json() as Promise<{ items?: LibraryItem[] }>) : null))
-			.then((data) => !gone && setLibrary(data?.items ?? []))
-			.catch(() => !gone && setLibrary([]));
+		// A new file in Import (libraryVersion went up): a list from after it.
+		void loadLibrary(key, libraryVersion > 0).then((items) => !gone && setLibrary(items));
 		return () => {
 			gone = true;
 		};
