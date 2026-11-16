@@ -62,6 +62,7 @@ type RenderState = {
 	status: "none" | "processing" | "done" | "failed";
 	videoUrl?: string;
 	downloadUrl?: string;
+	stopped?: boolean; // Stop was pressed (api/render DELETE): said in grey, not as an error
 	error?: string;
 	part?: RenderPart; // Make this part: only this stretch of the final video (lib/render-part.ts)
 	wholeUrl?: string; // with a part: the whole video made before, if there is one
@@ -146,6 +147,10 @@ export default function EditPage() {
 	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
 	// False from the press until the server has taken the job. Until then it still answers about the last video.
 	const renderAccepted = useRef(true);
+	// Stop pressed and on its way: the bar holds still and the button says so (it ran on 30% → 43% while Modal was told).
+	const [stopping, setStopping] = useState(false);
+	const stoppingRef = useRef(false);
+	const [unchanged, setUnchanged] = useState(false); // the last press changed nothing: the video before came back (api/render)
 	const [showReady, setShowReady] = useState(false); // the finished-video window: opens by itself when a render finishes
 	const closeReady = useCallback(() => setShowReady(false), []);
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
@@ -254,7 +259,7 @@ export default function EditPage() {
 			const run = renderRun.current;
 			const res = await fetch(`/api/render?key=${encodeURIComponent(key)}`);
 			const data = (await res.json()) as RenderState;
-			if (run !== renderRun.current) return;
+			if (run !== renderRun.current || stoppingRef.current) return;
 			if (data.status === "processing" && data.percent !== undefined) setRender((s) => (s.status === "processing" ? { ...s, percent: Math.max(s.percent ?? 0, data.percent ?? 0) } : s));
 			if (data.status === "done" || data.status === "failed") {
 				setRender(data);
@@ -696,7 +701,9 @@ export default function EditPage() {
 	}
 
 	// part: only this stretch of the final video, seconds (Make this part on the timeline, coach 14 Nov).
-	async function makeVideo(part?: RenderPart) {
+	// again: Make it again anyway, after a press that changed nothing (it counts toward the limit, render-limit.ts).
+	async function makeVideo(part?: RenderPart, again = false) {
+		setUnchanged(false);
 		if (!key) return;
 		if (!audioRef.current && "AudioContext" in window) audioRef.current = new AudioContext();
 		void audioRef.current?.resume();
@@ -729,9 +736,10 @@ export default function EditPage() {
 			const res = await fetch("/api/render", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ key, ...(part && { part }) }),
+				body: JSON.stringify({ key, ...(part && { part }), ...(again && { again }) }),
 			});
-			const data = (await res.json()) as { error?: string };
+			const data = (await res.json()) as { error?: string; unchanged?: boolean };
+			if (data.unchanged) setUnchanged(true);
 			if (!res.ok) throw new Error(data.error ?? "Could not start the render");
 			renderAccepted.current = true;
 		} catch (err) {
@@ -739,6 +747,30 @@ export default function EditPage() {
 			setRender({ status: "failed", error });
 			reportError("make video", error, { key });
 		}
+	}
+
+	// Stop (coach 15 Nov: Make video pressed by mistake). Closing the page never stopped Modal.
+	async function stopVideo() {
+		if (!key || render.status !== "processing") return;
+		const part = render.part;
+		renderRun.current += 1; // a status answer on its way is about the job being stopped
+		stoppingRef.current = true;
+		setStopping(true);
+		const res = await fetch(`/api/render?key=${encodeURIComponent(key)}${part ? "&part=1" : ""}`, { method: "DELETE" }).catch(() => null);
+		stoppingRef.current = false;
+		setStopping(false);
+		const data = (await res?.json().catch(() => null)) as { status?: string; error?: string } | null;
+		// Never quiet: a Stop that didn't reach us looked like it had worked.
+		if (!res?.ok || !data?.status) {
+			const error = data?.error ?? `server error ${res?.status ?? "(no answer)"}`;
+			setSaveError(`It could not be stopped (${error}). Please press Stop again.`);
+			reportError("stop video", error, { key });
+			return;
+		}
+		if (data.status === "stopped") return setRender({ status: "failed", stopped: true, error: "Stopped. Your edits are all here: press Make video when you're ready.", ...(part && { part }) });
+		// It had just finished (or failed) as Stop was pressed: show what it is now.
+		const now = (await (await fetch(`/api/render?key=${encodeURIComponent(key)}`)).json().catch(() => null)) as RenderState | null;
+		if (now) setRender(now);
 	}
 
 	if (user === undefined) return <main className="min-h-screen" />;
@@ -1029,13 +1061,18 @@ export default function EditPage() {
 					<div className="h-2 w-full overflow-hidden rounded-full bg-foreground/10">
 						<div className="h-full rounded-full bg-blue-600 transition-[width] duration-500" style={{ width: `${render.percent ?? 0}%` }} />
 					</div>
-					<p className="text-sm text-foreground/70">
-						{render.percent === undefined ? "Getting started…" : `Making your ${render.part ? `part (${clock(render.part.start)}–${clock(render.part.end)})` : "video"}… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
+					<p className="flex flex-wrap items-center gap-2 text-sm text-foreground/70">
+						<span>
+							{render.percent === undefined ? "Getting started…" : `Making your ${render.part ? `part (${clock(render.part.start)}–${clock(render.part.end)})` : "video"}… ${render.percent}%`} Keep editing or switch tabs, you&apos;ll hear a ding when it&apos;s ready.
+						</span>
+						<button onClick={() => void stopVideo()} disabled={stopping} className="rounded-md bg-foreground px-3 py-1 text-xs font-medium text-background hover:opacity-85 disabled:opacity-60" title="Stop making it. Closing the page doesn't stop it.">
+							{stopping ? "Stopping…" : "Stop"}
+						</button>
 					</p>
 				</div>
 			)}
 			{render.status === "failed" && (
-				<p className="text-sm text-red-500">
+				<p className={`text-sm ${render.stopped ? "text-foreground/60" : "text-red-500"}`}>
 					{render.part ? `This part could not be made: ${render.error}` : render.error}
 					{render.part && render.wholeUrl && (
 						<>
@@ -1057,6 +1094,14 @@ export default function EditPage() {
 						Download {render.part ? "part" : "video"}
 					</a>
 					<span className="text-xs text-foreground/50">{render.part ? "Only this part. Make video makes the whole video." : "Changed something after this? Press Make video again."}</span>
+					{unchanged && (
+						<span className="flex items-center gap-2 text-xs text-foreground/60">
+							Nothing changed since this one, so it wasn&apos;t made again.
+							<button onClick={() => void makeVideo(render.part, true)} className="underline hover:text-foreground">
+								Make it again anyway
+							</button>
+						</span>
+					)}
 					{render.part && render.wholeUrl && (
 						<span className="flex items-center gap-2 text-xs">
 							Your whole video from before:

@@ -13,6 +13,7 @@ import type { Window } from "@/lib/cutout";
 import { FPS, keepSegments, totalFrames } from "@/lib/timeline";
 import { jobFiles, PART_JOB, PART_RENDER, readRenderPart, type RenderPart, WHOLE_JOB } from "@/lib/render-part";
 import { readStyle } from "@/lib/subtitle-style";
+import { countRender, renderLimitReached } from "@/lib/render-limit";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 
 // One render job lives in the video's folder:
@@ -21,6 +22,14 @@ import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_
 //   render-error.json  written by Modal if it failed
 //   render-progress.json  { percent }, written by Modal while it works
 const LINK_SECONDS = 3600;
+// Part of every video's fingerprint (below). Change it whenever render.py makes the same edits look different
+// (a fix or a new look): else a press that changed nothing hands back the video made before the fix.
+const RENDER_REV = "2026-11-16";
+
+async function fingerprintOf(parts: unknown) {
+	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(parts)));
+	return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 type RenderEnv = { RENDER_URL: string; RENDER_TOKEN: string };
 
@@ -33,10 +42,12 @@ async function readKey(key: string | null) {
 export async function POST(request: Request) {
 	// part: only this stretch of the final video, seconds (Make this part, coach 14 Nov). Its job has files of its own
 	// (lib/render-part.ts), so the whole video made before stays, and the admin pages only see whole videos.
-	const { key: rawKey, part: rawPart } = (await request.json()) as { key?: string; part?: unknown };
+	// again: Make it again anyway, after a press that changed nothing.
+	const { key: rawKey, part: rawPart, again } = (await request.json()) as { key?: string; part?: unknown; again?: boolean };
 	const key = await readKey(rawKey ?? null);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
-	if (!(await canUseStudio((await currentUser()).user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
+	const email = (await currentUser()).user?.email;
+	if (!(await canUseStudio(email))) return Response.json({ error: NO_INVITE }, { status: 403 });
 	if (await renderRunning(key)) return Response.json({ error: "This video is already being made. Please wait for it to finish." }, { status: 409 });
 
 	const edit = await getJson<{
@@ -77,10 +88,27 @@ export async function POST(request: Request) {
 	const files = jobFiles(part);
 	const finalKey = siblingKey(key, files.out);
 	const errorKey = siblingKey(key, files.error);
+
+	// Nothing changed since the last video (or this part): hand that one back, at no cost and at once (coach 16 Nov:
+	// pressing Make video over and over cost us every time). Everything that changes the picture is in here:
+	// every edit, the part, whether Cutout is on and how far the speaker is cut out, the own font, render.py's rev.
+	const ownFont = readStyle(edit.style).font === "own" || edit.banners?.some((b) => b.font === "own");
+	const fingerprint = await fingerprintOf({
+		RENDER_REV,
+		edit,
+		part,
+		cutout: layers ? await getJson(siblingKey(key, "cutout.json")) : null,
+		font: ownFont ? await currentUser().then(({ user }) => (user ? getJson(fontKeys(user.id).info) : null)) : null,
+	});
+	const before = await getJson<{ fingerprint?: string; stoppedAt?: string }>(siblingKey(key, files.job)).catch(() => null);
+	if (!again && before?.fingerprint === fingerprint && !before.stoppedAt && (await exists(finalKey))) return Response.json({ status: "done", unchanged: true });
+	const limited = await renderLimitReached(email);
+	if (limited) return Response.json({ error: limited }, { status: 429 });
 	// Clear the previous attempt so the status check can't pick up an old result.
 	const progressKey = siblingKey(key, files.progress);
 	await Promise.all([deleteObject(finalKey), deleteObject(errorKey), deleteObject(progressKey)]);
-	await putObject(siblingKey(key, files.job), JSON.stringify({ startedAt: new Date().toISOString(), ...(part && { part }) }), "application/json");
+	const job = { startedAt: new Date().toISOString(), fingerprint, ...(part && { part }) };
+	await putObject(siblingKey(key, files.job), JSON.stringify(job), "application/json");
 
 	// The user's own font: Modal gets a short-lived link to the file and the name to ask for.
 	// A banner can have the own font too, while the subtitles don't (banner_events falls back to Kanit without it).
@@ -142,7 +170,39 @@ export async function POST(request: Request) {
 		await putObject(errorKey, JSON.stringify({ error, at: new Date().toISOString() }), "application/json");
 		return Response.json({ error }, { status: 502 });
 	}
+	// Its Modal job, so Stop can end it (DELETE). Written again: the status check only reads startedAt and part.
+	await putObject(siblingKey(key, files.job), JSON.stringify({ ...job, callId: data.callId }), "application/json");
+	// A part counts as its share of the video. Never stops the video it is counting: a hiccup here only misses one.
+	const total = totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS;
+	await countRender(email, part && total ? (part.end - part.start) / total : 1).catch(() => null);
 	return Response.json({ status: "processing" });
+}
+
+const STOPPED = "Stopped. Your edits are all here: press Make video when you're ready.";
+
+// Stop making it (coach 15 Nov: Make video pressed by mistake). Closing the page never stopped it: Modal went on,
+// and we paid for it. The job file says it was stopped, so the status check believes that even if Modal's own
+// error report lands after ours.
+export async function DELETE(request: Request) {
+	const params = new URL(request.url).searchParams;
+	const key = await readKey(params.get("key"));
+	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
+	const files = params.get("part") ? PART_JOB : WHOLE_JOB;
+	const jobKey = siblingKey(key, files.job);
+	const job = await getJson<{ startedAt?: string; callId?: string; stoppedAt?: string }>(jobKey);
+	if (!job?.startedAt || job.stoppedAt || (await exists(siblingKey(key, files.out)))) return Response.json({ status: "not running" });
+	await putObject(jobKey, JSON.stringify({ ...job, stoppedAt: new Date().toISOString() }), "application/json");
+	await putObject(siblingKey(key, files.error), JSON.stringify({ error: STOPPED, stopped: true, at: new Date().toISOString() }), "application/json");
+	if (job.callId) {
+		const env = getCloudflareContext().env as unknown as RenderEnv;
+		// Best effort: if Modal can't be told, the job ends by itself and its video is simply not shown.
+		await fetch(env.RENDER_URL, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ token: env.RENDER_TOKEN, kind: "cancel", callId: job.callId }),
+		}).catch(() => null);
+	}
+	return Response.json({ status: "stopped" });
 }
 
 // Where is the job at? The page asks this every few seconds.
@@ -153,8 +213,8 @@ export async function GET(request: Request) {
 	// The newer of the whole video's job and a part's job is the one shown (each has its own files, lib/render-part.ts).
 	// With a part shown, the whole video made before comes too (review 14 Nov: after a part, it could not be opened).
 	const [whole, partJob] = await Promise.all([
-		getJson<{ startedAt?: string }>(siblingKey(key, WHOLE_JOB.job)).catch(() => null),
-		getJson<{ startedAt?: string; part?: unknown }>(siblingKey(key, PART_JOB.job)).catch(() => null),
+		getJson<{ startedAt?: string; stoppedAt?: string }>(siblingKey(key, WHOLE_JOB.job)).catch(() => null),
+		getJson<{ startedAt?: string; stoppedAt?: string; part?: unknown }>(siblingKey(key, PART_JOB.job)).catch(() => null),
 	]);
 	const part: RenderPart | null = partJob && (partJob.startedAt ?? "") > (whole?.startedAt ?? "") ? readRenderPart(partJob.part, Infinity) : null;
 	const files = jobFiles(part);
@@ -174,10 +234,11 @@ export async function GET(request: Request) {
 		});
 	}
 
+	const job = part ? partJob : whole;
+	if (job?.stoppedAt) return Response.json({ status: "failed", stopped: true, error: STOPPED, ...(part && { part }), ...(await wholeLinks()) });
 	const failure = await getJson<{ error?: string }>(siblingKey(key, files.error));
 	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Render failed", ...(part && { part }), ...(await wholeLinks()) });
 
-	const job = part ? partJob : whole;
 	if (!job?.startedAt) return Response.json({ status: "none" });
 	// Older than any job runs (Modal stops it at 30 min) and nothing came back: it died without saying so, and the
 	// page waited forever with Make video locked (coach, 14 Nov: stuck at 96%). Say so, so it can be made again.

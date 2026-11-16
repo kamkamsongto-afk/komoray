@@ -2647,6 +2647,14 @@ def start(body: dict) -> dict:
     """Called by komoray.com. Starts a render (or, with kind "proxy", a preview copy) in the background."""
     if not hmac.compare_digest(str(body.get("token", "")), os.environ["RENDER_TOKEN"]):
         return {"error": "unauthorized"}
+    if body.get("kind") == "cancel":
+        # Stop pressed on the page (api/render DELETE, coach 15 Nov): end that job, so we don't pay for a video nobody wants.
+        try:
+            # terminate_containers: its machine goes at once. Without it ffmpeg ran on ~23 s after the cancel (staging, 16 Nov).
+            modal.FunctionCall.from_id(str(body.get("callId", ""))).cancel(terminate_containers=True)
+        except Exception as err:  # already finished, or not ours to find: nothing left to stop
+            return {"error": str(err)}
+        return {"ok": True}
     if body.get("kind") == "proxy":
         call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"))
     elif body.get("kind") == "faces":
