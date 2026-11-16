@@ -147,6 +147,7 @@ export default function EditPage() {
 	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
 	// False from the press until the server has taken the job. Until then it still answers about the last video.
 	const renderAccepted = useRef(true);
+	const [unchanged, setUnchanged] = useState(false); // the last press changed nothing: the video before came back (api/render)
 	const [showReady, setShowReady] = useState(false); // the finished-video window: opens by itself when a render finishes
 	const closeReady = useCallback(() => setShowReady(false), []);
 	// Personal dictionary: loaded for a video it hasn't run on yet; what it fixed, to show and undo.
@@ -697,7 +698,9 @@ export default function EditPage() {
 	}
 
 	// part: only this stretch of the final video, seconds (Make this part on the timeline, coach 14 Nov).
-	async function makeVideo(part?: RenderPart) {
+	// again: Make it again anyway, after a press that changed nothing (it counts toward the limit, render-limit.ts).
+	async function makeVideo(part?: RenderPart, again = false) {
+		setUnchanged(false);
 		if (!key) return;
 		if (!audioRef.current && "AudioContext" in window) audioRef.current = new AudioContext();
 		void audioRef.current?.resume();
@@ -730,9 +733,10 @@ export default function EditPage() {
 			const res = await fetch("/api/render", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ key, ...(part && { part }) }),
+				body: JSON.stringify({ key, ...(part && { part }), ...(again && { again }) }),
 			});
-			const data = (await res.json()) as { error?: string };
+			const data = (await res.json()) as { error?: string; unchanged?: boolean };
+			if (data.unchanged) setUnchanged(true);
 			if (!res.ok) throw new Error(data.error ?? "Could not start the render");
 			renderAccepted.current = true;
 		} catch (err) {
@@ -1083,6 +1087,14 @@ export default function EditPage() {
 						Download {render.part ? "part" : "video"}
 					</a>
 					<span className="text-xs text-foreground/50">{render.part ? "Only this part. Make video makes the whole video." : "Changed something after this? Press Make video again."}</span>
+					{unchanged && (
+						<span className="flex items-center gap-2 text-xs text-foreground/60">
+							Nothing changed since this one, so it wasn&apos;t made again.
+							<button onClick={() => void makeVideo(render.part, true)} className="underline hover:text-foreground">
+								Make it again anyway
+							</button>
+						</span>
+					)}
 					{render.part && render.wholeUrl && (
 						<span className="flex items-center gap-2 text-xs">
 							Your whole video from before:
