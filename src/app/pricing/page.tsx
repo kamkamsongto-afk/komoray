@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { signInWithGoogle, useUser } from "@/components/Account";
 import { HomeLogo } from "@/components/HomeLogo";
 import { EXTRA_PACKS, type PaddleEnv, PLANS, type PricesView } from "@/lib/billing";
+import { hashEmail } from "@/lib/email-hash";
 
 // Paddle.js from Paddle's own CDN (not an npm package): the global it sets up, as far as this page uses it.
 type PaddleEvent = { name?: string; data?: unknown };
@@ -28,6 +29,8 @@ declare global {
 const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
 
 type Config = { ready: false } | { ready: true; token: string; environment: PaddleEnv; prices: PricesView };
+type MyPlan = { plan: "free" | "starter" | "pro"; extraMinutes: number; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
+const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
 // Plans and the checkout (coach 16 Nov: Paddle in the sandbox first, on staging). What is sold is the decided pricing doc.
 // Buying needs signing in: the user's id goes with the payment (customData), so the webhook knows whose plan it is.
@@ -37,7 +40,29 @@ export default function PricingPage() {
 	const [ready, setReady] = useState(false); // Paddle.js loaded and set up
 	const [yearly, setYearly] = useState(true);
 	const [thanks, setThanks] = useState(false);
+	const [mine, setMine] = useState<MyPlan | null>(null);
 	const started = useRef(false);
+
+	// The plan we have on record (from Paddle's webhook). After a purchase it is asked again a few times: the webhook
+	// usually lands within seconds of the checkout closing.
+	useEffect(() => {
+		if (!user) return;
+		let gone = false;
+		let tries = 0;
+		const ask = () =>
+			fetch("/api/billing/me")
+				.then((r) => (r.ok ? (r.json() as Promise<MyPlan>) : null))
+				.then((p) => {
+					if (gone || !p) return;
+					setMine(p);
+					if (thanks && p.plan === "free" && tries++ < 6) setTimeout(ask, 2500);
+				})
+				.catch(() => {});
+		void ask();
+		return () => {
+			gone = true;
+		};
+	}, [user, thanks]);
 
 	useEffect(() => {
 		void fetch("/api/billing/config")
@@ -69,14 +94,16 @@ export default function PricingPage() {
 		document.head.appendChild(script);
 	}, [config]);
 
-	function buy(priceId: string) {
+	async function buy(priceId: string) {
 		if (!user) return void signInWithGoogle();
 		if (!ready || !window.Paddle || !user.email) return;
+		// Whose purchase it is, for the webhook: the same name as their files in R2 (lib/billing-store.ts).
+		const emailHash = await hashEmail(user.email);
 		const dark = document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
 		window.Paddle.Checkout.open({
 			items: [{ priceId, quantity: 1 }],
 			customer: { email: user.email },
-			customData: { user_id: user.id },
+			customData: { user_id: user.id, email_hash: emailHash },
 			settings: { displayMode: "overlay", variant: "one-page", theme: dark ? "dark" : "light", allowLogout: false },
 		});
 	}
@@ -85,7 +112,7 @@ export default function PricingPage() {
 	const open = Boolean(prices) && (ready || !user);
 	const button = (label: string, priceId: string | undefined) => (
 		<button
-			onClick={() => priceId && buy(priceId)}
+			onClick={() => priceId && void buy(priceId)}
 			disabled={!open || !priceId}
 			className="mt-auto rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-40"
 		>
@@ -116,6 +143,15 @@ export default function PricingPage() {
 				</div>
 			</header>
 
+			{mine && mine.plan !== "free" && (
+				<p className="rounded-xl border border-blue-600/30 bg-blue-600/10 p-4 text-center text-sm">
+					You&apos;re on <span className="font-semibold">{PLANS[mine.plan].name}</span>
+					{mine.every ? ` (${mine.every === "year" ? "yearly" : "monthly"})` : ""}.{" "}
+					{mine.cancelsAt ? `It ends on ${day(mine.cancelsAt)}.` : mine.periodEnds ? `Next bill on ${day(mine.periodEnds)}.` : ""}
+					{mine.status === "past_due" ? " Your last payment didn't go through: please update your card." : ""}
+					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}
+				</p>
+			)}
 			{thanks && (
 				<p className="rounded-xl border border-green-600/30 bg-green-600/10 p-4 text-center">
 					Thank you! Your plan starts in a moment. <Link href="/upload" className="underline">Make a video</Link>
@@ -165,7 +201,7 @@ export default function PricingPage() {
 					{EXTRA_PACKS.map((pack) => (
 						<button
 							key={pack.id}
-							onClick={() => prices && buy(prices[pack.id])}
+							onClick={() => prices && void buy(prices[pack.id])}
 							disabled={!open}
 							className="rounded-lg border border-foreground/20 px-4 py-2 font-medium hover:bg-foreground/5 disabled:opacity-40"
 						>

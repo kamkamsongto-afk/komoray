@@ -5,6 +5,7 @@ import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/fe
 import { BETA_MINUTES, MAX_FILE_GB, MINUTES_PER_VIDEO } from "@/lib/limits";
 import { type JobFiles, PART_JOB, WHOLE_JOB } from "./render-part";
 import { videoDuration } from "@/lib/video-duration";
+import { hashEmail } from "@/lib/email-hash";
 
 // Who may use the studio during the beta, and how much. All kept in R2, away from uploads/ so it stays:
 //   access/people/<hash of email>.json                   invited by the admin: { email, at, features? } (lib/features.ts)
@@ -21,10 +22,7 @@ export const NO_INVITE = "Komoray is invite-only for now. Your invite will come 
 export type AccessStatus = { allowed: boolean; unlimited: boolean; used: number; limit: number; left: number; perVideo: number; maxGb: number; features: Features };
 type PersonRecord = { email: string; at: string; features?: unknown };
 
-export async function hashEmail(email: string) {
-	const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email.trim().toLowerCase())));
-	return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+export { hashEmail }; // lib/email-hash.ts: the pricing page needs the same name in the browser
 
 const personKey = async (email: string) => `access/people/${await hashEmail(email)}.json`;
 const month = () => new Date().toISOString().slice(0, 7);

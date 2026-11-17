@@ -32,3 +32,19 @@ export const EXTRA_PACKS = [
 	{ id: "extra60" as const, minutes: 60, price: 6 },
 	{ id: "extra200" as const, minutes: 200, price: 18 },
 ];
+
+// What a Paddle price buys, worked out here from its ID (never from what the browser sent): a plan and how often it
+// is paid, or a pack of extra minutes. null: not one of ours. Sandbox and live IDs never clash, so both are looked in.
+export type PriceMeaning = { plan: PaidPlan; every: "month" | "year" } | { extraMinutes: number };
+export function priceMeaning(priceId: string): PriceMeaning | null {
+	for (const prices of Object.values(PRICES)) {
+		if (!prices) continue;
+		for (const plan of ["starter", "pro"] as const) {
+			if (prices[plan].month === priceId) return { plan, every: "month" };
+			if (prices[plan].year === priceId) return { plan, every: "year" };
+		}
+		for (const pack of EXTRA_PACKS) if (prices[pack.id] === priceId) return { extraMinutes: pack.minutes };
+	}
+	return null;
+}
+export const EXTRA_MONTHS = 12; // extra minutes can be used for this long after buying (decided pricing doc, 15 Nov)
