@@ -5,7 +5,7 @@ import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEff
 import { BANNER, type Banner } from "@/lib/banners";
 import { BEHIND, type CutoutLayers, insertName } from "@/lib/behind";
 import { FRAME, type FrameMe, frameName } from "@/lib/frame-me";
-import { duplicateOf, pasteOf } from "@/lib/layers";
+import { duplicateOf, pasteOf, spotInside } from "@/lib/layers";
 import { LAYOUT, layoutName, type VideoLayout } from "@/lib/layout";
 import type { TakeGroup } from "@/lib/takes";
 import { FPS, pieceAt, type Segment, toOutSeconds, totalFrames } from "@/lib/timeline";
@@ -59,6 +59,7 @@ type Props = {
 	revealed: { id: string; n: number } | null; // picked in a box: pick its strip here and scroll to it (n: each ask)
 	splits: number[]; // where Split divided the sound and the words, seconds of the original video
 	onSplitsChange: (splits: number[]) => void;
+	onShowCutsChange?: (on: boolean) => void; // Show cuts switched: the boxes show their times on the same clock as the ruler
 };
 
 // Things shown over the video, as strips under the waveform: banners first, then the Cutout layers, then Frame Me, then Layout, each in rows of their own.
@@ -71,17 +72,41 @@ const LANE_LOOK: Record<LaneKind, { edge: string; body: string; picked: string; 
 	frame: { edge: "bg-emerald-500/70", body: "bg-emerald-500/30 hover:bg-emerald-500/45", picked: "bg-emerald-500/55", ring: "ring-emerald-600", name: "Frame Me" },
 	layout: { edge: "bg-indigo-500/70", body: "bg-indigo-500/30 hover:bg-indigo-500/45", picked: "bg-indigo-500/55", ring: "ring-indigo-600", name: "layout" },
 };
-// Each item goes in the first row with room, so a row only starts where two overlap.
-function packRows(items: LaneItem[], first: number) {
-	const ends: number[] = [];
-	return [...items]
-		.sort((a, b) => a.start - b.start)
-		.map((item) => {
-			let row = ends.findIndex((end) => end <= item.start);
-			if (row === -1) row = ends.length;
-			ends[row] = item.end;
-			return { item, row: first + row };
-		});
+// Each item stays in the row it was in (coach, 17 Nov: with the rows worked out afresh on every change, adding or
+// moving one early in the video sent the strips after it jumping to other rows). First the ones that did not change
+// keep their rows, then the changed ones keep theirs if there is room, and new ones (or ones with no room) go in the
+// first row with room. Rows left empty close up. remembered: row, start and end of each id, from the last time.
+type RowMemo = Map<string, { row: number; start: number; end: number }>;
+function packRows(items: LaneItem[], first: number, remembered: RowMemo) {
+	const rows: { start: number; end: number }[][] = [];
+	const fits = (row: number, item: LaneItem) => !(rows[row] ?? []).some((o) => o.start < item.end && o.end > item.start);
+	const put = (row: number, item: LaneItem) => (rows[row] ??= []).push(item);
+	const placed = new Map<string, number>();
+	const was = (item: LaneItem) => remembered.get(item.id);
+	const same = (item: LaneItem) => was(item)?.start === item.start && was(item)?.end === item.end;
+	const byStart = [...items].sort((a, b) => a.start - b.start);
+	for (const pass of [(i: LaneItem) => Boolean(was(i)) && same(i), (i: LaneItem) => Boolean(was(i)) && !same(i)]) {
+		for (const item of byStart.filter(pass)) {
+			const row = was(item)!.row;
+			if (fits(row, item)) {
+				put(row, item);
+				placed.set(item.id, row);
+			}
+		}
+	}
+	for (const item of byStart) {
+		if (placed.has(item.id)) continue;
+		let row = 0;
+		while (!fits(row, item)) row++;
+		put(row, item);
+		placed.set(item.id, row);
+	}
+	const used = [...new Set(placed.values())].sort((a, b) => a - b);
+	return byStart.map((item) => {
+		const row = used.indexOf(placed.get(item.id)!);
+		remembered.set(item.id, { row, start: item.start, end: item.end });
+		return { item, row: first + row };
+	});
 }
 
 // Heights, px: time ruler, sentence chips, waveform (the zoom strip lies on top of it while it shows).
@@ -93,7 +118,9 @@ const ZOOM_TOP = WAVE_TOP;
 const ZOOM_STRIP = 16;
 const WAVE = 58;
 const WAVE_SMALL = 16; // the waveform folded away, so the script above has more room (coach, 7 Nov)
-const LANE_ROW = 20; // one row of things shown over the video (banners, later graphics): all in this one lane, stacked only where they overlap
+const LANE_ROW = 28; // one row of things shown over the video (banners, later graphics): all in this one lane, stacked only where they overlap. Was 20: too small to grab (coach, 17 Nov)
+const SCROLL_EDGE_PX = 40; // dragging a strip this close to the timeline's edge scrolls it
+const SCROLL_SPEED_PX = 12; // per frame
 
 const CHIP_GAP = 0.7; // a pause this long (seconds) starts a new chip
 const CHIP_MAX = 12; // a chip never covers more seconds than this
@@ -176,6 +203,7 @@ export function Timeline({
 	revealed,
 	splits,
 	onSplitsChange,
+	onShowCutsChange,
 }: Props) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -194,6 +222,7 @@ export function Timeline({
 	// A cut's edge being dragged (Show cuts on): which cut, which side, and where it is now.
 	const [edge, setEdge] = useState<{ cut: [number, number]; side: "start" | "end"; to: number } | null>(null);
 	const anchor = useRef<{ time: number; at: number } | null>(null); // keep this moment under this x after zooming
+	const follow = useRef(true); // the view follows the playhead while playing; not while something is being dragged
 	const [overWave, setOverWave] = useState(false);
 
 	useEffect(() => {
@@ -204,6 +233,7 @@ export function Timeline({
 			// no storage: the switches start as they are
 		}
 	}, []);
+	useEffect(() => onShowCutsChange?.(showCuts), [showCuts, onShowCutsChange]);
 	const toggleWave = () => {
 		setSmallWave(!smallWave);
 		try {
@@ -249,7 +279,9 @@ export function Timeline({
 		},
 		[segments],
 	);
-	// Banners in their rows, then the Cutout layers in rows of their own under them.
+	// Banners in their rows, then the Cutout layers in rows of their own under them. Each strip's row is remembered (packRows).
+	// Kept for the life of the timeline and filled in by packRows (a Map held in state, not a ref: it is read while drawing).
+	const [rowMemo] = useState<RowMemo>(() => new Map());
 	const lane = useMemo(() => {
 		const bannerItems = banners.map((b): LaneItem => ({ id: b.id, kind: "banner", label: b.text.replace(/\n/g, " "), start: b.start, end: b.end }));
 		const cutoutItems = [
@@ -257,13 +289,14 @@ export function Timeline({
 			...cutoutLayers.inserts.map((i): LaneItem => ({ id: i.id, kind: "insert", label: insertName(i), start: i.start, end: i.end })),
 		];
 		const rowsOf = (packed: { row: number }[], from: number) => (packed.length ? Math.max(...packed.map((l) => l.row)) + 1 : from);
-		const top = packRows(bannerItems, 0);
-		const middle = packRows(cutoutItems, rowsOf(top, 0));
+		const memo = rowMemo;
+		const top = packRows(bannerItems, 0, memo);
+		const middle = packRows(cutoutItems, rowsOf(top, 0), memo);
 		const frameItems = frames.map((f): LaneItem => ({ id: f.id, kind: "frame", label: frameName(f), start: f.start, end: f.end }));
-		const framed = packRows(frameItems, rowsOf(middle, rowsOf(top, 0)));
+		const framed = packRows(frameItems, rowsOf(middle, rowsOf(top, 0)), memo);
 		const layoutItems = layouts.map((l): LaneItem => ({ id: l.id, kind: "layout", label: layoutName(l), start: l.start, end: l.end }));
-		return [...top, ...middle, ...framed, ...packRows(layoutItems, rowsOf(framed, rowsOf(middle, rowsOf(top, 0))))];
-	}, [banners, cutoutLayers, frames, layouts]);
+		return [...top, ...middle, ...framed, ...packRows(layoutItems, rowsOf(framed, rowsOf(middle, rowsOf(top, 0))), memo)];
+	}, [banners, cutoutLayers, frames, layouts, rowMemo]);
 	const laneRows = lane.length ? Math.max(...lane.map((l) => l.row)) + 1 : 0;
 	const laneHeight = laneRows * LANE_ROW + (laneRows ? 2 : 0);
 	// The strip clicked on the timeline: highlighted, and Delete removes it (coach, 6 Nov: no trip back to the box's ×).
@@ -367,20 +400,49 @@ export function Timeline({
 		const seconds = b.end - b.start;
 		const startX = e.clientX;
 		let moved = false;
+		let lastX = e.clientX;
+		let last = "";
 		const tenths = (n: number) => Math.round(n * 10) / 10;
-		const move = (ev: globalThis.PointerEvent) => {
-			if (!moved && Math.abs(ev.clientX - startX) < DRAG_PX) return;
-			moved = true;
-			const at = outAt(ev.clientX);
+		const place = (clientX: number) => {
+			const at = outAt(clientX);
 			const patch =
 				resize === "end"
 					? { end: tenths(Math.min(total, Math.max(b.start + 0.3, at))) }
 					: resize === "start"
 						? { start: tenths(Math.max(0, Math.min(b.end - 0.3, at))) }
 						: { start: tenths(Math.min(total - seconds, Math.max(0, at - grab))), end: tenths(Math.min(total - seconds, Math.max(0, at - grab)) + seconds) };
+			const key = JSON.stringify(patch);
+			if (key === last) return; // nothing new: no save, no Undo step
+			last = key;
 			changeItem(b, patch);
 		};
+		const move = (ev: globalThis.PointerEvent) => {
+			lastX = ev.clientX;
+			if (!moved && Math.abs(ev.clientX - startX) < DRAG_PX) return;
+			moved = true;
+			place(ev.clientX);
+		};
+		// Held near an edge of the timeline, it scrolls on by itself, so a strip can be dragged further than the
+		// screen shows (coach, 17 Nov: long drags could not be done).
+		follow.current = false;
+		let frame = 0;
+		const edgeScroll = () => {
+			const el = scrollRef.current;
+			if (el && moved) {
+				const box = el.getBoundingClientRect();
+				const step = lastX < box.left + SCROLL_EDGE_PX ? -1 : lastX > box.right - SCROLL_EDGE_PX ? 1 : 0;
+				if (step) {
+					const before = el.scrollLeft;
+					el.scrollLeft += step * SCROLL_SPEED_PX;
+					if (el.scrollLeft !== before) place(lastX);
+				}
+			}
+			frame = requestAnimationFrame(edgeScroll);
+		};
+		frame = requestAnimationFrame(edgeScroll);
 		const stop = () => {
+			cancelAnimationFrame(frame);
+			follow.current = true;
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", stop);
 			window.removeEventListener("pointercancel", stop);
@@ -391,7 +453,9 @@ export function Timeline({
 			else if (b.kind === "frame") onOpenFrame(b.id);
 			else if (b.kind === "layout") onOpenLayout(b.id);
 			else onOpenCutout(b.id);
-			onSeek(toSource(b.start));
+			// Into it, not at its very start where it is still fading in (coach, 17 Nov), and not moved at all if the
+			// playhead is already well inside it.
+			onSeek(toSource(spotInside(b.start, b.end, toOutSeconds(timeRef.current ?? 0, segments))));
 		};
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", stop);
@@ -607,8 +671,7 @@ export function Timeline({
 		return () => el.removeEventListener("wheel", onWheel);
 	}, [scale, zoomTo]);
 
-	// The playhead and the clock follow the player every frame, without redrawing React.
-	const follow = useRef(true);
+	// The playhead and the clock follow the player every frame, without redrawing React (follow: declared at the top).
 	useEffect(() => {
 		let frame = 0;
 		const tick = () => {
@@ -660,6 +723,12 @@ export function Timeline({
 		if ((e.target as HTMLElement).closest("button")) return;
 		const el = scrollRef.current;
 		if (!el) return;
+		// A press in the rows of banners, frames and layouts that misses a strip does nothing but let the strip go
+		// (coach, 17 Nov: just missing a strip picked a stretch of the video, and Make this part came up instead).
+		if (e.clientY - el.getBoundingClientRect().top >= height) {
+			setPickedItem(null);
+			return;
+		}
 		follow.current = false;
 		try {
 			e.currentTarget.setPointerCapture(e.pointerId);
@@ -1087,7 +1156,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 					})}
 					{lane.map(({ item: b, row }) => {
 						const x0 = xOf(toSource(b.start));
-						const x1 = Math.max(x0 + 24, xOf(toSource(b.end)));
+						const x1 = Math.max(x0 + 36, xOf(toSource(b.end))); // room for both ends and a bit to grab
 						const picked = pickedItem === b.id;
 						const look = LANE_LOOK[b.kind];
 						return (
@@ -1096,11 +1165,14 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 								className={`absolute z-[1] flex rounded ${picked ? `ring-2 ${look.ring} ring-offset-1 ring-offset-background` : ""}`}
 								style={{ left: x0, width: x1 - x0 - 1, top: height + row * LANE_ROW, height: LANE_ROW - 2 }}
 							>
-								<button onPointerDown={(e) => startItemDrag(e, b, "start")} aria-label={`When ${b.label} starts`} title="Drag to change when it starts" className={`w-1.5 shrink-0 cursor-ew-resize touch-none rounded-l ${look.edge}`} />
+								{/* Ends 10 px wide with a grip line, so they can be found and held (coach, 17 Nov: 6 px was too fiddly). */}
+								<button onPointerDown={(e) => startItemDrag(e, b, "start")} aria-label={`When ${b.label} starts`} title="Drag to change when it starts" className={`flex w-2.5 shrink-0 cursor-ew-resize touch-none items-center justify-center rounded-l ${look.edge}`}>
+									<span className="h-3 w-px bg-white/80" aria-hidden />
+								</button>
 								<button
 									onPointerDown={(e) => startItemDrag(e, b, false)}
 									title={`${b.label} (${look.name}): drag to change when it shows, click to pick it (Delete removes it, Ctrl+D duplicates it, Ctrl+C copies it)`}
-									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-[11px] leading-[18px] text-foreground ${picked ? look.picked : look.body}`}
+									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-xs leading-[26px] text-foreground active:cursor-grabbing ${picked ? look.picked : look.body}`}
 								>
 									{b.label}
 								</button>
@@ -1126,7 +1198,9 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 										<X className="h-2.5 w-2.5" aria-hidden />
 									</button>
 								)}
-								<button onPointerDown={(e) => startItemDrag(e, b, "end")} aria-label={`How long ${b.label} shows`} title="Drag to change how long it shows" className={`w-2 shrink-0 cursor-ew-resize touch-none rounded-r ${look.edge}`} />
+								<button onPointerDown={(e) => startItemDrag(e, b, "end")} aria-label={`How long ${b.label} shows`} title="Drag to change how long it shows" className={`flex w-2.5 shrink-0 cursor-ew-resize touch-none items-center justify-center rounded-r ${look.edge}`}>
+									<span className="h-3 w-px bg-white/80" aria-hidden />
+								</button>
 							</div>
 						);
 					})}

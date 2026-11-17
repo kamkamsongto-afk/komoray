@@ -54,3 +54,28 @@ export function pasteOf<T extends Timed>(item: T, at: number, total: number): T 
 	const start = tenths(Math.max(0, Math.min(at, total - seconds)));
 	return { ...item, id: crypto.randomUUID(), start, end: tenths(Math.min(total, start + seconds)) };
 }
+
+// Where the playhead goes when a thing is picked or opened (coach, 17 Nov): at its very start it is still fading in,
+// so the preview showed nothing and it looked as if the change had not worked. Left where it is if that is already
+// well inside it, else up to 3 seconds in (half way for a short one). All seconds of the final video.
+export function spotInside(start: number, end: number, now: number) {
+	const seconds = Math.max(0, end - start);
+	const edge = Math.min(0.3, seconds / 4);
+	if (now >= start + edge && now <= end - edge) return now;
+	return start + Math.min(3, seconds / 2);
+}
+
+// A time on the timeline's clock, as its ruler writes it: 1:05.3 (coach, 17 Nov: "65.3" was hard to read).
+export function clockText(seconds: number) {
+	const s = Math.max(0, Math.round(seconds * 10) / 10);
+	const whole = Math.floor(s);
+	return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}.${Math.round((s - whole) * 10)}`;
+}
+
+// What was typed, back into seconds: "1:05.3", "1:05", "65.3" or "65". null: not a time.
+export function readClock(text: string): number | null {
+	const t = text.trim().replace(",", ".");
+	const m = /^(?:(\d+):)?(\d+(?:\.\d*)?)$/.exec(t);
+	if (!m) return null;
+	return (m[1] ? Number(m[1]) * 60 : 0) + Number(m[2]);
+}

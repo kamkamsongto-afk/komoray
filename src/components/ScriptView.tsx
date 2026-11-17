@@ -30,6 +30,8 @@ import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
 import { waitLabel } from "@/lib/use-cutout";
 import { AudioControls } from "./AudioControls";
+import { type Clock, FINAL_CLOCK } from "./TimeField";
+import { spotInside } from "@/lib/layers";
 import { Timeline } from "./Timeline";
 import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
 
@@ -364,10 +366,21 @@ export function ScriptView({
 	// A banner, picture or text picked in a box (or just added): the blue line goes to its start, and the
 	// timeline picks its strip and scrolls to it (coach, 12 Nov). n: a new ask each time, also for the same one.
 	const [revealed, setRevealed] = useState<{ id: string; n: number } | null>(null);
+	// Into it, not at its very start (still fading in, so it looked as if nothing was there), and left where it is if
+	// already well inside it (coach, 17 Nov: spotInside). One just added isn't in the lists yet: half a second in.
 	const reveal = (id: string, start: number) => {
-		jump(toSourceSeconds(start, segments));
+		const thing = [...banners, ...cutoutLayers.texts, ...cutoutLayers.inserts, ...frames, ...layouts].find((x) => x.id === id);
+		const spot = thing && thing.start === start ? spotInside(thing.start, thing.end, toOutSeconds(timeRef.current, segments)) : start + 0.5;
+		jump(toSourceSeconds(Math.min(spot, totalFrames(segments) / FPS), segments));
 		setRevealed((s) => ({ id, n: (s?.n ?? 0) + 1 }));
 	};
+	// The clock the timeline's ruler shows, for the times in the boxes (coach, 17 Nov: they never matched). Show cuts
+	// on: the whole upload. Off: the final video, which is what the times are saved in.
+	const [showCuts, setShowCuts] = useState(true);
+	const ruler = useMemo<Clock>(
+		() => (showCuts ? { shown: (t) => toSourceSeconds(t, segments), back: (t) => toOutSeconds(t, segments) } : FINAL_CLOCK),
+		[showCuts, segments],
+	);
 	// Layout: a picture or clip dropped on the video (coach, 14 Nov). From the computer it goes into Import first.
 	// Into the other part of the layout showing (id), else a new top / bottom layout here, and the Layout box opens on it.
 	const layoutsRef = useRef(layouts);
@@ -986,6 +999,28 @@ export function ScriptView({
 		window.addEventListener("pointerup", stop);
 		window.addEventListener("pointercancel", stop);
 	}
+	// The box ends above the timeline, never over it (coach, 17 Nov: it covered the strips, so they could not be
+	// grabbed while changing them). Measured again when the page scrolls, the window or the timeline changes size.
+	const [panelRoom, setPanelRoom] = useState<number | null>(null);
+	useEffect(() => {
+		if (!panel) return;
+		const measure = () => {
+			const box = panelRef.current;
+			const line = timelineRef.current;
+			if (!box || !line) return;
+			setPanelRoom(Math.max(160, Math.round(line.getBoundingClientRect().top - box.getBoundingClientRect().top - 12)));
+		};
+		measure();
+		const watch = new ResizeObserver(measure);
+		if (timelineRef.current) watch.observe(timelineRef.current);
+		window.addEventListener("scroll", measure, { passive: true });
+		window.addEventListener("resize", measure);
+		return () => {
+			watch.disconnect();
+			window.removeEventListener("scroll", measure);
+			window.removeEventListener("resize", measure);
+		};
+	}, [panel]);
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -1130,10 +1165,10 @@ export function ScriptView({
 					{mode === "preview" && panel && (
 						<div
 							ref={panelRef}
-							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] ${panelHeight ? "" : "lg:max-h-[calc(100vh-26rem)]"}`}
-							style={panelHeight ? ({ "--panel-h": `${panelHeight}px` } as CSSProperties) : undefined}
+							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] ${panelHeight ? "" : "lg:max-h-[var(--panel-room,calc(100vh-26rem))]"}`}
+							style={{ ...(panelHeight && { "--panel-h": `${panelHeight}px` }), ...(panelRoom && { "--panel-room": `${panelRoom}px` }) } as CSSProperties}
 						>
-						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${panelHeight ? "lg:h-[min(var(--panel-h),calc(100vh-2rem))]" : "lg:flex-1"}`}>
+						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${panelHeight ? "lg:h-[min(var(--panel-h),var(--panel-room,calc(100vh-2rem)))]" : "lg:flex-1"}`}>
 							<div className="flex items-center justify-between px-3 pt-2 text-sm font-medium">
 								{PANELS.find((p) => p.id === panel)?.name}
 								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close (Esc, or click outside)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
@@ -1246,6 +1281,7 @@ export function ScriptView({
 							thai={thaiClip}
 							focus={focusCutout}
 							onReveal={reveal}
+							ruler={ruler}
 							onPickImported={putInPicClip}
 							onUploading={(busy, added) => {
 								importUploading(busy, added);
@@ -1261,6 +1297,7 @@ export function ScriptView({
 							total={totalFrames(segments) / FPS}
 							focus={focusFrame}
 							onReveal={reveal}
+							ruler={ruler}
 						/>
 					)}
 					{panel === "layout" && (
@@ -1271,6 +1308,7 @@ export function ScriptView({
 							total={totalFrames(segments) / FPS}
 							focus={focusLayout}
 							onReveal={reveal}
+							ruler={ruler}
 							note={layoutNote}
 							libraryVersion={libraryVersion}
 							onImportFile={(file, id) => void dropOnLayout({ file }, id)}
@@ -1587,6 +1625,7 @@ export function ScriptView({
 					revealed={revealed}
 					splits={subtitle.splits ?? []}
 					onSplitsChange={(splits) => onSubtitleChange({ ...subtitle, splits })}
+					onShowCutsChange={setShowCuts}
 					onOpenCutout={(id) => {
 						setFocusCutout(id);
 						openPanel("cutout");

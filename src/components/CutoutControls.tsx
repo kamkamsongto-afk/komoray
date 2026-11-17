@@ -11,6 +11,7 @@ import { Confirm, ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
+import { type Clock, FINAL_CLOCK, rangeText, TimeRange } from "./TimeField";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 import { clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
@@ -26,6 +27,7 @@ type Props = {
 	videoUrl: string | null; // the preview copy, which Fast and Balanced read on this device
 	thai: boolean; // Thai video: only fonts with Thai letters
 	onReveal?: (id: string, start: number) => void; // show it: the blue line to its start, its strip picked on the timeline
+	ruler?: Clock; // the timeline ruler's clock, for the times shown here
 	onPickImported?: (item: LibraryItem) => void; // a file already in Import, into Pic/Clip without uploading it again (coach 15 Nov)
 	onUploading?: (busy: boolean, added?: boolean) => void; // the Import button's dot (ScriptView), as the Import box's uploads
 };
@@ -49,7 +51,7 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
-export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal, onPickImported, onUploading }: Props) {
+export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal, onPickImported, onUploading, ruler = FINAL_CLOCK }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
@@ -204,12 +206,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const times = (item: { start: number; end: number }, set: (patch: { start?: number; end?: number }) => void) =>
 		row(
 			"Shows",
-			<span className="flex items-center gap-1">
-				<input type="number" min={0} max={total} step={0.1} value={item.start} onChange={(e) => set({ start: round(Math.max(0, Number(e.target.value))) })} className="w-16 rounded border border-foreground/20 bg-background px-1" aria-label="From second" />
-				to
-				<input type="number" min={0} max={total} step={0.1} value={item.end} onChange={(e) => set({ end: round(Math.min(total, Number(e.target.value))) })} className="w-16 rounded border border-foreground/20 bg-background px-1" aria-label="To second" />
-				s
-			</span>,
+			<TimeRange start={item.start} end={item.end} total={total} clock={ruler} onChange={set} />,
 		);
 
 	const listing = !openText && !openInsert;
@@ -499,7 +496,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						<Type className="h-3.5 w-3.5 shrink-0 text-foreground/50" aria-hidden />
 						<span className="truncate">{t.text.replace(/\n/g, " ")}</span>
 						<span className="shrink-0 text-xs text-foreground/50 tabular-nums">
-							{t.start}–{t.end}s
+							{rangeText(t.start, t.end, ruler)}
 						</span>
 					</button>
 					{trash(`"${t.text.replace(/\n/g, " ")}"`, () => setTexts(layers.texts.filter((x) => x.id !== t.id)))}
@@ -596,7 +593,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								<button onClick={() => pick(i)} aria-label={`${insertName(i)} at ${i.start} seconds`} title="Open its settings" className="block w-full text-left">
 									{picture("aspect-square w-full")}
 									<span className="block truncate px-1 py-0.5 text-[11px] text-foreground/60 tabular-nums">
-										{insertName(i)} {i.start}–{i.end}s
+										{insertName(i)} {rangeText(i.start, i.end, ruler)}
 									</span>
 								</button>
 								<button onClick={() => setRemoving({ name, remove })} aria-label={`Delete ${insertName(i)}`} title="Delete" className="absolute top-0.5 right-0.5 rounded-full bg-black/70 p-1 text-white hover:bg-red-600">
@@ -609,7 +606,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									{picture("h-8 w-8 rounded")}
 									<span className="truncate">{insertName(i)}</span>
 									<span className="ml-auto shrink-0 text-xs text-foreground/50 tabular-nums">
-										{i.start}–{i.end}s
+										{rangeText(i.start, i.end, ruler)}
 									</span>
 								</button>
 								{trash(name, remove)}
