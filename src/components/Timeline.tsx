@@ -1132,7 +1132,8 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 					if (chip) setSelection({ start: chip.start, end: chip.end });
 				}}
 				className="relative cursor-text overflow-x-auto overflow-y-hidden text-foreground select-none"
-				style={{ height: height + laneHeight + 12, touchAction: "pan-x" }}
+				// Room under the last row for the scrollbar and a gap, so the strips' bottom edge shows (coach, 17 Nov: was 12, too tight).
+				style={{ height: height + laneHeight + 24, touchAction: "pan-x" }}
 			>
 				<div className="relative" style={{ width, height: height + laneHeight }}>
 					<canvas ref={canvasRef} className="sticky left-0 block" style={{ height: height }} />
