@@ -9,6 +9,7 @@ import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { LayerTools } from "./LayerTools";
+import { type Clock, FINAL_CLOCK, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
 	layouts: VideoLayout[];
@@ -17,6 +18,7 @@ type Props = {
 	total: number; // length of the final video, seconds
 	focus: string | null; // a layout to open here
 	onReveal?: (id: string, start: number) => void; // the blue line to its start
+	ruler?: Clock; // the timeline ruler's clock, for the times shown here
 	note?: string; // a file dropped on the video: being added to Import, or why it couldn't be
 	libraryVersion?: number; // goes up when Import got a new file: the pictures here are asked for again
 	onImportFile?: (file: File, id: string) => void; // a file from the computer: into Import, then into this layout's other part
@@ -40,7 +42,7 @@ function KindIcon({ kind, meFirst = true, split = 0.5, size = 22 }: { kind: Layo
 // The editor's Layout box (coach, 14 Nov): for a stretch of the video, the screen is split, you in one part and a
 // picture or clip from Import in the other, top / bottom or side by side, sliding in or with a flash.
 // Drawn by PlayerFrame, made by layout_filters (render.py).
-export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0, onImportFile }: Props) {
+export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0, onImportFile, ruler = FINAL_CLOCK }: Props) {
 	// Import file (coach 15 Nov): one hidden picker, told which layout it is for when its button is pressed.
 	const fileRef = useRef<HTMLInputElement>(null);
 	const importFor = useRef<string | null>(null);
@@ -165,7 +167,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									</span>
 									<span className="truncate">{layoutName(l)}</span>
 									<span className="shrink-0 text-xs text-foreground/50 tabular-nums">
-										{l.start}–{l.end}s
+										{rangeText(l.start, l.end, ruler)}
 									</span>
 								</button>
 								{trash(l)}
@@ -211,12 +213,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							</button>
 							{row(
 								"Shows",
-								<span className="flex items-center gap-1">
-									<input type="number" min={0} max={total} step={0.1} value={l.start} onChange={(e) => update(l.id, { start: round(Math.max(0, Number(e.target.value))) })} className="w-16 rounded border border-foreground/20 bg-background px-1" aria-label="From second" />
-									to
-									<input type="number" min={0} max={total} step={0.1} value={l.end} onChange={(e) => update(l.id, { end: round(Math.min(total, Number(e.target.value))) })} className="w-16 rounded border border-foreground/20 bg-background px-1" aria-label="To second" />
-									s
-								</span>,
+								<TimeRange start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />,
 							)}
 							{row("Your part", range(l.split, LAYOUT.split.min, LAYOUT.split.max, 0.01, percent(l.split), (split) => update(l.id, { split })))}
 						</div>

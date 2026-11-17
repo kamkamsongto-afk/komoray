@@ -9,6 +9,7 @@ import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { LayerTools } from "./LayerTools";
+import { type Clock, FINAL_CLOCK, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
 	frames: FrameMe[];
@@ -17,6 +18,7 @@ type Props = {
 	total: number; // length of the final video, seconds
 	focus: string | null; // a frame to open here
 	onReveal?: (id: string, start: number) => void; // the blue line to its start
+	ruler?: Clock; // the timeline ruler's clock, for the times shown here
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -41,7 +43,7 @@ function ShapeIcon({ shape, size = 22 }: { shape: FrameShape; size?: number }) {
 
 // The editor's Frame Me box (coach, 12 Nov): for a stretch of the video, you show inside a shape over a background,
 // like an alpha mask in OBS. Nothing is cut out, so it shows at once. Drawn by PlayerFrame, made by frame_filters.
-export function FrameControls({ frames, onChange, now, total, focus, onReveal }: Props) {
+export function FrameControls({ frames, onChange, now, total, focus, onReveal, ruler = FINAL_CLOCK }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	const [focused, setFocused] = useState(focus);
 	if (focus !== focused) {
@@ -160,7 +162,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 									</span>
 									<span className="truncate">{frameName(f)}</span>
 									<span className="shrink-0 text-xs text-foreground/50 tabular-nums">
-										{f.start}–{f.end}s
+										{rangeText(f.start, f.end, ruler)}
 									</span>
 								</button>
 								{trash(f)}
@@ -202,15 +204,17 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal }:
 
 						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
 							<span className="text-xs font-medium text-foreground/80">Shape</span>
-							{shapes(f.shape, (shape) => update(f.id, { shape }))}
+							{/* With the playhead moved off this frame, a shape is a new frame there (coach, 17 Nov: a circle at 3:00
+							    open, the playhead at 4:00, Heart picked: the circle turned into the heart, so the circle was gone). */}
+							{shapes(f.shape, (shape) => {
+								const at = now();
+								if ((at < f.start || at > f.end) && frames.length < FRAME.maxItems) add(shape);
+								else update(f.id, { shape });
+							})}
+							<p className="text-[11px] text-foreground/50">Changes this frame. With the video moved off it, a shape adds a new frame there.</p>
 							{row(
 								"Shows",
-								<span className="flex items-center gap-1">
-									<input type="number" min={0} max={total} step={0.1} value={f.start} onChange={(e) => update(f.id, { start: round(Math.max(0, Number(e.target.value))) })} className="w-16 rounded border border-foreground/20 bg-background px-1" aria-label="From second" />
-									to
-									<input type="number" min={0} max={total} step={0.1} value={f.end} onChange={(e) => update(f.id, { end: round(Math.min(total, Number(e.target.value))) })} className="w-16 rounded border border-foreground/20 bg-background px-1" aria-label="To second" />
-									s
-								</span>,
+								<TimeRange start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />,
 							)}
 							{row("Size", range(f.size, FRAME.size.min, FRAME.size.max, 0.01, percent(f.size), (size) => update(f.id, { size })))}
 							{row("Left / right", range(f.x, FRAME.move.min, FRAME.move.max, 0.005, percent(f.x), (x) => update(f.id, { x })))}
