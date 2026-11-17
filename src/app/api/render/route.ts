@@ -2,7 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, canUseStudio, JOB_TOO_OLD_MS, NO_INVITE, renderRunning } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
-import { logoKey } from "@/lib/logo";
+import { logoKey, logoVersion } from "@/lib/logo";
 import type { Faces } from "@/lib/framing";
 import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
 import { cutThaiWords } from "@/lib/newmm";
@@ -134,7 +134,11 @@ export async function POST(request: Request) {
 	// The logo picture: Modal gets a short-lived link to it (no picture saved → the channel name instead).
 	if (style.logoImage) {
 		const { user } = await currentUser();
-		if (user && (await exists(logoKey(user.id)))) style.logoUrl = await signedUrl(logoKey(user.id), "GET", LINK_SECONDS);
+		// This Brand Kit's own picture, else the one from before logos had versions (lib/logo.ts).
+		const version = logoVersion((style.logoImage as { version?: unknown }).version);
+		const own = user && version ? logoKey(user.id, version) : null;
+		const picture = own && (await exists(own)) ? own : user ? logoKey(user.id) : null;
+		if (picture && (await exists(picture))) style.logoUrl = await signedUrl(picture, "GET", LINK_SECONDS);
 	}
 
 	// Cutout layers (lib/behind.ts): links to the speaker's matte (once cut out) and each picture or clip.
