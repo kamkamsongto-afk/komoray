@@ -1,6 +1,9 @@
-// The user's logo picture (one per account; a new upload replaces it), shown in a corner of every
-// video whose style has logoImage. Kept in R2 next to the user's own font.
-export const logoKey = (userId: string) => `fonts/${userId}/logo`;
+// The user's logo pictures, shown in a corner of every video whose style has logoImage { version }. Each upload is
+// its own file, named by its version, so each Brand Kit (one per channel) keeps its own logo (coach, 17 Nov: there
+// was one picture per account, so a new logo for one channel changed every channel's). Kept next to the own font.
+// Logos uploaded before then are the one file without a version: a version with no file of its own falls back to it.
+export const logoKey = (userId: string, version?: number) => (version ? `fonts/${userId}/logo-${version}` : `fonts/${userId}/logo`);
+export const logoVersion = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined);
 export const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 // PNG, JPEG or WebP by the first bytes of the file (what the final video's FFmpeg reads), else null.

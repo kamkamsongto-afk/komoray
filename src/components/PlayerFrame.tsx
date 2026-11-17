@@ -350,6 +350,26 @@ function LayoutFileHandle({ l, box, place, scale, onChange }: { l: VideoLayout; 
 // Everything around the picture that both preview players share: the 9:16 box, the subtitle
 // (drawn at full 1080x1920 and shrunk, so sizes match the final video; drag it to move it),
 // the play button and the time bar.
+// A Brand Kit's logo picture. Until it has loaded, a soft "Loading logo" box sits in its place instead of the picture
+// before it (coach, 17 Nov: picking another Brand Kit kept the old channel's logo on for seconds, which looked wrong).
+function LogoPicture({ version, place, opacity }: { version: number; place: CSSProperties; opacity: number }) {
+	const [ready, setReady] = useState(false);
+	return (
+		<>
+			{/* eslint-disable-next-line @next/next/no-img-element */}
+			<img src={`/api/logo?v=${version}`} alt="" onLoad={() => setReady(true)} onError={() => setReady(true)} style={{ ...place, height: "auto", opacity: ready ? opacity : 0 }} />
+			{!ready && (
+				<div
+					className="animate-pulse"
+					style={{ ...place, aspectRatio: "3 / 1", borderRadius: 16, background: "rgba(255,255,255,0.35)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(0,0,0,0.6)", fontSize: 28, fontFamily: "sans-serif" }}
+				>
+					Loading logo…
+				</div>
+			)}
+		</>
+	);
+}
+
 export function PlayerFrame({
 	children,
 	playing,
@@ -941,19 +961,18 @@ export function PlayerFrame({
 						);
 					})}
 					{subtitle.logoImage ? (
-						// The logo picture, logoSize px wide, in its corner (the overlay in render.py).
-						// eslint-disable-next-line @next/next/no-img-element
-						<img
-							src={`/api/logo?v=${subtitle.logoImage.version}`}
-							alt=""
-							style={{
+						// The logo picture, logoSize px wide, in its corner (the overlay in render.py). Keyed by the picture,
+						// so another Brand Kit's logo starts out loading, never showing the last one (LogoPicture).
+						<LogoPicture
+							key={subtitle.logoImage.version}
+							version={subtitle.logoImage.version}
+							place={{
 								position: "absolute",
 								[subtitle.logoAt.startsWith("bottom") ? "bottom" : "top"]: LOGO.top,
 								[subtitle.logoAt.endsWith("right") ? "right" : "left"]: LOGO.side,
 								width: subtitle.logoSize,
-								height: "auto",
-								opacity: subtitle.logoOpacity,
 							}}
+							opacity={subtitle.logoOpacity}
 						/>
 					) : subtitle.logo && (
 						<div
