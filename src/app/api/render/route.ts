@@ -137,8 +137,9 @@ export async function POST(request: Request) {
 		// This Brand Kit's own picture, else the one from before logos had versions (lib/logo.ts).
 		const version = logoVersion((style.logoImage as { version?: unknown }).version);
 		const own = user && version ? logoKey(user.id, version) : null;
-		const picture = own && (await exists(own)) ? own : user ? logoKey(user.id) : null;
-		if (picture && (await exists(picture))) style.logoUrl = await signedUrl(picture, "GET", LINK_SECONDS);
+		const old = user ? logoKey(user.id) : null;
+		const picture = own && (await exists(own)) ? own : old && (await exists(old)) ? old : null; // each looked up once (review 17 Nov)
+		if (picture) style.logoUrl = await signedUrl(picture, "GET", LINK_SECONDS);
 	}
 
 	// Cutout layers (lib/behind.ts): links to the speaker's matte (once cut out) and each picture or clip.

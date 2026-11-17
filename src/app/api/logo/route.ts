@@ -12,7 +12,10 @@ export async function GET(request: Request) {
 	// That version's own picture; one from before logos had versions is the old single file (lib/logo.ts).
 	const version = logoVersion(Number(new URL(request.url).searchParams.get("v")));
 	let res = version ? await fetchObject(logoKey(user.id, version)) : null;
-	if (!res?.ok) res = await fetchObject(logoKey(user.id));
+	if (!res?.ok) {
+		await res?.body?.cancel(); // the 404 is not read
+		res = await fetchObject(logoKey(user.id));
+	}
 	if (!res.ok) return new Response("Not found", { status: 404 });
 	const type = res.headers.get("Content-Type") ?? "image/png";
 	return new Response(res.body, { headers: { "Content-Type": type, "Cache-Control": "private, max-age=31536000, immutable" } });
@@ -31,6 +34,8 @@ export async function POST(request: Request) {
 	return Response.json({ version });
 }
 
+// Removes only the picture from before logos had versions: nothing calls it now (Remove just takes the logo off the
+// kit). Pictures of old uploads stay, as a kit or an older video may still use them (review 17 Nov: to clean up later).
 export async function DELETE() {
 	const { user } = await currentUser();
 	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
