@@ -72,9 +72,16 @@ export function clockText(seconds: number) {
 	return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}.${Math.round((s - whole) * 10)}`;
 }
 
-// What was typed, back into seconds: "1:05.3", "1:05", "65.3" or "65". null: not a time.
+// What was typed, back into seconds: "1:05.3", "1:05", "65.3" or "65". A dot can stand for the colon (coach, 17 Nov:
+// quicker to type): "1.05.3" (two dots) and "1.05" (one dot, two digits after it) are 1:05.3 and 1:05, while "65.3"
+// or "3.5" stay seconds. null: not a time.
 export function readClock(text: string): number | null {
-	const t = text.trim().replace(",", ".");
+	const t = text.trim().replace(/,/g, ".");
+	const dots = /^(\d+)\.(\d{2})(?:\.(\d*))?$/.exec(t);
+	if (dots) {
+		const seconds = Number(`${dots[2]}${dots[3] ? `.${dots[3]}` : ""}`);
+		if (seconds < 60) return Number(dots[1]) * 60 + seconds;
+	}
 	const m = /^(?:(\d+):)?(\d+(?:\.\d*)?)$/.exec(t);
 	if (!m) return null;
 	return (m[1] ? Number(m[1]) * 60 : 0) + Number(m[2]);

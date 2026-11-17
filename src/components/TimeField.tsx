@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { type PointerEvent, useRef, useState } from "react";
 import { clockText, readClock } from "@/lib/layers";
 
 // The clock the timeline's ruler shows (coach, 17 Nov: the boxes showed seconds of the final video, "183.4", while
@@ -8,6 +9,8 @@ import { clockText, readClock } from "@/lib/layers";
 // seconds of the final video: shown turns those into the ruler's clock, back turns a typed time into them.
 export type Clock = { shown: (out: number) => number; back: (onRuler: number) => number };
 export const FINAL_CLOCK: Clock = { shown: (t) => t, back: (t) => t };
+const NUDGE_DRAG_PX = 3; // a press on < or > that moves this far is a drag, not a click
+const NUDGE_SECONDS_PER_PX = 0.04; // dragging: 25 px a second
 
 // One time, written 1:05.3 and typed the same way (or plain seconds). Applied on Enter or when it loses focus.
 export function TimeField({ value, onChange, clock, label }: { value: number; onChange: (out: number) => void; clock: Clock; label: string }) {
@@ -23,27 +26,65 @@ export function TimeField({ value, onChange, clock, label }: { value: number; on
 		setTyping(null);
 		if (t !== null) onChange(Math.round(clock.back(t) * 10) / 10);
 	};
+	// The < and > beside it (coach, 17 Nov): a click moves it a tenth of a second; held and dragged left or right, it
+	// moves with the mouse, so the strip grows or shrinks bit by bit. In seconds of the final video, so it never
+	// jumps over a cut the way a typed time on the Show cuts clock can.
+	const nudge = (e: PointerEvent<HTMLButtonElement>, step: number) => {
+		e.preventDefault();
+		const from = { x: e.clientX, value };
+		let dragged = false;
+		const move = (ev: globalThis.PointerEvent) => {
+			const dx = ev.clientX - from.x;
+			if (!dragged && Math.abs(dx) < NUDGE_DRAG_PX) return;
+			dragged = true;
+			onChange(Math.max(0, Math.round((from.value + dx * NUDGE_SECONDS_PER_PX) * 10) / 10));
+		};
+		const stop = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", stop);
+			window.removeEventListener("pointercancel", stop);
+			if (!dragged) onChange(Math.max(0, Math.round((from.value + step) * 10) / 10));
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", stop);
+		window.addEventListener("pointercancel", stop);
+	};
+	const arrow = (step: number) => (
+		<button
+			type="button"
+			onPointerDown={(e) => nudge(e, step)}
+			aria-label={`${label}: ${step < 0 ? "earlier" : "later"} by a tenth of a second`}
+			title="Click: a tenth of a second. Hold and drag left or right to move it further."
+			className="flex h-5 w-4 cursor-ew-resize touch-none items-center justify-center rounded text-foreground/60 hover:bg-foreground/10 hover:text-foreground"
+		>
+			{step < 0 ? <ChevronLeft className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+		</button>
+	);
 	return (
-		<input
-			value={typing ?? clockText(clock.shown(value))}
-			onFocus={(e) => {
-				setTyping(e.currentTarget.value);
-				e.currentTarget.select();
-			}}
-			onChange={(e) => setTyping(e.target.value)}
-			onBlur={apply}
-			onKeyDown={(e) => {
-				if (e.key === "Enter") e.currentTarget.blur();
-				if (e.key === "Escape") {
-					cancelled.current = true; // back to what it was
-					e.currentTarget.blur();
-				}
-			}}
-			inputMode="decimal"
-			aria-label={label}
-			title="Minutes:seconds, the same clock as the timeline. Type a time and press Enter."
-			className="w-[4.5rem] rounded border border-foreground/20 bg-background px-1 tabular-nums"
-		/>
+		<span className="inline-flex items-center">
+			<input
+				value={typing ?? clockText(clock.shown(value))}
+				onFocus={(e) => {
+					setTyping(e.currentTarget.value);
+					e.currentTarget.select();
+				}}
+				onChange={(e) => setTyping(e.target.value)}
+				onBlur={apply}
+				onKeyDown={(e) => {
+					if (e.key === "Enter") e.currentTarget.blur();
+					if (e.key === "Escape") {
+						cancelled.current = true; // back to what it was
+						e.currentTarget.blur();
+					}
+				}}
+				inputMode="decimal"
+				aria-label={label}
+				title="Minutes:seconds, the same clock as the timeline. Type a time (1:05.3 or 1.05.3) and press Enter."
+				className="w-[4.5rem] rounded border border-foreground/20 bg-background px-1 tabular-nums"
+			/>
+			{arrow(-0.1)}
+			{arrow(0.1)}
+		</span>
 	);
 }
 
