@@ -30,7 +30,8 @@ const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
 
 type Config = { ready: false } | { ready: true; token: string; environment: PaddleEnv; prices: PricesView };
 type MyPlan = { plan: "free" | "starter" | "pro"; extraMinutes: number; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
-const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+// In English like the rest of the page (coach, 17 Nov: a Thai computer showed "17 พ.ย. 2570").
+const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 
 // Plans and the checkout (coach 16 Nov: Paddle in the sandbox first, on staging). What is sold is the decided pricing doc.
 // Buying needs signing in: the user's id goes with the payment (customData), so the webhook knows whose plan it is.
@@ -41,6 +42,7 @@ export default function PricingPage() {
 	const [yearly, setYearly] = useState(true);
 	const [thanks, setThanks] = useState(false);
 	const [mine, setMine] = useState<MyPlan | null>(null);
+	const [note, setNote] = useState("");
 	const started = useRef(false);
 
 	// The plan we have on record (from Paddle's webhook). After a purchase it is asked again a few times: the webhook
@@ -94,9 +96,19 @@ export default function PricingPage() {
 		document.head.appendChild(script);
 	}, [config]);
 
-	async function buy(priceId: string) {
+	// plan: a plan is never bought twice (coach, 17 Nov: Choose Pro again would start a second plan and charge again).
+	// Asked again right before the checkout opens, in case this page was left open while buying in another tab.
+	async function buy(priceId: string, what: "plan" | "extra") {
 		if (!user) return void signInWithGoogle();
 		if (!ready || !window.Paddle || !user.email) return;
+		setNote("");
+		const now = await fetch("/api/billing/me")
+			.then((r) => (r.ok ? (r.json() as Promise<MyPlan>) : null))
+			.catch(() => null);
+		if (!now) return setNote("Couldn't check your plan just now. Please try again.");
+		setMine(now);
+		if (what === "plan" && now.plan !== "free") return setNote(`You're already on ${PLANS[now.plan].name}. Changing plans is coming soon.`);
+		if (what === "extra" && now.plan === "free") return setNote("Extra minutes are for paid plans: pick Starter or Pro first.");
 		// Whose purchase it is, for the webhook: the same name as their files in R2 (lib/billing-store.ts).
 		const emailHash = await hashEmail(user.email);
 		const dark = document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -110,13 +122,15 @@ export default function PricingPage() {
 
 	const prices = config?.ready ? config.prices : null;
 	const open = Boolean(prices) && (ready || !user);
-	const button = (label: string, priceId: string | undefined) => (
+	const paid = mine && mine.plan !== "free" ? mine.plan : null;
+	const button = (id: "starter" | "pro", priceId: string | undefined) => (
 		<button
-			onClick={() => priceId && void buy(priceId)}
-			disabled={!open || !priceId}
+			onClick={() => priceId && void buy(priceId, "plan")}
+			disabled={!open || !priceId || Boolean(paid)}
+			title={paid && paid !== id ? "Changing plans is coming soon" : undefined}
 			className="mt-auto rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-40"
 		>
-			{user === null ? "Sign in to choose" : label}
+			{user === null ? "Sign in to choose" : paid === id ? "Your plan" : paid ? "Change plan (soon)" : `Choose ${PLANS[id].name}`}
 		</button>
 	);
 
@@ -152,6 +166,7 @@ export default function PricingPage() {
 					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}
 				</p>
 			)}
+			{note && <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-center text-sm">{note}</p>}
 			{thanks && (
 				<p className="rounded-xl border border-green-600/30 bg-green-600/10 p-4 text-center">
 					Thank you! Your plan starts in a moment. <Link href="/upload" className="underline">Make a video</Link>
@@ -183,7 +198,7 @@ export default function PricingPage() {
 									Start free
 								</Link>
 							) : (
-								button(`Choose ${plan.name}`, prices?.[id][yearly ? "year" : "month"])
+								button(id, prices?.[id][yearly ? "year" : "month"])
 							)}
 						</div>
 					);
@@ -201,8 +216,8 @@ export default function PricingPage() {
 					{EXTRA_PACKS.map((pack) => (
 						<button
 							key={pack.id}
-							onClick={() => prices && void buy(prices[pack.id])}
-							disabled={!open}
+							onClick={() => prices && void buy(prices[pack.id], "extra")}
+							disabled={!open || (Boolean(mine) && !paid)}
 							className="rounded-lg border border-foreground/20 px-4 py-2 font-medium hover:bg-foreground/5 disabled:opacity-40"
 						>
 							Add {pack.minutes} minutes · ${pack.price}
