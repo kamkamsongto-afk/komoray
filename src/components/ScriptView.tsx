@@ -30,7 +30,8 @@ import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
 import { waitLabel } from "@/lib/use-cutout";
 import { AudioControls } from "./AudioControls";
-import { type Clock, FINAL_CLOCK } from "./TimeField";
+import { type Clock, FINAL_CLOCK, RowFit } from "./TimeField";
+import { fitInRow, loadRows } from "@/lib/lane-rows";
 import { spotInside } from "@/lib/layers";
 import { Timeline } from "./Timeline";
 import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
@@ -377,6 +378,14 @@ export function ScriptView({
 	// The clock the timeline's ruler shows, for the times in the boxes (coach, 17 Nov: they never matched). Show cuts
 	// on: the whole upload. Off: the final video, which is what the times are saved in.
 	const [showCuts, setShowCuts] = useState(true);
+	// Each timeline strip's row (lib/lane-rows.ts), kept for this video in this browser. The boxes use it too: a time
+	// typed into one stops at the next strip in its row (coach, 17 Nov).
+	const [rowsKey] = useState(() => new URLSearchParams(window.location.search).get("key"));
+	const [rowMemo] = useState(() => (rowsKey ? loadRows(rowsKey) : new Map()));
+	const fitRow = useCallback(
+		(id: string, was: { start: number; end: number }, want: { start?: number; end?: number }) => fitInRow(rowMemo, id, was, want, totalFrames(segments) / FPS),
+		[rowMemo, segments],
+	);
 	const ruler = useMemo<Clock>(
 		() => (showCuts ? { shown: (t) => toSourceSeconds(t, segments), back: (t) => toOutSeconds(t, segments) } : FINAL_CLOCK),
 		[showCuts, segments],
@@ -834,6 +843,8 @@ export function ScriptView({
 					kept = kitMemory ? localStorage.getItem(kitMemory) : null;
 				} catch {}
 				setKits(list);
+				// Every kit's logo fetched now, so picking a kit shows its logo at once (coach, 17 Nov; PlayerFrame LogoPicture).
+				for (const kit of list) if (kit.style.logoImage) new Image().src = `/api/logo?v=${kit.style.logoImage.version}`;
 				setInUse([kept, startKit, data?.defaultId].find((id) => id && list.some((k) => k.id === id)) ?? null);
 			});
 	}, [panel, kitMemory, startKit]);
@@ -1163,6 +1174,7 @@ export function ScriptView({
 					{mode === "preview" && <AudioControls style={subtitle} onChange={onSubtitleChange} />}
 					{/* Floats over the script on big screens: the video keeps its size while you watch the change. */}
 					{mode === "preview" && panel && (
+						<RowFit.Provider value={fitRow}>
 						<div
 							ref={panelRef}
 							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] ${panelHeight ? "" : "lg:max-h-[var(--panel-room,calc(100vh-26rem))]"}`}
@@ -1351,6 +1363,7 @@ export function ScriptView({
 							</svg>
 						</div>
 						</div>
+						</RowFit.Provider>
 					)}
 				</div>
 	
@@ -1626,6 +1639,8 @@ export function ScriptView({
 					splits={subtitle.splits ?? []}
 					onSplitsChange={(splits) => onSubtitleChange({ ...subtitle, splits })}
 					onShowCutsChange={setShowCuts}
+					rowMemo={rowMemo}
+					rowsKey={rowsKey}
 					onOpenCutout={(id) => {
 						setFocusCutout(id);
 						openPanel("cutout");

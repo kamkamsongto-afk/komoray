@@ -207,13 +207,20 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 
 						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
 							<span className="text-xs font-medium text-foreground/80">Layout</span>
-							{kinds(l.kind, (kind) => update(l.id, { kind }))}
+							{/* With the playhead moved off this layout, a kind is a new layout there, as in Frame Me (coach, 17 Nov:
+							    picking one with another layout's box open turned that one into it, so it was gone from where it was). */}
+							{kinds(l.kind, (kind) => {
+								const at = now();
+								if ((at < l.start || at > l.end) && layouts.length < LAYOUT.maxItems) add(kind);
+								else update(l.id, { kind });
+							})}
+							<p className="text-[11px] text-foreground/50">Changes this layout. With the video moved off it, a layout adds a new one there.</p>
 							<button onClick={() => update(l.id, { meFirst: !l.meFirst })} className="inline-flex items-center gap-1 self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
 								<ArrowLeftRight className="h-3.5 w-3.5" aria-hidden /> Swap sides
 							</button>
 							{row(
 								"Shows",
-								<TimeRange start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />,
+								<TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />,
 							)}
 							{row("Your part", range(l.split, LAYOUT.split.min, LAYOUT.split.max, 0.01, percent(l.split), (split) => update(l.id, { split })))}
 						</div>
