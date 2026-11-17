@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { type PointerEvent, useRef, useState } from "react";
+import { createContext, type PointerEvent, useContext, useRef, useState } from "react";
 import { clockText, readClock } from "@/lib/layers";
 
 // The clock the timeline's ruler shows (coach, 17 Nov: the boxes showed seconds of the final video, "183.4", while
@@ -88,13 +88,20 @@ export function TimeField({ value, onChange, clock, label }: { value: number; on
 	);
 }
 
+// Keeps a typed or nudged time out of the next strip in the same timeline row (coach, 17 Nov: it stops right at
+// that strip, which never moves). Given by ScriptView from the timeline's rows (lib/lane-rows.ts fitInRow).
+type Fit = (id: string, was: { start: number; end: number }, want: { start?: number; end?: number }) => { start?: number; end?: number };
+export const RowFit = createContext<Fit | null>(null);
+
 // "Shows 1:05.3 to 1:08.3": a thing's start and end in its box (Cutout, Frame Me, Layout).
-export function TimeRange({ start, end, total, clock, onChange }: { start: number; end: number; total: number; clock: Clock; onChange: (patch: { start?: number; end?: number }) => void }) {
+export function TimeRange({ id, start, end, total, clock, onChange }: { id: string; start: number; end: number; total: number; clock: Clock; onChange: (patch: { start?: number; end?: number }) => void }) {
+	const fit = useContext(RowFit);
+	const set = (want: { start?: number; end?: number }) => onChange(fit ? fit(id, { start, end }, want) : want);
 	return (
 		<span className="flex items-center gap-1">
-			<TimeField value={start} clock={clock} label="Shows from" onChange={(t) => onChange({ start: Math.max(0, Math.min(t, end - 0.3)) })} />
+			<TimeField value={start} clock={clock} label="Shows from" onChange={(t) => set({ start: Math.max(0, Math.min(t, end - 0.3)) })} />
 			to
-			<TimeField value={end} clock={clock} label="Shows to" onChange={(t) => onChange({ end: Math.min(total, Math.max(t, start + 0.3)) })} />
+			<TimeField value={end} clock={clock} label="Shows to" onChange={(t) => set({ end: Math.min(total, Math.max(t, start + 0.3)) })} />
 		</span>
 	);
 }

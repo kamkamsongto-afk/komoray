@@ -214,7 +214,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 							<p className="text-[11px] text-foreground/50">Changes this frame. With the video moved off it, a shape adds a new frame there.</p>
 							{row(
 								"Shows",
-								<TimeRange start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />,
+								<TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />,
 							)}
 							{row("Size", range(f.size, FRAME.size.min, FRAME.size.max, 0.01, percent(f.size), (size) => update(f.id, { size })))}
 							{row("Left / right", range(f.x, FRAME.move.min, FRAME.move.max, 0.005, percent(f.x), (x) => update(f.id, { x })))}

@@ -220,7 +220,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							</button>
 							{row(
 								"Shows",
-								<TimeRange start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />,
+								<TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />,
 							)}
 							{row("Your part", range(l.split, LAYOUT.split.min, LAYOUT.split.max, 0.01, percent(l.split), (split) => update(l.id, { split })))}
 						</div>

@@ -203,10 +203,10 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			<input type="color" value={value} onChange={(e) => set(e.target.value.toUpperCase())} aria-label={`Any ${label.toLowerCase()}`} className="h-5 w-7 cursor-pointer rounded border border-foreground/20 bg-transparent" />
 		</div>
 	);
-	const times = (item: { start: number; end: number }, set: (patch: { start?: number; end?: number }) => void) =>
+	const times = (item: { id: string; start: number; end: number }, set: (patch: { start?: number; end?: number }) => void) =>
 		row(
 			"Shows",
-			<TimeRange start={item.start} end={item.end} total={total} clock={ruler} onChange={set} />,
+			<TimeRange id={item.id} start={item.start} end={item.end} total={total} clock={ruler} onChange={set} />,
 		);
 
 	const listing = !openText && !openInsert;
