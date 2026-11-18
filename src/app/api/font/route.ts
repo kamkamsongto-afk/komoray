@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 	const { user } = await currentUser();
 	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
 	// A locked feature (pricing doc: the own font is Pro's). One already uploaded stays, but isn't used in videos (api/render).
-	if (!(await accessFor(user.email)).perks.ownFont) return Response.json({ error: "Your own font comes with Pro. Upgrade on the Pricing page." }, { status: 403 });
+	if (!(await accessFor(user.email)).perks.ownFont) return Response.json({ error: "Your own font comes with Starter and Pro. Upgrade on the Pricing page." }, { status: 403 });
 	const bytes = new Uint8Array(await request.arrayBuffer());
 	if (!bytes.length || bytes.length > MAX_BYTES) return Response.json({ error: "The font must be 5 MB or smaller" }, { status: 400 });
 	const info = readFontInfo(bytes);

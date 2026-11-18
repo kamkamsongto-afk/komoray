@@ -38,7 +38,8 @@ export const PLAN_RULES: Record<PlanName, PlanRules> = {
 	// Longest video for paid plans isn't decided yet (doc 13.): the beta's 20 minutes until it is.
 	// Extra minutes not sold for now (coach, 18 Nov: reads like a credit top-up); packs already bought still count.
 	// 10 and 20 hours (coach, 18 Nov: was 300 and 600; with no translation cost, full use still pays on every price).
-	starter: { ...BETA, monthly: 600, extraMinutes: false, cutout: true, ownFont: false, brandKits: 1 },
+	// Starter has the own font too (coach 18 Nov): Starter and Pro differ only in how much (minutes, storage, Brand Kits).
+	starter: { ...BETA, monthly: 600, extraMinutes: false, cutout: true, ownFont: true, brandKits: 1 },
 	pro: { ...BETA, monthly: 1200, extraMinutes: false, cutout: true, ownFont: true, brandKits: 5 },
 };
 

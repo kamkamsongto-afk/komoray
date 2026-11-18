@@ -27,8 +27,8 @@ export const pricesFor = (env: PaddleEnv) => PRICES[env] ?? null;
 // ($29, $55) so yearly saves about 35% and leaves room for sales and affiliates; yearly stays $19 and $36.
 export const PLANS = {
 	free: { name: "Free", month: 0, year: 0, minutes: "35 minutes to start, then 10 a month", points: ["Every editing feature", "5 GB storage", "Komoray watermark"] },
-	starter: { name: "Starter", month: 29, year: 19, minutes: "10 hours a month", points: ["200 GB storage", "No watermark", "Cutout", "1 Brand Kit"] },
-	pro: { name: "Pro", month: 55, year: 36, minutes: "20 hours a month", points: ["800 GB storage", "Everything in Starter", "Your own font", "5 Brand Kits"] },
+	starter: { name: "Starter", month: 29, year: 19, minutes: "10 hours a month", points: ["200 GB storage", "No watermark", "Cutout", "Your own font", "1 Brand Kit"] },
+	pro: { name: "Pro", month: 55, year: 36, minutes: "20 hours a month", points: ["800 GB storage", "Everything in Starter", "5 Brand Kits"] },
 } as const;
 export const EXTRA_PACKS = [
 	{ id: "extra60" as const, minutes: 60, price: 6 },
