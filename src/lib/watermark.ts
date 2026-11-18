@@ -5,6 +5,9 @@
 // "Random" is the same for every showing of one video: the corners follow from the video's id.
 
 export const WATERMARK = {
+	// Change it whenever the watermark looks different (picture, size, place, timing): it is in the video's fingerprint
+	// (api/render), so a watermarked video is made again instead of handing back one with the old watermark.
+	rev: "2026-11-18b", // b: 35% with a shadow
 	file: "/watermark.png", // the word with a thin shadow baked in (10% once faded, coach 18 Nov), 1225 x 321 px
 	opacity: 0.35, // coach 18 Nov: 30% was too faint on a white background
 	width: 0.187, // of the frame's shorter side: 202 px on a 1080 px side, the word itself ~194 px (the rest is the shadow's room)

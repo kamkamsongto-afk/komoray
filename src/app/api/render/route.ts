@@ -106,7 +106,7 @@ export async function POST(request: Request) {
 		font: ownFont ? await currentUser().then(({ user }) => (user ? getJson(fontKeys(user.id).info) : null)) : null,
 		// Only when it is on (agent review, 18 Nov): always adding the key changed every saved video's fingerprint, so each
 		// unchanged video would have been made again once. A Free video and the same one on a paid plan still differ.
-		...(watermarkOn(access) && { watermark: true }),
+		...(watermarkOn(access) && { watermark: WATERMARK.rev }),
 	});
 	const before = await getJson<{ fingerprint?: string; stoppedAt?: string }>(siblingKey(key, files.job)).catch(() => null);
 	if (!again && before?.fingerprint === fingerprint && !before.stoppedAt && (await exists(finalKey))) return Response.json({ status: "done", unchanged: true });
