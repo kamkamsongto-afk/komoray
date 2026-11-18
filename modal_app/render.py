@@ -172,10 +172,10 @@ LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or 
 LOGO_LAYER = 100
 
 # The Free plan's watermark (WATERMARK in src/lib/watermark.ts, coach 18 Nov): the white word Komoray at 35% with a thin
-# shadow baked into public/watermark.png (10% once faded), its width
+# shadow baked into public/watermark.png (15% once faded), its width
 # and its distance from the edges a share of the frame's shorter side, in a corner picked from the video's id every
 # `every` seconds. Over everything, the logo too, as the preview draws it last.
-WATERMARK = {"opacity": 0.35, "width": 0.206, "margin": 0.08, "every": 8, "fade": 0.6, "drift": 0.015, "driftX": 7, "driftY": 9}
+WATERMARK = {"opacity": 0.35, "width": 0.237, "margin": 0.08, "every": 8, "fade": 0.6, "drift": 0.015, "driftX": 7, "driftY": 9}
 MASK32 = 0xFFFFFFFF
 
 

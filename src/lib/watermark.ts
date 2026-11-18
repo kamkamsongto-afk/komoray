@@ -7,10 +7,10 @@
 export const WATERMARK = {
 	// Change it whenever the watermark looks different (picture, size, place, timing): it is in the video's fingerprint
 	// (api/render), so a watermarked video is made again instead of handing back one with the old watermark.
-	rev: "2026-11-18c", // b: 35% with a shadow · c: 10% bigger, drifts slowly, fades between corners
-	file: "/watermark.png", // the word with a thin shadow baked in (10% once faded, coach 18 Nov), 1225 x 321 px
+	rev: "2026-11-18d", // b: 35% with a shadow · c: 10% bigger, drifts slowly, fades between corners · d: 15% bigger again, shadow 15%
+	file: "/watermark.png", // the word with a thin shadow baked in (15% once faded, coach 18 Nov), 1225 x 321 px
 	opacity: 0.35, // coach 18 Nov: 30% was too faint on a white background
-	width: 0.206, // of the frame's shorter side: 222 px on a 1080 px side, the word itself ~213 px (coach 18 Nov: 10% bigger)
+	width: 0.237, // of the frame's shorter side: 256 px on a 1080 px side, the word itself ~245 px (coach 18 Nov: +10%, then +15%)
 	margin: 0.08, // from both edges of its corner, of the shorter side: 86 px (the Brand Kit logo sits 40 px in)
 	every: 8, // seconds in one corner before it moves
 	// Coach 18 Nov: drift slowly in a small loop, like a screensaver, and fade out and back in at the next corner.
