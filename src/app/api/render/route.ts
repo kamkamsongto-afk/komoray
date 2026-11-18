@@ -103,7 +103,9 @@ export async function POST(request: Request) {
 		part,
 		cutout: layers ? await getJson(siblingKey(key, "cutout.json")) : null,
 		font: ownFont ? await currentUser().then(({ user }) => (user ? getJson(fontKeys(user.id).info) : null)) : null,
-		watermark: access.perks.watermark, // a Free video and the same one made on a paid plan look different
+		// Only when it is on (agent review, 18 Nov): always adding the key changed every saved video's fingerprint, so each
+		// unchanged video would have been made again once. A Free video and the same one on a paid plan still differ.
+		...(access.perks.watermark && { watermark: true }),
 	});
 	const before = await getJson<{ fingerprint?: string; stoppedAt?: string }>(siblingKey(key, files.job)).catch(() => null);
 	if (!again && before?.fingerprint === fingerprint && !before.stoppedAt && (await exists(finalKey))) return Response.json({ status: "done", unchanged: true });
