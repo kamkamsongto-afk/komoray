@@ -17,6 +17,7 @@ import { readStyle } from "@/lib/subtitle-style";
 import { countRender, renderLimitReached } from "@/lib/render-limit";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { WATERMARK } from "@/lib/watermark";
+import { watermarkOn } from "@/lib/watermark-on";
 
 // One render job lives in the video's folder:
 //   render.json        written when the job starts (so we know it is in progress)
@@ -105,7 +106,7 @@ export async function POST(request: Request) {
 		font: ownFont ? await currentUser().then(({ user }) => (user ? getJson(fontKeys(user.id).info) : null)) : null,
 		// Only when it is on (agent review, 18 Nov): always adding the key changed every saved video's fingerprint, so each
 		// unchanged video would have been made again once. A Free video and the same one on a paid plan still differ.
-		...(access.perks.watermark && { watermark: true }),
+		...(watermarkOn(access) && { watermark: true }),
 	});
 	const before = await getJson<{ fingerprint?: string; stoppedAt?: string }>(siblingKey(key, files.job)).catch(() => null);
 	if (!again && before?.fingerprint === fingerprint && !before.stoppedAt && (await exists(finalKey))) return Response.json({ status: "done", unchanged: true });
@@ -150,7 +151,7 @@ export async function POST(request: Request) {
 
 	// The Free plan's watermark (lib/watermark.ts, watermark_filters in render.py): our own picture's link, and the video's
 	// id that picks its corners the same way the preview does.
-	if (access.perks.watermark) Object.assign(style, { watermarkUrl: new URL(WATERMARK.file, request.url).toString(), watermarkSeed: key.split("/")[1] });
+	if (watermarkOn(access)) Object.assign(style, { watermarkUrl: new URL(WATERMARK.file, request.url).toString(), watermarkSeed: key.split("/")[1] });
 
 	// Cutout layers (lib/behind.ts): links to the speaker's matte (once cut out) and each picture or clip.
 	let cutout: (CutoutLayers & { matteUrl: string; files: Record<string, string> }) | undefined;
