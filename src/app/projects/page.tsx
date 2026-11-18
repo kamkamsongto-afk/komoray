@@ -320,6 +320,11 @@ export default function ProjectsPage() {
 	const live = projects?.filter((p) => daysLeft(p.created_at) > 0) ?? [];
 	const editLink = (p: Project) => `/edit?key=${encodeURIComponent(p.video_key)}`; // the editor sends videos without a script yet back to the upload page
 	const deleted = (p: Project) => setProjects((list) => list?.filter((x) => x.id !== p.id) ?? null);
+	// A deleted folder's videos are in no folder now (the database did it: on delete set null), so say so here too.
+	const foldersChanged = (next: FolderRow[]) => {
+		setFolders(next);
+		setProjects((list) => list?.map((p) => (p.folder_id && !next.some((f) => f.id === p.folder_id) ? { ...p, folder_id: null } : p)) ?? null);
+	};
 	const copied = (copy: Project) => {
 		setError("");
 		setProjects((list) => (list ? [copy, ...list] : [copy]));
@@ -390,7 +395,7 @@ export default function ProjectsPage() {
 				</div>
 			)}
 
-			{folders && live.length > 0 && <FolderBar folders={folders} counts={counts} current={current} pick={setCurrent} onChange={setFolders} onError={setError} />}
+			{folders && live.length > 0 && <FolderBar folders={folders} counts={counts} current={current} pick={setCurrent} onChange={foldersChanged} onError={setError} />}
 			{current !== ALL && shown.length === 0 && <p className="text-sm text-foreground/60">No videos in this folder yet. Pick it in the folder box next to a video to move it here.</p>}
 
 			{view === "list" ? (
