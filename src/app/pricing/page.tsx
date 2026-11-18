@@ -150,7 +150,7 @@ export default function PricingPage() {
 				<div className="flex gap-1 rounded-full bg-foreground/10 p-1 text-sm" role="tablist" aria-label="Billing">
 					{[
 						[false, "Monthly"],
-						[true, "Yearly · save up to 27%"],
+						[true, "Yearly · save up to 35%"],
 					].map(([value, name]) => (
 						<button key={String(value)} role="tab" aria-selected={yearly === value} onClick={() => setYearly(value as boolean)} className={`rounded-full px-4 py-1.5 ${yearly === value ? "bg-background font-medium shadow" : "text-foreground/70"}`}>
 							{name}
@@ -190,6 +190,8 @@ export default function PricingPage() {
 								<span className="text-3xl font-bold">${price}</span>
 								<span className="text-sm text-foreground/60"> / month{yearly && price ? `, $${price * 12} a year` : ""}</span>
 							</p>
+							{/* What paying yearly saves, in dollars (coach, 18 Nov: people should see how much they keep). */}
+							{yearly && price > 0 && <p className="-mt-2 text-sm font-medium text-green-700 dark:text-green-400">Save ${(plan.month - plan.year) * 12} a year</p>}
 							<p className="text-sm font-medium">{plan.minutes}</p>
 							<ul className="flex flex-col gap-1 text-sm text-foreground/75">
 								{plan.points.map((p) => (

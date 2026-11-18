@@ -22,11 +22,12 @@ const PRICES: Partial<Record<PaddleEnv, PriceIds>> = {
 export const paddleEnvOf = (token: string): PaddleEnv => (token.startsWith("live_") ? "production" : "sandbox");
 export const pricesFor = (env: PaddleEnv) => PRICES[env] ?? null;
 
-// What the pricing page shows (the doc's table: only what is built and works today).
+// What the pricing page shows (the doc's table: only what is built and works today). Coach, 18 Nov: monthly set high
+// ($29, $55) so yearly saves about 35% and leaves room for sales and affiliates; yearly stays $19 and $36.
 export const PLANS = {
 	free: { name: "Free", month: 0, year: 0, minutes: "35 minutes to start, then 10 a month", points: ["Every editing feature", "komoray.com watermark", "Files kept 14 days"] },
-	starter: { name: "Starter", month: 26, year: 19, minutes: "300 minutes a month", points: ["No watermark", "Cutout", "1 Brand Kit"] },
-	pro: { name: "Pro", month: 48, year: 36, minutes: "600 minutes a month", points: ["Everything in Starter", "Your own font", "5 Brand Kits"] },
+	starter: { name: "Starter", month: 29, year: 19, minutes: "10 hours a month", points: ["No watermark", "Cutout", "1 Brand Kit"] },
+	pro: { name: "Pro", month: 55, year: 36, minutes: "20 hours a month", points: ["Everything in Starter", "Your own font", "5 Brand Kits"] },
 } as const;
 export const EXTRA_PACKS = [
 	{ id: "extra60" as const, minutes: 60, price: 6 },

@@ -37,8 +37,9 @@ export const PLAN_RULES: Record<PlanName, PlanRules> = {
 	// Paid files: the doc says 5 GB, but Deepgram refuses over 2 GB (lib/limits.ts) until the sound is sent on its own.
 	// Longest video for paid plans isn't decided yet (doc 13.): the beta's 20 minutes until it is.
 	// Extra minutes not sold for now (coach, 18 Nov: reads like a credit top-up); packs already bought still count.
-	starter: { ...BETA, monthly: 300, extraMinutes: false, cutout: true, ownFont: false, brandKits: 1 },
-	pro: { ...BETA, monthly: 600, extraMinutes: false, cutout: true, ownFont: true, brandKits: 5 },
+	// 10 and 20 hours (coach, 18 Nov: was 300 and 600; with no translation cost, full use still pays on every price).
+	starter: { ...BETA, monthly: 600, extraMinutes: false, cutout: true, ownFont: false, brandKits: 1 },
+	pro: { ...BETA, monthly: 1200, extraMinutes: false, cutout: true, ownFont: true, brandKits: 5 },
 };
 
 export const PLAN_LABEL: Record<PlanName, string> = { beta: "Beta", free: "Free", starter: "Starter", pro: "Pro" };
