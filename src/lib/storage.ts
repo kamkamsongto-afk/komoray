@@ -24,8 +24,10 @@ export async function markActive(email: string) {
 	if (last && Date.now() - new Date(last.at).getTime() < 12 * 60 * 60 * 1000) return;
 	await putObject(key, JSON.stringify({ at: new Date().toISOString() }), "application/json").catch(() => {});
 }
-export async function lastActive(email: string) {
-	return (await getJson<{ at: string }>(await activeKey(email)).catch(() => null))?.at ?? null;
+// strict: a read that fails throws (only a missing file is "never seen"), for the clean-up.
+export async function lastActive(email: string, strict = false) {
+	const read = getJson<{ at: string }>(await activeKey(email));
+	return (await (strict ? read : read.catch(() => null)))?.at ?? null;
 }
 
 // Left in a folder whose files the clean-up deleted (lib/storage.ts, step B): My projects then leaves it out.
@@ -60,9 +62,11 @@ export function storageFull(access: Pick<AccessStatus, "storageGb" | "plan">, us
 export type Deletion = { at: string; why: "plan ended" | "not used"; countdown: boolean } | null;
 // newest: when their newest file was written, for someone never seen since the last-opened date began to be kept (a
 // beta user who stopped before launch): their 30 days count from it instead of never.
-export async function deletionFor(email: string, access: Pick<AccessStatus, "storageGb" | "plan">, now = Date.now(), newest: string | null = null): Promise<Deletion> {
+// strict: every read must work, or it throws (the clean-up then leaves this person alone).
+export async function deletionFor(email: string, access: Pick<AccessStatus, "storageGb" | "plan">, now = Date.now(), newest: string | null = null, strict = false): Promise<Deletion> {
 	if (access.storageGb === null || access.plan !== "free") return null; // paid: kept while the plan is active
-	const [{ endedAt }, active, done] = await Promise.all([planFor(email), lastActive(email), getJson<{ endedAt: string }>(`access/storage-cleaned/${await hashEmail(email)}.json`).catch(() => null)]);
+	const cleaned = getJson<{ endedAt: string }>(`access/storage-cleaned/${await hashEmail(email)}.json`);
+	const [{ endedAt }, active, done] = await Promise.all([planFor(email, strict), lastActive(email, strict), strict ? cleaned : cleaned.catch(() => null)]);
 	// A plan that ended and whose 90 days haven't been used up yet (done: its files were already deleted for that end).
 	if (endedAt && done?.endedAt !== endedAt) {
 		const at = new Date(new Date(endedAt).getTime() + STORAGE.keepAfterPlanDays * DAY);

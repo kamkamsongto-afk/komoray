@@ -78,7 +78,7 @@ async function freeSince(email: string) {
 
 // Plans are on: on launch day (PLANS_LIVE), or on a site set to try them before (TRY_PLANS = "on", a Worker secret set on
 // staging only, coach 18 Nov: to see Free's limits, the storage bar and the watermark before launch; never on the live site).
-function plansLive() {
+export function plansLive() {
 	if (PLANS_LIVE) return true;
 	try {
 		return (getCloudflareContext().env as unknown as { TRY_PLANS?: string }).TRY_PLANS === "on";

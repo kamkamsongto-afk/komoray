@@ -135,13 +135,16 @@ export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; extraMin
 const GIVES_ACCESS: SubStatus[] = ["active", "trialing", "past_due"];
 const RANK: Record<PaidPlan, number> = { starter: 1, pro: 2 };
 
-export async function planFor(email: string): Promise<PlanNow> {
+// strict: a file that can't be read throws instead of being left out (the storage clean-up: when unsure, keep; agent
+// review 19 Nov: one failed read made a paying person look Free and their files due).
+export async function planFor(email: string, strict = false): Promise<PlanNow> {
+	const soft = <T>(p: Promise<T | null>) => (strict ? p : p.catch(() => null));
 	const root = userRoot(await hashEmail(email));
 	const [subFiles, extraFiles] = await Promise.all([listObjects(`${root}subs/`), listObjects(`${root}extra/`)]);
-	const subs = (await Promise.all(subFiles.map((f) => getJson<SubRecord>(f.key).catch(() => null)))).filter((s): s is SubRecord => Boolean(s));
+	const subs = (await Promise.all(subFiles.map((f) => soft(getJson<SubRecord>(f.key))))).filter((s): s is SubRecord => Boolean(s));
 	const best = subs.filter((s) => GIVES_ACCESS.includes(s.status)).sort((a, b) => RANK[b.plan] - RANK[a.plan])[0] ?? null;
 	const now = new Date().toISOString();
-	const extras = (await Promise.all(extraFiles.map((f) => getJson<ExtraRecord>(f.key).catch(() => null)))).filter((x): x is ExtraRecord => Boolean(x));
+	const extras = (await Promise.all(extraFiles.map((f) => soft(getJson<ExtraRecord>(f.key))))).filter((x): x is ExtraRecord => Boolean(x));
 	const extraMinutes = extras.reduce((sum, x) => sum + (x.until > now ? x.minutes : 0), 0);
 	// The end of the period they paid for: a scheduled cancel's date, else the period's end, else when Paddle said so.
 	const ends = best ? [] : subs.map((s) => (s.scheduled?.action === "cancel" ? s.scheduled.at : null) ?? s.periodEnds ?? s.occurredAt).filter(Boolean);

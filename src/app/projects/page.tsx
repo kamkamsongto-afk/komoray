@@ -430,9 +430,12 @@ export default function ProjectsPage() {
 	const daysLeft = (createdAt: string) => KEEP_DAYS - Math.floor((Date.now() - new Date(createdAt).getTime()) / DAY_MS);
 	// With a plan's storage (lib/storage.ts), videos stay until they delete them (or the clean-up does, which marks them
 	// gone): no 14 days. Without one (the beta), R2 deletes them after 14 days, as before.
+	// The 14-day filter only once we know it's the beta (agent review 19 Nov): while /api/storage loads, or if it fails, a
+	// paying person's older videos would vanish from the list for a moment.
 	const capped = storage?.storageGb != null;
+	const beta = storage !== null && storage.storageGb === null;
 	const gone = new Set(storage?.gone ?? []);
-	const live = projects?.filter((p) => (capped ? !gone.has(p.id) : daysLeft(p.created_at) > 0)) ?? [];
+	const live = projects?.filter((p) => (beta ? daysLeft(p.created_at) > 0 : !gone.has(p.id))) ?? [];
 	const bytesOf = (p: Project) => storage?.perProject[p.id] ?? p.size;
 	const editLink = (p: Project) => `/edit?key=${encodeURIComponent(p.video_key)}`; // the editor sends videos without a script yet back to the upload page
 	const deleted = (p: Project) => {
