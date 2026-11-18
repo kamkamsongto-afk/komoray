@@ -7,7 +7,7 @@ const CONTACT = "hello@komoray.com";
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" updated="November 11, 2026">
+		<LegalPage title="Privacy Policy" updated="November 18, 2026">
 			<p>
 				Komoray is an AI studio for talking-head creators. You upload a video, we cut the silences, add subtitles and give you
 				back a finished video. This page explains what we collect to do that, who helps us, and how long we keep it.
@@ -18,7 +18,10 @@ export default function PrivacyPage() {
 				<li>Your videos are yours. We use them only to make your edits.</li>
 				<li>We never sell your data, and we never use your videos to train AI models.</li>
 				<li>Sharing the words you fix with other creators is off unless you turn it on, and it never includes who you are.</li>
-				<li>During the beta, every video is deleted automatically after 14 days.</li>
+				<li>Payments go through Paddle. We never see or keep your card number.</li>
+				{/* Until launch (coach 19 Nov). Take this line out when paid plans open. */}
+				<li>Until paid plans open, Komoray is in beta: beta videos are deleted automatically after 14 days.</li>
+				<li>Paid plans keep your files for as long as you pay, up to your storage. Free files are deleted after 30 days without use, and files of a plan that ended after 90 days. We email you first.</li>
 				<li>You can ask us to delete your data at any time.</li>
 			</ul>
 
@@ -65,7 +68,13 @@ export default function PrivacyPage() {
 					file you upload, if any, so your next videos start with it. Only your videos use your font.
 				</li>
 				<li>
-					<strong>How you use Komoray:</strong> during the beta, we link your email address to your videos and keep track of how far each one got, how many words you fixed and any errors you saw, to help you and to improve Komoray. We also keep how many minutes you used each month. The link to each video is deleted with the video after 14 days.
+					<strong>Your plan and payments:</strong> if you buy a plan, Paddle (below) takes the payment. From Paddle we get which
+					plan you bought, whether it is monthly or yearly, when it renews or ends, whether a payment went through, and the IDs Paddle
+					gives your purchase. We keep this with a scrambled code made from your email address, so we know which plan is yours.
+					We never see or keep your card or bank details.
+				</li>
+				<li>
+					<strong>How you use Komoray:</strong> we link your email address to your videos and keep track of how far each one got, how many words you fixed and any errors you saw, to help you and to improve Komoray. We also keep how many minutes you used each month. The link to each video is deleted with the video.
 				</li>
 				<li>
 					<strong>Error reports:</strong> if something breaks, we record what went wrong, the file name and size, and your
@@ -102,6 +111,15 @@ export default function PrivacyPage() {
 					<strong>Supabase</strong> handles sign-in and stores your account details.
 				</li>
 				<li>
+					<strong>Paddle</strong> sells our plans as the Merchant of Record: it takes your payment, adds the right tax, sends your
+					receipts and lets you manage or cancel your plan. Paddle handles your payment details under its own{" "}
+					<a href="https://www.paddle.com/legal/privacy">privacy policy</a>.
+				</li>
+				<li>
+					<strong>Brevo</strong> sends our emails to you, such as an invite, a reminder before a yearly plan renews, or a warning
+					before an original video is deleted. It gets your email address and the message.
+				</li>
+				<li>
 					<strong>Google</strong> lets you sign in with your Google account.
 				</li>
 			</ul>
@@ -109,7 +127,12 @@ export default function PrivacyPage() {
 
 			<h2>How long we keep it</h2>
 			<ul>
-				<li>During the beta, uploaded videos, their smaller copies, transcripts, translations and finished videos are deleted automatically after 14 days.</li>
+				<li>Until paid plans open, Komoray is in beta: beta videos are deleted automatically after 14 days. From then, the rules below apply.</li>
+				<li>Your videos (the files you upload, their smaller copies, transcripts, translations and finished videos) are kept as the Terms of Service say under &ldquo;Storage&rdquo;:</li>
+				<li>On the Free plan, up to 5 GB, deleted if you don&apos;t open Komoray while signed in for 30 days in a row. We email you 7 days before.</li>
+				<li>On a paid plan, up to your plan&apos;s storage (Starter 200 GB, Pro 800 GB), for as long as your plan is active. We never delete them while you pay.</li>
+				<li>When a plan ends, for 90 days after the end of the period you paid for, then deleted. We show a countdown and email you from 20 days before.</li>
+				<li>What Paddle tells us about your plan and payments is kept for as long as the law asks us to keep records of sales.</li>
 				<li>You can delete a video and everything made from it at any time on the My projects page.</li>
 				<li>Error reports and troubleshooting recordings are deleted after 90 days.</li>
 				<li>
@@ -120,7 +143,6 @@ export default function PrivacyPage() {
 				<li>Shared word fixes are kept for as long as Komoray runs, without your name. If you want the ones you shared taken out, email us.</li>
 				<li>Your account stays until you ask us to delete it. Deleting your account also deletes your words and your Brand Kit.</li>
 			</ul>
-			<p>When the beta ends, this may change. If it does, we will update this page and email you before the change.</p>
 
 			<h2>Your choices</h2>
 			<p>
