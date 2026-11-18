@@ -96,7 +96,7 @@ export async function POST(request: Request) {
 	// Nothing changed since the last video (or this part): hand that one back, at no cost and at once (coach 16 Nov:
 	// pressing Make video over and over cost us every time). Everything that changes the picture is in here:
 	// every edit, the part, whether Cutout is on and how far the speaker is cut out, the own font, render.py's rev.
-	// The own font is Pro's (lib/plans.ts): on another plan the video is made in Kanit, as when no font is uploaded.
+	// The own font is a paid plan's (lib/plans.ts): on Free the video is made in Kanit, as when no font is uploaded.
 	const ownFont = access.perks.ownFont && (readStyle(edit.style).font === "own" || edit.banners?.some((b) => b.font === "own"));
 	const fingerprint = await fingerprintOf({
 		RENDER_REV,
