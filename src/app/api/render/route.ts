@@ -16,6 +16,7 @@ import { jobFiles, PART_JOB, PART_RENDER, readRenderPart, type RenderPart, WHOLE
 import { readStyle } from "@/lib/subtitle-style";
 import { countRender, renderLimitReached } from "@/lib/render-limit";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { WATERMARK } from "@/lib/watermark";
 
 // One render job lives in the video's folder:
 //   render.json        written when the job starts (so we know it is in progress)
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
 		part,
 		cutout: layers ? await getJson(siblingKey(key, "cutout.json")) : null,
 		font: ownFont ? await currentUser().then(({ user }) => (user ? getJson(fontKeys(user.id).info) : null)) : null,
+		watermark: access.perks.watermark, // a Free video and the same one made on a paid plan look different
 	});
 	const before = await getJson<{ fingerprint?: string; stoppedAt?: string }>(siblingKey(key, files.job)).catch(() => null);
 	if (!again && before?.fingerprint === fingerprint && !before.stoppedAt && (await exists(finalKey))) return Response.json({ status: "done", unchanged: true });
@@ -143,6 +145,10 @@ export async function POST(request: Request) {
 		const picture = own && (await exists(own)) ? own : old && (await exists(old)) ? old : null; // each looked up once (review 17 Nov)
 		if (picture) style.logoUrl = await signedUrl(picture, "GET", LINK_SECONDS);
 	}
+
+	// The Free plan's watermark (lib/watermark.ts, watermark_filters in render.py): our own picture's link, and the video's
+	// id that picks its corners the same way the preview does.
+	if (access.perks.watermark) Object.assign(style, { watermarkUrl: new URL(WATERMARK.file, request.url).toString(), watermarkSeed: key.split("/")[1] });
 
 	// Cutout layers (lib/behind.ts): links to the speaker's matte (once cut out) and each picture or clip.
 	let cutout: (CutoutLayers & { matteUrl: string; files: Record<string, string> }) | undefined;

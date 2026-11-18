@@ -9,6 +9,7 @@ import type { BadTake } from "@/lib/bad-takes";
 import { HeaderMenu } from "@/components/HeaderMenu";
 import { ScriptView } from "@/components/ScriptView";
 import { VideoReady } from "@/components/VideoReady";
+import { WatermarkSeed } from "@/components/WatermarkContext";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
 import { type CutoutLayers, NO_LAYERS } from "@/lib/behind";
@@ -26,6 +27,7 @@ import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
+import { watermarkSeed } from "@/lib/watermark";
 import type { ZoomPart } from "@/lib/zoom";
 
 type Cut = { start: number; end: number };
@@ -132,6 +134,7 @@ export default function EditPage() {
 	// Whether the plan has translating (lib/plans.ts). Hidden for everyone for now (coach, 18 Nov): a separate .srt to
 	// upload by hand isn't worth its AI cost; the menu shows only once a plan turns it on. null: not known yet.
 	const [translatePlan, setTranslatePlan] = useState<{ on: boolean } | null>(null);
+	const [watermarked, setWatermarked] = useState(false); // the plan puts the watermark on (Free): shown in the preview too
 	const [render, setRender] = useState<RenderState>({ status: "none" });
 	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
 	// False from the press until the server has taken the job. Until then it still answers about the last video.
@@ -224,8 +227,12 @@ export default function EditPage() {
 	useEffect(() => {
 		if (!userId) return;
 		void fetch("/api/access")
-			.then((r) => (r.ok ? (r.json() as Promise<{ perks?: { translate?: boolean } }>) : null))
-			.then((a) => a && setTranslatePlan({ on: a.perks?.translate === true }))
+			.then((r) => (r.ok ? (r.json() as Promise<{ perks?: { translate?: boolean; watermark?: boolean } }>) : null))
+			.then((a) => {
+				if (!a) return;
+				setTranslatePlan({ on: a.perks?.translate === true });
+				setWatermarked(a.perks?.watermark === true);
+			})
 			.catch(() => {});
 	}, [userId]);
 
@@ -851,6 +858,7 @@ export default function EditPage() {
 	}
 
 	return (
+		<WatermarkSeed.Provider value={watermarked ? watermarkSeed(key.split("/")[1] ?? "") : null}>
 		<main className="font-sans mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 sm:px-6">
 			{/* A few buttons only: the settings that go together sit in a menu (coach, 7 Nov: the top was crowded, not minimal). */}
 			<header className="flex flex-wrap items-center justify-between gap-3 border-b border-foreground/10 pb-3">
@@ -1168,5 +1176,6 @@ export default function EditPage() {
 				suggested={badTakes.status === "failed" ? null : new Set(readTakes ? badWords : [])}
 			/>
 		</main>
+		</WatermarkSeed.Provider>
 	);
 }
