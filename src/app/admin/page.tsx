@@ -114,7 +114,7 @@ export default function AdminPage() {
 	}, [user]);
 
 	// Send a change, then show the lists as they now are. Says so if it did not work.
-	async function change(url: string, init: RequestInit) {
+	async function change(url: string, init: RequestInit, done?: (data: Record<string, unknown>) => string) {
 		setNotice("");
 		const res = await fetch(url, init).catch(() => null);
 		if (!res?.ok) {
@@ -122,11 +122,21 @@ export default function AdminPage() {
 			setNotice(data?.error ?? "That didn't work. Please try again.");
 			return false;
 		}
+		const said = done?.((await res.json().catch(() => ({}))) as Record<string, unknown>);
 		await load();
+		if (said) setNotice(said);
 		return true;
 	}
 
-	const invite = (email: string) => change("/api/admin/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+	// Whether the invite email went out (api/admin/access POST).
+	const MAIL_SAID: Record<string, string> = {
+		sent: "Invited. The invite email was sent.",
+		"not set up": "Invited, but no email was sent: BREVO_API_KEY isn't set up. Tell them yourself.",
+		failed: "Invited, but the invite email didn't go out. Tell them yourself.",
+		"already invited": "Already invited, so no email was sent again.",
+	};
+	const invite = (email: string) =>
+		change("/api/admin/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }, (d) => MAIL_SAID[String(d.mail)] ?? "");
 	const saveFeatures = (email: string, features: Features) =>
 		change("/api/admin/access", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, features }) });
 	const removeInvite = (email: string) => {
@@ -200,7 +210,7 @@ export default function AdminPage() {
 				))}
 			</nav>
 
-			{notice && <p className="text-sm text-red-600">{notice}</p>}
+			{notice && <p className="text-sm font-medium text-amber-700 dark:text-amber-400">{notice}</p>}
 
 			{tab === "people" && (
 				<div className="flex flex-col gap-8">

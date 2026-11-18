@@ -59,9 +59,10 @@ export async function listPeople() {
 	return rows.sort((a, b) => b.at.localeCompare(a.at));
 }
 
+// true: newly invited (so the invite email goes once, not again when Invite is pressed twice).
 export async function addPerson(email: string) {
 	const key = await personKey(email);
-	if (!(await exists(key))) await putObject(key, JSON.stringify({ email: email.trim().toLowerCase(), at: new Date().toISOString() }), "application/json");
+	return putIfAbsent(key, JSON.stringify({ email: email.trim().toLowerCase(), at: new Date().toISOString() }), "application/json");
 }
 
 // Turn features on or off for someone already invited. false = not invited.
