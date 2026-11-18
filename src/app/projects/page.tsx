@@ -1,6 +1,6 @@
 "use client";
 
-import { Clapperboard, FileVideo, Folder, FolderPlus, LayoutGrid, List, type LucideIcon, Scissors, Sparkles, Trash2, Upload } from "lucide-react";
+import { Clapperboard, Copy, FileVideo, Folder, FolderPlus, LayoutGrid, List, type LucideIcon, Scissors, Sparkles, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
@@ -200,6 +200,30 @@ function Thumb({ videoKey }: { videoKey: string }) {
 	);
 }
 
+// Duplicate (coach, 18 Nov): a new project with the same video and everything done to it (api/projects POST).
+function DuplicateButton({ project, onCopied, onError }: { project: Project; onCopied: (copy: Project) => void; onError: (error: string) => void }) {
+	const [busy, setBusy] = useState(false);
+	async function duplicate() {
+		setBusy(true);
+		const res = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: project.video_key }) }).catch(() => null);
+		const data = (await res?.json().catch(() => null)) as { project?: Project; error?: string } | null;
+		setBusy(false);
+		if (res?.ok && data?.project) onCopied(data.project);
+		else onError(data?.error ?? `Could not duplicate ${project.filename}. Please try again.`);
+	}
+	return (
+		<button
+			onClick={() => void duplicate()}
+			disabled={busy}
+			aria-label={`Duplicate ${project.filename}`}
+			title={busy ? "Duplicating…" : "Duplicate: a copy with all your edits, to make another version"}
+			className="shrink-0 rounded-lg p-2 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:animate-pulse"
+		>
+			<Copy className="h-4 w-4" aria-hidden />
+		</button>
+	);
+}
+
 // The bin, which asks once more before deleting: a deleted video can't come back.
 function DeleteButton({ project, onDeleted, onError }: { project: Project; onDeleted: () => void; onError: (error: string) => void }) {
 	const [state, setState] = useState<"idle" | "asking" | "deleting">("idle");
@@ -296,6 +320,10 @@ export default function ProjectsPage() {
 	const live = projects?.filter((p) => daysLeft(p.created_at) > 0) ?? [];
 	const editLink = (p: Project) => `/edit?key=${encodeURIComponent(p.video_key)}`; // the editor sends videos without a script yet back to the upload page
 	const deleted = (p: Project) => setProjects((list) => list?.filter((x) => x.id !== p.id) ?? null);
+	const copied = (copy: Project) => {
+		setError("");
+		setProjects((list) => (list ? [copy, ...list] : [copy]));
+	};
 	const moved = (p: Project, folderId: string | null) => setProjects((list) => list?.map((x) => (x.id === p.id ? { ...x, folder_id: folderId } : x)) ?? null);
 	const counts: Record<string, number> = { [ALL]: live.length };
 	for (const p of live) if (p.folder_id) counts[p.folder_id] = (counts[p.folder_id] ?? 0) + 1;
@@ -375,6 +403,7 @@ export default function ProjectsPage() {
 								<span className="hidden shrink-0 text-xs text-foreground/60 sm:inline">{details(p)}</span>
 							</Link>
 							{moveTo(p)}
+							<DuplicateButton project={p} onCopied={copied} onError={setError} />
 							<DeleteButton project={p} onDeleted={() => deleted(p)} onError={setError} />
 						</li>
 					))}
@@ -393,6 +422,7 @@ export default function ProjectsPage() {
 								<div className="flex min-h-9 flex-wrap items-center justify-between gap-1">
 									<span className="text-xs text-foreground/60">{daysLeft(p.created_at)} days left</span>
 									{moveTo(p)}
+									<DuplicateButton project={p} onCopied={copied} onError={setError} />
 									<DeleteButton project={p} onDeleted={() => deleted(p)} onError={setError} />
 								</div>
 							</div>
