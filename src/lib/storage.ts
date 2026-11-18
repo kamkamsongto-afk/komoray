@@ -58,7 +58,9 @@ export function storageFull(access: Pick<AccessStatus, "storageGb" | "plan">, us
 // When their files will be deleted, and why; countdown: show it on My projects now. null: they won't be (a plan is active,
 // the beta, the admin, or nothing to delete yet). planEnded: a plan that ended, whose files are kept 90 days from its end.
 export type Deletion = { at: string; why: "plan ended" | "not used"; countdown: boolean } | null;
-export async function deletionFor(email: string, access: Pick<AccessStatus, "storageGb" | "plan">, now = Date.now()): Promise<Deletion> {
+// newest: when their newest file was written, for someone never seen since the last-opened date began to be kept (a
+// beta user who stopped before launch): their 30 days count from it instead of never.
+export async function deletionFor(email: string, access: Pick<AccessStatus, "storageGb" | "plan">, now = Date.now(), newest: string | null = null): Promise<Deletion> {
 	if (access.storageGb === null || access.plan !== "free") return null; // paid: kept while the plan is active
 	const [{ endedAt }, active, done] = await Promise.all([planFor(email), lastActive(email), getJson<{ endedAt: string }>(`access/storage-cleaned/${await hashEmail(email)}.json`).catch(() => null)]);
 	// A plan that ended and whose 90 days haven't been used up yet (done: its files were already deleted for that end).
@@ -67,7 +69,7 @@ export async function deletionFor(email: string, access: Pick<AccessStatus, "sto
 		return { at: at.toISOString(), why: "plan ended", countdown: at.getTime() - now <= STORAGE.countdownDays * DAY };
 	}
 	// Free: 30 days after they last opened Komoray. They are opening it as they see this, so no countdown on screen.
-	const since = active ?? null;
+	const since = active ?? newest;
 	if (!since) return null;
 	return { at: new Date(new Date(since).getTime() + STORAGE.freeIdleDays * DAY).toISOString(), why: "not used", countdown: false };
 }
