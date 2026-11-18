@@ -17,7 +17,10 @@ export const fixesNeedThaiCut = (fixes: { text: string }[] | undefined) => Boole
 
 // The cutter once loaded, else undefined (the fix stays one word until then, as before).
 export function useThaiCut(needed: boolean): ThaiCut | undefined {
-	const [cut, setCut] = useState<ThaiCut | null>(loaded);
+	// () => loaded, never useState(loaded): given a function, React CALLS it to get the first value, so once the cutter was
+	// loaded (a second video opened from My projects) the state became cutThaiWords(undefined) = [] and the AI studio
+	// crashed with "r is not a function" (coach 18 Nov, docs/bugs.md).
+	const [cut, setCut] = useState<ThaiCut | null>(() => loaded);
 	useEffect(() => {
 		if (!needed || cut) return;
 		let gone = false;
