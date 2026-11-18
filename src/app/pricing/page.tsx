@@ -46,6 +46,18 @@ export default function PricingPage() {
 	const [mine, setMine] = useState<MyPlan | null>(null);
 	const [note, setNote] = useState("");
 	const started = useRef(false);
+	const [opening, setOpening] = useState(false);
+
+	// A fresh link every press: Paddle's portal links work once and run out.
+	async function manage() {
+		setOpening(true);
+		setNote("");
+		const res = await fetch("/api/billing/portal", { method: "POST" }).catch(() => null);
+		const data = (await res?.json().catch(() => null)) as { url?: string; error?: string } | null;
+		if (res?.ok && data?.url) return void (window.location.href = data.url);
+		setOpening(false);
+		setNote(data?.error ?? "Couldn't open billing just now. Please try again.");
+	}
 
 	// The plan we have on record (from Paddle's webhook). After a purchase it is asked again a few times: the webhook
 	// usually lands within seconds of the checkout closing.
@@ -166,7 +178,11 @@ export default function PricingPage() {
 					{mine.cancelsAt ? `It ends on ${day(mine.cancelsAt)}.` : mine.periodEnds ? `Next bill on ${day(mine.periodEnds)}.` : ""}
 					{mine.status === "past_due" ? " Your last payment didn't go through: please update your card." : ""}
 					{mine.monthly ? ` ${mine.monthly.left} of ${mine.monthly.limit} minutes left · resets ${shortDate(mine.monthly.resetsAt)}.` : ""}
-					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}
+					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}{" "}
+					{/* Paddle's own page: cancel, change card, invoices (api/billing/portal; money promise 5). */}
+					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-blue-600 underline hover:text-blue-700 disabled:opacity-60 dark:text-blue-400">
+						{opening ? "Opening…" : "Manage billing"}
+					</button>
 				</p>
 			)}
 			{note && <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-center text-sm">{note}</p>}
