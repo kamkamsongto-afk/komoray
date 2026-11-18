@@ -24,7 +24,7 @@ import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
 import { TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
-import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
+import { FPS, keepSegments, subtitleLines, toSrt, totalFrames } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
 import type { ZoomPart } from "@/lib/zoom";
 
@@ -129,6 +129,9 @@ export default function EditPage() {
 	const [loadError, setLoadError] = useState("");
 	const [saveError, setSaveError] = useState("");
 	const [translating, setTranslating] = useState<string | null>(null); // what the Translate menu shows while it works
+	// What the plan says about translating (lib/plans.ts): locked on Free; on a plan with monthly minutes each new language
+	// takes minutes, said on the menu before it is picked (pricing doc, promise 1). null: not known yet, or the beta.
+	const [translatePlan, setTranslatePlan] = useState<{ on: boolean; paysMinutes: boolean } | null>(null);
 	const [render, setRender] = useState<RenderState>({ status: "none" });
 	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
 	// False from the press until the server has taken the job. Until then it still answers about the last video.
@@ -216,6 +219,14 @@ export default function EditPage() {
 			// Make video pressed while this was on its way: the answer is about the video it is replacing.
 			if (run === renderRun.current && rendered.status !== "none") setRender(rendered);
 		})();
+	}, [userId]);
+
+	useEffect(() => {
+		if (!userId) return;
+		void fetch("/api/access")
+			.then((r) => (r.ok ? (r.json() as Promise<{ perks?: { translate?: boolean }; monthly?: unknown }>) : null))
+			.then((a) => a && setTranslatePlan({ on: a.perks?.translate !== false, paysMinutes: Boolean(a.monthly) }))
+			.catch(() => {});
 	}, [userId]);
 
 	// The preview copy (or where the face is) is still being worked out: play the original / frame the
@@ -788,6 +799,8 @@ export default function EditPage() {
 	const silentSeconds = cutSeconds(analysis.cuts);
 	const finalSeconds = analysis.duration - cutSeconds(allCuts(analysis));
 	const filename = key.split("/").pop() ?? key;
+	// The same count as api/translate: 1 minute of the final video per language.
+	const translateMinutes = Math.max(1, Math.ceil(totalFrames(keepSegments(analysis.duration, allCuts(analysis))) / FPS / 60));
 
 	// The subtitles of the final video as a file, same lines and timing as the preview.
 	async function downloadSrt() {
@@ -941,16 +954,17 @@ export default function EditPage() {
 						<select
 							value=""
 							onChange={(e) => void translateSrt(e.target.value)}
-							disabled={translating !== null}
+							disabled={translating !== null || translatePlan?.on === false}
 							aria-label="Translate subtitles"
+							title={translatePlan?.on === false ? "Translating subtitles comes with Starter and Pro" : translatePlan?.paysMinutes ? "A language already translated for this video downloads again with no minutes" : undefined}
 							className="rounded-md border border-foreground/20 bg-background px-1.5 py-1 text-foreground/80 disabled:opacity-60"
 						>
 							<option value="" disabled>
-								{translating ?? "Translate subtitles (.srt)…"}
+								{translating ?? (translatePlan?.on === false ? "Translate subtitles · Starter and Pro" : "Translate subtitles (.srt)…")}
 							</option>
 							{TRANSLATIONS.map((l) => (
 								<option key={l.code} value={l.code}>
-									{l.name}
+									{translatePlan?.paysMinutes ? `${l.name} · uses ${translateMinutes} minute${translateMinutes > 1 ? "s" : ""}` : l.name}
 								</option>
 							))}
 						</select>
