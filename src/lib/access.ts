@@ -38,6 +38,7 @@ export type AccessStatus = {
 	extra: { left: number; until: string | null } | null;
 	perVideo: number;
 	maxGb: number;
+	storageGb: number | null; // the plan's storage (lib/storage.ts); null: no cap (the beta, the admin)
 	features: Features;
 	perks: Perks;
 	renders: { perDay: number; perWindow: number; show: boolean };
@@ -76,7 +77,7 @@ async function freeSince(email: string) {
 
 export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	const beta = PLAN_RULES.beta;
-	const base = { limit: BETA_MINUTES, perVideo: beta.perVideo, maxGb: beta.maxGb, monthly: null, extra: null, perks: perksOf(beta), renders: rendersOf(beta) };
+	const base = { limit: BETA_MINUTES, perVideo: beta.perVideo, maxGb: beta.maxGb, storageGb: beta.storageGb, monthly: null, extra: null, perks: perksOf(beta), renders: rendersOf(beta) };
 	const none: AccessStatus = { ...base, allowed: false, unlimited: false, plan: null, used: 0, left: 0, features: NO_FEATURES };
 	if (!email) return none;
 	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, plan: "admin", used: 0, left: BETA_MINUTES, features: ALL_FEATURES };
@@ -87,7 +88,7 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	if (!plan) return none;
 	const rules = PLAN_RULES[plan];
 	const features: Features = { cutout: { ...granted.cutout, on: granted.cutout.on || rules.cutout } };
-	const shared = { allowed: true, unlimited: false, plan, perVideo: rules.perVideo, maxGb: rules.maxGb, features, perks: perksOf(rules), renders: rendersOf(rules) };
+	const shared = { allowed: true, unlimited: false, plan, perVideo: rules.perVideo, maxGb: rules.maxGb, storageGb: rules.storageGb, features, perks: perksOf(rules), renders: rendersOf(rules) };
 	const usage = await usageOf(email);
 
 	if (rules.monthly === null) {

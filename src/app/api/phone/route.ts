@@ -4,6 +4,7 @@ import { OWNER_FILE } from "@/lib/admin-activity";
 import { hmac, verifyCallback } from "@/lib/callback";
 import { bytesOfGb, fileTooBig, MAX_FILE_GB } from "@/lib/limits";
 import { exists, getJson, putObject, signedUrl } from "@/lib/r2";
+import { GB, roomLeft, storageFull } from "@/lib/storage";
 import { currentUser } from "@/lib/supabase/server";
 import { uploadLimitReached } from "@/lib/upload-limit";
 
@@ -28,6 +29,7 @@ type Handoff = {
 	filename?: string;
 	size?: number;
 	maxGb?: number; // the plan's biggest file, from when the QR was made (the phone isn't signed in)
+	room?: number | null; // bytes left in their storage then (lib/storage.ts); null or missing: no cap
 };
 
 const handoffKey = (id: string) => `uploads/${id}/phone.json`;
@@ -53,9 +55,11 @@ export async function POST(request: Request) {
 		if (!access.left) return Response.json({ error: outOfMinutes(access) }, { status: 429 });
 		const limit = await uploadLimitReached(supabase, user);
 		if (limit) return Response.json({ error: limit }, { status: 429 });
+		const room = await roomLeft(supabase, access);
+		if (room === 0) return Response.json({ error: storageFull(access, (access.storageGb ?? 0) * GB, 1) }, { status: 413 });
 		const id = crypto.randomUUID();
 		const expires = Date.now() + LINK_MINUTES * 60 * 1000;
-		const handoff: Handoff = { userId: user.id, expires, status: "waiting", maxGb: access.maxGb };
+		const handoff: Handoff = { userId: user.id, expires, status: "waiting", maxGb: access.maxGb, room };
 		await putObject(handoffKey(id), JSON.stringify(handoff), "application/json");
 		const t = `${id}.${expires}.${await hmac(secret(), `phone:${id}.${expires}`)}`;
 		return Response.json({ id, link: new URL(`/phone?t=${t}`, request.url).toString(), expires });
@@ -75,6 +79,9 @@ export async function POST(request: Request) {
 			if (!ALLOWED_TYPES.includes(contentType)) return Response.json({ error: "Only .mp4 and .mov videos are allowed" }, { status: 400 });
 			const maxGb = Math.min(handoff.maxGb ?? MAX_FILE_GB, MAX_FILE_GB);
 			if (!Number.isInteger(size) || size <= 0 || size > bytesOfGb(maxGb)) return Response.json({ error: fileTooBig(maxGb) }, { status: 400 });
+			if (typeof handoff.room === "number" && size > handoff.room) {
+				return Response.json({ error: "This video doesn't fit in your storage. Delete videos on My projects on your computer, then make a new QR code." }, { status: 413 });
+			}
 			const filename = String(body.filename ?? "video");
 			const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "video";
 			const key = `uploads/${id}/${safeName}`;

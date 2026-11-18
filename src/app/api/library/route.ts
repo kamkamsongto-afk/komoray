@@ -1,10 +1,11 @@
-import { canUseStudio, NO_INVITE } from "@/lib/access";
+import { accessFor, canUseStudio, NO_INVITE } from "@/lib/access";
 import type { Banner } from "@/lib/banners";
 import type { CutoutLayers } from "@/lib/behind";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
 import { cleanMediaName, filesInUse, LIBRARY, LIBRARY_TYPES, type LibraryItem, MEDIA_FILE, PROJECT_FILE } from "@/lib/media-library";
 import { deleteObject, getJson, listObjects, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { uploadBlocked } from "@/lib/storage";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // Import: the files a video's project keeps for its banners and Pic/Clip (lib/media-library.ts).
@@ -60,13 +61,16 @@ export async function POST(request: Request) {
 	const body = (await request.json().catch(() => ({}))) as { key?: unknown; contentType?: unknown; size?: unknown };
 	const key = await ownKey(body.key);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
-	if (!(await canUseStudio((await currentUser()).user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
+	const { supabase, user } = await currentUser();
+	if (!(await canUseStudio(user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
 	const type = typeof body.contentType === "string" ? LIBRARY_TYPES[body.contentType] : undefined;
 	if (!type) return Response.json({ error: "Please pick a JPG, PNG, WebP or GIF picture, or an MP4 clip." }, { status: 400 });
 	const max = LIBRARY.maxBytes[type.media];
 	if (typeof body.size !== "number" || !Number.isInteger(body.size) || body.size <= 0 || body.size > max) {
 		return Response.json({ error: `That file is too big. ${type.media === "image" ? "Pictures" : "Clips"} can be up to ${Math.round(max / 1_000_000)} MB.` }, { status: 400 });
 	}
+	const full = await uploadBlocked(supabase, await accessFor(user?.email), body.size); // the plan's storage (lib/storage.ts)
+	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
 	const library = await getJson<Library>(libraryKey(key));
 	if ((library?.items.length ?? 0) >= LIBRARY.maxItems) return Response.json({ error: `A project keeps up to ${LIBRARY.maxItems} files. Delete one you don't use first.` }, { status: 400 });
 	const file = `media-${crypto.randomUUID()}.${type.ext}`;

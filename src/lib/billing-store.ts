@@ -129,7 +129,9 @@ export async function recordTransaction(txn: PaddleTransaction, event: string) {
 // What this person has now: their best plan that still gives access, and the extra minutes not yet run out.
 // Free when nothing is bought. past_due keeps the plan while Paddle retries the card (Paddle's advice).
 // extras: every pack still good, for lib/access.ts to take minutes from (extraMinutes is their total before any was used).
-export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; extraMinutes: number; extras: ExtraRecord[] };
+// endedAt: when their last plan stopped giving access (none active now): the 90 days of keeping their files count from
+// there (lib/storage.ts). null: they never had one, or one is active.
+export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
 const GIVES_ACCESS: SubStatus[] = ["active", "trialing", "past_due"];
 const RANK: Record<PaidPlan, number> = { starter: 1, pro: 2 };
 
@@ -141,5 +143,8 @@ export async function planFor(email: string): Promise<PlanNow> {
 	const now = new Date().toISOString();
 	const extras = (await Promise.all(extraFiles.map((f) => getJson<ExtraRecord>(f.key).catch(() => null)))).filter((x): x is ExtraRecord => Boolean(x));
 	const extraMinutes = extras.reduce((sum, x) => sum + (x.until > now ? x.minutes : 0), 0);
-	return { plan: best?.plan ?? "free", sub: best, extraMinutes, extras };
+	// The end of the period they paid for: a scheduled cancel's date, else the period's end, else when Paddle said so.
+	const ends = best ? [] : subs.map((s) => (s.scheduled?.action === "cancel" ? s.scheduled.at : null) ?? s.periodEnds ?? s.occurredAt).filter(Boolean);
+	const endedAt = ends.length ? ends.sort().at(-1)! : null;
+	return { plan: best?.plan ?? "free", sub: best, extraMinutes, extras, endedAt };
 }

@@ -2,6 +2,7 @@ import { accessFor, NO_INVITE, outOfMinutes } from "@/lib/access";
 import { OWNER_FILE } from "@/lib/admin-activity";
 import { bytesOfGb, fileTooBig } from "@/lib/limits";
 import { putObject, signedUrl } from "@/lib/r2";
+import { uploadBlocked } from "@/lib/storage";
 import { currentUser } from "@/lib/supabase/server";
 import { uploadLimitReached } from "@/lib/upload-limit";
 
@@ -30,6 +31,9 @@ export async function POST(request: Request) {
 	if (!Number.isInteger(size) || !size || size < 0 || size > bytesOfGb(access.maxGb)) {
 		return Response.json({ error: fileTooBig(access.maxGb) }, { status: 400 });
 	}
+	// The plan's storage (lib/storage.ts): a full one takes no new videos until some are deleted.
+	const full = await uploadBlocked(supabase, access, size as number);
+	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
 
 	// Each upload gets its own folder so two files with the same name never overwrite each other.
 	const safeName = (filename ?? "video").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100);
