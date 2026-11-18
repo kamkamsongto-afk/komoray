@@ -1,7 +1,7 @@
 // What each plan may use: one table for the server (lib/access.ts, the API routes) and the pages, so both show and
 // enforce the same numbers. No server imports here. The numbers are the decided pricing doc of 15 Nov
 // (Google Doc "Komoray ★Final★ ราคาและแพ็กเกจ"): only 5 things are locked, the watermark, minutes, Cutout,
-// the own font and how many Brand Kits; translating comes with paying and takes minutes. Everything else is on for all.
+// the own font and how many Brand Kits. Everything else is on for all.
 import { MAX_FILE_GB, MINUTES_PER_VIDEO } from "./limits";
 
 // Off until launch day: until then whoever isn't paying is on the beta's rules (invite only, 45 minutes in all), as
@@ -26,7 +26,9 @@ export type PlanRules = {
 };
 
 // The beta keeps what it has today, so nothing changes on komoray.com before launch.
-const BETA: PlanRules = { monthly: null, firstMonth: null, perVideo: MINUTES_PER_VIDEO, maxGb: MAX_FILE_GB, renders: { perDay: 60, perWindow: 200 }, showRenderLimit: false, extraMinutes: false, translate: true, cutout: false, ownFont: true, brandKits: 20, watermark: false }; // 20: MAX_KITS in lib/brand-kits.ts (which reads R2, so not imported here)
+// Except translating: hidden for everyone for now (coach, 18 Nov: a separate .srt to upload by hand costs us AI money per
+// language and isn't a wow). The code stays (api/translate, lib/translate.ts) for when it builds translated subtitles in.
+const BETA: PlanRules = { monthly: null, firstMonth: null, perVideo: MINUTES_PER_VIDEO, maxGb: MAX_FILE_GB, renders: { perDay: 60, perWindow: 200 }, showRenderLimit: false, extraMinutes: false, translate: false, cutout: false, ownFont: true, brandKits: 20, watermark: false }; // 20: MAX_KITS in lib/brand-kits.ts (which reads R2, so not imported here)
 
 export const PLAN_RULES: Record<PlanName, PlanRules> = {
 	beta: BETA,
@@ -34,8 +36,9 @@ export const PLAN_RULES: Record<PlanName, PlanRules> = {
 	free: { monthly: 10, firstMonth: 35, perVideo: 15, maxGb: 1, renders: { perDay: 3, perWindow: 30 }, showRenderLimit: true, extraMinutes: false, translate: false, cutout: false, ownFont: false, brandKits: 0, watermark: true },
 	// Paid files: the doc says 5 GB, but Deepgram refuses over 2 GB (lib/limits.ts) until the sound is sent on its own.
 	// Longest video for paid plans isn't decided yet (doc 13.): the beta's 20 minutes until it is.
-	starter: { ...BETA, monthly: 300, extraMinutes: true, cutout: true, ownFont: false, brandKits: 1 },
-	pro: { ...BETA, monthly: 600, extraMinutes: true, cutout: true, ownFont: true, brandKits: 5 },
+	// Extra minutes not sold for now (coach, 18 Nov: reads like a credit top-up); packs already bought still count.
+	starter: { ...BETA, monthly: 300, extraMinutes: false, cutout: true, ownFont: false, brandKits: 1 },
+	pro: { ...BETA, monthly: 600, extraMinutes: false, cutout: true, ownFont: true, brandKits: 5 },
 };
 
 export const PLAN_LABEL: Record<PlanName, string> = { beta: "Beta", free: "Free", starter: "Starter", pro: "Pro" };

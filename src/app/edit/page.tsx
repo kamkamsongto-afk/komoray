@@ -24,7 +24,7 @@ import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
 import { TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
-import { FPS, keepSegments, subtitleLines, toSrt, totalFrames } from "@/lib/timeline";
+import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
 import type { ZoomPart } from "@/lib/zoom";
 
@@ -129,9 +129,9 @@ export default function EditPage() {
 	const [loadError, setLoadError] = useState("");
 	const [saveError, setSaveError] = useState("");
 	const [translating, setTranslating] = useState<string | null>(null); // what the Translate menu shows while it works
-	// What the plan says about translating (lib/plans.ts): locked on Free; on a plan with monthly minutes each new language
-	// takes minutes, said on the menu before it is picked (pricing doc, promise 1). null: not known yet, or the beta.
-	const [translatePlan, setTranslatePlan] = useState<{ on: boolean; paysMinutes: boolean } | null>(null);
+	// Whether the plan has translating (lib/plans.ts). Hidden for everyone for now (coach, 18 Nov): a separate .srt to
+	// upload by hand isn't worth its AI cost; the menu shows only once a plan turns it on. null: not known yet.
+	const [translatePlan, setTranslatePlan] = useState<{ on: boolean } | null>(null);
 	const [render, setRender] = useState<RenderState>({ status: "none" });
 	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
 	// False from the press until the server has taken the job. Until then it still answers about the last video.
@@ -224,8 +224,8 @@ export default function EditPage() {
 	useEffect(() => {
 		if (!userId) return;
 		void fetch("/api/access")
-			.then((r) => (r.ok ? (r.json() as Promise<{ perks?: { translate?: boolean }; monthly?: unknown }>) : null))
-			.then((a) => a && setTranslatePlan({ on: a.perks?.translate !== false, paysMinutes: Boolean(a.monthly) }))
+			.then((r) => (r.ok ? (r.json() as Promise<{ perks?: { translate?: boolean } }>) : null))
+			.then((a) => a && setTranslatePlan({ on: a.perks?.translate === true }))
 			.catch(() => {});
 	}, [userId]);
 
@@ -799,8 +799,6 @@ export default function EditPage() {
 	const silentSeconds = cutSeconds(analysis.cuts);
 	const finalSeconds = analysis.duration - cutSeconds(allCuts(analysis));
 	const filename = key.split("/").pop() ?? key;
-	// The same count as api/translate: 1 minute of the final video per language.
-	const translateMinutes = Math.max(1, Math.ceil(totalFrames(keepSegments(analysis.duration, allCuts(analysis))) / FPS / 60));
 
 	// The subtitles of the final video as a file, same lines and timing as the preview.
 	async function downloadSrt() {
@@ -951,23 +949,24 @@ export default function EditPage() {
 							<Download className="h-3 w-3 shrink-0" aria-hidden />
 							Subtitles (.srt)
 						</button>
-						<select
-							value=""
-							onChange={(e) => void translateSrt(e.target.value)}
-							disabled={translating !== null || translatePlan?.on === false}
-							aria-label="Translate subtitles"
-							title={translatePlan?.on === false ? "Translating subtitles comes with Starter and Pro" : translatePlan?.paysMinutes ? "A language already translated for this video downloads again with no minutes" : undefined}
-							className="rounded-md border border-foreground/20 bg-background px-1.5 py-1 text-foreground/80 disabled:opacity-60"
-						>
-							<option value="" disabled>
-								{translating ?? (translatePlan?.on === false ? "Translate subtitles · Starter and Pro" : "Translate subtitles (.srt)…")}
-							</option>
-							{TRANSLATIONS.map((l) => (
-								<option key={l.code} value={l.code}>
-									{translatePlan?.paysMinutes ? `${l.name} · uses ${translateMinutes} minute${translateMinutes > 1 ? "s" : ""}` : l.name}
+						{translatePlan?.on && (
+							<select
+								value=""
+								onChange={(e) => void translateSrt(e.target.value)}
+								disabled={translating !== null}
+								aria-label="Translate subtitles"
+								className="rounded-md border border-foreground/20 bg-background px-1.5 py-1 text-foreground/80 disabled:opacity-60"
+							>
+								<option value="" disabled>
+									{translating ?? "Translate subtitles (.srt)…"}
 								</option>
-							))}
-						</select>
+								{TRANSLATIONS.map((l) => (
+									<option key={l.code} value={l.code}>
+										{l.name}
+									</option>
+								))}
+							</select>
+						)}
 						<label className="flex items-center gap-2 text-foreground/80">
 							<input type="checkbox" checked={desktopNotify} onChange={(e) => void toggleDesktopNotify(e.target.checked)} />
 							Notify me on my desktop

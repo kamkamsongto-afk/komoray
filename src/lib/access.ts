@@ -121,8 +121,9 @@ export function outOfMinutes(status: AccessStatus, needs?: number) {
 	}
 	const resets = `Your minutes reset ${shortDate(status.monthly.resetsAt)}.`;
 	const head = needs ? `This needs ${needs} minutes. You have ${status.left} left.` : "You've used all your minutes for now.";
-	const more = status.perks.extraMinutes ? "Add Extra minutes on the Pricing page, or upgrade." : "Upgrade on the Pricing page for more.";
-	return `${head} ${resets} ${more}`;
+	// Extra minutes aren't sold for now (lib/plans.ts), and Pro has nothing above it yet (Max is "coming soon").
+	const more = status.perks.extraMinutes ? "Add Extra minutes on the Pricing page, or upgrade." : status.plan === "pro" ? "" : "Upgrade on the Pricing page for more.";
+	return `${head} ${resets}${more && ` ${more}`}`;
 }
 
 // Take minutes for one charge (name: the file under this month). Monthly minutes go first, then Extra (doc 2.).

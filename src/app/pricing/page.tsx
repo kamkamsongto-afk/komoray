@@ -28,6 +28,7 @@ declare global {
 	}
 }
 const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
+const SELL_EXTRA = false;
 
 type Config = { ready: false } | { ready: true; token: string; environment: PaddleEnv; prices: PricesView };
 type MyPlan = { plan: "free" | "starter" | "pro"; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
@@ -141,7 +142,7 @@ export default function PricingPage() {
 			<HomeLogo className="self-start" />
 			<header className="flex flex-col items-center gap-3 text-center">
 				<h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Pick your plan</h1>
-				<p className="text-foreground/70">One counter: minutes. Making a video and translating use the same minutes. Never charged automatically for more.</p>
+				<p className="text-foreground/70">One counter: minutes of video you upload. Never charged automatically for more.</p>
 				{config?.ready && config.environment === "sandbox" && (
 					<p className="rounded-full bg-amber-500/20 px-3 py-1 text-xs text-foreground">Test mode: no real money. Card 4242 4242 4242 4242, any future date, any 3 digits.</p>
 				)}
@@ -216,22 +217,25 @@ export default function PricingPage() {
 				Prices in US dollars, plus applicable VAT or sales tax for your country, added at checkout. Buying for a business? Add your VAT or tax number at checkout.
 			</p>
 
-			<section className="flex flex-col gap-3 rounded-2xl border border-foreground/15 p-5">
-				<h2 className="text-lg font-semibold">Extra minutes</h2>
-				<p className="text-sm text-foreground/70">For paid plans. Good for 12 months. Your monthly minutes are used first.</p>
-				<div className="flex flex-wrap gap-3">
-					{EXTRA_PACKS.map((pack) => (
-						<button
-							key={pack.id}
-							onClick={() => prices && void buy(prices[pack.id], "extra")}
-							disabled={!open || (Boolean(mine) && !paid)}
-							className="rounded-lg border border-foreground/20 px-4 py-2 font-medium hover:bg-foreground/5 disabled:opacity-40"
-						>
-							Add {pack.minutes} minutes · ${pack.price}
-						</button>
-					))}
-				</div>
-			</section>
+			{/* Extra minutes: not sold for now (coach, 18 Nov: it reads like a credit top-up). Kept to turn back on. */}
+			{SELL_EXTRA && (
+				<section className="flex flex-col gap-3 rounded-2xl border border-foreground/15 p-5">
+					<h2 className="text-lg font-semibold">Extra minutes</h2>
+					<p className="text-sm text-foreground/70">For paid plans. Good for 12 months. Your monthly minutes are used first.</p>
+					<div className="flex flex-wrap gap-3">
+						{EXTRA_PACKS.map((pack) => (
+							<button
+								key={pack.id}
+								onClick={() => prices && void buy(prices[pack.id], "extra")}
+								disabled={!open || (Boolean(mine) && !paid)}
+								className="rounded-lg border border-foreground/20 px-4 py-2 font-medium hover:bg-foreground/5 disabled:opacity-40"
+							>
+								Add {pack.minutes} minutes · ${pack.price}
+							</button>
+						))}
+					</div>
+				</section>
+			)}
 		</main>
 	);
 }

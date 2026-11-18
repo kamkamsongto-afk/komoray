@@ -25,7 +25,7 @@ export const pricesFor = (env: PaddleEnv) => PRICES[env] ?? null;
 // What the pricing page shows (the doc's table: only what is built and works today).
 export const PLANS = {
 	free: { name: "Free", month: 0, year: 0, minutes: "35 minutes to start, then 10 a month", points: ["Every editing feature", "komoray.com watermark", "Files kept 14 days"] },
-	starter: { name: "Starter", month: 26, year: 19, minutes: "300 minutes a month", points: ["No watermark", "Translate subtitles", "Cutout", "1 Brand Kit", "Buy Extra minutes"] },
+	starter: { name: "Starter", month: 26, year: 19, minutes: "300 minutes a month", points: ["No watermark", "Cutout", "1 Brand Kit"] },
 	pro: { name: "Pro", month: 48, year: 36, minutes: "600 minutes a month", points: ["Everything in Starter", "Your own font", "5 Brand Kits"] },
 } as const;
 export const EXTRA_PACKS = [
