@@ -181,6 +181,52 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const VIEW_PREF = "komoray.projectsView"; // remembers list or thumbnails in this browser
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const GB = 1024 ** 3;
+const size = (bytes: number) => (bytes >= GB ? `${(bytes / GB).toFixed(1)} GB` : mb(bytes));
+type Storage = {
+	used: number;
+	perProject: Record<string, number>;
+	gone: string[];
+	storageGb: number | null;
+	deletion: { at: string; why: "plan ended" | "not used"; countdown: boolean } | null;
+};
+
+// How much of their plan's storage their projects take (Terms "Storage"), and, once a plan has ended, the days left before
+// the files are deleted (from 20 days before, lib/storage.ts). Only with a plan's storage: the beta has none.
+function StorageBar({ storage }: { storage: Storage }) {
+	const [now] = useState(() => Date.now()); // when the page opened: days left are counted from then
+	if (storage.storageGb === null) return null;
+	const cap = storage.storageGb * GB;
+	const share = Math.min(1, storage.used / cap);
+	const left = storage.deletion ? Math.max(0, Math.ceil((new Date(storage.deletion.at).getTime() - now) / DAY_MS)) : 0;
+	return (
+		<div className="flex flex-col gap-2">
+			{storage.deletion?.countdown && (
+				<p className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+					Your plan has ended. Your videos will be deleted in <span className="font-semibold">{left} {left === 1 ? "day" : "days"}</span> (
+					{new Date(storage.deletion.at).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}). Download what you
+					want to keep, or{" "}
+					<Link href="/pricing" className="font-medium underline">
+						start a plan again
+					</Link>{" "}
+					to keep everything.
+				</p>
+			)}
+			<div className="flex max-w-md flex-col gap-1">
+				<div className="flex items-center justify-between text-xs text-foreground/70">
+					<span>Storage</span>
+					<span>
+						{size(storage.used)} of {storage.storageGb} GB used
+					</span>
+				</div>
+				<div className="h-1.5 overflow-hidden rounded-full bg-foreground/10" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share * 100)} aria-label="Storage used">
+					<div className={`h-full rounded-full ${share >= 0.9 ? "bg-amber-500" : "bg-blue-600"}`} style={{ width: `${Math.max(share * 100, storage.used ? 1 : 0)}%` }} />
+				</div>
+				{share >= 1 && <p className="text-xs text-amber-700 dark:text-amber-400">Your storage is full. Delete videos to upload new ones.</p>}
+			</div>
+		</div>
+	);
+}
 
 // What a new user sees before their first video.
 const FIRST_STEPS: [LucideIcon, string, string][] = [
@@ -327,6 +373,14 @@ export default function ProjectsPage() {
 	const [folders, setFolders] = useState<FolderRow[] | null>(null); // null: no folders on this database yet
 	const [current, setCurrent] = useState(ALL);
 	const [copying, setCopying] = useState<Project[]>([]); // "Duplicating…" cards, one per copy on its way (id: the original's)
+	const [storage, setStorage] = useState<Storage | null>(null);
+
+	// What their projects take, against their plan's storage (api/storage). Asked again after a delete or a copy.
+	const loadStorage = () =>
+		void fetch("/api/storage")
+			.then((r) => (r.ok ? (r.json() as Promise<Storage>) : null))
+			.then((s) => s && setStorage(s))
+			.catch(() => {});
 
 	useEffect(() => {
 		try {
@@ -361,6 +415,7 @@ export default function ProjectsPage() {
 			if (error) setError("Could not load your projects");
 			else setProjects(data);
 		})();
+		loadStorage();
 	}, [user]);
 
 	if (user === undefined) return <main className="min-h-screen" />;
@@ -373,9 +428,20 @@ export default function ProjectsPage() {
 	}
 
 	const daysLeft = (createdAt: string) => KEEP_DAYS - Math.floor((Date.now() - new Date(createdAt).getTime()) / DAY_MS);
-	const live = projects?.filter((p) => daysLeft(p.created_at) > 0) ?? [];
+	// With a plan's storage (lib/storage.ts), videos stay until they delete them (or the clean-up does, which marks them
+	// gone): no 14 days. Without one (the beta), R2 deletes them after 14 days, as before.
+	// The 14-day filter only once we know it's the beta (agent review 19 Nov): while /api/storage loads, or if it fails, a
+	// paying person's older videos would vanish from the list for a moment.
+	const capped = storage?.storageGb != null;
+	const beta = storage !== null && storage.storageGb === null;
+	const gone = new Set(storage?.gone ?? []);
+	const live = projects?.filter((p) => (beta ? daysLeft(p.created_at) > 0 : !gone.has(p.id))) ?? [];
+	const bytesOf = (p: Project) => storage?.perProject[p.id] ?? p.size;
 	const editLink = (p: Project) => `/edit?key=${encodeURIComponent(p.video_key)}`; // the editor sends videos without a script yet back to the upload page
-	const deleted = (p: Project) => setProjects((list) => list?.filter((x) => x.id !== p.id) ?? null);
+	const deleted = (p: Project) => {
+		setProjects((list) => list?.filter((x) => x.id !== p.id) ?? null);
+		loadStorage();
+	};
 	// A deleted folder's videos are in no folder now (the database did it: on delete set null), so say so here too.
 	const foldersChanged = (next: FolderRow[]) => {
 		setFolders(next);
@@ -390,7 +456,10 @@ export default function ProjectsPage() {
 		const data = (await res?.json().catch(() => null)) as { project?: Project; error?: string } | null;
 		setCopying((list) => list.filter((x) => x.id !== p.id));
 		const copy = data?.project;
-		if (res?.ok && copy) setProjects((list) => (list ? [copy, ...list] : [copy]));
+		if (res?.ok && copy) {
+			setProjects((list) => (list ? [copy, ...list] : [copy]));
+			loadStorage();
+		}
 		else setError(data?.error ?? `Could not duplicate ${p.filename}. Please try again.`);
 	}
 	const busy = (p: Project) => copying.some((x) => x.id === p.id);
@@ -400,7 +469,7 @@ export default function ProjectsPage() {
 	const shown = current === ALL ? live : live.filter((p) => p.folder_id === current);
 	const waiting = copying.filter((c) => current === ALL || c.folder_id === current);
 	const moveTo = (p: Project) => folders && <MoveTo project={p} folders={folders} onMoved={(id) => moved(p, id)} onError={setError} />;
-	const details = (p: Project) => `${new Date(p.created_at).toLocaleDateString()} · ${mb(p.size)} · deleted in ${daysLeft(p.created_at)} days`;
+	const details = (p: Project) => `${new Date(p.created_at).toLocaleDateString()} · ${size(bytesOf(p))}${capped ? "" : ` · deleted in ${daysLeft(p.created_at)} days`}`;
 
 	return (
 		<main className="font-sans mx-auto flex min-h-screen max-w-5xl flex-col gap-6 p-4 sm:p-8">
@@ -461,6 +530,7 @@ export default function ProjectsPage() {
 				</div>
 			)}
 
+			{storage && <StorageBar storage={storage} />}
 			{folders && live.length > 0 && <FolderBar folders={folders} counts={counts} current={current} pick={setCurrent} onChange={foldersChanged} onError={setError} />}
 			{current !== ALL && shown.length === 0 && waiting.length === 0 && <p className="text-sm text-foreground/60">No videos in this folder yet. Pick it in the folder box next to a video to move it here.</p>}
 
@@ -505,7 +575,7 @@ export default function ProjectsPage() {
 							</Link>
 							<div className="flex flex-col gap-1 p-2">
 								<NameLine project={p} href={editLink(p)} onRenamed={(name) => renamed(p, name)} onError={setError} />
-								<span className="text-xs text-foreground/60">{daysLeft(p.created_at)} days left</span>
+								<span className="text-xs text-foreground/60">{capped ? size(bytesOf(p)) : `${daysLeft(p.created_at)} days left`}</span>
 								{moveTo(p)}
 								<div className="flex min-h-9 items-center justify-between gap-1">
 									<DuplicateButton project={p} busy={busy(p)} onClick={() => void duplicate(p)} />
@@ -517,7 +587,7 @@ export default function ProjectsPage() {
 				</ul>
 			)}
 
-			{live.length > 0 && <p className="text-xs text-foreground/50">During the beta, videos are deleted automatically after {KEEP_DAYS} days.</p>}
+			{!capped && live.length > 0 && <p className="text-xs text-foreground/50">During the beta, videos are deleted automatically after {KEEP_DAYS} days.</p>}
 		</main>
 	);
 }

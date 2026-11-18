@@ -2,7 +2,7 @@
 
 import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
-import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useContext, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import { clipGain, soundOf } from "@/lib/clip-sound";
@@ -13,6 +13,8 @@ import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
 import { FPS, type Line, setSpot, ZOOM_ORIGIN } from "@/lib/timeline";
+import { WATERMARK, watermarkAt } from "@/lib/watermark";
+import { WatermarkSeed } from "@/components/WatermarkContext";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
 // latin-ext: the letters of Polish, Norwegian and the like. Only downloaded when a page uses them.
@@ -395,6 +397,7 @@ export function PlayerFrame({
 	onLayoutChange,
 	onLayoutDrop,
 }: Props) {
+	const seed = useContext(WatermarkSeed);
 	const line = subtitle.subtitles ? saying : null; // subtitles turned off: none drawn, like the final video (build_subtitles)
 	const boxRef = useRef<HTMLDivElement>(null);
 
@@ -993,6 +996,26 @@ export function PlayerFrame({
 							{subtitle.logo}
 						</div>
 					)}
+					{seed !== null &&
+						(() => {
+							// The Free plan's watermark, last so it is over everything (watermark_filters in render.py).
+							// It drifts and fades by the time in the final video (watermarkAt), as in render.py.
+							const mark = watermarkAt(seed, outTime, W, H);
+							return (
+								// eslint-disable-next-line @next/next/no-img-element -- our own small picture, drawn in the frame's pixels
+								<img
+									src={WATERMARK.file}
+									alt=""
+									style={{
+										position: "absolute",
+										left: mark.left,
+										top: mark.top,
+										width: mark.width,
+										opacity: mark.opacity,
+									}}
+								/>
+							);
+						})()}
 				</div>
 				{dropping && (
 					// Where it will go: the other part of the layout showing now, else a new layout here.

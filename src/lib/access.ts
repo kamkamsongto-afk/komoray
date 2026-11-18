@@ -1,14 +1,20 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, siblingKey } from "@/lib/r2";
 import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
 import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/features";
-import { BETA_MINUTES, MAX_FILE_GB, MINUTES_PER_VIDEO } from "@/lib/limits";
+import { BETA_MINUTES, OUT_OF_MINUTES } from "@/lib/limits";
+import { cycleAround, extraLeft, PLAN_LABEL, PLAN_RULES, type PlanName, type PlanRules, PLANS_LIVE, shortDate } from "@/lib/plans";
+import { planFor } from "@/lib/billing-store";
 import { type JobFiles, PART_JOB, WHOLE_JOB } from "./render-part";
 import { videoDuration } from "@/lib/video-duration";
+import { hashEmail } from "@/lib/email-hash";
 
 // Who may use the studio during the beta, and how much. All kept in R2, away from uploads/ so it stays:
 //   access/people/<hash of email>.json                   invited by the admin: { email, at, features? } (lib/features.ts)
-//   access/usage/<hash>/<YYYY-MM>/<video id>.json        minutes this video took, added up across every month of the beta: { minutes }
+//   access/usage/<hash>/<YYYY-MM>/<video id>.json        minutes this video took: { minutes, extra?, at } (UsageRecord below)
+//   access/usage/<hash>/<YYYY-MM>/<id>-tr-<lang>.json    minutes a translation took (api/translate, paid plans)
+//   access/free/<hash>.json                              when Free began for this person (once PLANS_LIVE)
 //   access/best/<hash>/<YYYY-MM>/<video id>.json         Cutout Best seconds this video took from that month: { seconds }
 //   uploads/<id>/access.json                             how many times this video was listened to
 // Minutes count the length of the original video, once, when Find silences is pressed. Deleting the
@@ -18,33 +24,134 @@ export const JOB_TOO_OLD_MS = 30 * 60 * 1000; // a job still running after this 
 
 export const NO_INVITE = "Komoray is invite-only for now. Your invite will come by email.";
 
-export type AccessStatus = { allowed: boolean; unlimited: boolean; used: number; limit: number; left: number; perVideo: number; maxGb: number; features: Features };
+// plan: whose rules (lib/plans.ts). used / limit / left: this month's minutes on a plan (all of the beta's on the beta),
+// left also counting Extra minutes. monthly and extra: the two parts, for the minutes bar ("212 of 300 · resets Dec 14").
+// perks: what the plan unlocks; features: what the admin turned on for this person, with Cutout also on for paid plans.
+export type Perks = { translate: boolean; ownFont: boolean; brandKits: number; watermark: boolean; extraMinutes: boolean };
+export type AccessStatus = {
+	allowed: boolean;
+	unlimited: boolean;
+	plan: PlanName | "admin" | null;
+	used: number;
+	limit: number;
+	left: number;
+	monthly: { used: number; limit: number; left: number; resetsAt: string } | null;
+	extra: { left: number; until: string | null } | null;
+	perVideo: number;
+	maxGb: number;
+	storageGb: number | null; // the plan's storage (lib/storage.ts); null: no cap (the beta, the admin)
+	features: Features;
+	perks: Perks;
+	renders: { perDay: number; perWindow: number; show: boolean };
+};
 type PersonRecord = { email: string; at: string; features?: unknown };
+// A charge of minutes: a video listened to (uploads/…/<video id>.json) or a translation (<video id>-tr-<language>.json).
+// extra: how many of them came from Extra minutes. at: when (files from before 18 Nov have none: when the file was written).
+type UsageRecord = { minutes: number; extra?: number; at?: string };
 
-export async function hashEmail(email: string) {
-	const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email.trim().toLowerCase())));
-	return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+export { hashEmail }; // lib/email-hash.ts: the pricing page needs the same name in the browser
 
 const personKey = async (email: string) => `access/people/${await hashEmail(email)}.json`;
 const month = () => new Date().toISOString().slice(0, 7);
 
-// Everything this person has used since the beta began: the limit never renews, so no month in the path.
-async function minutesUsed(email: string) {
+async function usageOf(email: string) {
 	const files = await listObjects(`access/usage/${await hashEmail(email)}/`);
-	const used = await Promise.all(files.map((file) => getJson<{ minutes: number }>(file.key).catch(() => null)));
-	return used.reduce((sum, item) => sum + (item?.minutes ?? 0), 0);
+	const used = await Promise.all(files.map(async (file) => ({ file, item: await getJson<UsageRecord>(file.key).catch(() => null) })));
+	return used.flatMap(({ file, item }) => (item ? [{ minutes: item.minutes ?? 0, extra: item.extra ?? 0, at: item.at ?? file.lastModified }] : []));
+}
+
+// Everything this person has used since the beta began: the beta's limit never renews, so the month in the path is not read.
+async function minutesUsed(email: string) {
+	return (await usageOf(email)).reduce((sum, item) => sum + item.minutes, 0);
+}
+
+const perksOf = (rules: PlanRules): Perks => ({ translate: rules.translate, ownFont: rules.ownFont, brandKits: rules.brandKits, watermark: rules.watermark, extraMinutes: rules.extraMinutes });
+const rendersOf = (rules: PlanRules) => ({ ...rules.renders, show: rules.showRenderLimit });
+
+// When Free began for this person: their first visit once plans are live (beta users on launch day, doc 4.), kept so it
+// never moves. Their month resets on that day.
+async function freeSince(email: string) {
+	const key = `access/free/${await hashEmail(email)}.json`;
+	await putIfAbsent(key, JSON.stringify({ at: new Date().toISOString() }), "application/json");
+	return (await getJson<{ at: string }>(key))?.at ?? new Date().toISOString();
+}
+
+// Plans are on: on launch day (PLANS_LIVE), or on a site set to try them before (TRY_PLANS = "on", a Worker secret set on
+// staging only, coach 18 Nov: to see Free's limits, the storage bar and the watermark before launch; never on the live site).
+export function plansLive() {
+	if (PLANS_LIVE) return true;
+	try {
+		return (getCloudflareContext().env as unknown as { TRY_PLANS?: string }).TRY_PLANS === "on";
+	} catch {
+		return false; // no Worker around (a script or a test): as PLANS_LIVE says
+	}
 }
 
 export async function accessFor(email?: string | null): Promise<AccessStatus> {
-	const base = { limit: BETA_MINUTES, perVideo: MINUTES_PER_VIDEO, maxGb: MAX_FILE_GB };
-	const none = { ...base, allowed: false, unlimited: false, used: 0, left: 0, features: NO_FEATURES };
+	const beta = PLAN_RULES.beta;
+	const base = { limit: BETA_MINUTES, perVideo: beta.perVideo, maxGb: beta.maxGb, storageGb: beta.storageGb, monthly: null, extra: null, perks: perksOf(beta), renders: rendersOf(beta) };
+	const none: AccessStatus = { ...base, allowed: false, unlimited: false, plan: null, used: 0, left: 0, features: NO_FEATURES };
 	if (!email) return none;
-	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, used: 0, left: BETA_MINUTES, features: ALL_FEATURES };
-	const person = await getJson<PersonRecord>(await personKey(email));
-	if (!person) return none;
-	const used = await minutesUsed(email);
-	return { ...base, allowed: true, unlimited: false, used, left: Math.max(0, BETA_MINUTES - used), features: readFeatures(person.features) };
+	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, plan: "admin", used: 0, left: BETA_MINUTES, features: ALL_FEATURES };
+	const [person, bought] = await Promise.all([getJson<PersonRecord>(await personKey(email)), planFor(email).catch(() => null)]);
+	const granted = person ? readFeatures(person.features) : NO_FEATURES;
+	const paid = bought && bought.plan !== "free" ? bought.plan : null;
+	const plan: PlanName | null = paid ?? (plansLive() ? "free" : person ? "beta" : null);
+	if (!plan) return none;
+	const rules = PLAN_RULES[plan];
+	const features: Features = { cutout: { ...granted.cutout, on: granted.cutout.on || rules.cutout } };
+	const shared = { allowed: true, unlimited: false, plan, perVideo: rules.perVideo, maxGb: rules.maxGb, storageGb: rules.storageGb, features, perks: perksOf(rules), renders: rendersOf(rules) };
+	const usage = await usageOf(email);
+
+	if (rules.monthly === null) {
+		const used = usage.reduce((sum, item) => sum + item.minutes, 0);
+		return { ...shared, limit: BETA_MINUTES, used, left: Math.max(0, BETA_MINUTES - used), monthly: null, extra: null };
+	}
+	// A paid plan's month runs from its own billing day (Paddle's period end), Free's from the day it began.
+	const anchor = paid ? (bought?.sub?.periodEnds ?? bought?.sub?.occurredAt ?? "") : await freeSince(email);
+	const cycle = cycleAround(anchor);
+	const first = !paid && cycle.start.getTime() <= new Date(anchor).getTime();
+	const limit = first && rules.firstMonth !== null ? rules.firstMonth : rules.monthly;
+	const start = cycle.start.toISOString();
+	const used = usage.filter((u) => u.at >= start).reduce((sum, u) => sum + Math.max(0, u.minutes - u.extra), 0);
+	// Extra minutes bought on a paid plan stay theirs after it ends (paid for, good 12 months), so they are read on any plan.
+	const extra = extraLeft(bought?.extras ?? [], usage);
+	const monthlyLeft = Math.max(0, limit - used);
+	return {
+		...shared,
+		limit,
+		used,
+		left: monthlyLeft + extra.minutes,
+		monthly: { used, limit, left: monthlyLeft, resetsAt: cycle.end.toISOString() },
+		extra: extra.minutes || bought?.extras.length ? { left: extra.minutes, until: extra.until } : null,
+	};
+}
+
+// What to say when there are no minutes left (before an upload, and when a video needs more than is left).
+export function outOfMinutes(status: AccessStatus, needs?: number) {
+	if (status.plan === "beta" || !status.monthly) {
+		return needs ? `This video needs ${needs} minutes and you have ${status.left} of your beta minutes left. Need more? Email hello@komoray.com.` : OUT_OF_MINUTES;
+	}
+	const resets = `Your minutes reset ${shortDate(status.monthly.resetsAt)}.`;
+	const head = needs ? `This needs ${needs} minutes. You have ${status.left} left.` : "You've used all your minutes for now.";
+	// Extra minutes aren't sold for now (lib/plans.ts), and Pro has nothing above it yet (Max is "coming soon").
+	const more = status.perks.extraMinutes ? "Add Extra minutes on the Pricing page, or upgrade." : status.plan === "pro" ? "" : "Upgrade on the Pricing page for more.";
+	return `${head} ${resets}${more && ` ${more}`}`;
+}
+
+// Take minutes for one charge (name: the file under this month). Monthly minutes go first, then Extra (doc 2.).
+// once: the same name twice at once takes them only once (a translation; a listen has its own guard in startListening).
+// null: not enough left, or (once) already taken.
+export async function takeMinutes(email: string, name: string, minutes: number, status: AccessStatus, once = false) {
+	if (status.unlimited) return { usageKey: undefined };
+	if (minutes > status.left) return null;
+	const extra = status.monthly ? Math.max(0, minutes - status.monthly.left) : 0;
+	const usageKey = `access/usage/${await hashEmail(email)}/${month()}/${name}.json`;
+	const record = JSON.stringify({ minutes, at: new Date().toISOString(), ...(extra && { extra }) } satisfies UsageRecord);
+	if (once) {
+		if (!(await putIfAbsent(usageKey, record, "application/json"))) return null;
+	} else await putObject(usageKey, record, "application/json");
+	return { usageKey };
 }
 
 export async function canUseStudio(email?: string | null) {
@@ -103,16 +210,18 @@ export async function startListening(key: string, email?: string | null): Promis
 	const seconds = await videoDuration(key);
 	if (!seconds) return { error: "We could not read this video's length. Please try exporting it again as MP4.", status: 400 };
 	const minutes = Math.ceil(seconds / 60);
-	if (minutes > MINUTES_PER_VIDEO) return { error: `This video is ${minutes} minutes long. During the beta, each video can be up to ${MINUTES_PER_VIDEO} minutes. Please trim it and upload it again.`, status: 400 };
-	if (minutes > status.left) return { error: `This video needs ${minutes} minutes and you have ${status.left} of your beta minutes left. Need more? Email hello@komoray.com.`, status: 429 };
+	if (minutes > status.perVideo) {
+		const which = status.plan === "beta" ? "During the beta, each video" : `On ${PLAN_LABEL[status.plan as PlanName] ?? "your plan"}, each video`;
+		return { error: `This video is ${minutes} minutes long. ${which} can be up to ${status.perVideo} minutes. Please trim it and upload it again.`, status: 400 };
+	}
+	if (minutes > status.left) return { error: outOfMinutes(status, minutes), status: 429 };
 
 	// The same video sent twice at once: only one request gets past here, so speech-to-text is paid for once.
 	if (!(await putIfAbsent(recordKey, JSON.stringify({ listens: 1, at: new Date().toISOString() }), "application/json"))) {
 		return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
 	}
-	const usageKey = `access/usage/${await hashEmail(email)}/${month()}/${key.split("/")[1]}.json`;
-	await putObject(usageKey, JSON.stringify({ minutes }), "application/json");
-	return { usageKey };
+	const taken = await takeMinutes(email, key.split("/")[1], minutes, status);
+	return { usageKey: taken?.usageKey };
 }
 
 // A job that never reported back has died: say so and give the minutes back. true = it had died.

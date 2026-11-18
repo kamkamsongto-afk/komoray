@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { accessFor, canUseStudio, JOB_TOO_OLD_MS, NO_INVITE, renderRunning } from "@/lib/access";
+import { accessFor, JOB_TOO_OLD_MS, NO_INVITE, renderRunning } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
 import { logoKey, logoVersion } from "@/lib/logo";
@@ -16,6 +16,8 @@ import { jobFiles, PART_JOB, PART_RENDER, readRenderPart, type RenderPart, WHOLE
 import { readStyle } from "@/lib/subtitle-style";
 import { countRender, renderLimitReached } from "@/lib/render-limit";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { WATERMARK } from "@/lib/watermark";
+import { watermarkOn } from "@/lib/watermark-on";
 
 // One render job lives in the video's folder:
 //   render.json        written when the job starts (so we know it is in progress)
@@ -48,7 +50,8 @@ export async function POST(request: Request) {
 	const key = await readKey(rawKey ?? null);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const email = (await currentUser()).user?.email;
-	if (!(await canUseStudio(email))) return Response.json({ error: NO_INVITE }, { status: 403 });
+	const access = await accessFor(email);
+	if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
 	if (await renderRunning(key)) return Response.json({ error: "This video is already being made. Please wait for it to finish." }, { status: 409 });
 
 	const edit = await getJson<{
@@ -77,7 +80,7 @@ export async function POST(request: Request) {
 	// picture at 2:00). render.py leaves out the matte where no layer shows.
 	const inPart = <T extends { start: number; end: number }>(list: T[]) => (part ? list.filter((x) => x.start < part.end && x.end > part.start) : list);
 	const needed = layers && { ...layers, texts: inPart(layers.texts), inserts: inPart(layers.inserts) };
-	if (layers && !(await accessFor((await currentUser()).user?.email)).features.cutout.on) layers = undefined;
+	if (layers && !access.features.cutout.on) layers = undefined;
 	if (layers) {
 		const done = await getJson<{ windows: Window[] }>(siblingKey(key, "cutout.json"));
 		const need = cutoutWindows(needed ?? layers, keepSegments(edit.duration, allCuts(edit)));
@@ -93,13 +96,17 @@ export async function POST(request: Request) {
 	// Nothing changed since the last video (or this part): hand that one back, at no cost and at once (coach 16 Nov:
 	// pressing Make video over and over cost us every time). Everything that changes the picture is in here:
 	// every edit, the part, whether Cutout is on and how far the speaker is cut out, the own font, render.py's rev.
-	const ownFont = readStyle(edit.style).font === "own" || edit.banners?.some((b) => b.font === "own");
+	// The own font is a paid plan's (lib/plans.ts): on Free the video is made in Kanit, as when no font is uploaded.
+	const ownFont = access.perks.ownFont && (readStyle(edit.style).font === "own" || edit.banners?.some((b) => b.font === "own"));
 	const fingerprint = await fingerprintOf({
 		RENDER_REV,
 		edit,
 		part,
 		cutout: layers ? await getJson(siblingKey(key, "cutout.json")) : null,
 		font: ownFont ? await currentUser().then(({ user }) => (user ? getJson(fontKeys(user.id).info) : null)) : null,
+		// Only when it is on (agent review, 18 Nov): always adding the key changed every saved video's fingerprint, so each
+		// unchanged video would have been made again once. A Free video and the same one on a paid plan still differ.
+		...(watermarkOn(access) && { watermark: WATERMARK.rev }),
 	});
 	const before = await getJson<{ fingerprint?: string; stoppedAt?: string }>(siblingKey(key, files.job)).catch(() => null);
 	if (!again && before?.fingerprint === fingerprint && !before.stoppedAt && (await exists(finalKey))) return Response.json({ status: "done", unchanged: true });
@@ -114,13 +121,13 @@ export async function POST(request: Request) {
 	// The user's own font: Modal gets a short-lived link to the file and the name to ask for.
 	// A banner can have the own font too, while the subtitles don't (banner_events falls back to Kanit without it).
 	const style: Record<string, unknown> = readStyle(edit.style);
-	if (style.font === "own" || edit.banners?.some((b) => b.font === "own")) {
+	if (ownFont) {
 		const { user } = await currentUser();
 		const keys = user ? fontKeys(user.id) : null;
 		const own = keys ? await getJson<OwnFont>(keys.info) : null;
 		if (keys && own) Object.assign(style, { fontUrl: await signedUrl(keys.file, "GET", LINK_SECONDS), ownFamily: own.family });
 		else if (style.font === "own") style.font = "kanit";
-	}
+	} else if (style.font === "own") style.font = "kanit";
 
 	// Uploaded banners (kind "file"): Modal gets a short-lived link to each one's file.
 	const bannerNames = [...new Set((edit.banners ?? []).flatMap((b) => (b.kind === "file" && b.file ? [b.file] : [])))];
@@ -141,6 +148,10 @@ export async function POST(request: Request) {
 		const picture = own && (await exists(own)) ? own : old && (await exists(old)) ? old : null; // each looked up once (review 17 Nov)
 		if (picture) style.logoUrl = await signedUrl(picture, "GET", LINK_SECONDS);
 	}
+
+	// The Free plan's watermark (lib/watermark.ts, watermark_filters in render.py): our own picture's link, and the video's
+	// id that picks its corners the same way the preview does.
+	if (watermarkOn(access)) Object.assign(style, { watermarkUrl: new URL(WATERMARK.file, request.url).toString(), watermarkSeed: key.split("/")[1] });
 
 	// Cutout layers (lib/behind.ts): links to the speaker's matte (once cut out) and each picture or clip.
 	let cutout: (CutoutLayers & { matteUrl: string; files: Record<string, string> }) | undefined;

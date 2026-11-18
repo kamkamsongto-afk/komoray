@@ -2,6 +2,7 @@ import { accessFor, hashEmail, LISTENS_PER_VIDEO, NO_INVITE } from "@/lib/access
 import { OWNER_FILE } from "@/lib/admin-activity";
 import { copyObject, deleteObject, exists, getJson, listObjects, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
+import { uploadBlocked } from "@/lib/storage";
 import { uploadLimitReached } from "@/lib/upload-limit";
 
 // Files a copy leaves behind: the finished video and a part of it (Make video makes them again), jobs, locks, progress
@@ -29,7 +30,8 @@ export async function POST(request: Request) {
 	if (!key || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const { supabase, user } = await currentUser();
 	if (!user?.email) return Response.json({ error: "Please sign in first" }, { status: 401 });
-	if (!(await accessFor(user.email)).allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
+	const access = await accessFor(user.email);
+	if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
 	const limit = await uploadLimitReached(supabase, user);
 	if (limit) return Response.json({ error: limit }, { status: 429 });
 
@@ -53,6 +55,9 @@ export async function POST(request: Request) {
 	if (!from) return Response.json({ error: "Unknown video" }, { status: 404 });
 
 	const files = (await listObjects(siblingKey(key, ""))).filter((file) => !NOT_COPIED.test(file.key.split("/").slice(2).join("/")));
+	// A copy takes as much storage as what it copies (lib/storage.ts): not over the plan's storage either.
+	const full = await uploadBlocked(supabase, access, files.reduce((sum, f) => sum + f.size, 0));
+	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
 	const copied: string[] = [];
 	// allSettled: every copy has finished (or failed) before any clean-up, so none lands after it.
 	const results = await Promise.allSettled(

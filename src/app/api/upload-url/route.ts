@@ -1,7 +1,8 @@
-import { accessFor, NO_INVITE } from "@/lib/access";
+import { accessFor, NO_INVITE, outOfMinutes } from "@/lib/access";
 import { OWNER_FILE } from "@/lib/admin-activity";
-import { FILE_TOO_BIG, MAX_FILE_BYTES, OUT_OF_MINUTES } from "@/lib/limits";
+import { bytesOfGb, fileTooBig } from "@/lib/limits";
 import { putObject, signedUrl } from "@/lib/r2";
+import { uploadBlocked } from "@/lib/storage";
 import { currentUser } from "@/lib/supabase/server";
 import { uploadLimitReached } from "@/lib/upload-limit";
 
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
 	if (!user) return Response.json({ error: "Please sign in first" }, { status: 401 });
 	const access = await accessFor(user.email);
 	if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
-	if (!access.left) return Response.json({ error: OUT_OF_MINUTES }, { status: 429 });
+	if (!access.left) return Response.json({ error: outOfMinutes(access) }, { status: 429 });
 	const limit = await uploadLimitReached(supabase, user);
 	if (limit) return Response.json({ error: limit }, { status: 429 });
 
@@ -27,9 +28,12 @@ export async function POST(request: Request) {
 	if (!contentType || !ALLOWED_TYPES.includes(contentType)) {
 		return Response.json({ error: "Only .mp4 and .mov videos are allowed" }, { status: 400 });
 	}
-	if (!Number.isInteger(size) || !size || size < 0 || size > MAX_FILE_BYTES) {
-		return Response.json({ error: FILE_TOO_BIG }, { status: 400 });
+	if (!Number.isInteger(size) || !size || size < 0 || size > bytesOfGb(access.maxGb)) {
+		return Response.json({ error: fileTooBig(access.maxGb) }, { status: 400 });
 	}
+	// The plan's storage (lib/storage.ts): a full one takes no new videos until some are deleted.
+	const full = await uploadBlocked(supabase, access, size as number);
+	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
 
 	// Each upload gets its own folder so two files with the same name never overwrite each other.
 	const safeName = (filename ?? "video").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100);

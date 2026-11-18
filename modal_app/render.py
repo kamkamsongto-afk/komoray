@@ -171,6 +171,76 @@ LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or 
 # Over every banner (layers 3, 5, ... one pair each, banner_events) and subtitle, as the preview draws it last (coach 15 Nov).
 LOGO_LAYER = 100
 
+# The Free plan's watermark (WATERMARK in src/lib/watermark.ts, coach 18 Nov): the white word Komoray at 45% with a thin
+# shadow baked into public/watermark.png (20% once faded), its width
+# and its distance from the edges a share of the frame's shorter side, in a corner picked from the video's id every
+# `every` seconds. Over everything, the logo too, as the preview draws it last.
+WATERMARK = {"opacity": 0.45, "width": 0.237, "margin": 0.08, "every": 8, "fade": 0.6, "drift": 0.015, "driftX": 7, "driftY": 9}
+MASK32 = 0xFFFFFFFF
+
+
+def watermark_seed(video_id: str) -> int:
+    """FNV-1a over the id's characters, 32-bit (watermarkSeed)."""
+    h = 0x811C9DC5
+    for ch in video_id:
+        h = ((h ^ ord(ch)) * 0x01000193) & MASK32
+    return h
+
+
+def watermark_draw(seed: int, slot: int) -> int:
+    """xorshift32 of the seed mixed with the stretch's number (draw in watermark.ts)."""
+    x = (seed ^ (((slot + 1) * 0x9E3779B1) & MASK32)) & MASK32
+    x = (x ^ (x << 13)) & MASK32
+    x = (x ^ (x >> 17)) & MASK32
+    x = (x ^ (x << 5)) & MASK32
+    return x
+
+
+def watermark_corners(seed: int, slots: int) -> list[int]:
+    """The place of each stretch, 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right, 4 middle of the left edge,
+    5 middle of the right edge (coach 18 Nov): the first at random, then always a different one (watermarkCorner)."""
+    n = 6
+    corners = [watermark_draw(seed, 0) % n]
+    while len(corners) < slots:
+        corners.append((corners[-1] + 1 + watermark_draw(seed, len(corners)) % (n - 1)) % n)
+    return corners[:slots]
+
+
+def watermark_filters(parts: list[str], base: str, size: tuple[int, int], index: int, seed: int, start: float, length: float, out: str):
+    """The watermark over `base` for the stretch [start, start + length) of the final video (start: a part's place in
+    it; this runs after the part's time is set back to 0, so t + start is the time in the whole video). The picture is
+    a looped input, so its see-through can change every frame: it fades in and out at each corner (geq on its alpha).
+    One overlay per corner it visits, on while it is there, drifting in a slow loop around its place (coach 18 Nov).
+    The same sums as watermarkAt in watermark.ts."""
+    short = min(size)
+    width, margin = round(short * WATERMARK["width"]), round(short * WATERMARK["margin"])
+    reach = round(short * WATERMARK["drift"])
+    inset = margin + reach  # never nearer the edge than `margin`, even at the far end of the drift
+    every, fade = WATERMARK["every"], WATERMARK["fade"]
+    first, last = int(start // every), int(math.ceil((start + length) / every))
+    corners = watermark_corners(seed, last)
+    times: dict[int, list[str]] = {}
+    for slot in range(first, last):
+        a, b = slot * every - start, (slot + 1) * every - start
+        times.setdefault(corners[slot], []).append(f"gte(t,{a:.4f})*lt(t,{b:.4f})")
+    used = sorted(times)
+    names = "".join(f"[wm{k}]" for k in range(len(used)))
+    u = f"mod(T+{start:.4f},{every})"
+    shown = f"min(1,max(0,min({u}/{fade},({every}-{u})/{fade})))"
+    parts.append(
+        f"[{index}:v]scale={width}:-1,format=rgba,"
+        f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*{WATERMARK['opacity']}*{shown}',split={len(used)}{names}"
+    )
+    for k, corner in enumerate(used):
+        dx = f"{reach}*sin(2*PI*(t+{start:.4f})/{WATERMARK['driftX']}+{corner * 1.7:.4f})"
+        dy = f"{reach}*sin(2*PI*(t+{start:.4f})/{WATERMARK['driftY']}+{corner * 0.9:.4f})"
+        x = f"main_w-overlay_w-{inset}+{dx}" if corner in (1, 3, 5) else f"{inset}+{dx}"
+        y = f"main_h-overlay_h-{inset}+{dy}" if corner in (2, 3) else f"floor((main_h-overlay_h)/2)+{dy}" if corner in (4, 5) else f"{inset}+{dy}"
+        label = out if k == len(used) - 1 else f"[wmo{k}]"
+        parts.append(f"{base}[wm{k}]overlay=x='{x}':y='{y}':format=auto:enable='{'+'.join(times[corner])}'{label}")
+        base = label
+    return length
+
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
 BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
@@ -1762,6 +1832,7 @@ def ffmpeg_command(
     part: tuple[int, int] | None = None,
     frames: list[dict] | None = None,
     layouts: list[dict] | None = None,
+    watermark: dict | None = None,
 ) -> list[str]:
     """part: only these frames of the final video [from, to), without sound, for picture_parts (made side
     by side, then joined). Every layer goes by the time on the picture, so the part is moved to its place
@@ -1771,7 +1842,8 @@ def ffmpeg_command(
     cutout: {"behind": subtitles file, "matte": path, "inserts": [{"path", "kind", "start", ...}]} (cutout_filters).
     banner_files: uploaded banners, each a banner with "path" (banner_file_filters).
     frames: Frame Me, each with "art" (frame_art) and, for a picture or clip background, "path" (frame_filters).
-    layouts: Layout, each with "path" when the other part is a picture or clip (layout_filters)."""
+    layouts: Layout, each with "path" when the other part is a picture or clip (layout_filters).
+    watermark: {"path", "seed"}: the Free plan's watermark (watermark_filters), over everything."""
     banner_files = banner_files or []
     # A part only reads the frames that show in it: the others' mask and background would be read for nothing.
     framed = [f for f in frames or [] if not part or (float(f["start"]) * FPS < part[1] and float(f["end"]) * FPS > part[0])]
@@ -1812,6 +1884,7 @@ def ffmpeg_command(
     for l in showing:
         inputs["layouts"].append(extra if l.get("path") else None)
         extra += 1 if l.get("path") else 0
+    inputs["watermark"] = extra  # last of all, so no other input moves (cmd below adds it last too)
     matte_labels = []
     # The picture may have more parts than the pieces (a no-zoom part can start inside a piece), so
     # picture and sound are joined separately. Both add up to the same whole frames.
@@ -1886,7 +1959,7 @@ def ffmpeg_command(
     parts.append(
         f"{base}fps={FPS},"
         # shaping=complex: Thai tone marks sit above the vowels (simple shaping draws them on top of each other).
-        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}{'[sv]' if logo else '[outv]'}"
+        f"ass={subs.name}:shaping=complex{f':fontsdir={fonts_dir}' if fonts_dir else ''}{',setpts=PTS-STARTPTS' if part else ''}{'[sv]' if logo or watermark else '[outv]'}"
     )
     if logo:
         # Same place as the preview (PlayerFrame): LOGO side / top px from its corner, size px wide.
@@ -1896,7 +1969,13 @@ def ffmpeg_command(
         y = f"main_h-overlay_h-{edge}" if str(logo["at"]).startswith("bottom") else str(edge)
         opacity = min(1.0, max(0.2, float(logo["opacity"])))
         parts.append(f"[1:v]scale={int(logo['size'])}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[lg]")
-        parts.append(f"[sv][lg]overlay={x}:{y}:format=auto[outv]")
+        parts.append(f"[sv][lg]overlay={x}:{y}:format=auto{'[lv]' if watermark else '[outv]'}")
+    if watermark:
+        # After the subtitles and the logo: over everything, as the preview draws it last. A part's time is back at 0
+        # here (setpts above), so it is told where the part sits in the whole video.
+        length = (part[1] - part[0] if part else sum(frames for _, _, frames in pieces)) / FPS
+        start = part[0] / FPS if part else 0.0
+        watermark_length = watermark_filters(parts, "[lv]" if logo else "[sv]", size, inputs["watermark"], int(watermark["seed"]), start, length, "[outv]")
 
     jump = ["-ss", str(seek)] if seek else []
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *jump, "-i", str(src)]
@@ -1922,6 +2001,9 @@ def ffmpeg_command(
     for l in showing:
         if l.get("path"):
             cmd += banner_file_input({"path": l["path"], "file": l.get("file", ""), "media": l.get("media")})
+    if watermark:
+        # Looped, so its fade can change every frame (watermark_filters); as long as the part or video, and a second more.
+        cmd += ["-loop", "1", "-framerate", str(FPS), "-t", f"{watermark_length + 1:.3f}", "-i", str(watermark["path"])]
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         # The sound people get when Audio optimization is off or polish_sound failed.
@@ -2417,6 +2499,16 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 urllib.request.urlretrieve(style["logoUrl"], logo_path)
                 logo = {"path": logo_path, "size": style.get("logoSize", 180), "opacity": style.get("logoOpacity", 1), "at": style.get("logoAt", "top-left")}
 
+            # The Free plan's watermark: the app sends its picture's link and the video's id (watermark.ts).
+            mark = None
+            if style.get("watermarkUrl"):
+                mark = {"path": workdir / "watermark.png", "seed": watermark_seed(str(style.get("watermarkSeed") or ""))}
+                # From our own site, not R2: Cloudflare's bot check refuses Python's own name ("Python-urllib", error 1010
+                # -> HTTP 403, coach 18 Nov: "This part could not be made"), so it says who it is (docs/bugs.md).
+                request = urllib.request.Request(style["watermarkUrl"], headers={"User-Agent": "KomorayRender/1.0"})
+                with urllib.request.urlopen(request, timeout=30) as res:
+                    mark["path"].write_bytes(res.read())
+
             report(PROGRESS_READY, force=True)
             command = lambda path, part=None, cut=cutout: ffmpeg_command(
                 src,
@@ -2438,6 +2530,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 part,
                 frame_list,
                 layout_list,
+                mark,
             )
             picture = lambda part: report(PROGRESS_READY + min(1.0, part) * (PROGRESS_PICTURE - PROGRESS_READY))
             if lo is not None:

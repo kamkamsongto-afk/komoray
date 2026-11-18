@@ -2,6 +2,7 @@ import { readKits, type BrandFile, kitId, MAX_KITS, MAX_KIT_NAME } from "@/lib/b
 import { putObject } from "@/lib/r2";
 import { readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { currentUser } from "@/lib/supabase/server";
+import { accessFor } from "@/lib/access";
 
 // The signed-in user's Brand Kits: subtitle looks a new video can start with, one per channel (coach, 13 Nov).
 // Kept in R2 at brand/<user id>.json (outside uploads/, so it is not deleted after 14 days). The one starred is what
@@ -53,6 +54,12 @@ export async function PUT(request: Request) {
 		if (cleanName(body.name)) kit.name = cleanName(body.name);
 	} else {
 		if (file.kits.length >= MAX_KITS) return Response.json({ error: `You can keep up to ${MAX_KITS} Brand Kits. Remove one first.` }, { status: 400 });
+		// How many a plan may have (pricing doc: Starter 1, Pro 5, Free none). Kits made before stay and can be changed.
+		const allowed = (await accessFor(me.user.email)).perks.brandKits;
+		if (file.kits.length >= allowed) {
+			const error = allowed ? `Your plan has ${allowed} Brand Kit${allowed > 1 ? "s" : ""}. Upgrade on the Pricing page for more.` : "Brand Kits come with Starter and Pro. Upgrade on the Pricing page.";
+			return Response.json({ error }, { status: 403 });
+		}
 		const id = kitId();
 		file.kits.push({ id, name: cleanName(body.name) || `Brand Kit ${file.kits.length + 1}`, style });
 		if (!file.defaultId) file.defaultId = id;

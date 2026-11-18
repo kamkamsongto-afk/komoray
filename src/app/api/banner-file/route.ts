@@ -1,6 +1,7 @@
-import { canUseStudio, NO_INVITE } from "@/lib/access";
+import { accessFor, canUseStudio, NO_INVITE } from "@/lib/access";
 import { BANNER_FILE, BANNER_FILE_NAME } from "@/lib/banners";
 import { signedUrl, siblingKey, VIDEO_KEY } from "@/lib/r2";
+import { uploadBlocked } from "@/lib/storage";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // The customer's own finished banner (a picture, GIF or clip: kind "file" in lib/banners.ts), uploaded next to the video.
@@ -20,7 +21,8 @@ const VIEW_SECONDS = 3 * 3600;
 export async function POST(request: Request) {
 	const { key, contentType, size } = (await request.json().catch(() => ({}))) as { key?: unknown; contentType?: unknown; size?: unknown };
 	if (typeof key !== "string" || !VIDEO_KEY.test(key) || !(await ownsVideo(key))) return Response.json({ error: "Unknown video" }, { status: 404 });
-	if (!(await canUseStudio((await currentUser()).user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
+	const { supabase, user } = await currentUser();
+	if (!(await canUseStudio(user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
 
 	const type = typeof contentType === "string" ? TYPES[contentType] : undefined;
 	if (!type) return Response.json({ error: "Please pick a JPG, PNG, WebP or GIF picture, or an MP4 clip." }, { status: 400 });
@@ -28,6 +30,8 @@ export async function POST(request: Request) {
 	if (typeof size !== "number" || !Number.isInteger(size) || size <= 0 || size > max) {
 		return Response.json({ error: `That file is too big. ${type.media === "image" ? "Pictures" : "Clips"} can be up to ${Math.round(max / 1_000_000)} MB.` }, { status: 400 });
 	}
+	const full = await uploadBlocked(supabase, await accessFor(user?.email), size); // the plan's storage (lib/storage.ts)
+	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
 
 	const file = `banner-${crypto.randomUUID()}.${type.ext}`;
 	const uploadUrl = await signedUrl(siblingKey(key, file), "PUT", URL_LIFETIME_SECONDS, contentType as string, undefined, size);

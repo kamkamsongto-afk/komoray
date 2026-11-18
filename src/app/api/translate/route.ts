@@ -22,6 +22,8 @@ export async function POST(request: Request) {
 	const { user } = await currentUser();
 	const access = await accessFor(user?.email);
 	if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
+	// Off on every plan for now (lib/plans.ts, coach 18 Nov), so nothing can run up the AI bill while the menu is hidden.
+	if (!access.perks.translate) return Response.json({ error: "Translating subtitles isn't available right now.", locked: true }, { status: 403 });
 	const languageName = language ? translationName(language) : undefined;
 	if (!languageName) return Response.json({ error: "Unknown language" }, { status: 400 });
 
@@ -39,7 +41,8 @@ export async function POST(request: Request) {
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
 	const style = readStyle(edit.style);
-	const lines = subtitleLines(fixedWords(edit.words, edit.fixes, cutThaiWords), keepSegments(edit.duration, allCuts(edit)), style.look, style.size, style.letterSpacing);
+	const segments = keepSegments(edit.duration, allCuts(edit));
+	const lines = subtitleLines(fixedWords(edit.words, edit.fixes, cutThaiWords), segments, style.look, style.size, style.letterSpacing);
 	const texts = lines.map((l) => l.text.trim());
 
 	const savedKey = siblingKey(key, `translation-${language}.json`);

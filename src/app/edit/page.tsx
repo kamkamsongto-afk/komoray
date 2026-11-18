@@ -9,6 +9,7 @@ import type { BadTake } from "@/lib/bad-takes";
 import { HeaderMenu } from "@/components/HeaderMenu";
 import { ScriptView } from "@/components/ScriptView";
 import { VideoReady } from "@/components/VideoReady";
+import { WatermarkSeed } from "@/components/WatermarkContext";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
 import { type CutoutLayers, NO_LAYERS } from "@/lib/behind";
@@ -26,6 +27,7 @@ import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
+import { watermarkSeed } from "@/lib/watermark";
 import type { ZoomPart } from "@/lib/zoom";
 
 type Cut = { start: number; end: number };
@@ -129,6 +131,10 @@ export default function EditPage() {
 	const [loadError, setLoadError] = useState("");
 	const [saveError, setSaveError] = useState("");
 	const [translating, setTranslating] = useState<string | null>(null); // what the Translate menu shows while it works
+	// Whether the plan has translating (lib/plans.ts). Hidden for everyone for now (coach, 18 Nov): a separate .srt to
+	// upload by hand isn't worth its AI cost; the menu shows only once a plan turns it on. null: not known yet.
+	const [translatePlan, setTranslatePlan] = useState<{ on: boolean } | null>(null);
+	const [watermarked, setWatermarked] = useState(false); // the plan puts the watermark on (Free): shown in the preview too
 	const [render, setRender] = useState<RenderState>({ status: "none" });
 	const renderRun = useRef(0); // counts Make video presses: a slow answer about the last one mustn't set this one's percent
 	// False from the press until the server has taken the job. Until then it still answers about the last video.
@@ -216,6 +222,18 @@ export default function EditPage() {
 			// Make video pressed while this was on its way: the answer is about the video it is replacing.
 			if (run === renderRun.current && rendered.status !== "none") setRender(rendered);
 		})();
+	}, [userId]);
+
+	useEffect(() => {
+		if (!userId) return;
+		void fetch("/api/access")
+			.then((r) => (r.ok ? (r.json() as Promise<{ perks?: { translate?: boolean; watermark?: boolean } }>) : null))
+			.then((a) => {
+				if (!a) return;
+				setTranslatePlan({ on: a.perks?.translate === true });
+				setWatermarked(a.perks?.watermark === true);
+			})
+			.catch(() => {});
 	}, [userId]);
 
 	// The preview copy (or where the face is) is still being worked out: play the original / frame the
@@ -817,7 +835,11 @@ export default function EditPage() {
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ key, language }),
 				});
-				const data = (await res.json().catch(() => ({}))) as { total?: number; remaining?: number; srt?: string; error?: string };
+				const data = (await res.json().catch(() => ({}))) as { total?: number; remaining?: number; srt?: string; error?: string; locked?: boolean };
+				if (data.locked) {
+					setSaveError(data.error ?? "Translating isn't on your plan."); // the plan or the minutes: trying again won't help
+					return;
+				}
 				if (!res.ok) {
 					if (++tries === TRANSLATE_TRIES) throw new Error(data.error ?? `Translation failed (${res.status})`);
 					continue;
@@ -836,6 +858,7 @@ export default function EditPage() {
 	}
 
 	return (
+		<WatermarkSeed.Provider value={watermarked ? watermarkSeed(key.split("/")[1] ?? "") : null}>
 		<main className="font-sans mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-4 sm:px-6">
 			{/* A few buttons only: the settings that go together sit in a menu (coach, 7 Nov: the top was crowded, not minimal). */}
 			<header className="flex flex-wrap items-center justify-between gap-3 border-b border-foreground/10 pb-3">
@@ -934,22 +957,24 @@ export default function EditPage() {
 							<Download className="h-3 w-3 shrink-0" aria-hidden />
 							Subtitles (.srt)
 						</button>
-						<select
-							value=""
-							onChange={(e) => void translateSrt(e.target.value)}
-							disabled={translating !== null}
-							aria-label="Translate subtitles"
-							className="rounded-md border border-foreground/20 bg-background px-1.5 py-1 text-foreground/80 disabled:opacity-60"
-						>
-							<option value="" disabled>
-								{translating ?? "Translate subtitles (.srt)…"}
-							</option>
-							{TRANSLATIONS.map((l) => (
-								<option key={l.code} value={l.code}>
-									{l.name}
+						{translatePlan?.on && (
+							<select
+								value=""
+								onChange={(e) => void translateSrt(e.target.value)}
+								disabled={translating !== null}
+								aria-label="Translate subtitles"
+								className="rounded-md border border-foreground/20 bg-background px-1.5 py-1 text-foreground/80 disabled:opacity-60"
+							>
+								<option value="" disabled>
+									{translating ?? "Translate subtitles (.srt)…"}
 								</option>
-							))}
-						</select>
+								{TRANSLATIONS.map((l) => (
+									<option key={l.code} value={l.code}>
+										{l.name}
+									</option>
+								))}
+							</select>
+						)}
 						<label className="flex items-center gap-2 text-foreground/80">
 							<input type="checkbox" checked={desktopNotify} onChange={(e) => void toggleDesktopNotify(e.target.checked)} />
 							Notify me on my desktop
@@ -1151,5 +1176,6 @@ export default function EditPage() {
 				suggested={badTakes.status === "failed" ? null : new Set(readTakes ? badWords : [])}
 			/>
 		</main>
+		</WatermarkSeed.Provider>
 	);
 }

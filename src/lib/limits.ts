@@ -4,4 +4,7 @@ export const MINUTES_PER_VIDEO = 20;
 export const MAX_FILE_GB = 2; // Deepgram refuses files over 2 GB: a larger limit needs the audio taken out of the video first
 export const MAX_FILE_BYTES = MAX_FILE_GB * 1000 * 1000 * 1000;
 export const FILE_TOO_BIG = `File must be ${MAX_FILE_GB} GB or smaller`;
+// The same, for a plan's own size (lib/plans.ts maxGb: Free 1 GB).
+export const bytesOfGb = (gb: number) => gb * 1000 * 1000 * 1000;
+export const fileTooBig = (gb: number) => `File must be ${gb} GB or smaller`;
 export const OUT_OF_MINUTES = `You've used all ${BETA_MINUTES} of your beta minutes. Need more? Email hello@komoray.com.`;
