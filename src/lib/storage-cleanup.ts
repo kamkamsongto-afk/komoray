@@ -2,7 +2,9 @@ import { accessFor, hashEmail } from "@/lib/access";
 import { OWNER_FILE } from "@/lib/admin-activity";
 import { planFor } from "@/lib/billing-store";
 import { deleteObject, getJson, listObjects, putObject } from "@/lib/r2";
+import { sendMail } from "@/lib/mail";
 import { deletionFor, REMOVED_FILE, STORAGE } from "@/lib/storage";
+import { type StorageMailKind, storageMail } from "@/lib/storage-mail";
 
 // The daily storage clean-up (coach 18 Nov; Terms "Storage"; called by api/cron/storage):
 // - a plan that ended: 90 days after its paid period, every file in that person's projects goes;
@@ -23,10 +25,11 @@ export type CleanupReport = {
 	folders: number;
 	noOwner: number; // folders without owner.json: left alone
 	deleted: { who: string; why: string; due: string; folders: number; bytes: number }[];
-	warn: { who: string; why: string; due: string; days: number }[];
+	warn: { who: string; why: string; due: string; days: number; mail: string }[];
 };
 
-export async function storageCleanup(apply: boolean, now = Date.now()): Promise<CleanupReport> {
+// site: the address for the emails' links.
+export async function storageCleanup(apply: boolean, site: string, now = Date.now()): Promise<CleanupReport> {
 	// Every folder in uploads/, its size, and whether the clean-up already emptied it.
 	const files = await listObjects("uploads/");
 	const folders = new Map<string, { bytes: number; removed: boolean; hasOwner: boolean; newest: string }>();
@@ -76,9 +79,25 @@ export async function storageCleanup(apply: boolean, now = Date.now()): Promise<
 			continue;
 		}
 		const warnFrom = deletion.why === "plan ended" ? STORAGE.countdownDays : STORAGE.freeWarnDays;
-		if (days <= warnFrom) report.warn.push({ who: person.hash, why: deletion.why, due: deletion.at, days });
+		if (days > warnFrom) continue;
+		// Which email: a plan that ended gets one when the countdown starts and one in its last 7 days; Free gets one.
+		const kind: StorageMailKind = deletion.why === "not used" ? "not used" : days <= 7 ? "plan ended, 7 days" : "plan ended";
+		report.warn.push({ who: person.hash, why: deletion.why, due: deletion.at, days, mail: await remind(person, kind, deletion.at, site, apply) });
 	}
 	return report;
+}
+
+// One email per stage and deletion date (access/storage-mail/<hash>.json remembers which went), only when applying.
+async function remind(person: Person, kind: StorageMailKind, due: string, site: string, apply: boolean) {
+	const key = `access/storage-mail/${await hashEmail(person.email)}.json`;
+	const sent = (await getJson<Record<string, string>>(key).catch(() => null)) ?? {};
+	const id = `${kind}|${due}`;
+	if (sent[id]) return "already sent";
+	if (!apply) return "would send";
+	const mail = storageMail(kind, due, site);
+	const result = await sendMail(person.email, mail.subject, mail.text, mail.html);
+	if (result === "sent") await putObject(key, JSON.stringify({ ...sent, [id]: new Date().toISOString() }), "application/json");
+	return result;
 }
 
 // Every file in their project folders, leaving removed.json; for a plan that ended, which end it was, so its 90 days

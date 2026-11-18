@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 	if (!env.CRON_SECRET || !given || !(await same(given, env.CRON_SECRET))) return Response.json({ error: "Not allowed" }, { status: 403 });
 	const body = (await request.json().catch(() => ({}))) as { apply?: unknown };
 	const apply = body.apply === true && env.STORAGE_CLEANUP === "on";
-	const report = await storageCleanup(apply);
+	const report = await storageCleanup(apply, new URL(request.url).origin);
 	await putObject(`logs/storage-cleanup/${report.at}.json`, JSON.stringify(report, null, 2), "application/json").catch(() => {});
 	return Response.json(report);
 }
