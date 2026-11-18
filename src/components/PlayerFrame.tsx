@@ -1008,8 +1008,8 @@ export function PlayerFrame({
 									alt=""
 									style={{
 										position: "absolute",
-										[mark.corner.startsWith("bottom") ? "bottom" : "top"]: mark.edge,
-										[mark.corner.endsWith("right") ? "right" : "left"]: mark.side,
+										left: mark.left,
+										top: mark.top,
 										width: mark.width,
 										opacity: mark.opacity,
 									}}

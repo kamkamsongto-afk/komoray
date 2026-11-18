@@ -171,11 +171,11 @@ LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or 
 # Over every banner (layers 3, 5, ... one pair each, banner_events) and subtitle, as the preview draws it last (coach 15 Nov).
 LOGO_LAYER = 100
 
-# The Free plan's watermark (WATERMARK in src/lib/watermark.ts, coach 18 Nov): the white word Komoray at 35% with a thin
-# shadow baked into public/watermark.png (15% once faded), its width
+# The Free plan's watermark (WATERMARK in src/lib/watermark.ts, coach 18 Nov): the white word Komoray at 45% with a thin
+# shadow baked into public/watermark.png (20% once faded), its width
 # and its distance from the edges a share of the frame's shorter side, in a corner picked from the video's id every
 # `every` seconds. Over everything, the logo too, as the preview draws it last.
-WATERMARK = {"opacity": 0.35, "width": 0.237, "margin": 0.08, "every": 8, "fade": 0.6, "drift": 0.015, "driftX": 7, "driftY": 9}
+WATERMARK = {"opacity": 0.45, "width": 0.237, "margin": 0.08, "every": 8, "fade": 0.6, "drift": 0.015, "driftX": 7, "driftY": 9}
 MASK32 = 0xFFFFFFFF
 
 
@@ -197,11 +197,12 @@ def watermark_draw(seed: int, slot: int) -> int:
 
 
 def watermark_corners(seed: int, slots: int) -> list[int]:
-    """The corner of each stretch, 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right: the first at random,
-    then always a different one (watermarkCorner)."""
-    corners = [watermark_draw(seed, 0) % 4]
+    """The place of each stretch, 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right, 4 middle of the left edge,
+    5 middle of the right edge (coach 18 Nov): the first at random, then always a different one (watermarkCorner)."""
+    n = 6
+    corners = [watermark_draw(seed, 0) % n]
     while len(corners) < slots:
-        corners.append((corners[-1] + 1 + watermark_draw(seed, len(corners)) % 3) % 4)
+        corners.append((corners[-1] + 1 + watermark_draw(seed, len(corners)) % (n - 1)) % n)
     return corners[:slots]
 
 
@@ -233,8 +234,8 @@ def watermark_filters(parts: list[str], base: str, size: tuple[int, int], index:
     for k, corner in enumerate(used):
         dx = f"{reach}*sin(2*PI*(t+{start:.4f})/{WATERMARK['driftX']}+{corner * 1.7:.4f})"
         dy = f"{reach}*sin(2*PI*(t+{start:.4f})/{WATERMARK['driftY']}+{corner * 0.9:.4f})"
-        x = f"main_w-overlay_w-{inset}+{dx}" if corner in (1, 3) else f"{inset}+{dx}"
-        y = f"main_h-overlay_h-{inset}+{dy}" if corner in (2, 3) else f"{inset}+{dy}"
+        x = f"main_w-overlay_w-{inset}+{dx}" if corner in (1, 3, 5) else f"{inset}+{dx}"
+        y = f"main_h-overlay_h-{inset}+{dy}" if corner in (2, 3) else f"floor((main_h-overlay_h)/2)+{dy}" if corner in (4, 5) else f"{inset}+{dy}"
         label = out if k == len(used) - 1 else f"[wmo{k}]"
         parts.append(f"{base}[wm{k}]overlay=x='{x}':y='{y}':format=auto:enable='{'+'.join(times[corner])}'{label}")
         base = label
