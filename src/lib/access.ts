@@ -1,3 +1,4 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, siblingKey } from "@/lib/r2";
 import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
@@ -75,6 +76,17 @@ async function freeSince(email: string) {
 	return (await getJson<{ at: string }>(key))?.at ?? new Date().toISOString();
 }
 
+// Plans are on: on launch day (PLANS_LIVE), or on a site set to try them before (TRY_PLANS = "on", a Worker secret set on
+// staging only, coach 18 Nov: to see Free's limits, the storage bar and the watermark before launch; never on the live site).
+function plansLive() {
+	if (PLANS_LIVE) return true;
+	try {
+		return (getCloudflareContext().env as unknown as { TRY_PLANS?: string }).TRY_PLANS === "on";
+	} catch {
+		return false; // no Worker around (a script or a test): as PLANS_LIVE says
+	}
+}
+
 export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	const beta = PLAN_RULES.beta;
 	const base = { limit: BETA_MINUTES, perVideo: beta.perVideo, maxGb: beta.maxGb, storageGb: beta.storageGb, monthly: null, extra: null, perks: perksOf(beta), renders: rendersOf(beta) };
@@ -84,7 +96,7 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	const [person, bought] = await Promise.all([getJson<PersonRecord>(await personKey(email)), planFor(email).catch(() => null)]);
 	const granted = person ? readFeatures(person.features) : NO_FEATURES;
 	const paid = bought && bought.plan !== "free" ? bought.plan : null;
-	const plan: PlanName | null = paid ?? (PLANS_LIVE ? "free" : person ? "beta" : null);
+	const plan: PlanName | null = paid ?? (plansLive() ? "free" : person ? "beta" : null);
 	if (!plan) return none;
 	const rules = PLAN_RULES[plan];
 	const features: Features = { cutout: { ...granted.cutout, on: granted.cutout.on || rules.cutout } };

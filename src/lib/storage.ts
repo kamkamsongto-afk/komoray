@@ -28,11 +28,15 @@ export async function lastActive(email: string) {
 	return (await getJson<{ at: string }>(await activeKey(email)).catch(() => null))?.at ?? null;
 }
 
-// The bytes in each of these projects' folders, and in all.
+// Left in a folder whose files the clean-up deleted (lib/storage.ts, step B): My projects then leaves it out.
+export const REMOVED_FILE = "removed.json";
+
+// The bytes in each of these projects' folders, and in all; gone: the ones whose files were deleted by the clean-up.
 export async function projectBytes(ids: string[]) {
-	const sizes = await Promise.all(ids.map(async (id) => [id, (await listObjects(`uploads/${id}/`)).reduce((sum, f) => sum + f.size, 0)] as const));
-	const perProject = Object.fromEntries(sizes);
-	return { used: sizes.reduce((sum, [, bytes]) => sum + bytes, 0), perProject };
+	const listed = await Promise.all(ids.map(async (id) => [id, await listObjects(`uploads/${id}/`)] as const));
+	const perProject = Object.fromEntries(listed.map(([id, files]) => [id, files.reduce((sum, f) => sum + f.size, 0)]));
+	const gone = listed.filter(([, files]) => files.some((f) => f.key.endsWith(`/${REMOVED_FILE}`))).map(([id]) => id);
+	return { used: Object.values(perProject).reduce((sum, bytes) => sum + bytes, 0), perProject, gone };
 }
 
 // The signed-in person's projects (the database only returns their own rows).

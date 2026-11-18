@@ -9,5 +9,5 @@ export async function GET() {
 	if (!user?.email) return Response.json({ error: "Please sign in" }, { status: 401 });
 	const access = await accessFor(user.email);
 	const [storage, deletion] = await Promise.all([storageOf(supabase), deletionFor(user.email, access), markActive(user.email)]);
-	return Response.json({ used: storage.used, perProject: storage.perProject, storageGb: access.storageGb, deletion });
+	return Response.json({ used: storage.used, perProject: storage.perProject, gone: storage.gone, storageGb: access.storageGb, deletion });
 }
