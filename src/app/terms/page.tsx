@@ -64,6 +64,10 @@ export default function TermsPage() {
 			</ul>
 
 			<h2>Storage: how much you can keep, and when files are deleted</h2>
+			{/* Until launch (coach 19 Nov): the beta is still on R2's 14-day rule. Take this line out when paid plans open. */}
+			<p>
+				<strong>Until paid plans open, Komoray is in beta: beta videos are deleted automatically after 14 days.</strong> The rules below apply from then.
+			</p>
 			<p>Everything in your projects counts toward your storage: the videos you upload, the smaller copies we make of them, the finished videos and the pictures and clips you import.</p>
 			<ul>
 				<li>

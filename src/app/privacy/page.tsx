@@ -19,6 +19,8 @@ export default function PrivacyPage() {
 				<li>We never sell your data, and we never use your videos to train AI models.</li>
 				<li>Sharing the words you fix with other creators is off unless you turn it on, and it never includes who you are.</li>
 				<li>Payments go through Paddle. We never see or keep your card number.</li>
+				{/* Until launch (coach 19 Nov). Take this line out when paid plans open. */}
+				<li>Until paid plans open, Komoray is in beta: beta videos are deleted automatically after 14 days.</li>
 				<li>Paid plans keep your files for as long as you pay, up to your storage. Free files are deleted after 30 days without use, and files of a plan that ended after 90 days. We email you first.</li>
 				<li>You can ask us to delete your data at any time.</li>
 			</ul>
@@ -125,6 +127,7 @@ export default function PrivacyPage() {
 
 			<h2>How long we keep it</h2>
 			<ul>
+				<li>Until paid plans open, Komoray is in beta: beta videos are deleted automatically after 14 days. From then, the rules below apply.</li>
 				<li>Your videos (the files you upload, their smaller copies, transcripts, translations and finished videos) are kept as the Terms of Service say under &ldquo;Storage&rdquo;:</li>
 				<li>On the Free plan, up to 5 GB, deleted if you don&apos;t open Komoray while signed in for 30 days in a row. We email you 7 days before.</li>
 				<li>On a paid plan, up to your plan&apos;s storage (Starter 200 GB, Pro 800 GB), for as long as your plan is active. We never delete them while you pay.</li>
