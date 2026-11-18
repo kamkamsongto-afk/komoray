@@ -29,7 +29,7 @@ export type SubRecord = {
 	scheduled: { action: string; at: string } | null; // e.g. cancel at the end of the period
 	occurredAt: string; // of the Paddle event this came from
 };
-type ExtraRecord = { transactionId: string; minutes: number; at: string; until: string };
+export type ExtraRecord = { transactionId: string; minutes: number; at: string; until: string };
 
 // The parts of Paddle's payloads used here (developer.paddle.com/webhooks).
 type PaddleItem = { quantity?: number; price?: { id?: string } | null };
@@ -128,7 +128,8 @@ export async function recordTransaction(txn: PaddleTransaction, event: string) {
 
 // What this person has now: their best plan that still gives access, and the extra minutes not yet run out.
 // Free when nothing is bought. past_due keeps the plan while Paddle retries the card (Paddle's advice).
-export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; extraMinutes: number };
+// extras: every pack still good, for lib/access.ts to take minutes from (extraMinutes is their total before any was used).
+export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; extraMinutes: number; extras: ExtraRecord[] };
 const GIVES_ACCESS: SubStatus[] = ["active", "trialing", "past_due"];
 const RANK: Record<PaidPlan, number> = { starter: 1, pro: 2 };
 
@@ -138,7 +139,7 @@ export async function planFor(email: string): Promise<PlanNow> {
 	const subs = (await Promise.all(subFiles.map((f) => getJson<SubRecord>(f.key).catch(() => null)))).filter((s): s is SubRecord => Boolean(s));
 	const best = subs.filter((s) => GIVES_ACCESS.includes(s.status)).sort((a, b) => RANK[b.plan] - RANK[a.plan])[0] ?? null;
 	const now = new Date().toISOString();
-	const extras = await Promise.all(extraFiles.map((f) => getJson<ExtraRecord>(f.key).catch(() => null)));
-	const extraMinutes = extras.reduce((sum, x) => sum + (x && x.until > now ? x.minutes : 0), 0);
-	return { plan: best?.plan ?? "free", sub: best, extraMinutes };
+	const extras = (await Promise.all(extraFiles.map((f) => getJson<ExtraRecord>(f.key).catch(() => null)))).filter((x): x is ExtraRecord => Boolean(x));
+	const extraMinutes = extras.reduce((sum, x) => sum + (x.until > now ? x.minutes : 0), 0);
+	return { plan: best?.plan ?? "free", sub: best, extraMinutes, extras };
 }

@@ -11,6 +11,7 @@ import { WaitingForInvite } from "@/components/WaitingForInvite";
 import type { AccessStatus } from "@/lib/access";
 import { browserLanguage, isLanguage } from "@/lib/languages";
 import { MAX_FILE_GB } from "@/lib/limits";
+import { shortDate } from "@/lib/plans";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
 import { ding } from "@/lib/ding";
@@ -333,14 +334,17 @@ export default function UploadPage() {
 			<AccountBar user={user} />
 			<h1 className="text-3xl font-bold tracking-tight">Upload a video</h1>
 			<p className="text-foreground/70">
-				MP4 or MOV, up to {MAX_FILE_GB} GB{access && !access.unlimited && ` and ${access.perVideo} minutes`}.
+				MP4 or MOV, up to {access?.maxGb ?? MAX_FILE_GB} GB{access && !access.unlimited && ` and ${access.perVideo} minutes`}.
 				{access && !access.unlimited && (
 					<span className="mt-1 block font-medium text-foreground">
-						{access.left} of {access.limit} beta minutes left
+						{/* A plan's minutes bar (pricing doc 8.): "212 of 300 minutes left · resets Dec 14", Extra minutes beside it. */}
+						{access.monthly
+							? `${access.monthly.left} of ${access.monthly.limit} minutes left · resets ${shortDate(access.monthly.resetsAt)}${access.extra?.left ? ` · ${access.extra.left} Extra minutes` : ""}`
+							: `${access.left} of ${access.limit} beta minutes left`}
 					</span>
 				)}
 			</p>
-			{access && !access.unlimited && !showOptions && <BetaWelcome access={access} />}
+			{access && access.plan === "beta" && !showOptions && <BetaWelcome access={access} />}
 			{showOptions && status !== "idle" && (
 				<UploadOptions
 					fileName={message}

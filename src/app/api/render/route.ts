@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { accessFor, canUseStudio, JOB_TOO_OLD_MS, NO_INVITE, renderRunning } from "@/lib/access";
+import { accessFor, JOB_TOO_OLD_MS, NO_INVITE, renderRunning } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
 import { logoKey, logoVersion } from "@/lib/logo";
@@ -48,7 +48,8 @@ export async function POST(request: Request) {
 	const key = await readKey(rawKey ?? null);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const email = (await currentUser()).user?.email;
-	if (!(await canUseStudio(email))) return Response.json({ error: NO_INVITE }, { status: 403 });
+	const access = await accessFor(email);
+	if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
 	if (await renderRunning(key)) return Response.json({ error: "This video is already being made. Please wait for it to finish." }, { status: 409 });
 
 	const edit = await getJson<{
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
 	// picture at 2:00). render.py leaves out the matte where no layer shows.
 	const inPart = <T extends { start: number; end: number }>(list: T[]) => (part ? list.filter((x) => x.start < part.end && x.end > part.start) : list);
 	const needed = layers && { ...layers, texts: inPart(layers.texts), inserts: inPart(layers.inserts) };
-	if (layers && !(await accessFor((await currentUser()).user?.email)).features.cutout.on) layers = undefined;
+	if (layers && !access.features.cutout.on) layers = undefined;
 	if (layers) {
 		const done = await getJson<{ windows: Window[] }>(siblingKey(key, "cutout.json"));
 		const need = cutoutWindows(needed ?? layers, keepSegments(edit.duration, allCuts(edit)));
@@ -93,7 +94,8 @@ export async function POST(request: Request) {
 	// Nothing changed since the last video (or this part): hand that one back, at no cost and at once (coach 16 Nov:
 	// pressing Make video over and over cost us every time). Everything that changes the picture is in here:
 	// every edit, the part, whether Cutout is on and how far the speaker is cut out, the own font, render.py's rev.
-	const ownFont = readStyle(edit.style).font === "own" || edit.banners?.some((b) => b.font === "own");
+	// The own font is Pro's (lib/plans.ts): on another plan the video is made in Kanit, as when no font is uploaded.
+	const ownFont = access.perks.ownFont && (readStyle(edit.style).font === "own" || edit.banners?.some((b) => b.font === "own"));
 	const fingerprint = await fingerprintOf({
 		RENDER_REV,
 		edit,
@@ -114,13 +116,13 @@ export async function POST(request: Request) {
 	// The user's own font: Modal gets a short-lived link to the file and the name to ask for.
 	// A banner can have the own font too, while the subtitles don't (banner_events falls back to Kanit without it).
 	const style: Record<string, unknown> = readStyle(edit.style);
-	if (style.font === "own" || edit.banners?.some((b) => b.font === "own")) {
+	if (ownFont) {
 		const { user } = await currentUser();
 		const keys = user ? fontKeys(user.id) : null;
 		const own = keys ? await getJson<OwnFont>(keys.info) : null;
 		if (keys && own) Object.assign(style, { fontUrl: await signedUrl(keys.file, "GET", LINK_SECONDS), ownFamily: own.family });
 		else if (style.font === "own") style.font = "kanit";
-	}
+	} else if (style.font === "own") style.font = "kanit";
 
 	// Uploaded banners (kind "file"): Modal gets a short-lived link to each one's file.
 	const bannerNames = [...new Set((edit.banners ?? []).flatMap((b) => (b.kind === "file" && b.file ? [b.file] : [])))];

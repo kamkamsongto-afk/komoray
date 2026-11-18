@@ -817,7 +817,11 @@ export default function EditPage() {
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ key, language }),
 				});
-				const data = (await res.json().catch(() => ({}))) as { total?: number; remaining?: number; srt?: string; error?: string };
+				const data = (await res.json().catch(() => ({}))) as { total?: number; remaining?: number; srt?: string; error?: string; locked?: boolean };
+				if (data.locked) {
+					setSaveError(data.error ?? "Translating isn't on your plan."); // the plan or the minutes: trying again won't help
+					return;
+				}
 				if (!res.ok) {
 					if (++tries === TRANSLATE_TRIES) throw new Error(data.error ?? `Translation failed (${res.status})`);
 					continue;

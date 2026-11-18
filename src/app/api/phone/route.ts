@@ -1,8 +1,8 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { accessFor, canUseStudio, NO_INVITE } from "@/lib/access";
+import { accessFor, canUseStudio, NO_INVITE, outOfMinutes } from "@/lib/access";
 import { OWNER_FILE } from "@/lib/admin-activity";
 import { hmac, verifyCallback } from "@/lib/callback";
-import { FILE_TOO_BIG, MAX_FILE_BYTES, OUT_OF_MINUTES } from "@/lib/limits";
+import { bytesOfGb, fileTooBig, MAX_FILE_GB } from "@/lib/limits";
 import { exists, getJson, putObject, signedUrl } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
 import { uploadLimitReached } from "@/lib/upload-limit";
@@ -27,6 +27,7 @@ type Handoff = {
 	key?: string;
 	filename?: string;
 	size?: number;
+	maxGb?: number; // the plan's biggest file, from when the QR was made (the phone isn't signed in)
 };
 
 const handoffKey = (id: string) => `uploads/${id}/phone.json`;
@@ -49,12 +50,12 @@ export async function POST(request: Request) {
 		if (!user) return Response.json({ error: "Please sign in first" }, { status: 401 });
 		const access = await accessFor(user.email);
 		if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
-		if (!access.left) return Response.json({ error: OUT_OF_MINUTES }, { status: 429 });
+		if (!access.left) return Response.json({ error: outOfMinutes(access) }, { status: 429 });
 		const limit = await uploadLimitReached(supabase, user);
 		if (limit) return Response.json({ error: limit }, { status: 429 });
 		const id = crypto.randomUUID();
 		const expires = Date.now() + LINK_MINUTES * 60 * 1000;
-		const handoff: Handoff = { userId: user.id, expires, status: "waiting" };
+		const handoff: Handoff = { userId: user.id, expires, status: "waiting", maxGb: access.maxGb };
 		await putObject(handoffKey(id), JSON.stringify(handoff), "application/json");
 		const t = `${id}.${expires}.${await hmac(secret(), `phone:${id}.${expires}`)}`;
 		return Response.json({ id, link: new URL(`/phone?t=${t}`, request.url).toString(), expires });
@@ -72,7 +73,8 @@ export async function POST(request: Request) {
 			const contentType = String(body.contentType ?? "");
 			const size = Number(body.size);
 			if (!ALLOWED_TYPES.includes(contentType)) return Response.json({ error: "Only .mp4 and .mov videos are allowed" }, { status: 400 });
-			if (!Number.isInteger(size) || size <= 0 || size > MAX_FILE_BYTES) return Response.json({ error: FILE_TOO_BIG }, { status: 400 });
+			const maxGb = Math.min(handoff.maxGb ?? MAX_FILE_GB, MAX_FILE_GB);
+			if (!Number.isInteger(size) || size <= 0 || size > bytesOfGb(maxGb)) return Response.json({ error: fileTooBig(maxGb) }, { status: 400 });
 			const filename = String(body.filename ?? "video");
 			const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "video";
 			const key = `uploads/${id}/${safeName}`;

@@ -6,6 +6,7 @@ import { signInWithGoogle, useUser } from "@/components/Account";
 import { HomeLogo } from "@/components/HomeLogo";
 import { EXTRA_PACKS, type PaddleEnv, PLANS, type PricesView } from "@/lib/billing";
 import { hashEmail } from "@/lib/email-hash";
+import { shortDate } from "@/lib/plans";
 
 // Paddle.js from Paddle's own CDN (not an npm package): the global it sets up, as far as this page uses it.
 type PaddleEvent = { name?: string; data?: unknown };
@@ -29,7 +30,7 @@ declare global {
 const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
 
 type Config = { ready: false } | { ready: true; token: string; environment: PaddleEnv; prices: PricesView };
-type MyPlan = { plan: "free" | "starter" | "pro"; extraMinutes: number; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
+type MyPlan = { plan: "free" | "starter" | "pro"; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
 // In English like the rest of the page (coach, 17 Nov: a Thai computer showed "17 พ.ย. 2570").
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 
@@ -163,6 +164,7 @@ export default function PricingPage() {
 					{mine.every ? ` (${mine.every === "year" ? "yearly" : "monthly"})` : ""}.{" "}
 					{mine.cancelsAt ? `It ends on ${day(mine.cancelsAt)}.` : mine.periodEnds ? `Next bill on ${day(mine.periodEnds)}.` : ""}
 					{mine.status === "past_due" ? " Your last payment didn't go through: please update your card." : ""}
+					{mine.monthly ? ` ${mine.monthly.left} of ${mine.monthly.limit} minutes left · resets ${shortDate(mine.monthly.resetsAt)}.` : ""}
 					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}
 				</p>
 			)}
@@ -208,6 +210,11 @@ export default function PricingPage() {
 					<p className="text-sm">For studios and teams. Coming soon.</p>
 				</div>
 			</section>
+			{/* Prices are before tax (coach 18 Nov): Paddle adds VAT or sales tax for the buyer's country at checkout (prices'
+			    tax_mode "external"), and a business can add its tax number there. */}
+			<p className="-mt-4 text-center text-xs text-foreground/60">
+				Prices in US dollars, plus applicable VAT or sales tax for your country, added at checkout. Buying for a business? Add your VAT or tax number at checkout.
+			</p>
 
 			<section className="flex flex-col gap-3 rounded-2xl border border-foreground/15 p-5">
 				<h2 className="text-lg font-semibold">Extra minutes</h2>

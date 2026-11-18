@@ -2,11 +2,11 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { allCuts, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
 import { cutThaiWords } from "@/lib/newmm";
 import { translationName } from "@/lib/languages";
-import { accessFor, NO_INVITE } from "@/lib/access";
-import { getJson, listObjects, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
+import { accessFor, NO_INVITE, outOfMinutes, takeMinutes } from "@/lib/access";
+import { deleteObject, exists, getJson, listObjects, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { readStyle } from "@/lib/subtitle-style";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
-import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
+import { FPS, keepSegments, subtitleLines, toSrt, totalFrames } from "@/lib/timeline";
 import { translateLines } from "@/lib/translate";
 
 // One call translates the next BATCH lines of the final video's subtitles and answers how many are left;
@@ -22,6 +22,7 @@ export async function POST(request: Request) {
 	const { user } = await currentUser();
 	const access = await accessFor(user?.email);
 	if (!access.allowed) return Response.json({ error: NO_INVITE }, { status: 403 });
+	if (!access.perks.translate) return Response.json({ error: "Translating subtitles comes with Starter and Pro. Upgrade on the Pricing page.", locked: true }, { status: 403 });
 	const languageName = language ? translationName(language) : undefined;
 	if (!languageName) return Response.json({ error: "Unknown language" }, { status: 400 });
 
@@ -39,7 +40,8 @@ export async function POST(request: Request) {
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
 
 	const style = readStyle(edit.style);
-	const lines = subtitleLines(fixedWords(edit.words, edit.fixes, cutThaiWords), keepSegments(edit.duration, allCuts(edit)), style.look, style.size, style.letterSpacing);
+	const segments = keepSegments(edit.duration, allCuts(edit));
+	const lines = subtitleLines(fixedWords(edit.words, edit.fixes, cutThaiWords), segments, style.look, style.size, style.letterSpacing);
 	const texts = lines.map((l) => l.text.trim());
 
 	const savedKey = siblingKey(key, `translation-${language}.json`);
@@ -48,6 +50,16 @@ export async function POST(request: Request) {
 		if (started.length >= LANGUAGES_PER_VIDEO && !started.includes(savedKey)) {
 			return Response.json({ error: `During the beta, each video can be translated into ${LANGUAGES_PER_VIDEO} languages.` }, { status: 429 });
 		}
+	}
+	// A plan with monthly minutes pays once per language: 1 minute of the final video for each language (pricing doc 2.).
+	// Taken when a language is first started; a translation already started or done takes nothing (fixes only redo lines).
+	// The beta translates without minutes, as before.
+	let charge: string | undefined;
+	if (access.monthly && user?.email && !(await exists(savedKey))) {
+		const minutes = Math.max(1, Math.ceil(totalFrames(segments) / FPS / 60));
+		if (minutes > access.left) return Response.json({ error: outOfMinutes(access, minutes), locked: true }, { status: 429 });
+		const taken = await takeMinutes(user.email, `${key.split("/")[1]}-tr-${language}`, minutes, access, true);
+		charge = taken?.usageKey; // null: already taken for this language this month (a second press at once): paid once, go on
 	}
 	const saved =new Map(Object.entries((await getJson<Record<string, string>>(savedKey)) ?? {}));
 	const missing = [...new Set(texts)].filter((t) => !saved.has(t));
@@ -62,6 +74,7 @@ export async function POST(request: Request) {
 			await putObject(savedKey, JSON.stringify(Object.fromEntries(saved)), "application/json");
 		} catch (error) {
 			console.error("Translation failed:", error);
+			if (charge && !saved.size) await deleteObject(charge).catch(() => {}); // nothing was translated: the minutes go back
 			return Response.json({ error: "The translation did not finish" }, { status: 502 });
 		}
 	}
