@@ -5,14 +5,14 @@ import { LegalPage } from "@/components/LegalPage";
 export const metadata: Metadata = { title: "Terms of Service · Komoray" };
 
 const CONTACT = "hello@komoray.com";
-// Who runs Komoray, as Paddle's seller check needs to see it (coach to fill in before this goes live).
-const OPERATOR = "[legal name of the person or company that runs Komoray], Thailand";
+// Who runs Komoray, as Paddle's seller check needs to see it: the name the Paddle account is in (coach, 18 Nov).
+const OPERATOR = "Kampon Ulanwiriyo, Thailand";
 
-// Paid plans (coach 18 Nov; the money promises in the decided pricing doc). Draft: the coach approves this text before
-// it goes live (AGENTS.md section 8), and the refund wording is to be read by a lawyer first (pricing doc, promise 7).
+// Paid plans (coach 18 Nov; the money promises in the decided pricing doc). Approved by the coach on staging, 18 Nov,
+// with the 14-day refund as written (a lawyer may read it later: pricing doc, promise 7).
 export default function TermsPage() {
 	return (
-		<LegalPage title="Terms of Service" updated="[date it goes live]">
+		<LegalPage title="Terms of Service" updated="November 18, 2026">
 			<p>
 				By using Komoray, you agree to these terms. They are short on purpose. Komoray is run by {OPERATOR}
 				(&ldquo;we&rdquo;).
