@@ -2503,7 +2503,11 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             mark = None
             if style.get("watermarkUrl"):
                 mark = {"path": workdir / "watermark.png", "seed": watermark_seed(str(style.get("watermarkSeed") or ""))}
-                urllib.request.urlretrieve(style["watermarkUrl"], mark["path"])
+                # From our own site, not R2: Cloudflare's bot check refuses Python's own name ("Python-urllib", error 1010
+                # -> HTTP 403, coach 18 Nov: "This part could not be made"), so it says who it is (docs/bugs.md).
+                request = urllib.request.Request(style["watermarkUrl"], headers={"User-Agent": "KomorayRender/1.0"})
+                with urllib.request.urlopen(request, timeout=30) as res:
+                    mark["path"].write_bytes(res.read())
 
             report(PROGRESS_READY, force=True)
             command = lambda path, part=None, cut=cutout: ffmpeg_command(
