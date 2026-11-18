@@ -13,7 +13,7 @@ import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
 import { FPS, type Line, setSpot, ZOOM_ORIGIN } from "@/lib/timeline";
-import { WATERMARK, watermarkBox, watermarkCorner } from "@/lib/watermark";
+import { WATERMARK, watermarkAt } from "@/lib/watermark";
 import { WatermarkSeed } from "@/components/WatermarkContext";
 
 // Same fonts and weights as the final video (FONTS in modal_app/render.py), side margins 80px.
@@ -999,8 +999,8 @@ export function PlayerFrame({
 					{seed !== null &&
 						(() => {
 							// The Free plan's watermark, last so it is over everything (watermark_filters in render.py).
-							const corner = watermarkCorner(seed, outTime);
-							const { width, margin } = watermarkBox(W, H);
+							// It drifts and fades by the time in the final video (watermarkAt), as in render.py.
+							const mark = watermarkAt(seed, outTime, W, H);
 							return (
 								// eslint-disable-next-line @next/next/no-img-element -- our own small picture, drawn in the frame's pixels
 								<img
@@ -1008,10 +1008,10 @@ export function PlayerFrame({
 									alt=""
 									style={{
 										position: "absolute",
-										[corner.startsWith("bottom") ? "bottom" : "top"]: margin,
-										[corner.endsWith("right") ? "right" : "left"]: margin,
-										width,
-										opacity: WATERMARK.opacity,
+										[mark.corner.startsWith("bottom") ? "bottom" : "top"]: mark.edge,
+										[mark.corner.endsWith("right") ? "right" : "left"]: mark.side,
+										width: mark.width,
+										opacity: mark.opacity,
 									}}
 								/>
 							);

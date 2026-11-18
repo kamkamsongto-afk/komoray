@@ -175,7 +175,7 @@ LOGO_LAYER = 100
 # shadow baked into public/watermark.png (10% once faded), its width
 # and its distance from the edges a share of the frame's shorter side, in a corner picked from the video's id every
 # `every` seconds. Over everything, the logo too, as the preview draws it last.
-WATERMARK = {"opacity": 0.35, "width": 0.187, "margin": 0.08, "every": 8}
+WATERMARK = {"opacity": 0.35, "width": 0.206, "margin": 0.08, "every": 8, "fade": 0.6, "drift": 0.015, "driftX": 7, "driftY": 9}
 MASK32 = 0xFFFFFFFF
 
 
@@ -207,10 +207,15 @@ def watermark_corners(seed: int, slots: int) -> list[int]:
 
 def watermark_filters(parts: list[str], base: str, size: tuple[int, int], index: int, seed: int, start: float, length: float, out: str):
     """The watermark over `base` for the stretch [start, start + length) of the final video (start: a part's place in
-    it; this runs after the part's time is set back to 0). One overlay per corner it visits, on when it is there."""
+    it; this runs after the part's time is set back to 0, so t + start is the time in the whole video). The picture is
+    a looped input, so its see-through can change every frame: it fades in and out at each corner (geq on its alpha).
+    One overlay per corner it visits, on while it is there, drifting in a slow loop around its place (coach 18 Nov).
+    The same sums as watermarkAt in watermark.ts."""
     short = min(size)
     width, margin = round(short * WATERMARK["width"]), round(short * WATERMARK["margin"])
-    every = WATERMARK["every"]
+    reach = round(short * WATERMARK["drift"])
+    inset = margin + reach  # never nearer the edge than `margin`, even at the far end of the drift
+    every, fade = WATERMARK["every"], WATERMARK["fade"]
     first, last = int(start // every), int(math.ceil((start + length) / every))
     corners = watermark_corners(seed, last)
     times: dict[int, list[str]] = {}
@@ -219,13 +224,21 @@ def watermark_filters(parts: list[str], base: str, size: tuple[int, int], index:
         times.setdefault(corners[slot], []).append(f"gte(t,{a:.4f})*lt(t,{b:.4f})")
     used = sorted(times)
     names = "".join(f"[wm{k}]" for k in range(len(used)))
-    parts.append(f"[{index}:v]scale={width}:-1,format=rgba,colorchannelmixer=aa={WATERMARK['opacity']:.2f},split={len(used)}{names}")
+    u = f"mod(T+{start:.4f},{every})"
+    shown = f"min(1,max(0,min({u}/{fade},({every}-{u})/{fade})))"
+    parts.append(
+        f"[{index}:v]scale={width}:-1,format=rgba,"
+        f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*{WATERMARK['opacity']}*{shown}',split={len(used)}{names}"
+    )
     for k, corner in enumerate(used):
-        x = f"main_w-overlay_w-{margin}" if corner in (1, 3) else str(margin)
-        y = f"main_h-overlay_h-{margin}" if corner in (2, 3) else str(margin)
+        dx = f"{reach}*sin(2*PI*(t+{start:.4f})/{WATERMARK['driftX']}+{corner * 1.7:.4f})"
+        dy = f"{reach}*sin(2*PI*(t+{start:.4f})/{WATERMARK['driftY']}+{corner * 0.9:.4f})"
+        x = f"main_w-overlay_w-{inset}+{dx}" if corner in (1, 3) else f"{inset}+{dx}"
+        y = f"main_h-overlay_h-{inset}+{dy}" if corner in (2, 3) else f"{inset}+{dy}"
         label = out if k == len(used) - 1 else f"[wmo{k}]"
-        parts.append(f"{base}[wm{k}]overlay={x}:{y}:format=auto:enable='{'+'.join(times[corner])}'{label}")
+        parts.append(f"{base}[wm{k}]overlay=x='{x}':y='{y}':format=auto:enable='{'+'.join(times[corner])}'{label}")
         base = label
+    return length
 
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
@@ -1961,7 +1974,7 @@ def ffmpeg_command(
         # here (setpts above), so it is told where the part sits in the whole video.
         length = (part[1] - part[0] if part else sum(frames for _, _, frames in pieces)) / FPS
         start = part[0] / FPS if part else 0.0
-        watermark_filters(parts, "[lv]" if logo else "[sv]", size, inputs["watermark"], int(watermark["seed"]), start, length, "[outv]")
+        watermark_length = watermark_filters(parts, "[lv]" if logo else "[sv]", size, inputs["watermark"], int(watermark["seed"]), start, length, "[outv]")
 
     jump = ["-ss", str(seek)] if seek else []
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *jump, "-i", str(src)]
@@ -1988,7 +2001,8 @@ def ffmpeg_command(
         if l.get("path"):
             cmd += banner_file_input({"path": l["path"], "file": l.get("file", ""), "media": l.get("media")})
     if watermark:
-        cmd += ["-i", str(watermark["path"])]
+        # Looped, so its fade can change every frame (watermark_filters); as long as the part or video, and a second more.
+        cmd += ["-loop", "1", "-framerate", str(FPS), "-t", f"{watermark_length + 1:.3f}", "-i", str(watermark["path"])]
     cmd += ["-filter_complex", ";".join(parts), "-map", "[outv]"]
     if audio:
         # The sound people get when Audio optimization is off or polish_sound failed.
