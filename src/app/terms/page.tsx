@@ -63,14 +63,25 @@ export default function TermsPage() {
 				<li>We will not raise the price of a plan you already have without telling you at least 30 days before.</li>
 			</ul>
 
-			<h2>How long we keep your files</h2>
+			<h2>Storage: how much you can keep, and when files are deleted</h2>
+			<p>Everything in your projects counts toward your storage: the videos you upload, the smaller copies we make of them, the finished videos and the pictures and clips you import.</p>
 			<ul>
-				<li>On paid plans, the original videos you upload are deleted 45 days after upload on monthly billing, or 90 days on yearly billing. We email you 14 days and 7 days before.</li>
-				<li>Once an original is deleted, you can still download the finished videos made from it, but you can&apos;t edit it again.</li>
-				<li>On the Free plan, videos are deleted after 14 days.</li>
 				<li>
-					If you stop paying, your words (My words) stay with your account, and you have 30 days to download your finished videos.
+					<strong>Free plan: 5 GB.</strong> If you don&apos;t open Komoray while signed in for 30 days in a row, we delete the files in
+					your storage. We email you 7 days before. Your account, your words (My words) and your Brand Kit stay.
 				</li>
+				<li>
+					<strong>Starter: 200 GB. Pro: 800 GB.</strong> While your plan is active, we never delete your files. You decide what to
+					keep. When your storage is full, delete videos on the My projects page to upload new ones.
+				</li>
+				<li>
+					<strong>If your plan ends</strong> (you cancel, or a payment fails and isn&apos;t fixed), we keep all your files for 90 days
+					after the end of the period you paid for, even if they are more than the Free plan&apos;s 5 GB. During those 90 days you can
+					open and download everything, and new uploads follow the Free plan. From 20 days before the 90 days are up, we show you a
+					countdown and email you. After 90 days we delete the files. Your account, your words and your Brand Kit stay. If you start a
+					plan again before then, everything stays.
+				</li>
+				<li>You can delete any video, and everything made from it, at any time on the My projects page.</li>
 			</ul>
 
 			<h2>Fair use</h2>
