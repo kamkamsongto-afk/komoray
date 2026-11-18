@@ -1,6 +1,6 @@
 "use client";
 
-import { Clapperboard, Copy, FileVideo, Folder, FolderPlus, LayoutGrid, List, type LucideIcon, Scissors, Sparkles, Trash2, Upload } from "lucide-react";
+import { Clapperboard, Copy, FileVideo, Folder, FolderPlus, LayoutGrid, List, type LucideIcon, MoreHorizontal, Scissors, Sparkles, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
@@ -200,27 +200,82 @@ function Thumb({ videoKey }: { videoKey: string }) {
 	);
 }
 
-// Duplicate (coach, 18 Nov): a new project with the same video and everything done to it (api/projects POST).
-function DuplicateButton({ project, onCopied, onError }: { project: Project; onCopied: (copy: Project) => void; onError: (error: string) => void }) {
-	const [busy, setBusy] = useState(false);
-	async function duplicate() {
-		setBusy(true);
-		const res = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: project.video_key }) }).catch(() => null);
-		const data = (await res?.json().catch(() => null)) as { project?: Project; error?: string } | null;
-		setBusy(false);
-		if (res?.ok && data?.project) onCopied(data.project);
-		else onError(data?.error ?? `Could not duplicate ${project.filename}. Please try again.`);
-	}
+// Duplicate (coach, 18 Nov): the page does the work (duplicate() below) and keeps a "Duplicating…" card meanwhile;
+// this blinks clearly while it runs, so it's plain something is happening.
+function DuplicateButton({ project, busy, onClick }: { project: Project; busy: boolean; onClick: () => void }) {
 	return (
 		<button
-			onClick={() => void duplicate()}
+			onClick={onClick}
 			disabled={busy}
 			aria-label={`Duplicate ${project.filename}`}
 			title={busy ? "Duplicating…" : "Duplicate: a copy with all your edits, to make another version"}
-			className="shrink-0 rounded-lg p-2 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:animate-pulse"
+			className={`shrink-0 rounded-lg p-2 ${busy ? "blink-strong" : "text-foreground/50 hover:bg-foreground/10 hover:text-foreground"}`}
 		>
 			<Copy className="h-4 w-4" aria-hidden />
 		</button>
+	);
+}
+
+// The name, with a ⋯ menu to rename it (only the name in My projects: the file itself keeps its name).
+function NameLine({ project, href, onRenamed, onError }: { project: Project; href: string; onRenamed: (name: string) => void; onError: (error: string) => void }) {
+	const [menu, setMenu] = useState(false);
+	const [editing, setEditing] = useState(false);
+	const [name, setName] = useState(project.filename);
+
+	async function save() {
+		const clean = name.trim().slice(0, 120);
+		setEditing(false);
+		if (!clean || clean === project.filename) return;
+		const { error } = await supabaseBrowser().from("projects").update({ filename: clean }).eq("id", project.id);
+		if (error) onError(`Could not rename ${project.filename}. Please try again.`);
+		else onRenamed(clean);
+	}
+
+	if (editing) {
+		return (
+			<form
+				onSubmit={(e) => {
+					e.preventDefault();
+					void save();
+				}}
+				className="flex min-w-0 flex-1 items-center gap-1"
+			>
+				<input
+					autoFocus
+					value={name}
+					maxLength={120}
+					onChange={(e) => setName(e.target.value)}
+					onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
+					onBlur={() => void save()}
+					aria-label="Video name"
+					className="min-w-0 flex-1 rounded-md border border-foreground/30 bg-background px-2 py-0.5 text-sm"
+				/>
+			</form>
+		);
+	}
+	return (
+		<div className="relative flex min-w-0 flex-1 items-center gap-1">
+			<Link href={href} className="min-w-0 flex-1 truncate text-sm font-medium" title={project.filename}>
+				{project.filename}
+			</Link>
+			<button onClick={() => setMenu((m) => !m)} aria-label={`More for ${project.filename}`} title="More" className="shrink-0 rounded-md p-1 text-foreground/50 hover:bg-foreground/10 hover:text-foreground">
+				<MoreHorizontal className="h-4 w-4" aria-hidden />
+			</button>
+			{menu && (
+				<div className="absolute top-full right-0 z-10 mt-1 flex min-w-28 flex-col rounded-lg border border-foreground/15 bg-background p-1 text-sm shadow-lg" onMouseLeave={() => setMenu(false)}>
+					<button
+						onClick={() => {
+							setMenu(false);
+							setName(project.filename);
+							setEditing(true);
+						}}
+						className="rounded-md px-3 py-1.5 text-left hover:bg-foreground/10"
+					>
+						Rename
+					</button>
+				</div>
+			)}
+		</div>
 	);
 }
 
@@ -255,7 +310,7 @@ function DeleteButton({ project, onDeleted, onError }: { project: Project; onDel
 				disabled={state === "deleting"}
 				className="rounded-md bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700 disabled:opacity-60"
 			>
-				{state === "deleting" ? "Deleting…" : "Delete for good"}
+				{state === "deleting" ? "Deleting…" : "Delete"}
 			</button>
 			<button onClick={() => setState("idle")} disabled={state === "deleting"} className="rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5 disabled:opacity-60">
 				Cancel
@@ -271,6 +326,7 @@ export default function ProjectsPage() {
 	const [view, setView] = useState<View>("list");
 	const [folders, setFolders] = useState<FolderRow[] | null>(null); // null: no folders on this database yet
 	const [current, setCurrent] = useState(ALL);
+	const [copying, setCopying] = useState<Project[]>([]); // "Duplicating…" cards, one per copy on its way (id: the original's)
 
 	useEffect(() => {
 		try {
@@ -325,15 +381,25 @@ export default function ProjectsPage() {
 		setFolders(next);
 		setProjects((list) => list?.map((p) => (p.folder_id && !next.some((f) => f.id === p.folder_id) ? { ...p, folder_id: null } : p)) ?? null);
 	};
-	const copied = (copy: Project) => {
+	const renamed = (p: Project, filename: string) => setProjects((list) => list?.map((x) => (x.id === p.id ? { ...x, filename } : x)) ?? null);
+	// The copy can take a while (the whole video is copied in storage): its card shows at once and blinks until it's done.
+	async function duplicate(p: Project) {
 		setError("");
-		setProjects((list) => (list ? [copy, ...list] : [copy]));
-	};
+		setCopying((list) => [{ ...p, filename: `${p.filename} (copy)` }, ...list]);
+		const res = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: p.video_key }) }).catch(() => null);
+		const data = (await res?.json().catch(() => null)) as { project?: Project; error?: string } | null;
+		setCopying((list) => list.filter((x) => x.id !== p.id));
+		const copy = data?.project;
+		if (res?.ok && copy) setProjects((list) => (list ? [copy, ...list] : [copy]));
+		else setError(data?.error ?? `Could not duplicate ${p.filename}. Please try again.`);
+	}
+	const busy = (p: Project) => copying.some((x) => x.id === p.id);
 	const moved = (p: Project, folderId: string | null) => setProjects((list) => list?.map((x) => (x.id === p.id ? { ...x, folder_id: folderId } : x)) ?? null);
 	const counts: Record<string, number> = { [ALL]: live.length };
 	for (const p of live) if (p.folder_id) counts[p.folder_id] = (counts[p.folder_id] ?? 0) + 1;
 	const shown = current === ALL ? live : live.filter((p) => p.folder_id === current);
-	const moveTo = (p: Project) => folders && folders.length > 0 && <MoveTo project={p} folders={folders} onMoved={(id) => moved(p, id)} onError={setError} />;
+	const waiting = copying.filter((c) => current === ALL || c.folder_id === current);
+	const moveTo = (p: Project) => folders && <MoveTo project={p} folders={folders} onMoved={(id) => moved(p, id)} onError={setError} />;
 	const details = (p: Project) => `${new Date(p.created_at).toLocaleDateString()} · ${mb(p.size)} · deleted in ${daysLeft(p.created_at)} days`;
 
 	return (
@@ -396,38 +462,53 @@ export default function ProjectsPage() {
 			)}
 
 			{folders && live.length > 0 && <FolderBar folders={folders} counts={counts} current={current} pick={setCurrent} onChange={foldersChanged} onError={setError} />}
-			{current !== ALL && shown.length === 0 && <p className="text-sm text-foreground/60">No videos in this folder yet. Pick it in the folder box next to a video to move it here.</p>}
+			{current !== ALL && shown.length === 0 && waiting.length === 0 && <p className="text-sm text-foreground/60">No videos in this folder yet. Pick it in the folder box next to a video to move it here.</p>}
 
 			{view === "list" ? (
 				<ul className="flex flex-col divide-y divide-foreground/10 rounded-xl border border-foreground/15 empty:hidden">
+					{waiting.map((c) => (
+						<li key={`copy-${c.id}`} className="flex items-center gap-3 p-3 text-foreground/60">
+							<Copy className="blink-strong h-7 w-7 shrink-0 rounded-md p-1.5" aria-hidden />
+							<span className="min-w-0 flex-1 truncate font-medium">{c.filename}</span>
+							<span className="text-xs">Duplicating…</span>
+						</li>
+					))}
 					{shown.map((p) => (
-						<li key={p.id} className="flex items-center gap-2 pr-2 hover:bg-foreground/5">
-							<Link href={editLink(p)} className="flex min-w-0 flex-1 items-center gap-3 p-3">
-								<FileVideo className="h-5 w-5 shrink-0 text-foreground/50" aria-hidden />
-								<span className="min-w-0 flex-1 truncate font-medium">{p.filename}</span>
-								<span className="hidden shrink-0 text-xs text-foreground/60 sm:inline">{details(p)}</span>
-							</Link>
+						<li key={p.id} className="flex items-center gap-2 py-2 pr-2 pl-3 hover:bg-foreground/5">
+							<FileVideo className="h-5 w-5 shrink-0 text-foreground/50" aria-hidden />
+							<NameLine project={p} href={editLink(p)} onRenamed={(name) => renamed(p, name)} onError={setError} />
+							<span className="hidden shrink-0 text-xs text-foreground/60 sm:inline">{details(p)}</span>
 							{moveTo(p)}
-							<DuplicateButton project={p} onCopied={copied} onError={setError} />
+							<DuplicateButton project={p} busy={busy(p)} onClick={() => void duplicate(p)} />
 							<DeleteButton project={p} onDeleted={() => deleted(p)} onError={setError} />
 						</li>
 					))}
 				</ul>
 			) : (
 				<ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+					{waiting.map((c) => (
+						<li key={`copy-${c.id}`} className="flex flex-col overflow-hidden rounded-xl border border-dashed border-blue-500/60">
+							<div className="flex aspect-[3/4] items-center justify-center bg-foreground/5">
+								<Copy className="blink-strong h-12 w-12 rounded-xl p-3" aria-hidden />
+							</div>
+							<div className="flex flex-col gap-1 p-2 text-foreground/60">
+								<span className="truncate text-sm font-medium">{c.filename}</span>
+								<span className="text-xs">Duplicating…</span>
+							</div>
+						</li>
+					))}
+					{/* Card (coach, 18 Nov): name + ⋯ / days left / folder / Duplicate on the left, the bin on the right. */}
 					{shown.map((p) => (
 						<li key={p.id} className="flex flex-col overflow-hidden rounded-xl border border-foreground/15 hover:border-foreground/40">
 							<Link href={editLink(p)} className="flex aspect-[3/4] items-center justify-center overflow-hidden bg-foreground/10">
 								<Thumb videoKey={p.video_key} />
 							</Link>
 							<div className="flex flex-col gap-1 p-2">
-								<Link href={editLink(p)} className="truncate text-sm font-medium" title={p.filename}>
-									{p.filename}
-								</Link>
-								<div className="flex min-h-9 flex-wrap items-center justify-between gap-1">
-									<span className="text-xs text-foreground/60">{daysLeft(p.created_at)} days left</span>
-									{moveTo(p)}
-									<DuplicateButton project={p} onCopied={copied} onError={setError} />
+								<NameLine project={p} href={editLink(p)} onRenamed={(name) => renamed(p, name)} onError={setError} />
+								<span className="text-xs text-foreground/60">{daysLeft(p.created_at)} days left</span>
+								{moveTo(p)}
+								<div className="flex min-h-9 items-center justify-between gap-1">
+									<DuplicateButton project={p} busy={busy(p)} onClick={() => void duplicate(p)} />
 									<DeleteButton project={p} onDeleted={() => deleted(p)} onError={setError} />
 								</div>
 							</div>

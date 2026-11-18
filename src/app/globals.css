@@ -71,3 +71,19 @@ body {
 	color: var(--foreground);
 	font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Work going on (coach, 18 Nov: the plain pulse was too faint to notice): dim, then a clear bright blue. */
+@keyframes komoray-blink {
+	0%,
+	100% {
+		opacity: 0.3;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+.blink-strong {
+	animation: komoray-blink 1s ease-in-out infinite;
+	color: #3b82f6;
+	background: rgb(59 130 246 / 0.18);
+}

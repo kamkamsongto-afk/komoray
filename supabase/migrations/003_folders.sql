@@ -38,6 +38,10 @@ create policy "own projects: move" on public.projects for update to authenticate
 
 grant update (folder_id) on public.projects to authenticated;
 
+-- Rename in My projects (coach, 18 Nov): the name shown there may change too (the policy above covers every update of
+-- your own rows; these two columns are the only ones granted). The file in R2 keeps its own name.
+grant update (filename) on public.projects to authenticated;
+
 -- A new project may also only start in one of your own folders (agent review, 18 Nov: insert is granted on every
 -- column, so without this a direct insert could point folder_id at someone else's folder). Same rule as 001 otherwise.
 drop policy if exists "own projects: add" on public.projects;
