@@ -18,7 +18,7 @@ import { hashEmail } from "@/lib/email-hash";
 //   uploads/<id>/access.json                             how many times this video was listened to
 // Minutes count the length of the original video, once, when Find silences is pressed. Deleting the
 // video gives nothing back; a failed job does (refundListen).
-const LISTENS_PER_VIDEO = 3; // the first, and Wrong language? twice. Each one pays speech-to-text again
+export const LISTENS_PER_VIDEO = 3; // the first, and Wrong language? twice. Each one pays speech-to-text again
 export const JOB_TOO_OLD_MS = 30 * 60 * 1000; // a job still running after this has died (same as the admin page)
 
 export const NO_INVITE = "Komoray is invite-only for now. Your invite will come by email.";
