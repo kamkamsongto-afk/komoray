@@ -1,13 +1,13 @@
-// The Free plan's watermark (coach, 18 Nov): the word Komoray in white (public/watermark.png), 30% see-through, small
+// The Free plan's watermark (coach, 18 Nov): the word Komoray in white (public/watermark.png), at 35% with a thin shadow, small
 // enough not to be in the way but still readable, kept well in from the edges, and moving to a corner picked at random
 // every few seconds. The preview (PlayerFrame) and the final video (WATERMARK, watermark_corners and the overlay in
 // ffmpeg_command, render.py) work it out the same way, so both show it in the same corner at the same moment.
 // "Random" is the same for every showing of one video: the corners follow from the video's id.
 
 export const WATERMARK = {
-	file: "/watermark.png", // the word only, cropped to its ink: 1177 x 273 px
-	opacity: 0.3,
-	width: 0.18, // of the frame's shorter side: 194 px on a 1080 px side
+	file: "/watermark.png", // the word with a thin shadow baked in (10% once faded, coach 18 Nov), 1225 x 321 px
+	opacity: 0.35, // coach 18 Nov: 30% was too faint on a white background
+	width: 0.187, // of the frame's shorter side: 202 px on a 1080 px side, the word itself ~194 px (the rest is the shadow's room)
 	margin: 0.08, // from both edges of its corner, of the shorter side: 86 px (the Brand Kit logo sits 40 px in)
 	every: 8, // seconds in one corner before it moves
 };
