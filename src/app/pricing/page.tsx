@@ -186,7 +186,7 @@ export default function PricingPage() {
 				</p>
 			)}
 			{/* A plan that ended (cancelled or paused): its receipts are still on Paddle's page. */}
-			{mine && mine.plan === "free" && mine.hadPlan && (
+			{mine && mine.plan === "free" && mine.hadPlan && !thanks && (
 				<p className="rounded-xl border border-foreground/15 p-4 text-center text-sm">
 					Your plan has ended. Receipts and past payments:{" "}
 					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-blue-600 underline hover:text-blue-700 disabled:opacity-60 dark:text-blue-400">

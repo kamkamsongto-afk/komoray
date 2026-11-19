@@ -151,6 +151,8 @@ export async function planFor(email: string, strict = false): Promise<PlanNow> {
 	// The end of the period they paid for: a scheduled cancel's date, else the period's end, else when Paddle said so.
 	const ends = best ? [] : subs.map((s) => (s.scheduled?.action === "cancel" ? s.scheduled.at : null) ?? s.periodEnds ?? s.occurredAt).filter(Boolean);
 	const endedAt = ends.length ? ends.sort().at(-1)! : null;
-	const latest = best ?? [...subs].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)).at(-1) ?? null;
+	// A paused plan before a cancelled one (it can still be resumed there), then the newest (agent review 19 Nov).
+	const paused = (s: SubRecord) => (s.status === "paused" ? 1 : 0);
+	const latest = best ?? [...subs].sort((a, b) => paused(a) - paused(b) || a.occurredAt.localeCompare(b.occurredAt)).at(-1) ?? null;
 	return { plan: best?.plan ?? "free", sub: best, latest, extraMinutes, extras, endedAt };
 }
