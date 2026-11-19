@@ -2,7 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { createContext, type PointerEvent, useContext, useRef, useState } from "react";
-import { clockText, readClock } from "@/lib/layers";
+import { clockText, readClock as readTimelineClock } from "@/lib/layers";
 
 // The clock the timeline's ruler shows (coach, 17 Nov: the boxes showed seconds of the final video, "183.4", while
 // the ruler with Show cuts on counts the whole upload, so the numbers never matched). Things are still saved in
@@ -14,9 +14,16 @@ const NUDGE_SECONDS_PER_PX = 0.04; // dragging: 25 px a second
 
 // One time, written 1:05.3 and typed the same way (or plain seconds). Applied on Enter or when it loses focus.
 // hint: what the box's tip says instead (Trim counts the clip's own seconds, not the timeline's).
-export function TimeField({ value, onChange, clock, label, hint }: { value: number; onChange: (out: number) => void; clock: Clock; label: string; hint?: string }) {
+// seconds: shown and typed as plain seconds with two decimals, 11.25 (Trim, coach 19 Nov: easier than 0:11.3).
+export function TimeField({ value, onChange, clock, label, hint, seconds = false }: { value: number; onChange: (out: number) => void; clock: Clock; label: string; hint?: string; seconds?: boolean }) {
 	const [typing, setTyping] = useState<string | null>(null);
 	const cancelled = useRef(false);
+	const steps = seconds ? 100 : 10; // kept to hundredths or tenths of a second
+	const readClock = (text: string) => {
+		if (!seconds) return readTimelineClock(text);
+		const n = Number(text.trim().replace(/,/g, "."));
+		return Number.isFinite(n) && n >= 0 ? n : null;
+	};
 	const apply = () => {
 		if (typing === null || cancelled.current) {
 			cancelled.current = false;
@@ -25,7 +32,7 @@ export function TimeField({ value, onChange, clock, label, hint }: { value: numb
 		}
 		const t = readClock(typing);
 		setTyping(null);
-		if (t !== null) onChange(Math.round(clock.back(t) * 10) / 10);
+		if (t !== null) onChange(Math.round(clock.back(t) * steps) / steps);
 	};
 	// The < and > beside it (coach, 17 Nov): a click moves it a tenth of a second; held and dragged left or right, it
 	// moves with the mouse, so the strip grows or shrinks bit by bit. In seconds of the final video, so it never
@@ -38,13 +45,13 @@ export function TimeField({ value, onChange, clock, label, hint }: { value: numb
 			const dx = ev.clientX - from.x;
 			if (!dragged && Math.abs(dx) < NUDGE_DRAG_PX) return;
 			dragged = true;
-			onChange(Math.max(0, Math.round((from.value + dx * NUDGE_SECONDS_PER_PX) * 10) / 10));
+			onChange(Math.max(0, Math.round((from.value + dx * NUDGE_SECONDS_PER_PX) * steps) / steps));
 		};
 		const stop = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", stop);
 			window.removeEventListener("pointercancel", stop);
-			if (!dragged) onChange(Math.max(0, Math.round((from.value + step) * 10) / 10));
+			if (!dragged) onChange(Math.max(0, Math.round((from.value + step) * steps) / steps));
 		};
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", stop);
@@ -64,7 +71,7 @@ export function TimeField({ value, onChange, clock, label, hint }: { value: numb
 	return (
 		<span className="inline-flex items-center">
 			<input
-				value={typing ?? clockText(clock.shown(value))}
+				value={typing ?? (seconds ? value.toFixed(2) : clockText(clock.shown(value)))}
 				onFocus={(e) => {
 					setTyping(e.currentTarget.value);
 					e.currentTarget.select();

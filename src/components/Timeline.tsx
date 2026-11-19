@@ -6,7 +6,7 @@ import { BANNER, type Banner } from "@/lib/banners";
 import { BEHIND, type CutoutLayers, insertName } from "@/lib/behind";
 import { CLIP_LAST, useClipLengths } from "@/lib/clip-length";
 import { FRAME, type FrameMe, frameName } from "@/lib/frame-me";
-import { clockText, duplicateOf, pasteOf, spotInside } from "@/lib/layers";
+import { duplicateOf, pasteOf, spotInside } from "@/lib/layers";
 import { fitInRow, type LaneGroup, packRows, rowIsFree, type RowMemo, saveRows } from "@/lib/lane-rows";
 import { LAYOUT, layoutName, type VideoLayout } from "@/lib/layout";
 import type { TakeGroup } from "@/lib/takes";
@@ -1292,7 +1292,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 										className="pointer-events-none absolute -top-5 z-[3] rounded bg-foreground px-1 text-[10px] leading-4 whitespace-nowrap text-background tabular-nums"
 										style={trimNote.side === "start" ? { left: 0 } : { right: 0 }}
 									>
-										Clip {clockText(trimNote.at)}
+										Clip {trimNote.at.toFixed(2)} s
 									</span>
 								)}
 								{/* "Drag to trim" / "Drag to move" (coach 19 Nov). On a clip the start edge trims its start too. */}
