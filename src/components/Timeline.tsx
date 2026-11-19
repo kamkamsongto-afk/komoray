@@ -69,14 +69,19 @@ type Props = {
 // Things shown over the video, as strips under the waveform: banners first, then the Cutout layers, then Frame Me, then Layout, each in rows of their own.
 type LaneKind = "banner" | "text" | "insert" | "frame" | "layout";
 // clip: an uploaded clip (not a picture): its file, and the second of it that plays first (Trim, lib/clip-sound.ts).
-type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number; clip?: { file: string; from: number } };
+// media: a banner's uploaded picture or clip (its colour, lookOf).
+type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number; clip?: { file: string; from: number }; media?: "image" | "video" };
 type ItemPatch = { start?: number; end?: number; clipFrom?: number };
 // One colour per kind, so a glance tells them apart (coach 19 Nov): picture green, clip indigo, Cutout's text black,
 // Frame Me orange, Layout sky blue, banner pink (zoom stays purple, the sentence chips a softer green). ink: the
 // strip's letters where its colour is dark. A Pic/Clip strip takes "clip" when it holds a clip (lookOf).
-type LookKind = LaneKind | "clip";
+// Banners (coach 19 Nov, a second look): yellow for words, light green for a picture, dark teal for a clip, so a
+// banner's picture is never taken for a Pic/Clip one.
+type LookKind = LaneKind | "clip" | "bannerPic" | "bannerClip";
 const LANE_LOOK: Record<LookKind, { edge: string; body: string; picked: string; ring: string; name: string; ink?: string }> = {
-	banner: { edge: "bg-pink-500/80", body: "bg-pink-500/30 hover:bg-pink-500/45", picked: "bg-pink-500/55", ring: "ring-pink-600", name: "banner" },
+	banner: { edge: "bg-yellow-400", body: "bg-yellow-400/40 hover:bg-yellow-400/55", picked: "bg-yellow-400/70", ring: "ring-yellow-500", name: "banner" },
+	bannerPic: { edge: "bg-lime-400", body: "bg-lime-400/40 hover:bg-lime-400/55", picked: "bg-lime-400/70", ring: "ring-lime-500", name: "banner" },
+	bannerClip: { edge: "bg-teal-700", body: "bg-teal-700/45 hover:bg-teal-700/60", picked: "bg-teal-700/70", ring: "ring-teal-700", name: "banner" },
 	text: {
 		edge: "bg-black dark:bg-neutral-400",
 		body: "bg-neutral-900/80 hover:bg-neutral-900/90 dark:bg-neutral-700 dark:hover:bg-neutral-600",
@@ -90,7 +95,8 @@ const LANE_LOOK: Record<LookKind, { edge: string; body: string; picked: string; 
 	frame: { edge: "bg-orange-500/80", body: "bg-orange-500/30 hover:bg-orange-500/45", picked: "bg-orange-500/55", ring: "ring-orange-600", name: "Frame Me" },
 	layout: { edge: "bg-sky-500/80", body: "bg-sky-500/30 hover:bg-sky-500/45", picked: "bg-sky-500/55", ring: "ring-sky-600", name: "layout" },
 };
-const lookOf = (item: LaneItem) => LANE_LOOK[item.kind === "insert" && item.clip ? "clip" : item.kind];
+const lookOf = (item: LaneItem) =>
+	LANE_LOOK[item.kind === "insert" && item.clip ? "clip" : item.kind === "banner" && item.media ? (item.media === "video" ? "bannerClip" : "bannerPic") : item.kind];
 // Which kind of rows each strip goes in (lib/lane-rows.ts: rows stay put, strips never overlap in a row).
 const GROUP_OF: Record<LaneKind, LaneGroup> = { banner: "banner", text: "cutout", insert: "cutout", frame: "frame", layout: "layout" };
 
@@ -282,7 +288,7 @@ export function Timeline({
 			...(clip && clip.file && { clip: { file: clip.file, from: clip.clipFrom ?? 0 } }),
 		});
 		const lists: [LaneGroup, LaneItem[]][] = [
-			["banner", banners.map((b) => item("banner", b.id, b.text.replace(/\n/g, " "), b.start, b.end, b.kind === "file" && b.media === "video" && b))],
+			["banner", banners.map((b) => ({ ...item("banner", b.id, b.text.replace(/\n/g, " "), b.start, b.end, b.kind === "file" && b.media === "video" && b), ...(b.kind === "file" && b.media && { media: b.media }) }))],
 			["cutout", [...cutoutLayers.texts.map((t) => item("text", t.id, t.text, t.start, t.end)), ...cutoutLayers.inserts.map((i) => item("insert", i.id, insertName(i), i.start, i.end, i.kind === "video" && i))]],
 			["frame", frames.map((f) => item("frame", f.id, frameName(f), f.start, f.end, f.back === "file" && f.media === "video" && f))],
 			["layout", layouts.map((l) => item("layout", l.id, layoutName(l), l.start, l.end, l.media === "video" && l))],
