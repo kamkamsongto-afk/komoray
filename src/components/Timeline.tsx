@@ -72,17 +72,16 @@ type LaneKind = "banner" | "text" | "insert" | "frame" | "layout";
 // media: a banner's uploaded picture or clip (its colour, lookOf).
 type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number; clip?: { file: string; from: number }; media?: "image" | "video" };
 type ItemPatch = { start?: number; end?: number; clipFrom?: number };
-// One colour per kind, so a glance tells them apart (coach 19 Nov): picture green, clip indigo, Cutout's text black,
-// Frame Me orange, Layout sky blue, banner pink (zoom stays purple, the sentence chips a softer green). ink: the
-// strip's letters where its colour is dark. A Pic/Clip strip takes "clip" when it holds a clip (lookOf).
-// Banners (coach 19 Nov, a second look): yellow for words, light green for a picture, dark cyan for a clip, so a
-// banner's picture is never taken for a Pic/Clip one.
+// One colour per kind, so a glance tells them apart (coach 19 Nov): Pic/Clip picture green, clip indigo, Cutout's text
+// black, Frame Me orange, Layout dark blue; banners yellow, a banner's picture light green, its clip dark cyan, so a
+// banner's picture is never taken for a Pic/Clip one. Zoom stays purple, the sentence chips a softer green. Stronger
+// on the light theme (hard to see on white). ink: the strip's letters where its colour is dark. lookOf picks the look.
 type LookKind = LaneKind | "clip" | "bannerPic" | "bannerClip";
 const LANE_LOOK: Record<LookKind, { edge: string; body: string; picked: string; ring: string; name: string; ink?: string }> = {
-	banner: { edge: "bg-yellow-400", body: "bg-yellow-400/40 hover:bg-yellow-400/55", picked: "bg-yellow-400/70", ring: "ring-yellow-500", name: "banner" },
-	bannerPic: { edge: "bg-lime-400", body: "bg-lime-400/40 hover:bg-lime-400/55", picked: "bg-lime-400/70", ring: "ring-lime-500", name: "banner" },
-	// Cyan, not teal (coach 19 Nov: teal looked too close to the greens); darker than Layout's sky blue.
-	bannerClip: { edge: "bg-cyan-600", body: "bg-cyan-600/45 hover:bg-cyan-600/60", picked: "bg-cyan-600/70", ring: "ring-cyan-700", name: "banner" },
+	banner: { edge: "bg-yellow-400", body: "bg-yellow-400/60 hover:bg-yellow-400/75 dark:bg-yellow-400/45", picked: "bg-yellow-400/85", ring: "ring-yellow-500", name: "banner" },
+	bannerPic: { edge: "bg-lime-400", body: "bg-lime-400/60 hover:bg-lime-400/75 dark:bg-lime-400/45", picked: "bg-lime-400/85", ring: "ring-lime-500", name: "banner" },
+	// Cyan, not teal (coach 19 Nov: teal looked too close to the greens); lighter than Layout's dark blue.
+	bannerClip: { edge: "bg-cyan-600", body: "bg-cyan-600/55 hover:bg-cyan-600/70 dark:bg-cyan-600/50", picked: "bg-cyan-600/80", ring: "ring-cyan-700", name: "banner" },
 	text: {
 		edge: "bg-black dark:bg-neutral-400",
 		body: "bg-neutral-900/80 hover:bg-neutral-900/90 dark:bg-neutral-700 dark:hover:bg-neutral-600",
@@ -91,10 +90,11 @@ const LANE_LOOK: Record<LookKind, { edge: string; body: string; picked: string; 
 		name: "text behind you",
 		ink: "text-white",
 	},
-	insert: { edge: "bg-green-600/85", body: "bg-green-600/35 hover:bg-green-600/50", picked: "bg-green-600/60", ring: "ring-green-700", name: "picture" },
-	clip: { edge: "bg-indigo-500/85", body: "bg-indigo-500/35 hover:bg-indigo-500/50", picked: "bg-indigo-500/60", ring: "ring-indigo-600", name: "clip" },
-	frame: { edge: "bg-orange-500/80", body: "bg-orange-500/30 hover:bg-orange-500/45", picked: "bg-orange-500/55", ring: "ring-orange-600", name: "Frame Me" },
-	layout: { edge: "bg-sky-500/80", body: "bg-sky-500/30 hover:bg-sky-500/45", picked: "bg-sky-500/55", ring: "ring-sky-600", name: "layout" },
+	insert: { edge: "bg-green-600/85", body: "bg-green-600/50 hover:bg-green-600/65 dark:bg-green-600/40", picked: "bg-green-600/75", ring: "ring-green-700", name: "picture" },
+	clip: { edge: "bg-indigo-500/85", body: "bg-indigo-500/50 hover:bg-indigo-500/65 dark:bg-indigo-500/40", picked: "bg-indigo-500/75", ring: "ring-indigo-600", name: "clip" },
+	frame: { edge: "bg-orange-500/80", body: "bg-orange-500/50 hover:bg-orange-500/65 dark:bg-orange-500/40", picked: "bg-orange-500/75", ring: "ring-orange-600", name: "Frame Me" },
+	// Dark blue (coach 19 Nov: sky blue sat too close to a banner's clip).
+	layout: { edge: "bg-blue-700", body: "bg-blue-700/55 hover:bg-blue-700/70 dark:bg-blue-600/50", picked: "bg-blue-700/80", ring: "ring-blue-700", name: "layout" },
 };
 const lookOf = (item: LaneItem) =>
 	LANE_LOOK[item.kind === "insert" && item.clip ? "clip" : item.kind === "banner" && item.media ? (item.media === "video" ? "bannerClip" : "bannerPic") : item.kind];
@@ -1194,6 +1194,16 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 				style={{ height: height + laneShown + 24, touchAction: "pan-x" }}
 			>
 				<div className="relative" style={{ width, height: height + laneHeight }}>
+					{/* The rows of strips in turns of two shades, so each row is easy to follow (coach 19 Nov): on the light theme
+					    a smoky white and a step darker, never pure white; on the dark one the page's black and about 20% lighter. */}
+					{Array.from({ length: laneRows }, (_, r) => (
+						<div
+							key={`row-${r}`}
+							aria-hidden
+							className={`pointer-events-none absolute left-0 ${r % 2 ? "bg-neutral-200 dark:bg-white/[0.08]" : "bg-neutral-100 dark:bg-transparent"}`}
+							style={{ top: height + r * LANE_ROW, width, height: LANE_ROW }}
+						/>
+					))}
 					{/* The ruler, the script and the waveform stay put; only the rows of strips under them scroll up and down once
 					    there are more than LANE_MAX_ROWS (coach, 17 Nov). Opaque, so strips scrolled up go under it. */}
 					<div className="sticky top-0 z-[3] bg-background" style={{ height }}>
