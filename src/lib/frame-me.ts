@@ -43,6 +43,7 @@ export type FrameMe = {
 	media?: "image" | "video";
 	volume?: number; // a clip background's own sound (lib/clip-sound.ts)
 	muted?: boolean;
+	clipFrom?: number; // a clip background: the second of it that plays first (Trim, lib/clip-sound.ts). Added 19 Nov
 	name?: string;
 };
 

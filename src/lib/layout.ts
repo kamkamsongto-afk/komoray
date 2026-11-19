@@ -31,6 +31,7 @@ export type VideoLayout = {
 	media?: "image" | "video";
 	volume?: number; // a clip's own sound (lib/clip-sound.ts)
 	muted?: boolean;
+	clipFrom?: number; // a clip: the second of it that plays first (Trim, lib/clip-sound.ts). Added 19 Nov
 	// The picture or clip in its part (coach, 14 Nov): fileZoom times as big as it takes to fill the part (1 = just fills
 	// it), and the point of it (fileX, fileY: share of its width / height) put in the part's middle, as far as it still
 	// covers the part. Left out: 1, and its middle (layouts saved before).

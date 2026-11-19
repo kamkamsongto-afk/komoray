@@ -32,7 +32,11 @@ export async function GET(request: Request) {
 	const file = params.get("file");
 	if (file !== null) {
 		if (!PROJECT_FILE.test(file)) return new Response("Not found", { status: 404 });
-		return Response.redirect(await signedUrl(siblingKey(key, file), "GET", VIEW_SECONDS), 302);
+		// Kept by this browser for an hour (coach 19 Nov: a clip took a while to show in the preview): every ask made a new
+		// signed link, so the browser could never reuse what it had already loaded of the same file. Private: only this
+		// browser keeps it. The link itself lasts VIEW_SECONDS, well past the hour. A project file never changes (new name each upload).
+		const location = await signedUrl(siblingKey(key, file), "GET", VIEW_SECONDS);
+		return new Response(null, { status: 302, headers: { Location: location, "Cache-Control": "private, max-age=3600" } });
 	}
 
 	const [library, edit, folder] = await Promise.all([getJson<Library>(libraryKey(key)), getJson<Edit>(siblingKey(key, "edit.json")), listObjects(siblingKey(key, ""))]);

@@ -9,9 +9,10 @@ import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
 import { Confirm, ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
+import { ClipTrim } from "./ClipTrim";
 import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
-import { type Clock, FINAL_CLOCK, rangeText, TimeRange } from "./TimeField";
+import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 import { clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
@@ -183,7 +184,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const openInsert = layers.inserts.find((i) => i.id === open && tab === "inserts");
 	const byTime = <T extends { start: number }>(list: T[]) => [...list].sort((a, b) => a.start - b.start);
 
-	const row = (label: string, control: React.ReactNode) => (
+	const row = (label: React.ReactNode, control: React.ReactNode) => (
 		<label className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
 			{control}
@@ -205,7 +206,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	);
 	const times = (item: { id: string; start: number; end: number }, set: (patch: { start?: number; end?: number }) => void) =>
 		row(
-			"Shows",
+			ON_TIMELINE,
 			<TimeRange id={item.id} start={item.start} end={item.end} total={total} clock={ruler} onChange={set} />,
 		);
 
@@ -676,6 +677,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{row("Rotate", range(i.picRotate ?? 0, -INSERT.picture.rotate, INSERT.picture.rotate, 1, `${i.picRotate ?? 0}°`, (picRotate) => updateInsert(i.id, { picRotate })))}
 								{/* Not in a <label>: Mute has its own. */}
 								{i.kind === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={i} onChange={(patch) => updateInsert(i.id, patch)} /></div>}
+								{i.kind === "video" && <ClipTrim id={i.id} file={i.file} start={i.start} end={i.end} clipFrom={i.clipFrom} total={total} onChange={(patch) => updateInsert(i.id, patch)} />}
 							{times(i, (patch) => updateInsert(i.id, patch))}
 						</div>
 						</div>

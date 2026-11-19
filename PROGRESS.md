@@ -1,6 +1,6 @@
 # Komoray: บันทึกความคืบหน้า
 
-อัปเดตล่าสุด: **19 พ.ย. 2026 (ปิดงาน)** · ขึ้นเว็บจริงแล้ว (ล่าสุด merge `42596e0`, สวิตช์แพ็ก `PLANS_LIVE` ยังปิด เว็บยังเป็น beta): หน้าราคา + Manage billing, Terms/Privacy ฉบับแพ็กจ่ายเงิน (อนุมัติแล้ว, Paddle เป็น Merchant of Record, ผู้ให้บริการ Kampon Ulanwiriyo), ลายน้ำ Free, ระบบพื้นที่ (Free 5 GB / Starter 200 GB / Pro 800 GB) + ตัวลบรายวันโหมดรายงาน + เมลเตือน (Brevo), แก้ AI studio พังตอนเปิดคลิปที่สอง · แผน 67 วัน: ก่อน launch ~70% (ถ่วงน้ำหนัก) · เว็บพร้อมให้ Paddle ตรวจ รอโค้ชสมัคร Paddle ตัวจริง
+อัปเดตล่าสุด: **19 พ.ย. 2026 (ปิดงานรอบค่ำ)** · ขึ้นเว็บจริงแล้ว (ล่าสุด merge `2c32efe`, Modal ตัวจริง deploy แล้ว, สวิตช์แพ็ก `PLANS_LIVE` ยังปิด เว็บยังเป็น beta): หน้าแรกมีลิงก์ Pricing + Refund Policy + "Open to everyone on December 25", หน้า /refund, โลโก้บนหน้า Terms/Privacy/Refund, **Trim คลิปที่แทรก** (ลากขอบบน Timeline หรือกล่อง Trim (clip)), คลิปที่แทรกโผล่เร็วขึ้น, สีบน Timeline แยกตามประเภท + แถวสลับโทน · **ยื่นตรวจ Paddle ตัวจริงแล้ว 19 พ.ย. (รอผล ~7 วัน)** · สร้างแพ็ก Starter/Pro ในบัญชีจริงแล้ว · Public launch เลื่อนเป็น **25 ธ.ค.** · แผน 67 วัน: ก่อน launch **~72%** (เสร็จ 28 วัน + กำลังทำ 13 วันนับครึ่ง จาก 48 วันทำงาน, ไม่นับวันพัก) · โค้ชแจ้ง 19 พ.ย. ค่ำว่าทำรายการค้างอื่นแล้ว เหลือรออีเมล Paddle
 แผน 67 วัน: [Google Sheet](https://docs.google.com/spreadsheets/d/177tM1wyvNRYY82ykldY7aoKK9YSHDi8JJ1SKtCfR5v4/edit) (1 แถว = 1 วันในปฏิทิน, คอลัมน์ K = สถานะ)
 
 ---
@@ -16,7 +16,7 @@
 | เว็บ | https://komoray.com (และ www, komoray.kamkamsongto.workers.dev) |
 | โค้ด | https://github.com/kamkamsongto-afk/komoray (private, branch `main`) |
 | X | https://x.com/KomorayStudio (Professional → Software Company → Business) |
-| Soft launch | **ศ. 30 ต.ค.** (เลื่อนจาก 28 ต.ค.) · Public launch **15 ธ.ค.** |
+| Soft launch | **ศ. 30 ต.ค.** (เลื่อนจาก 28 ต.ค.) · Public launch **25 ธ.ค.** (เลื่อนจาก 15 ธ.ค. โค้ช 19 พ.ย. หน้าแรกเขียนไว้แล้ว) |
 
 ---
 
@@ -315,6 +315,17 @@
 - ตรวจ: `tsc` · `lint` 0 error 26 warning · `build` · `py_compile` ผ่าน · รูปทรงตัวอย่างตรงคลิปจริง 99.7–99.9% · ทำเป็นท่อนตรงกับทั้งคลิป 46–49 dB · จางเข้าออกวัดได้ตรงสูตร · Codex รีวิวทุกชุด แก้ครบ · ⏳ ยังไม่ได้ลองบน /edit จริงกับคลิปคนจริง และ iPhone/iPad
 
 
+**19 พ.ย. รอบค่ำ (ขึ้นเว็บจริงแล้ว ล่าสุด merge `2c32efe` · deploy Modal ตัวจริงก่อน push · agent ตรวจ Manage billing และ Trim แล้ว แก้ครบ)**
+- **เตรียมเว็บให้ Paddle ตรวจ** (ChatGPT แนะนำ 3 ข้อ, `0208be1`): ลิงก์ Pricing ที่เมนูบน + ปุ่ม See pricing + ท้ายหน้า · หน้าใหม่ `/refund` (ข้อความเดียวกับ Terms ที่อนุมัติแล้ว, ห้ามแก้ฝั่งเดียว) · "Private beta." → "In beta now. Open to everyone on December 25." · "60 นาทีต่อเดือน" ของ ChatGPT มาจากร่างราคาเก่า 4 พ.ย. ไม่ใช้
+- **โลโก้ Komoray บนหน้า Privacy/Terms/Refund** กดแล้วกลับหน้าแรก (`25f9f68`) · `HomeLogo` รับ `href` ได้ หน้าอื่นยังไป `/upload`
+- **Trim คลิปที่แทรก** (แผนวันที่ 43 ครึ่งแรก, `2c32efe`): ใช้กับ Pic/Clip, Banner คลิป, Layout, พื้นหลัง Frame Me · ค่า `clipFrom` (วินาทีในคลิปที่เริ่มเล่น) อ่านผ่าน `readClipSound` · Timeline: ขอบซ้ายลากแล้วตัดหัวจริง (start กับ clipFrom ขยับด้วยกัน ตัวอย่างจึงไม่ต้องโหลดภาพใหม่ระหว่างลาก ไม่กระตุก), ไม่เลยต้น/ท้ายคลิปจริง (`lib/clip-length.ts` อ่านความยาวจากหัวไฟล์), ป้าย "Clip 11.25 s" ระหว่างลาก, tooltip "Drag to trim" / "Drag to move" · กล่องส้ม **Trim (clip)** (Clip from ขยับขอบซ้าย, Clip to ขยับขอบขวา, วินาทีทศนิยม 2 ตำแหน่ง) · แถวเวลาเดิมชื่อ **Start - End (on timeline)** · `render.py` `clip_seek` ใส่ `-ss` ทั้งภาพและเสียง คลิปที่ไม่ได้ตัดออกมาเหมือนเดิม · แถวใหม่ใน `docs/bugs.md`
+- **คลิปที่แทรกโผล่เร็วขึ้นในตัวอย่าง:** Pic/Clip และ Banner คลิปเตรียมตัวเล่นไว้ 3 วิก่อนโผล่ (ซ่อน หยุดที่ภาพแรก) · Frame Me/Layout อุ่นไฟล์ด้วยตัวเล่นซ่อน · `/api/library` ให้เบราว์เซอร์จำลิงก์ไฟล์ 1 ชม. (private)
+- **กล่องเครื่องมือ:** ปกติหยุดเหนือ Timeline เหมือนเดิม แต่ลากมุมให้สูงทับ Timeline ได้ ดับเบิลคลิกมุมกลับปกติ
+- **สีบน Timeline (โค้ชเลือก):** Pic เขียว · Clip น้ำเงินอมม่วง · Cutout ข้อความเทาเข้ม · Frame Me ส้ม · Layout น้ำเงินเข้ม · Banner ข้อความเหลือง / รูปเขียวอ่อน / คลิปฟ้าเข้ม (cyan) · Zoom ม่วง · ก้อนประโยคเขียวอ่อนผสมขาว · แถวสลับโทน (สีจาก foreground ตามปุ่ม Theme) · **ห้ามใช้ `dark:` ใน Timeline** (ตามคอมพิวเตอร์ ไม่ตามปุ่ม Theme) แก้สีได้ที่ `LANE_LOOK` ใน `Timeline.tsx`
+- **Paddle ตัวจริง:** โค้ชยื่น Verify (Sole Trader, Thailand, Kampon Ulanwiriyo, Not yet live, โดเมน komoray.com + www, ลิงก์ pricing/terms/privacy/refund) รอผล · ต่อ MCP `paddle-live` แล้ว (โค้ชเปิด write เฉพาะ Products/Prices ควรปิดหลังใช้) · สร้างแพ็กในบัญชีจริง: Starter `pro_01m7sg8f1sbdzjzdw1n05ar08t` (month `pri_01m7sg8fcj0307ess0krr2t1k4` $29, year `pri_01m7sg8fra9nywjpv1fpa2e26b` $228) · Pro `pro_01m7sg8gwdnk27499r76cec2zk` (month `pri_01m7sg8h759j8dfsem12fa9azq` $55, year `pri_01m7sg8jb7xjvyjgv896wnfk2c` $432) · ไม่รวมภาษี (external), SaaS, ไม่มี Extra minutes · แก้คำอธิบายแพ็กใน sandbox ให้ตรงเว็บแล้ว (เดิมเขียน 300/600 นาที + แปลซับ)
+- **Manage billing หลังแพ็กจบ** (`claude/billing-after-cancel`, **ยังไม่รวม**): เปิดหน้า Paddle ดูใบเสร็จได้หลังยกเลิก/พักแพ็ก + "Your plan has ended" บนหน้าราคา · agent ตรวจแล้ว แก้ 2 จุด · ขึ้น staging แล้ว รอโค้ชลอง
+- ตรวจ: `tsc` · `lint` 0 error 25 warning · `build` · `py_compile` ผ่านทุกชุด · agent รีวิว Manage billing และ Trim (แก้ครบ) · โค้ชลอง Trim + สีบน staging แล้ว · ยังไม่มีใครทำคลิปจริงที่ตัดหัวคลิปบนเว็บจริง
+
 **19 พ.ย. (ขึ้นเว็บจริงแล้ว ล่าสุด merge `42596e0` · deploy Modal ตัวจริงก่อน push · agent ตรวจ Paddle + ลายน้ำ และระบบพื้นที่แล้ว แก้ครบ · สวิตช์แพ็กยังปิด)**
 - **แก้ AI studio พัง "r is not a function" ตอนเปิดคลิปที่สองจาก My projects** (`8238bb5`): `useThaiCut` ส่งฟังก์ชันให้ `useState` ตรง ๆ React เลยเรียกมัน → `useState(() => loaded)` · เจอจากรายงานของหน้า error ใหม่ · เป็นต้นเหตุเดียวกับคลิป Duplicate พังเมื่อ 18 พ.ย.
 - **ลายน้ำ Free แบบสุดท้าย** (โค้ชปรับบน staging หลายรอบ): คำว่า Komoray ขาว 45% + เงา 20%, กว้าง 23.7% ของด้านสั้น, ลอยวนช้า ๆ (±1.5%, 7/9 วิ), จางเข้าออก 0.6 วิ, ย้ายสุ่ม 6 จุด (4 มุม + กลางขอบซ้าย/ขวา) ทุก 8 วิ · ตรวจ FFmpeg บน Modal: ตำแหน่งตรงตัวอย่างไม่เกิน 1 px · `WATERMARK.rev` อยู่ในลายนิ้วมือคลิป · แก้ 403: Modal ต้องดาวน์โหลดรูปจากเว็บเราด้วย User-Agent ของเราเอง (Cloudflare บล็อก `Python-urllib`)
@@ -436,6 +447,12 @@
 ## ⏭️ ขั้นต่อไป
 
 **แชทหน้าเริ่มตรงนี้:**
+0. **เริ่มตรงนี้ (19 พ.ย. ค่ำ):**
+   **รอ Paddle:** ผลตรวจบัญชีจริง (~7 วัน) ดูอีเมลทุกวัน ถ้าขอ Sumsub ใช้ passport · ผ่านแล้ว: โค้ชสร้าง client token + API key + notification destination (`https://komoray.com/api/billing/webhook`) ใน Paddle ตัวจริง แล้วใส่เป็น Worker secrets `PADDLE_CLIENT_TOKEN`, `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET` (Claude บอกวิธี ห้ามส่งในแชต) → Claude ใส่ price ID จริง (ดู "เสร็จแล้ว" 19 พ.ย. ค่ำ) ใน `PRICES.production` ของ `src/lib/billing.ts` → ลองบน staging → ซื้อจริง 1 ครั้งแล้วคืนเงิน (03 Test and go live)
+   **โค้ชลองบน komoray.com:** ตัดหัวคลิปใน Pic/Clip แล้ว Make video ดูว่าตรงตัวอย่าง (ไม่ตรงให้กดซ้ำ 1 ครั้งก่อน) · Banner/Layout คลิปโผล่เร็วไหม
+   **โค้ชลองบน staging:** Manage billing หลังยกเลิกแพ็ก sandbox (ซื้อ Starter บัตร 4242 → Manage billing ยกเลิกทันที → เห็น "Your plan has ended" + ใบเสร็จ) แล้วสั่งรวม `claude/billing-after-cancel`
+   **งานถัดไปที่ตกลงแล้ว:** (1) กล่องเครื่องมือแบบ 2 หน้า "รายชื่อ" กับ "ปรับแต่ง" (‹ ชื่อประเภท (จำนวน) กลับรายชื่อ, ‹ › ไปอันก่อน/ถัดไป, จุดสีตาม Timeline) ทั้ง Banners / Cutout / Frame Me / Layout (2) คร็อป Banner รูป/คลิป ลากมุมบนตัวอย่าง + Done · ในหน้า Start - End (on timeline) เปลี่ยน Start แล้วคลิปยังเริ่มวินาทีเดิม (ต่างจากลากขอบ) ถามโค้ชแล้ว ยังไม่ตอบ
+   **รอโค้ชอนุมัติ:** เพิ่ม `clip-sound.ts` (`clipFrom`) ↔ `clip_seek` ในตารางโค้ดคู่ `AGENTS.md` ข้อ 4 · หน้า pricing/projects/words ใช้ `dark:` ซึ่งไม่ตามปุ่ม Theme (แก้ไหม)
 0. **เริ่มตรงนี้ (19 พ.ย.):**
    **โค้ชทำ:** สมัคร/ยืนยัน Paddle ตัวจริง (ชื่อ Kampon Ulanwiriyo ตรงกับ Terms) แล้วส่ง komoray.com ให้ตรวจ (หน้าราคา Terms Privacy ขึ้นจริงแล้ว) · ถามเรื่องจ่ายเข้าบัญชีไทยเป็นลายลักษณ์อักษร
    **วันเปิดขาย (ลำดับ):** ตั้ง Paddle ตัวจริงบนเว็บ (client token, webhook secret, `PADDLE_API_KEY`, price ID จริงใน `billing.ts`) → `PLANS_LIVE = true` + ลบประโยค beta ใน Terms/Privacy → ดูรายงานตัวลบ 2–3 วัน → โค้ชสั่ง `STORAGE_CLEANUP=on` → ปิดกฎ R2 `beta-expire-14d` (โค้ชอนุญาตแล้ว) · deploy Modal ก่อน push ทุกครั้งที่แก้ `render.py`
