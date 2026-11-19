@@ -42,6 +42,7 @@ export type Banner = {
 	media?: "image" | "video";
 	volume?: number; // media "video": how loud its own sound is, none = silent (lib/clip-sound.ts). Added 12 Nov
 	muted?: boolean; // media "video": Mute ticked (keeps volume for when it is untied)
+	clipFrom?: number; // media "video": the second of the clip it plays from (Trim, lib/clip-sound.ts). Added 19 Nov
 };
 
 // How a banner arrives. Same keyframes as BANNER_ANIMS in render.py, which writes them as ASS tags.

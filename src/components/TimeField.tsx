@@ -13,7 +13,8 @@ const NUDGE_DRAG_PX = 3; // a press on < or > that moves this far is a drag, not
 const NUDGE_SECONDS_PER_PX = 0.04; // dragging: 25 px a second
 
 // One time, written 1:05.3 and typed the same way (or plain seconds). Applied on Enter or when it loses focus.
-export function TimeField({ value, onChange, clock, label }: { value: number; onChange: (out: number) => void; clock: Clock; label: string }) {
+// hint: what the box's tip says instead (Trim counts the clip's own seconds, not the timeline's).
+export function TimeField({ value, onChange, clock, label, hint }: { value: number; onChange: (out: number) => void; clock: Clock; label: string; hint?: string }) {
 	const [typing, setTyping] = useState<string | null>(null);
 	const cancelled = useRef(false);
 	const apply = () => {
@@ -79,7 +80,7 @@ export function TimeField({ value, onChange, clock, label }: { value: number; on
 				}}
 				inputMode="decimal"
 				aria-label={label}
-				title="Minutes:seconds, the same clock as the timeline. Type a time (1:05.3 or 1.05.3) and press Enter."
+				title={hint ?? "Minutes:seconds, the same clock as the timeline. Type a time (1:05.3 or 1.05.3) and press Enter."}
 				className="w-[4.5rem] rounded border border-foreground/20 bg-background px-1 tabular-nums"
 			/>
 			{arrow(-0.1)}
@@ -105,6 +106,13 @@ export function TimeRange({ id, start, end, total, clock, onChange }: { id: stri
 		</span>
 	);
 }
+
+// The label of a box's TimeRange row (coach 19 Nov): where on the video it shows, never taken for Trim (clip).
+export const ON_TIMELINE = (
+	<span className="leading-tight">
+		Start - End <span className="block text-[10px] text-foreground/45">(on timeline)</span>
+	</span>
+);
 
 // The same for a line in a box's list: 1:05.3–1:08.3.
 export const rangeText = (start: number, end: number, clock: Clock) => `${clockText(clock.shown(start))}–${clockText(clock.shown(end))}`;

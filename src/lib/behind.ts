@@ -81,6 +81,7 @@ export type Insert = {
 	picZoom?: number; // how much bigger it gets in the time it shows: more is a faster zoom. Older videos have none = INSERT.zoom.start
 	volume?: number; // clips only: how loud its own sound is, none = silent (lib/clip-sound.ts). Added 12 Nov
 	muted?: boolean; // clips only: Mute ticked (keeps volume for when it is untied)
+	clipFrom?: number; // clips only: the second of the clip it plays from (Trim, lib/clip-sound.ts). Added 19 Nov
 };
 
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };

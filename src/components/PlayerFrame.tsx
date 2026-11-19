@@ -195,12 +195,14 @@ function BlurBack({ source, blur, dim, ratio, side = 320 }: { source: RefObject<
 
 // An inserted clip, kept at the final video's time: it plays with the preview, and jumps when it is far off.
 // volume / length: its own sound, faded at the edges of the time it shows (clipGain, same as mix_clip_sounds in render.py).
-function InsertClip({ src, at, playing, style, onRatio, volume, length }: { src: string; at: number; playing: boolean; style: CSSProperties; onRatio: (ratio: number) => void; volume?: number; length: number }) {
+// from: Trim, the second of the clip it starts at (clipFrom, lib/clip-sound.ts; clip_seek in render.py). A trim dragged on
+// the timeline moves its start and from together, so `at + from` stays put and the clip isn't asked to jump while dragging.
+function InsertClip({ src, at, from = 0, playing, style, onRatio, volume, length }: { src: string; at: number; from?: number; playing: boolean; style: CSSProperties; onRatio: (ratio: number) => void; volume?: number; length: number }) {
 	const ref = useRef<HTMLVideoElement>(null);
 	useEffect(() => {
 		const video = ref.current;
 		if (!video) return;
-		const want = Math.min(at, Math.max(0, (video.duration || at + 1) - 0.05)); // past its end: its last picture
+		const want = Math.min(at + from, Math.max(0, (video.duration || at + from + 1) - 0.05)); // past its end: its last picture
 		if (Math.abs(video.currentTime - want) > 0.25) video.currentTime = want;
 		const gain = clipGain(volume, at, length);
 		video.muted = gain <= 0;
@@ -212,7 +214,7 @@ function InsertClip({ src, at, playing, style, onRatio, volume, length }: { src:
 				void video.play().catch(() => {});
 			});
 		else video.pause();
-	}, [at, playing, volume, length]);
+	}, [at, from, playing, volume, length]);
 	return <video ref={ref} src={src} muted playsInline preload="auto" style={style} onLoadedMetadata={(e) => e.currentTarget.videoHeight && onRatio(e.currentTarget.videoWidth / e.currentTarget.videoHeight)} />;
 }
 
@@ -612,7 +614,7 @@ export function PlayerFrame({
 						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
 							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
 								{i.kind === "video" ? (
-									<InsertClip src={src} at={outTime - i.start} playing={playing} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
+									<InsertClip src={src} at={outTime - i.start} from={i.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
 								) : (
 									// eslint-disable-next-line @next/next/no-img-element
 									<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
@@ -686,7 +688,7 @@ export function PlayerFrame({
 				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} ratio={W / H} />}
 				{src &&
 					(f.media === "video" ? (
-						<InsertClip src={src} at={outTime - f.start} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
+						<InsertClip src={src} at={outTime - f.start} from={f.clipFrom} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
 					) : (
 						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 						<img src={src} alt="" style={fill} />
@@ -742,7 +744,7 @@ export function PlayerFrame({
 			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
 				{src &&
 					(l.media === "video" ? (
-						<InsertClip src={src} at={outTime - l.start} playing={playing} style={fill} onRatio={seen} volume={soundOf(l)} length={l.end - l.start} />
+						<InsertClip src={src} at={outTime - l.start} from={l.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(l)} length={l.end - l.start} />
 					) : (
 						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 						<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
@@ -820,7 +822,7 @@ export function PlayerFrame({
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									{b.media === "video" ? (
-										<InsertClip src={src} at={outTime - b.start} playing={playing} style={fit} onRatio={() => {}} volume={soundOf(b)} length={b.end - b.start} />
+										<InsertClip src={src} at={outTime - b.start} from={b.clipFrom} playing={playing} style={fit} onRatio={() => {}} volume={soundOf(b)} length={b.end - b.start} />
 									) : (
 										// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 										<img src={src} alt="" draggable={false} style={fit} />
