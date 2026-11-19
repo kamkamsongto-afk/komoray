@@ -200,7 +200,7 @@ export default function Home() {
 					</h2>
 					<div className="k-finalform">
 						{/* Still invite only until PLANS_LIVE (lib/plans.ts), but it reads as a product about to sell, for Paddle's check (coach 19 Nov). */}
-						<p className="k-promise">In beta now. Open to everyone on December 15. Your videos stay yours. We never sell your data, and we never use your videos to train AI models.</p>
+						<p className="k-promise">In beta now. Open to everyone on December 25. Your videos stay yours. We never sell your data, and we never use your videos to train AI models.</p>
 						<WaitlistForm />
 					</div>
 					<footer className="k-foot">
