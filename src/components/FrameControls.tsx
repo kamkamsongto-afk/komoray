@@ -70,7 +70,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 
 	const update = (id: string, patch: Partial<FrameMe>) => onChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)));
 	// A clip background: quietly on at first, so people hear it plays (coach, 12 Nov). A picture has no sound.
-	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
+	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, clipFrom: undefined, ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
 	const add = (shape: FrameShape) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const frame = NEW_FRAME(start, round(Math.min(total, start + FRAME.seconds)), shape);

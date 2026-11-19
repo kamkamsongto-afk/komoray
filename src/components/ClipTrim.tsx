@@ -2,7 +2,7 @@
 
 import { Film } from "lucide-react";
 import { useContext } from "react";
-import { useClipLengths } from "@/lib/clip-length";
+import { CLIP_LAST, useClipLengths } from "@/lib/clip-length";
 import { CLIP_TRIM } from "@/lib/clip-sound";
 import { clockText } from "@/lib/layers";
 import { FINAL_CLOCK, RowFit, TimeField } from "./TimeField";
@@ -26,7 +26,8 @@ export function ClipTrim({ id, file, start, end, clipFrom, total, onChange }: { 
 		return fit ? (fit(id, { start, end }, { end: e }).end ?? e) : e;
 	};
 	const setFrom = (f: number) => {
-		const next = round(Math.max(0, Math.min(f, to - CLIP_TRIM.min)));
+		// Never at or past the clip's end, even on a clip shown longer than it lasts (agent review 19 Nov).
+		const next = round(Math.max(0, Math.min(f, to - CLIP_TRIM.min, length !== undefined ? length - CLIP_LAST : Infinity)));
 		onChange({ clipFrom: next || undefined, end: endAt(start + to - next) });
 	};
 	const setTo = (t: number) => onChange({ end: endAt(start + Math.min(t, length ?? Infinity) - from) });

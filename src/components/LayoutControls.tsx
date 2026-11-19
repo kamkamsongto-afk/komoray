@@ -71,7 +71,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 
 	const update = (id: string, patch: Partial<VideoLayout>) => onChange(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 	// A clip: quietly on at first, so people hear it plays (as Frame Me, coach 12 Nov). A picture has no sound.
-	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
+	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, clipFrom: undefined, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
 	const add = (kind: LayoutKind) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const layout = NEW_LAYOUT(start, round(Math.min(total, start + LAYOUT.seconds)), kind);

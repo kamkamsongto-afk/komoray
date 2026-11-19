@@ -4,7 +4,7 @@ import { AudioWaveform, Clapperboard, Copy, Pause, Play, Repeat2, RotateCcw, Sci
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BANNER, type Banner } from "@/lib/banners";
 import { BEHIND, type CutoutLayers, insertName } from "@/lib/behind";
-import { useClipLengths } from "@/lib/clip-length";
+import { CLIP_LAST, useClipLengths } from "@/lib/clip-length";
 import { FRAME, type FrameMe, frameName } from "@/lib/frame-me";
 import { clockText, duplicateOf, pasteOf, spotInside } from "@/lib/layers";
 import { fitInRow, type LaneGroup, packRows, rowIsFree, type RowMemo, saveRows } from "@/lib/lane-rows";
@@ -424,6 +424,8 @@ export function Timeline({
 		const length = clip ? clipLengths[clip.file] : undefined;
 		const earliest = clip ? b.start - clip.from : -Infinity;
 		const latest = clip && length ? Math.max(b.end, b.start + length - clip.from) : Infinity;
+		// The start edge never passes the clip's last picture (agent review 19 Nov: past it, the final video had no picture).
+		const startMost = clip && length ? b.start + length - CLIP_LAST - clip.from : Infinity;
 		const round2 = (n: number) => Math.round(n * 100) / 100;
 		// Along the timeline: it stops at the strip next to it in its row, never over it.
 		const place = (clientX: number) => {
@@ -432,9 +434,11 @@ export function Timeline({
 				resize === "end"
 					? { end: Math.min(at, latest) }
 					: resize === "start"
-						? { start: Math.max(at, earliest) }
+						? { start: Math.min(Math.max(at, earliest), startMost) }
 						: { start: Math.max(0, at - grab), end: Math.max(0, at - grab) + seconds };
 			const patch: ItemPatch = fitInRow(rowMemo, b.id, cur, want, total);
+			// fitInRow rounds to tenths: a start rounded to before the clip's first second is put back on it (agent review 19 Nov).
+			if (clip && resize === "start" && patch.start !== undefined && patch.start < earliest) patch.start = earliest;
 			if (clip && resize === "start" && patch.start !== undefined) patch.clipFrom = Math.max(0, round2(clip.from + patch.start - b.start));
 			const key = JSON.stringify(patch);
 			if (key === last) return; // nothing new: no save, no Undo step
