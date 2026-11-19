@@ -71,13 +71,26 @@ type LaneKind = "banner" | "text" | "insert" | "frame" | "layout";
 // clip: an uploaded clip (not a picture): its file, and the second of it that plays first (Trim, lib/clip-sound.ts).
 type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number; clip?: { file: string; from: number } };
 type ItemPatch = { start?: number; end?: number; clipFrom?: number };
-const LANE_LOOK: Record<LaneKind, { edge: string; body: string; picked: string; ring: string; name: string }> = {
-	banner: { edge: "bg-fuchsia-500/70", body: "bg-fuchsia-500/30 hover:bg-fuchsia-500/45", picked: "bg-fuchsia-500/55", ring: "ring-fuchsia-600", name: "banner" },
-	text: { edge: "bg-sky-500/70", body: "bg-sky-500/30 hover:bg-sky-500/45", picked: "bg-sky-500/55", ring: "ring-sky-600", name: "text behind you" },
-	insert: { edge: "bg-orange-500/70", body: "bg-orange-500/30 hover:bg-orange-500/45", picked: "bg-orange-500/55", ring: "ring-orange-600", name: "picture or clip" },
-	frame: { edge: "bg-emerald-500/70", body: "bg-emerald-500/30 hover:bg-emerald-500/45", picked: "bg-emerald-500/55", ring: "ring-emerald-600", name: "Frame Me" },
-	layout: { edge: "bg-indigo-500/70", body: "bg-indigo-500/30 hover:bg-indigo-500/45", picked: "bg-indigo-500/55", ring: "ring-indigo-600", name: "layout" },
+// One colour per kind, so a glance tells them apart (coach 19 Nov): picture green, clip indigo, Cutout's text black,
+// Frame Me orange, Layout sky blue, banner pink (zoom stays purple, the sentence chips a softer green). ink: the
+// strip's letters where its colour is dark. A Pic/Clip strip takes "clip" when it holds a clip (lookOf).
+type LookKind = LaneKind | "clip";
+const LANE_LOOK: Record<LookKind, { edge: string; body: string; picked: string; ring: string; name: string; ink?: string }> = {
+	banner: { edge: "bg-pink-500/80", body: "bg-pink-500/30 hover:bg-pink-500/45", picked: "bg-pink-500/55", ring: "ring-pink-600", name: "banner" },
+	text: {
+		edge: "bg-black dark:bg-neutral-400",
+		body: "bg-neutral-900/80 hover:bg-neutral-900/90 dark:bg-neutral-700 dark:hover:bg-neutral-600",
+		picked: "bg-neutral-900 dark:bg-neutral-600",
+		ring: "ring-neutral-900 dark:ring-neutral-300",
+		name: "text behind you",
+		ink: "text-white",
+	},
+	insert: { edge: "bg-green-600/85", body: "bg-green-600/35 hover:bg-green-600/50", picked: "bg-green-600/60", ring: "ring-green-700", name: "picture" },
+	clip: { edge: "bg-indigo-500/85", body: "bg-indigo-500/35 hover:bg-indigo-500/50", picked: "bg-indigo-500/60", ring: "ring-indigo-600", name: "clip" },
+	frame: { edge: "bg-orange-500/80", body: "bg-orange-500/30 hover:bg-orange-500/45", picked: "bg-orange-500/55", ring: "ring-orange-600", name: "Frame Me" },
+	layout: { edge: "bg-sky-500/80", body: "bg-sky-500/30 hover:bg-sky-500/45", picked: "bg-sky-500/55", ring: "ring-sky-600", name: "layout" },
 };
+const lookOf = (item: LaneItem) => LANE_LOOK[item.kind === "insert" && item.clip ? "clip" : item.kind];
 // Which kind of rows each strip goes in (lib/lane-rows.ts: rows stay put, strips never overlap in a row).
 const GROUP_OF: Record<LaneKind, LaneGroup> = { banner: "banner", text: "cutout", insert: "cutout", frame: "frame", layout: "layout" };
 
@@ -1188,7 +1201,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 									key={i}
 									title={c.text}
 									className={`absolute truncate rounded px-1.5 text-xs leading-[26px] ${
-										c.gone ? "bg-red-500/15 text-red-600/70 line-through" : "bg-emerald-500/25 text-foreground"
+										c.gone ? "bg-red-500/15 text-red-600/70 line-through" : "bg-emerald-300/35 text-foreground dark:bg-emerald-300/20"
 									}`}
 									style={{ left: x0, width: x1 - x0 - 1, top: CHIPS_TOP, height: CHIPS }}
 								>
@@ -1278,7 +1291,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 						const x0 = xOf(toSource(b.start));
 						const x1 = Math.max(x0 + 36, xOf(toSource(b.end))); // room for both ends and a bit to grab
 						const picked = pickedItem === b.id;
-						const look = LANE_LOOK[b.kind];
+						const look = lookOf(b);
 						return (
 							<div
 								key={`${b.kind}-${b.id}`}
@@ -1302,7 +1315,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 								<button
 									onPointerDown={(e) => startItemDrag(e, b, false)}
 									title={`Drag to move. ${b.label} (${look.name}): click to pick it (Delete removes it, Ctrl+D duplicates it, Ctrl+C copies it)`}
-									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-xs leading-[26px] text-foreground active:cursor-grabbing ${picked ? look.picked : look.body}`}
+									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-xs leading-[26px] ${look.ink ?? "text-foreground"} active:cursor-grabbing ${picked ? look.picked : look.body}`}
 								>
 									{b.label}
 								</button>
