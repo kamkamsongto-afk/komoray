@@ -76,25 +76,26 @@ type ItemPatch = { start?: number; end?: number; clipFrom?: number };
 // black, Frame Me orange, Layout dark blue; banners yellow, a banner's picture light green, its clip dark cyan, so a
 // banner's picture is never taken for a Pic/Clip one. Zoom stays purple, the sentence chips a softer green. Stronger
 // on the light theme (hard to see on white). ink: the strip's letters where its colour is dark. lookOf picks the look.
+// No dark: classes: they follow the computer, not the Theme switch (ThemeToggle).
 type LookKind = LaneKind | "clip" | "bannerPic" | "bannerClip";
 const LANE_LOOK: Record<LookKind, { edge: string; body: string; picked: string; ring: string; name: string; ink?: string }> = {
-	banner: { edge: "bg-yellow-400", body: "bg-yellow-400/60 hover:bg-yellow-400/75 dark:bg-yellow-400/45", picked: "bg-yellow-400/85", ring: "ring-yellow-500", name: "banner" },
-	bannerPic: { edge: "bg-lime-400", body: "bg-lime-400/60 hover:bg-lime-400/75 dark:bg-lime-400/45", picked: "bg-lime-400/85", ring: "ring-lime-500", name: "banner" },
+	banner: { edge: "bg-yellow-400", body: "bg-yellow-400/60 hover:bg-yellow-400/75", picked: "bg-yellow-400/85", ring: "ring-yellow-500", name: "banner" },
+	bannerPic: { edge: "bg-lime-400", body: "bg-lime-400/60 hover:bg-lime-400/75", picked: "bg-lime-400/85", ring: "ring-lime-500", name: "banner" },
 	// Cyan, not teal (coach 19 Nov: teal looked too close to the greens); lighter than Layout's dark blue.
-	bannerClip: { edge: "bg-cyan-600", body: "bg-cyan-600/55 hover:bg-cyan-600/70 dark:bg-cyan-600/50", picked: "bg-cyan-600/80", ring: "ring-cyan-700", name: "banner" },
+	bannerClip: { edge: "bg-cyan-600", body: "bg-cyan-600/55 hover:bg-cyan-600/70", picked: "bg-cyan-600/80", ring: "ring-cyan-700", name: "banner" },
 	text: {
-		edge: "bg-black dark:bg-neutral-400",
-		body: "bg-neutral-900/80 hover:bg-neutral-900/90 dark:bg-neutral-700 dark:hover:bg-neutral-600",
-		picked: "bg-neutral-900 dark:bg-neutral-600",
-		ring: "ring-neutral-900 dark:ring-neutral-300",
+		edge: "bg-neutral-500",
+		body: "bg-neutral-800 hover:bg-neutral-700",
+		picked: "bg-neutral-700",
+		ring: "ring-neutral-500",
 		name: "text behind you",
 		ink: "text-white",
 	},
-	insert: { edge: "bg-green-600/85", body: "bg-green-600/50 hover:bg-green-600/65 dark:bg-green-600/40", picked: "bg-green-600/75", ring: "ring-green-700", name: "picture" },
-	clip: { edge: "bg-indigo-500/85", body: "bg-indigo-500/50 hover:bg-indigo-500/65 dark:bg-indigo-500/40", picked: "bg-indigo-500/75", ring: "ring-indigo-600", name: "clip" },
-	frame: { edge: "bg-orange-500/80", body: "bg-orange-500/50 hover:bg-orange-500/65 dark:bg-orange-500/40", picked: "bg-orange-500/75", ring: "ring-orange-600", name: "Frame Me" },
+	insert: { edge: "bg-green-600/85", body: "bg-green-600/50 hover:bg-green-600/65", picked: "bg-green-600/75", ring: "ring-green-700", name: "picture" },
+	clip: { edge: "bg-indigo-500/85", body: "bg-indigo-500/50 hover:bg-indigo-500/65", picked: "bg-indigo-500/75", ring: "ring-indigo-600", name: "clip" },
+	frame: { edge: "bg-orange-500/80", body: "bg-orange-500/50 hover:bg-orange-500/65", picked: "bg-orange-500/75", ring: "ring-orange-600", name: "Frame Me" },
 	// Dark blue (coach 19 Nov: sky blue sat too close to a banner's clip).
-	layout: { edge: "bg-blue-700", body: "bg-blue-700/55 hover:bg-blue-700/70 dark:bg-blue-600/50", picked: "bg-blue-700/80", ring: "ring-blue-700", name: "layout" },
+	layout: { edge: "bg-blue-700", body: "bg-blue-700/55 hover:bg-blue-700/70", picked: "bg-blue-700/80", ring: "ring-blue-700", name: "layout" },
 };
 const lookOf = (item: LaneItem) =>
 	LANE_LOOK[item.kind === "insert" && item.clip ? "clip" : item.kind === "banner" && item.media ? (item.media === "video" ? "bannerClip" : "bannerPic") : item.kind];
@@ -1195,12 +1196,13 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 			>
 				<div className="relative" style={{ width, height: height + laneHeight }}>
 					{/* The rows of strips in turns of two shades, so each row is easy to follow (coach 19 Nov): on the light theme
-					    a smoky white and a step darker, never pure white; on the dark one the page's black and about 20% lighter. */}
+					    a smoky white and a step darker, never pure white; on the dark one the page's black and about 20% lighter. Made from the
+					    theme's own ink (foreground), so they follow the Theme switch: Tailwind's dark: only follows the computer. */}
 					{Array.from({ length: laneRows }, (_, r) => (
 						<div
 							key={`row-${r}`}
 							aria-hidden
-							className={`pointer-events-none absolute left-0 ${r % 2 ? "bg-neutral-200 dark:bg-white/[0.08]" : "bg-neutral-100 dark:bg-transparent"}`}
+							className={`pointer-events-none absolute left-0 ${r % 2 ? "bg-foreground/[0.10]" : "bg-foreground/[0.04]"}`}
 							style={{ top: height + r * LANE_ROW, width, height: LANE_ROW }}
 						/>
 					))}
@@ -1218,7 +1220,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 									key={i}
 									title={c.text}
 									className={`absolute truncate rounded px-1.5 text-xs leading-[26px] ${
-										c.gone ? "bg-red-500/15 text-red-600/70 line-through" : "bg-emerald-300/35 text-foreground dark:bg-emerald-300/20"
+										c.gone ? "bg-red-500/15 text-red-600/70 line-through" : "bg-emerald-300/35 text-foreground"
 									}`}
 									style={{ left: x0, width: x1 - x0 - 1, top: CHIPS_TOP, height: CHIPS }}
 								>
