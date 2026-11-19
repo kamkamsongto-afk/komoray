@@ -232,7 +232,8 @@ export default function PricingPage() {
 			{/* Prices are before tax (coach 18 Nov): Paddle adds VAT or sales tax for the buyer's country at checkout (prices'
 			    tax_mode "external"), and a business can add its tax number there. */}
 			<p className="-mt-4 text-center text-xs text-foreground/60">
-				Prices in US dollars, plus applicable VAT or sales tax for your country, added at checkout. Buying for a business? Add your VAT or tax number at checkout.
+				Prices in US dollars, plus applicable VAT or sales tax for your country, added at checkout. Buying for a business? Add your VAT or tax number at checkout.{" "}
+				<Link href="/refund" className="underline">Refund Policy</Link> · <Link href="/terms" className="underline">Terms</Link>
 			</p>
 
 			{/* Extra minutes: not sold for now (coach, 18 Nov: it reads like a credit top-up). Kept to turn back on. */}

@@ -36,6 +36,8 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 .k-herocta:hover { background: #B9F36A; }
 .k-herocta svg { width: 14px; height: 14px; transition: transform .25s ease; }
 .k-herocta:hover svg { transform: translateX(3px); }
+.k-herocta-ghost { margin-left: 10px; background: transparent; color: #F4F3EF; box-shadow: inset 0 0 0 1px rgba(244,243,239,.5); }
+.k-herocta-ghost:hover { color: #101114; }
 .k-note { position: absolute; top: 14px; right: 16px; padding: 6px 10px; border-radius: 999px; background: rgba(16,17,20,.72); color: #F4F3EF; }
 
 /* Sections */
