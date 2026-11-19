@@ -7,9 +7,10 @@ import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { knownLibrary, LIBRARY_ACCEPT, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
+import { ClipTrim } from "./ClipTrim";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { LayerTools } from "./LayerTools";
-import { type Clock, FINAL_CLOCK, rangeText, TimeRange } from "./TimeField";
+import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
 	layouts: VideoLayout[];
@@ -70,7 +71,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 
 	const update = (id: string, patch: Partial<VideoLayout>) => onChange(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 	// A clip: quietly on at first, so people hear it plays (as Frame Me, coach 12 Nov). A picture has no sound.
-	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
+	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, clipFrom: undefined, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
 	const add = (kind: LayoutKind) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const layout = NEW_LAYOUT(start, round(Math.min(total, start + LAYOUT.seconds)), kind);
@@ -99,7 +100,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 	};
 	const remove = (l: VideoLayout) => setRemoving({ name: layoutName(l), remove: () => onChange(layouts.filter((x) => x.id !== l.id)) });
 
-	const row = (label: string, control: React.ReactNode) => (
+	const row = (label: React.ReactNode, control: React.ReactNode) => (
 		<label className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
 			{control}
@@ -219,7 +220,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								<ArrowLeftRight className="h-3.5 w-3.5" aria-hidden /> Swap sides
 							</button>
 							{row(
-								"Shows",
+								ON_TIMELINE,
 								<TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />,
 							)}
 							{row("Your part", range(l.split, LAYOUT.split.min, LAYOUT.split.max, 0.01, percent(l.split), (split) => update(l.id, { split })))}
@@ -331,6 +332,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									<ClipSound sound={l} onChange={(patch) => update(l.id, patch)} />
 								</div>
 							)}
+							{l.file && l.media === "video" && <ClipTrim id={l.id} file={l.file} start={l.start} end={l.end} clipFrom={l.clipFrom} total={total} onChange={(patch) => update(l.id, patch)} />}
 							<p className="flex items-center gap-1 text-xs text-foreground/60">
 								<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Pick one here, drag it onto the video, or drop a picture or clip from your computer on the video.{library === null && " Loading…"}
 							</p>

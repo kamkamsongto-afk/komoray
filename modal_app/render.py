@@ -1095,13 +1095,24 @@ def banner_file_filters(parts: list[str], base: str, size: tuple[int, int], bann
     return base
 
 
+def clip_seek(c: dict) -> list[str]:
+    """Trim (coach 19 Nov): an uploaded clip read from its clipFrom second, picture and sound, so all that follows sees it
+    start at 0 as before. Same as `from` in InsertClip (PlayerFrame.tsx) and readClipSound (lib/clip-sound.ts).
+    -ss before -i: FFmpeg jumps near it and decodes on to the exact frame, never the whole clip before it."""
+    try:
+        start = float(c.get("clipFrom") or 0)
+    except (TypeError, ValueError):
+        start = 0.0
+    return ["-ss", f"{min(start, 3600.0):.3f}"] if start > 0 else []
+
+
 def banner_file_input(b: dict) -> list[str]:
     """How FFmpeg reads an uploaded banner: a picture as one frame repeated, a GIF as its file plays (-stream_loop
-    froze it, 11 Nov), an MP4 clip as it is."""
+    froze it, 11 Nov), an MP4 clip as it is, from its Trim (clip_seek)."""
     path, name = str(b["path"]), str(b.get("file", ""))
     if b.get("media") != "video":
         return (["-ignore_loop", "0"] if name.endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]) + ["-i", path]
-    return ["-i", path]
+    return [*clip_seek(b), "-i", path]
 
 
 def ass_colour(hex_colour: str) -> str:
@@ -1988,7 +1999,7 @@ def ffmpeg_command(
             # A picture is one frame: repeated for as long as it shows (trimmed in cutout_filters).
             # A GIF has its own frames: played as its file says. -stream_loop froze it on the first frame (test 11 Nov).
             still = ["-ignore_loop", "0"] if str(ins.get("file", "")).endswith(".gif") else ["-loop", "1", "-framerate", str(FPS)]
-            cmd += (still if ins.get("kind") == "image" else []) + ["-i", str(ins["path"])]
+            cmd += (still if ins.get("kind") == "image" else clip_seek(ins)) + ["-i", str(ins["path"])]
     for b in banner_files:
         cmd += banner_file_input(b)
     still = ["-loop", "1", "-framerate", str(FPS)]
@@ -1997,10 +2008,10 @@ def ffmpeg_command(
         if f["art"].get("border"):
             cmd += [*still, "-i", str(f["art"]["border"])]
         if f.get("back") == "file" and f.get("path"):
-            cmd += banner_file_input({"path": f["path"], "file": f.get("file", ""), "media": f.get("media")})
+            cmd += banner_file_input({"path": f["path"], "file": f.get("file", ""), "media": f.get("media"), "clipFrom": f.get("clipFrom")})
     for l in showing:
         if l.get("path"):
-            cmd += banner_file_input({"path": l["path"], "file": l.get("file", ""), "media": l.get("media")})
+            cmd += banner_file_input({"path": l["path"], "file": l.get("file", ""), "media": l.get("media"), "clipFrom": l.get("clipFrom")})
     if watermark:
         # Looped, so its fade can change every frame (watermark_filters); as long as the part or video, and a second more.
         cmd += ["-loop", "1", "-framerate", str(FPS), "-t", f"{watermark_length + 1:.3f}", "-i", str(watermark["path"])]
@@ -2363,7 +2374,7 @@ def mix_clip_sounds(video: Path, clips: list[dict]) -> None:
     mixed = video.with_name("mixed.mp4")
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video)]
     for c in clips:
-        cmd += ["-i", str(c["path"])]
+        cmd += [*clip_seek(c), "-i", str(c["path"])]  # its sound from its Trim, as its picture
     cmd += ["-filter_complex", ";".join(parts), "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", str(mixed)]
     result = subprocess.run(cmd, cwd=video.parent, capture_output=True, text=True)
     if result.returncode != 0:

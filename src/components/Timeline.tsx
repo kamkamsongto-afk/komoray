@@ -4,6 +4,7 @@ import { AudioWaveform, Clapperboard, Copy, Pause, Play, Repeat2, RotateCcw, Sci
 import { type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BANNER, type Banner } from "@/lib/banners";
 import { BEHIND, type CutoutLayers, insertName } from "@/lib/behind";
+import { CLIP_LAST, useClipLengths } from "@/lib/clip-length";
 import { FRAME, type FrameMe, frameName } from "@/lib/frame-me";
 import { duplicateOf, pasteOf, spotInside } from "@/lib/layers";
 import { fitInRow, type LaneGroup, packRows, rowIsFree, type RowMemo, saveRows } from "@/lib/lane-rows";
@@ -67,14 +68,37 @@ type Props = {
 
 // Things shown over the video, as strips under the waveform: banners first, then the Cutout layers, then Frame Me, then Layout, each in rows of their own.
 type LaneKind = "banner" | "text" | "insert" | "frame" | "layout";
-type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number };
-const LANE_LOOK: Record<LaneKind, { edge: string; body: string; picked: string; ring: string; name: string }> = {
-	banner: { edge: "bg-fuchsia-500/70", body: "bg-fuchsia-500/30 hover:bg-fuchsia-500/45", picked: "bg-fuchsia-500/55", ring: "ring-fuchsia-600", name: "banner" },
-	text: { edge: "bg-sky-500/70", body: "bg-sky-500/30 hover:bg-sky-500/45", picked: "bg-sky-500/55", ring: "ring-sky-600", name: "text behind you" },
-	insert: { edge: "bg-orange-500/70", body: "bg-orange-500/30 hover:bg-orange-500/45", picked: "bg-orange-500/55", ring: "ring-orange-600", name: "picture or clip" },
-	frame: { edge: "bg-emerald-500/70", body: "bg-emerald-500/30 hover:bg-emerald-500/45", picked: "bg-emerald-500/55", ring: "ring-emerald-600", name: "Frame Me" },
-	layout: { edge: "bg-indigo-500/70", body: "bg-indigo-500/30 hover:bg-indigo-500/45", picked: "bg-indigo-500/55", ring: "ring-indigo-600", name: "layout" },
+// clip: an uploaded clip (not a picture): its file, and the second of it that plays first (Trim, lib/clip-sound.ts).
+// media: a banner's uploaded picture or clip (its colour, lookOf).
+type LaneItem = { id: string; kind: LaneKind; label: string; start: number; end: number; clip?: { file: string; from: number }; media?: "image" | "video" };
+type ItemPatch = { start?: number; end?: number; clipFrom?: number };
+// One colour per kind, so a glance tells them apart (coach 19 Nov): Pic/Clip picture green, clip indigo, Cutout's text
+// black, Frame Me orange, Layout dark blue; banners yellow, a banner's picture light green, its clip dark cyan, so a
+// banner's picture is never taken for a Pic/Clip one. Zoom stays purple, the sentence chips a softer green. Stronger
+// on the light theme (hard to see on white). ink: the strip's letters where its colour is dark. lookOf picks the look.
+// No dark: classes: they follow the computer, not the Theme switch (ThemeToggle).
+type LookKind = LaneKind | "clip" | "bannerPic" | "bannerClip";
+const LANE_LOOK: Record<LookKind, { edge: string; body: string; picked: string; ring: string; name: string; ink?: string }> = {
+	banner: { edge: "bg-yellow-400", body: "bg-yellow-400/60 hover:bg-yellow-400/75", picked: "bg-yellow-400/85", ring: "ring-yellow-500", name: "banner" },
+	bannerPic: { edge: "bg-lime-400", body: "bg-lime-400/60 hover:bg-lime-400/75", picked: "bg-lime-400/85", ring: "ring-lime-500", name: "banner" },
+	// Cyan, not teal (coach 19 Nov: teal looked too close to the greens); lighter than Layout's dark blue.
+	bannerClip: { edge: "bg-cyan-600", body: "bg-cyan-600/55 hover:bg-cyan-600/70", picked: "bg-cyan-600/80", ring: "ring-cyan-700", name: "banner" },
+	text: {
+		edge: "bg-neutral-500",
+		body: "bg-neutral-800 hover:bg-neutral-700",
+		picked: "bg-neutral-700",
+		ring: "ring-neutral-500",
+		name: "text behind you",
+		ink: "text-white",
+	},
+	insert: { edge: "bg-green-600/85", body: "bg-green-600/50 hover:bg-green-600/65", picked: "bg-green-600/75", ring: "ring-green-700", name: "picture" },
+	clip: { edge: "bg-indigo-500/85", body: "bg-indigo-500/50 hover:bg-indigo-500/65", picked: "bg-indigo-500/75", ring: "ring-indigo-600", name: "clip" },
+	frame: { edge: "bg-orange-500/80", body: "bg-orange-500/50 hover:bg-orange-500/65", picked: "bg-orange-500/75", ring: "ring-orange-600", name: "Frame Me" },
+	// Dark blue (coach 19 Nov: sky blue sat too close to a banner's clip).
+	layout: { edge: "bg-blue-700", body: "bg-blue-700/55 hover:bg-blue-700/70", picked: "bg-blue-700/80", ring: "ring-blue-700", name: "layout" },
 };
+const lookOf = (item: LaneItem) =>
+	LANE_LOOK[item.kind === "insert" && item.clip ? "clip" : item.kind === "banner" && item.media ? (item.media === "video" ? "bannerClip" : "bannerPic") : item.kind];
 // Which kind of rows each strip goes in (lib/lane-rows.ts: rows stay put, strips never overlap in a row).
 const GROUP_OF: Record<LaneKind, LaneGroup> = { banner: "banner", text: "cutout", insert: "cutout", frame: "frame", layout: "layout" };
 
@@ -257,12 +281,19 @@ export function Timeline({
 	const lane = useMemo(() => {
 		void rowsVersion;
 		const memo = rowMemo;
-		const item = (kind: LaneKind, id: string, label: string, start: number, end: number): LaneItem => ({ id, kind, label, start, end });
+		const item = (kind: LaneKind, id: string, label: string, start: number, end: number, clip?: { file?: string; clipFrom?: number } | false): LaneItem => ({
+			id,
+			kind,
+			label,
+			start,
+			end,
+			...(clip && clip.file && { clip: { file: clip.file, from: clip.clipFrom ?? 0 } }),
+		});
 		const lists: [LaneGroup, LaneItem[]][] = [
-			["banner", banners.map((b) => item("banner", b.id, b.text.replace(/\n/g, " "), b.start, b.end))],
-			["cutout", [...cutoutLayers.texts.map((t) => item("text", t.id, t.text, t.start, t.end)), ...cutoutLayers.inserts.map((i) => item("insert", i.id, insertName(i), i.start, i.end))]],
-			["frame", frames.map((f) => item("frame", f.id, frameName(f), f.start, f.end))],
-			["layout", layouts.map((l) => item("layout", l.id, layoutName(l), l.start, l.end))],
+			["banner", banners.map((b) => ({ ...item("banner", b.id, b.text.replace(/\n/g, " "), b.start, b.end, b.kind === "file" && b.media === "video" && b), ...(b.kind === "file" && b.media && { media: b.media }) }))],
+			["cutout", [...cutoutLayers.texts.map((t) => item("text", t.id, t.text, t.start, t.end)), ...cutoutLayers.inserts.map((i) => item("insert", i.id, insertName(i), i.start, i.end, i.kind === "video" && i))]],
+			["frame", frames.map((f) => item("frame", f.id, frameName(f), f.start, f.end, f.back === "file" && f.media === "video" && f))],
+			["layout", layouts.map((l) => item("layout", l.id, layoutName(l), l.start, l.end, l.media === "video" && l))],
 		];
 		const placed: { item: LaneItem; row: number }[] = [];
 		const firstRow = {} as Record<LaneGroup, number>;
@@ -282,6 +313,10 @@ export function Timeline({
 	useEffect(() => {
 		if (rowsKey) saveRows(rowsKey, rowMemo);
 	}, [lane, rowsKey, rowMemo]);
+	// Each clip's length, so a trim stops at its real end (read once per file, lib/clip-length.ts).
+	const clipLengths = useClipLengths(lane.placed.flatMap((p) => (p.item.clip ? [p.item.clip.file] : [])));
+	// While a clip's edge is dragged: the second of the clip at that edge, shown by the strip (coach 19 Nov).
+	const [trimNote, setTrimNote] = useState<{ id: string; side: "start" | "end"; at: number } | null>(null);
 	const laneRows = lane.placed.length ? Math.max(...lane.placed.map((l) => l.row)) + 1 : 0;
 	const laneHeight = laneRows * LANE_ROW + (laneRows ? 2 : 0);
 	const laneShown = Math.min(laneHeight, LANE_MAX_ROWS * LANE_ROW + 2); // the rest scrolls
@@ -295,7 +330,7 @@ export function Timeline({
 	}
 	// patch null: remove it.
 	const changeItem = useCallback(
-		(item: LaneItem, patch: { start?: number; end?: number } | null) => {
+		(item: LaneItem, patch: ItemPatch | null) => {
 			const apply = <T extends { id: string }>(list: T[]) => (patch ? list.map((x) => (x.id === item.id ? { ...x, ...patch } : x)) : list.filter((x) => x.id !== item.id));
 			if (item.kind === "banner") onBannersChange(apply(banners));
 			else if (item.kind === "text") onCutoutChange({ ...cutoutLayers, texts: apply(cutoutLayers.texts) });
@@ -403,15 +438,36 @@ export function Timeline({
 			rowMemo.set(b.id, { ...me, row });
 			setRowsVersion((v) => v + 1);
 		};
+		// A clip's edges trim it (coach 19 Nov): its start edge moves the second of the clip it plays from along with it,
+		// so what stays keeps its place; neither edge goes past the clip's real start or end. A clip already shown longer
+		// than it lasts (its last picture held, before Trim) keeps that length.
+		const clip = b.clip;
+		const length = clip ? clipLengths[clip.file] : undefined;
+		const earliest = clip ? b.start - clip.from : -Infinity;
+		const latest = clip && length ? Math.max(b.end, b.start + length - clip.from) : Infinity;
+		// The start edge never passes the clip's last picture (agent review 19 Nov: past it, the final video had no picture).
+		const startMost = clip && length ? b.start + length - CLIP_LAST - clip.from : Infinity;
+		const round2 = (n: number) => Math.round(n * 100) / 100;
 		// Along the timeline: it stops at the strip next to it in its row, never over it.
 		const place = (clientX: number) => {
 			const at = outAt(clientX);
-			const want = resize === "end" ? { end: at } : resize === "start" ? { start: at } : { start: Math.max(0, at - grab), end: Math.max(0, at - grab) + seconds };
-			const patch = fitInRow(rowMemo, b.id, cur, want, total);
+			const want =
+				resize === "end"
+					? { end: Math.min(at, latest) }
+					: resize === "start"
+						? { start: Math.min(Math.max(at, earliest), startMost) }
+						: { start: Math.max(0, at - grab), end: Math.max(0, at - grab) + seconds };
+			const patch: ItemPatch = fitInRow(rowMemo, b.id, cur, want, total);
+			// fitInRow rounds to tenths: a start rounded to before the clip's first second is put back on it (agent review 19 Nov).
+			if (clip && resize === "start" && patch.start !== undefined && patch.start < earliest) patch.start = earliest;
+			if (clip && resize === "start" && patch.start !== undefined) patch.clipFrom = Math.max(0, round2(clip.from + patch.start - b.start));
 			const key = JSON.stringify(patch);
 			if (key === last) return; // nothing new: no save, no Undo step
 			last = key;
 			cur = { ...cur, ...patch };
+			// Only the strip and this note move while dragging: the preview's clip stays where it is (start and clipFrom
+			// move together), so nothing is decoded until the drag ends (coach 19 Nov: no stutter).
+			if (clip && resize) setTrimNote({ id: b.id, side: resize, at: resize === "start" ? (patch.clipFrom ?? clip.from) : clip.from + cur.end - cur.start });
 			changeItem(b, patch);
 		};
 		const move = (ev: globalThis.PointerEvent) => {
@@ -445,6 +501,7 @@ export function Timeline({
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", stop);
 			window.removeEventListener("pointercancel", stop);
+			setTrimNote(null);
 			setPickedItem(b.id);
 			setSelection(null);
 			if (moved) return;
@@ -1138,6 +1195,17 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 				style={{ height: height + laneShown + 24, touchAction: "pan-x" }}
 			>
 				<div className="relative" style={{ width, height: height + laneHeight }}>
+					{/* The rows of strips in turns of two shades, so each row is easy to follow (coach 19 Nov): on the light theme
+					    a smoky white and a step darker, never pure white; on the dark one the page's black and about 20% lighter. Made from the
+					    theme's own ink (foreground), so they follow the Theme switch: Tailwind's dark: only follows the computer. */}
+					{Array.from({ length: laneRows }, (_, r) => (
+						<div
+							key={`row-${r}`}
+							aria-hidden
+							className={`pointer-events-none absolute left-0 ${r % 2 ? "bg-foreground/[0.10]" : "bg-foreground/[0.04]"}`}
+							style={{ top: height + r * LANE_ROW, width, height: LANE_ROW }}
+						/>
+					))}
 					{/* The ruler, the script and the waveform stay put; only the rows of strips under them scroll up and down once
 					    there are more than LANE_MAX_ROWS (coach, 17 Nov). Opaque, so strips scrolled up go under it. */}
 					<div className="sticky top-0 z-[3] bg-background" style={{ height }}>
@@ -1152,7 +1220,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 									key={i}
 									title={c.text}
 									className={`absolute truncate rounded px-1.5 text-xs leading-[26px] ${
-										c.gone ? "bg-red-500/15 text-red-600/70 line-through" : "bg-emerald-500/25 text-foreground"
+										c.gone ? "bg-red-500/15 text-red-600/70 line-through" : "bg-emerald-300/35 text-foreground"
 									}`}
 									style={{ left: x0, width: x1 - x0 - 1, top: CHIPS_TOP, height: CHIPS }}
 								>
@@ -1242,21 +1310,31 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 						const x0 = xOf(toSource(b.start));
 						const x1 = Math.max(x0 + 36, xOf(toSource(b.end))); // room for both ends and a bit to grab
 						const picked = pickedItem === b.id;
-						const look = LANE_LOOK[b.kind];
+						const look = lookOf(b);
 						return (
 							<div
 								key={`${b.kind}-${b.id}`}
-								className={`absolute z-[1] flex rounded ${picked ? `ring-2 ${look.ring} ring-offset-1 ring-offset-background` : ""}`}
+								className={`absolute ${trimNote?.id === b.id ? "z-[4]" : "z-[1]"} flex rounded ${picked ? `ring-2 ${look.ring} ring-offset-1 ring-offset-background` : ""}`}
 								style={{ left: x0, width: x1 - x0 - 1, top: height + row * LANE_ROW, height: LANE_ROW - 2 }}
 							>
 								{/* Ends 10 px wide with a grip line, so they can be found and held (coach, 17 Nov: 6 px was too fiddly). */}
-								<button onPointerDown={(e) => startItemDrag(e, b, "start")} aria-label={`When ${b.label} starts`} title="Drag to change when it starts" className={`flex w-2.5 shrink-0 cursor-ew-resize touch-none items-center justify-center rounded-l ${look.edge}`}>
+								{/* While a clip's edge is dragged: the second of the clip at that edge (Trim, coach 19 Nov). */}
+								{trimNote?.id === b.id && (
+									<span
+										className="pointer-events-none absolute -top-5 z-[3] rounded bg-foreground px-1 text-[10px] leading-4 whitespace-nowrap text-background tabular-nums"
+										style={trimNote.side === "start" ? { left: 0 } : { right: 0 }}
+									>
+										Clip {trimNote.at.toFixed(2)} s
+									</span>
+								)}
+								{/* "Drag to trim" / "Drag to move" (coach 19 Nov). On a clip the start edge trims its start too. */}
+								<button onPointerDown={(e) => startItemDrag(e, b, "start")} aria-label={`Trim the start of ${b.label}`} title={b.clip ? "Drag to trim (the start of the clip)" : "Drag to trim"} className={`flex w-2.5 shrink-0 cursor-ew-resize touch-none items-center justify-center rounded-l ${look.edge}`}>
 									<span className="h-3 w-px bg-white/80" aria-hidden />
 								</button>
 								<button
 									onPointerDown={(e) => startItemDrag(e, b, false)}
-									title={`${b.label} (${look.name}): drag to change when it shows, click to pick it (Delete removes it, Ctrl+D duplicates it, Ctrl+C copies it)`}
-									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-xs leading-[26px] text-foreground active:cursor-grabbing ${picked ? look.picked : look.body}`}
+									title={`Drag to move. ${b.label} (${look.name}): click to pick it (Delete removes it, Ctrl+D duplicates it, Ctrl+C copies it)`}
+									className={`min-w-0 flex-1 cursor-grab touch-none truncate px-1.5 text-left text-xs leading-[26px] ${look.ink ?? "text-foreground"} active:cursor-grabbing ${picked ? look.picked : look.body}`}
 								>
 									{b.label}
 								</button>
@@ -1282,7 +1360,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 										<X className="h-2.5 w-2.5" aria-hidden />
 									</button>
 								)}
-								<button onPointerDown={(e) => startItemDrag(e, b, "end")} aria-label={`How long ${b.label} shows`} title="Drag to change how long it shows" className={`flex w-2.5 shrink-0 cursor-ew-resize touch-none items-center justify-center rounded-r ${look.edge}`}>
+								<button onPointerDown={(e) => startItemDrag(e, b, "end")} aria-label={`Trim the end of ${b.label}`} title={b.clip ? "Drag to trim (the end of the clip)" : "Drag to trim"} className={`flex w-2.5 shrink-0 cursor-ew-resize touch-none items-center justify-center rounded-r ${look.edge}`}>
 									<span className="h-3 w-px bg-white/80" aria-hidden />
 								</button>
 							</div>

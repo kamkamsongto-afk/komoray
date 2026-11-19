@@ -423,7 +423,7 @@ export function ScriptView({
 		if (id && list.some((l) => l.id === id)) {
 			const media = item.media;
 			const file = item.file;
-			onLayoutsChange(list.map((l) => (l.id === id ? { ...l, file, media, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(media === "video" && l.volume === undefined && !l.muted ? sound : {}) } : l)));
+			onLayoutsChange(list.map((l) => (l.id === id ? { ...l, file, media, clipFrom: undefined, fileZoom: undefined, fileX: undefined, fileY: undefined, ...(media === "video" && l.volume === undefined && !l.muted ? sound : {}) } : l)));
 			return;
 		}
 		if (list.length >= LAYOUT.maxItems) return setLayoutNote("That's the most layouts one video can have.");
@@ -1012,6 +1012,8 @@ export function ScriptView({
 	}
 	// The box ends above the timeline, never over it (coach, 17 Nov: it covered the strips, so they could not be
 	// grabbed while changing them). Measured again when the page scrolls, the window or the timeline changes size.
+	// Once dragged taller by its corner it may go over the timeline (coach 19 Nov: some boxes need more room); a
+	// double-click on the corner brings it back above the timeline.
 	const [panelRoom, setPanelRoom] = useState<number | null>(null);
 	useEffect(() => {
 		if (!panel) return;
@@ -1180,7 +1182,7 @@ export function ScriptView({
 							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] ${panelHeight ? "" : "lg:max-h-[var(--panel-room,calc(100vh-26rem))]"}`}
 							style={{ ...(panelHeight && { "--panel-h": `${panelHeight}px` }), ...(panelRoom && { "--panel-room": `${panelRoom}px` }) } as CSSProperties}
 						>
-						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${panelHeight ? "lg:h-[min(var(--panel-h),var(--panel-room,calc(100vh-2rem)))]" : "lg:flex-1"}`}>
+						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${panelHeight ? "lg:h-[min(var(--panel-h),calc(100vh-2rem))]" : "lg:flex-1"}`}>
 							<div className="flex items-center justify-between px-3 pt-2 text-sm font-medium">
 								{PANELS.find((p) => p.id === panel)?.name}
 								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close (Esc, or click outside)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">

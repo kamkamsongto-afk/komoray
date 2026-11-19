@@ -7,9 +7,10 @@ import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
+import { ClipTrim } from "./ClipTrim";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { LayerTools } from "./LayerTools";
-import { type Clock, FINAL_CLOCK, rangeText, TimeRange } from "./TimeField";
+import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
 	frames: FrameMe[];
@@ -69,7 +70,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 
 	const update = (id: string, patch: Partial<FrameMe>) => onChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)));
 	// A clip background: quietly on at first, so people hear it plays (coach, 12 Nov). A picture has no sound.
-	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
+	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, clipFrom: undefined, ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
 	const add = (shape: FrameShape) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const frame = NEW_FRAME(start, round(Math.min(total, start + FRAME.seconds)), shape);
@@ -95,7 +96,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 	};
 	const remove = (f: FrameMe) => setRemoving({ name: frameName(f), remove: () => onChange(frames.filter((x) => x.id !== f.id)) });
 
-	const row = (label: string, control: React.ReactNode) => (
+	const row = (label: React.ReactNode, control: React.ReactNode) => (
 		<label className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
 			{control}
@@ -213,7 +214,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 							})}
 							<p className="text-[11px] text-foreground/50">Changes this frame. With the video moved off it, a shape adds a new frame there.</p>
 							{row(
-								"Shows",
+								ON_TIMELINE,
 								<TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />,
 							)}
 							{row("Size", range(f.size, FRAME.size.min, FRAME.size.max, 0.01, percent(f.size), (size) => update(f.id, { size })))}
@@ -290,6 +291,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 								</div>
 							)}
 							{f.back === "file" && f.media === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={f} onChange={(patch) => update(f.id, patch)} /></div>}
+							{f.back === "file" && f.media === "video" && f.file && <ClipTrim id={f.id} file={f.file} start={f.start} end={f.end} clipFrom={f.clipFrom} total={total} onChange={(patch) => update(f.id, patch)} />}
 							{(f.back === "file" || !files.length) && (
 								<p className="flex items-center gap-1 text-xs text-foreground/60">
 									<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Add your pictures and clips in Import, then pick one here.{library === null && " Loading…"}

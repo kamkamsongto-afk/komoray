@@ -7,6 +7,7 @@ import type { OwnFont } from "@/lib/font-info";
 import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
+import { ClipTrim } from "./ClipTrim";
 import { LayerTools } from "./LayerTools";
 import { clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
@@ -415,6 +416,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 						{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
 						{b.media === "video" && <ClipSound sound={b} onChange={(patch) => update(b.id, patch)} />}
+						{b.media === "video" && b.file && <ClipTrim id={b.id} file={b.file} start={b.start} end={b.end} clipFrom={b.clipFrom} total={total} onChange={(patch) => update(b.id, patch)} />}
 					</>}
 					{open === b.id && b.kind !== "file" && <>
 					<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/70">
