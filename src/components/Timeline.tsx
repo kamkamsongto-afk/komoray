@@ -75,13 +75,14 @@ type ItemPatch = { start?: number; end?: number; clipFrom?: number };
 // One colour per kind, so a glance tells them apart (coach 19 Nov): picture green, clip indigo, Cutout's text black,
 // Frame Me orange, Layout sky blue, banner pink (zoom stays purple, the sentence chips a softer green). ink: the
 // strip's letters where its colour is dark. A Pic/Clip strip takes "clip" when it holds a clip (lookOf).
-// Banners (coach 19 Nov, a second look): yellow for words, light green for a picture, dark teal for a clip, so a
+// Banners (coach 19 Nov, a second look): yellow for words, light green for a picture, dark cyan for a clip, so a
 // banner's picture is never taken for a Pic/Clip one.
 type LookKind = LaneKind | "clip" | "bannerPic" | "bannerClip";
 const LANE_LOOK: Record<LookKind, { edge: string; body: string; picked: string; ring: string; name: string; ink?: string }> = {
 	banner: { edge: "bg-yellow-400", body: "bg-yellow-400/40 hover:bg-yellow-400/55", picked: "bg-yellow-400/70", ring: "ring-yellow-500", name: "banner" },
 	bannerPic: { edge: "bg-lime-400", body: "bg-lime-400/40 hover:bg-lime-400/55", picked: "bg-lime-400/70", ring: "ring-lime-500", name: "banner" },
-	bannerClip: { edge: "bg-teal-700", body: "bg-teal-700/45 hover:bg-teal-700/60", picked: "bg-teal-700/70", ring: "ring-teal-700", name: "banner" },
+	// Cyan, not teal (coach 19 Nov: teal looked too close to the greens); darker than Layout's sky blue.
+	bannerClip: { edge: "bg-cyan-600", body: "bg-cyan-600/45 hover:bg-cyan-600/60", picked: "bg-cyan-600/70", ring: "ring-cyan-700", name: "banner" },
 	text: {
 		edge: "bg-black dark:bg-neutral-400",
 		body: "bg-neutral-900/80 hover:bg-neutral-900/90 dark:bg-neutral-700 dark:hover:bg-neutral-600",
