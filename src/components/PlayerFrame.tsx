@@ -195,6 +195,31 @@ function BlurBack({ source, blur, dim, ratio, side = 320 }: { source: RefObject<
 
 // An inserted clip, kept at the final video's time: it plays with the preview, and jumps when it is far off.
 // volume / length: its own sound, faded at the edges of the time it shows (clipGain, same as mix_clip_sounds in render.py).
+// A clip is made ready this long before it shows, unseen and paused on its first picture (coach 19 Nov: an inserted
+// clip took a while to appear): its file, the jump to its Trim and the first picture are done by the time it shows.
+// Kept until its end, so it isn't made again at its fade-in. Frame Me and Layout show one at a time, so theirs are
+// warmed up by a hidden player (ClipWarmup) that loads the same file.
+const CLIP_PRELOAD = 3;
+const clipSoon = (c: { start: number; end: number }, t: number) => t >= c.start - CLIP_PRELOAD && t <= c.end;
+
+// Loads a clip that will show soon, unseen, so the player that shows it finds the file (and the second it starts at)
+// already in the browser. The link is kept by the browser for an hour (api/library), so both ask for the same file.
+function ClipWarmup({ src, from = 0 }: { src: string; from?: number }) {
+	return (
+		<video
+			src={src}
+			muted
+			playsInline
+			preload="auto"
+			aria-hidden
+			onLoadedMetadata={(e) => {
+				if (from > 0) e.currentTarget.currentTime = from;
+			}}
+			style={{ position: "absolute", width: 2, height: 2, opacity: 0, pointerEvents: "none" }}
+		/>
+	);
+}
+
 // from: Trim, the second of the clip it starts at (clipFrom, lib/clip-sound.ts; clip_seek in render.py). A trim dragged on
 // the timeline moves its start and from together, so `at + from` stays put and the clip isn't asked to jump while dragging.
 function InsertClip({ src, at, from = 0, playing, style, onRatio, volume, length }: { src: string; at: number; from?: number; playing: boolean; style: CSSProperties; onRatio: (ratio: number) => void; volume?: number; length: number }) {
@@ -605,7 +630,8 @@ export function PlayerFrame({
 				{layers.inserts.map((i) => {
 					const show = insertShown(i, outTime);
 					const src = files[i.file];
-					if (!show || !src) return null;
+					const early = i.kind === "video" && clipSoon(i, outTime); // made ready, unseen, before it shows
+					if ((!show && !early) || !src) return null;
 					const moved = picMoved(i);
 					const ratio = ratios[i.file];
 					const seen = (r: number) => setRatios((all) => (all[i.file] === r ? all : { ...all, [i.file]: r }));
@@ -614,7 +640,7 @@ export function PlayerFrame({
 						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
 							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
 								{i.kind === "video" ? (
-									<InsertClip src={src} at={outTime - i.start} from={i.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
+									<InsertClip src={src} at={Math.max(0, outTime - i.start)} from={i.clipFrom} playing={playing && outTime >= i.start} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
 								) : (
 									// eslint-disable-next-line @next/next/no-img-element
 									<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
@@ -790,6 +816,9 @@ export function PlayerFrame({
 						</div>
 					</div>
 					{framed && <FrameEdge f={framed} W={W} H={H} scale={scale} box={boxRef} onChange={playing ? undefined : onFrameChange} />}
+					{/* Frame Me and Layout clips about to show: loaded unseen first (CLIP_PRELOAD). */}
+					{(frames ?? []).map((f) => f.back === "file" && f.media === "video" && f.file && f.id !== framed?.id && outTime < f.start && clipSoon(f, outTime) && <ClipWarmup key={`w-${f.id}`} src={projectFileSrc(f.file)} from={f.clipFrom} />)}
+					{(layouts ?? []).map((l) => l.media === "video" && l.file && l.id !== split?.id && outTime < l.start && clipSoon(l, outTime) && <ClipWarmup key={`w-${l.id}`} src={projectFileSrc(l.file)} from={l.clipFrom} />)}
 				</div>
 				<div
 					className="pointer-events-none absolute top-0 left-0"
@@ -802,8 +831,9 @@ export function PlayerFrame({
 						const move = bannerMotion(b, outTime);
 						const opacity = move.opacity * (b.opacity ?? 1);
 						const src = bannerFileSrc(b.file);
-						if (!opacity || !src) return null;
-						const movable = Boolean(onBannersChange) && !playing;
+						const early = b.media === "video" && clipSoon(b, outTime); // made ready, unseen, before it shows
+						if ((!opacity && !early) || !src) return null;
+						const movable = Boolean(onBannersChange) && !playing && opacity > 0; // not while made ready unseen
 						const fit: CSSProperties = { display: "block", width: "100%", height: "auto" };
 						return (
 							<div
@@ -822,7 +852,7 @@ export function PlayerFrame({
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									{b.media === "video" ? (
-										<InsertClip src={src} at={outTime - b.start} from={b.clipFrom} playing={playing} style={fit} onRatio={() => {}} volume={soundOf(b)} length={b.end - b.start} />
+										<InsertClip src={src} at={Math.max(0, outTime - b.start)} from={b.clipFrom} playing={playing && outTime >= b.start} style={fit} onRatio={() => {}} volume={soundOf(b)} length={b.end - b.start} />
 									) : (
 										// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 										<img src={src} alt="" draggable={false} style={fit} />
