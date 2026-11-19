@@ -131,7 +131,9 @@ export async function recordTransaction(txn: PaddleTransaction, event: string) {
 // extras: every pack still good, for lib/access.ts to take minutes from (extraMinutes is their total before any was used).
 // endedAt: when their last plan stopped giving access (none active now): the 90 days of keeping their files count from
 // there (lib/storage.ts). null: they never had one, or one is active.
-export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
+// latest: their newest plan whatever its status (cancelled or paused too), only for Manage billing, so past receipts
+// stay reachable after a plan ends (agent review 18 Nov). Never for access: that is `sub`.
+export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; latest: SubRecord | null; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
 const GIVES_ACCESS: SubStatus[] = ["active", "trialing", "past_due"];
 const RANK: Record<PaidPlan, number> = { starter: 1, pro: 2 };
 
@@ -149,5 +151,6 @@ export async function planFor(email: string, strict = false): Promise<PlanNow> {
 	// The end of the period they paid for: a scheduled cancel's date, else the period's end, else when Paddle said so.
 	const ends = best ? [] : subs.map((s) => (s.scheduled?.action === "cancel" ? s.scheduled.at : null) ?? s.periodEnds ?? s.occurredAt).filter(Boolean);
 	const endedAt = ends.length ? ends.sort().at(-1)! : null;
-	return { plan: best?.plan ?? "free", sub: best, extraMinutes, extras, endedAt };
+	const latest = best ?? [...subs].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)).at(-1) ?? null;
+	return { plan: best?.plan ?? "free", sub: best, latest, extraMinutes, extras, endedAt };
 }

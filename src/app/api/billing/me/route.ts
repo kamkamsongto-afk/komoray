@@ -10,6 +10,7 @@ export async function GET() {
 	const sub = now.sub;
 	return Response.json({
 		plan: now.plan,
+		hadPlan: Boolean(now.latest), // a plan that ended: the pricing page still offers Manage billing, for receipts
 		extraMinutes: access.extra?.left ?? 0, // what is left of them now, not what was bought
 		monthly: access.monthly,
 		...(sub && { status: sub.status, every: sub.every, periodEnds: sub.periodEnds, cancelsAt: sub.scheduled?.action === "cancel" ? sub.scheduled.at : null }),

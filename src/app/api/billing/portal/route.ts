@@ -16,8 +16,9 @@ export async function POST() {
 	const { user } = await currentUser();
 	if (!user?.email) return Response.json({ error: "Please sign in first" }, { status: 401 });
 
-	const { sub } = await planFor(user.email);
-	if (!sub || !PADDLE_ID.test(sub.customerId) || !PADDLE_ID.test(sub.subscriptionId)) {
+	// latest, not sub: a cancelled or paused plan still opens the portal, for its receipts (and to resume a paused one).
+	const { latest: sub } = await planFor(user.email);
+	if (!sub ||!PADDLE_ID.test(sub.customerId) || !PADDLE_ID.test(sub.subscriptionId)) {
 		return Response.json({ error: "There's no plan to manage on this account yet." }, { status: 404 });
 	}
 
@@ -42,7 +43,8 @@ export async function POST() {
 	const res = await fetch(`${api}/customers/${sub.customerId}/portal-sessions`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-		body: JSON.stringify({ subscription_ids: [sub.subscriptionId] }),
+		// A cancelled one isn't named: there is nothing left to manage on it, and the overview still lists past payments.
+		body: JSON.stringify(sub.status === "canceled" ? {} : { subscription_ids: [sub.subscriptionId] }),
 	}).catch(() => null);
 	const data = (await res?.json().catch(() => null)) as { data?: { urls?: { general?: { overview?: string } } } } | null;
 	const url = data?.data?.urls?.general?.overview;
