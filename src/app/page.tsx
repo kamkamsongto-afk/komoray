@@ -39,6 +39,7 @@ export default function Home() {
 						<a href="#words">My words</a>
 						<a href="#effects">Effects</a>
 						<a href="#studio">Studio</a>
+						<Link href="/pricing">Pricing</Link>
 						<a className="k-pill" href="#access">
 							Get early access
 						</a>
@@ -63,6 +64,9 @@ export default function Home() {
 								<path d="M5 2l5 5-5 5" />
 							</svg>
 						</a>
+						<Link className="k-herocta k-herocta-ghost" href="/pricing">
+							See pricing
+						</Link>
 					</div>
 				</section>
 			</div>
@@ -195,11 +199,14 @@ export default function Home() {
 						is <span className="k-lime">waiting.</span>
 					</h2>
 					<div className="k-finalform">
-						<p className="k-promise">Private beta. Your videos stay yours. We never sell your data, and we never use your videos to train AI models.</p>
+						{/* Still invite only until PLANS_LIVE (lib/plans.ts), but it reads as a product about to sell, for Paddle's check (coach 19 Nov). */}
+						<p className="k-promise">In beta now. Open to everyone on December 25. Your videos stay yours. We never sell your data, and we never use your videos to train AI models.</p>
 						<WaitlistForm />
 					</div>
 					<footer className="k-foot">
 						<div>
+							<Link href="/pricing">Pricing</Link>
+							<Link href="/refund">Refund Policy</Link>
 							<Link href="/privacy">Privacy</Link>
 							<Link href="/terms">Terms</Link>
 							<a href="mailto:hello@komoray.com">hello@komoray.com</a>

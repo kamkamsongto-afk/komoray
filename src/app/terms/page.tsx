@@ -42,6 +42,7 @@ export default function TermsPage() {
 				</li>
 			</ul>
 
+			{/* The refund and cancel lines are repeated on app/refund/page.tsx: change both together. */}
 			<h2>Payments</h2>
 			<p>
 				Our order process is conducted by our online reseller Paddle.com. Paddle.com is the Merchant of Record for all our
