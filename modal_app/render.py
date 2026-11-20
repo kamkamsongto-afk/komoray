@@ -1277,6 +1277,10 @@ EN_NO_END = {"a", "an", "the", "i", "i'm", "i've", "i'll", "i'd", "to", "of", "a
 EN_PUNCT = re.compile(r"[.,!?;:…][\"'”’)]*$")
 
 
+EN_NO_END_COST = 100  # frames: ending on such a word costs more than any pause is worth (timeline.ts)
+EN_CARRY_PAUSE = 2  # seconds: a line ended by a pause this short after such a word gives it to the next line (timeline.ts)
+
+
 def en_word(text: str) -> str:
     return re.sub(r"^[^a-z0-9']+|[^a-z0-9']+$", "", text.lower().replace("’", "'"))
 THAI_LETTER_EM = 0.44  # how wide a Thai letter is, in text sizes: to work out what letter spacing costs (timeline.ts)
@@ -1314,7 +1318,7 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
                 continue
             last, first = every[k - 1], every[k]
             end = bool(EN_PUNCT.search(last["text"]))
-            score = first["start"] - last["end"] + (START_BONUS if end else 0) - (2 * START_BONUS if not end and en_word(last["text"]) in EN_NO_END else 0) + 0.3 * k
+            score = first["start"] - last["end"] + (START_BONUS if end else 0) - (EN_NO_END_COST if not end and en_word(last["text"]) in EN_NO_END else 0) + 0.3 * k
             if score >= best_score:
                 best, best_score = k, score
         return best
@@ -1324,8 +1328,16 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
         crosses_split = bool(current) and any(current[-1]["start"] < b <= w["start"] + 0.01 for b in (breaks or []))
         # br: two spaces typed before it in Edit text, a new line here (coach 20 Nov, subtitleLines in timeline.ts).
         if crosses_split or (current and w.get("br")) or (current and w["start"] - current[-1]["end"] > gap_frames):
-            lines.append(current)
-            current = []
+            # Ended by a pause after a word that leads on ("With Komoray, I … can"): that word starts the next line
+            # (coach 20 Nov). Never across a Split or a typed line break, never in Thai. Same as subtitleLines.
+            last = current[-1] if current else None
+            carry = (
+                not thai and not crosses_split and not w.get("br") and current and w["start"] - last["end"] <= EN_CARRY_PAUSE * FPS
+                and not EN_PUNCT.search(last["text"]) and en_word(last["text"]) in EN_NO_END
+            )
+            if not carry or len(current) > 1:  # a lone such word just waits for the next
+                lines.append(current[:-1] if carry else current)
+            current = [last] if carry else []
         elif current and not fits(current + [w]):
             k = best_break(current, w) if thai else english_break(current, w)
             lines.append(current[:k])

@@ -29,6 +29,11 @@ const START_BONUS = 8; // frames: a phrase start or a polite ending is worth a p
 // leads into the next one, best after , . ! ? or at a pause. Same as EN_NO_END / EN_PUNCT / english_break in render.py.
 const EN_NO_END = new Set(["a", "an", "the", "i", "i'm", "i've", "i'll", "i'd", "to", "of", "and", "or", "but", "my", "your", "his", "her", "our", "their", "its", "in", "on", "at", "for", "with", "from", "by", "as", "if", "so", "that", "this", "these", "those", "we", "you", "they", "he", "she", "we're", "you're", "they're", "it's", "is", "are", "was", "were", "not", "don't", "can't", "very", "just", "can", "will", "would", "could", "should", "into", "about", "than", "when", "because"]);
 const EN_PUNCT = /[.,!?;:…]["'”’)]*$/;
+// A line that ends at a pause after such a word ("With Komoray, I … can") gives that word to the next line, if the pause
+// is at most this many seconds (a longer one would show it long before the rest is said). EN_CARRY_PAUSE in render.py.
+const EN_CARRY_PAUSE = 2;
+// frames: what ending on such a word costs, more than any pause is worth, so it happens only when nothing else fits. EN_NO_END_COST in render.py
+const EN_NO_END_COST = 100;
 const enWord = (text: string) => text.toLowerCase().replace(/’/g, "'").replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
 const THAI_LETTER_EM = 0.44; // how wide a Thai letter is, in text sizes: to work out what letter spacing costs
 const THAI_PAUSE = 0.15; // a pause this long inside a Thai line gets a space
@@ -260,7 +265,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 			if (k < run.length && !fits(all.slice(k))) continue;
 			const [last, first] = [all[k - 1], all[k]];
 			const end = EN_PUNCT.test(last.text);
-			const score = first.start - last.end + (end ? START_BONUS : 0) - (!end && EN_NO_END.has(enWord(last.text)) ? 2 * START_BONUS : 0) + 0.3 * k;
+			const score = first.start - last.end + (end ? START_BONUS : 0) - (!end && EN_NO_END.has(enWord(last.text)) ? EN_NO_END_COST : 0) + 0.3 * k;
 			if (score >= bestScore) [best, bestScore] = [k, score];
 		}
 		return best;
@@ -272,8 +277,12 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		const crossesSplit = current.length > 0 && breaks.some((b) => current[current.length - 1].start < b && b <= w.start + 0.01);
 		// br: two spaces typed before it in Edit text, a new line here (coach 20 Nov). Same in group_lines (render.py).
 		if (crossesSplit || (current.length && w.br) || (current.length && w.start - current[current.length - 1].end > gapFrames)) {
-			groups.push(current);
-			current = [];
+			// Ended by a pause after a word that leads on: that word starts the next line (coach 20 Nov). Never across a
+			// Split or a typed line break (two spaces), and never in Thai.
+			const last = current[current.length - 1];
+			const carry = !thai && !crossesSplit && !w.br && w.start - last.end <= EN_CARRY_PAUSE * FPS && !EN_PUNCT.test(last.text) && EN_NO_END.has(enWord(last.text));
+			if (!carry || current.length > 1) groups.push(carry ? current.slice(0, -1) : current); // a lone such word just waits for the next
+			current = carry ? [last] : [];
 		} else if (current.length && !fits([...current, w])) {
 			const k = thai ? bestBreak(current, w) : englishBreak(current, w);
 			groups.push(current.slice(0, k));
