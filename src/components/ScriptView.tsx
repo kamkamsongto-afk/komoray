@@ -304,6 +304,7 @@ export function ScriptView({
 	const [finding, setFinding] = useState<{ find: string; replace: string } | null>(null);
 	const wordItems = useMemo(() => items.filter((it): it is WordItem => it.kind === "word"), [items]);
 	const gone = useMemo(() => new Set(deleted), [deleted]);
+	const isGone = (index: number) => gone.has(index); // a fix never takes in a cut word next to it (withNeighbours)
 	// Preview = the final video (cuts, 9:16, subtitles), built live in the browser. Original = the raw upload.
 	const [mode, setMode] = useState<"preview" | "original">("preview");
 	const [speed, setSpeed] = useState(1); // the preview's; outlives the player, which is made again after the Original
@@ -576,7 +577,7 @@ export function ScriptView({
 	function saveEdit(text: string, remember = true) {
 		if (!editing || text.trim().length > MAX_FIX_LENGTH) return;
 		// Typed in the word next to it too ("ใช่" → "ไม่ใช่" right after "ไม่"): the fix covers that word, never repeats it.
-		const { from, to } = withNeighbours(wordItems, editing.from, editing.to, text, editing.before);
+		const { from, to } = withNeighbours(wordItems, editing.from, editing.to, text, editing.before, isGone);
 		const original = from === editing.from && to === editing.to ? editing.original : originalText(from, to);
 		onFixesChange(setFix(fixes, from, to, text, original));
 		if (remember) learn(from, to, text, editing.before);
@@ -592,7 +593,7 @@ export function ScriptView({
 		const plain: typeof matches = [];
 		for (const m of matches) {
 			const text = m.keep ? m.keep.join(replacement.trim()) : replacement.trim() && m.trail && !TRAIL.test(replacement.trim()) ? replacement.trim() + m.trail : replacement;
-			const span = withNeighbours(wordItems, m.from, m.to, text, drawnText(m.from, m.to));
+			const span = withNeighbours(wordItems, m.from, m.to, text, drawnText(m.from, m.to), isGone);
 			if (skip?.(span)) continue;
 			next = setFix(next, span.from, span.to, text, originalText(span.from, span.to));
 			if (norm(text) !== norm(originalText(span.from, span.to))) applied++; // widened onto words that already read so: nothing changed
@@ -633,7 +634,7 @@ export function ScriptView({
 
 	const editTooLong = Boolean(editing && editing.text.trim().length > MAX_FIX_LENGTH);
 	// What this fix would teach My words, worked out as it is typed (the same widening as saveEdit).
-	const editSpan = editing ? withNeighbours(wordItems, editing.from, editing.to, editing.text, editing.before) : null;
+	const editSpan = editing ? withNeighbours(wordItems, editing.from, editing.to, editing.text, editing.before, isGone) : null;
 	const editLesson = editing && editSpan && editing.text.trim() ? lessonOf(editSpan.from, editSpan.to, editing.text) : null;
 	const editTeaches = Boolean(onLearn && editLesson?.kind === "spelling" && editLesson.pairs.length);
 	const editingFixed = editing && fixes.some((f) => f.to >= editing.from && f.from <= editing.to);

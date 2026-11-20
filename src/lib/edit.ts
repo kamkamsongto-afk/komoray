@@ -243,19 +243,21 @@ function closes(text: string, word: string) {
 	if (/[฀-๿]/.test(word)) return squashWord(text).length > squashWord(word).length && squashWord(text).endsWith(squashWord(word));
 	return normText(text).endsWith(` ${normText(word)}`);
 }
-export function withNeighbours(words: { index: number; last: number; text: string }[], from: number, to: number, text: string, shown: string) {
+// gone: words cut from the video are never taken in. "มัน" was cut, the creator typed "มันมีสัญญาณ…" over the words after
+// it, the fix took the cut word in and, starting on a cut word, the whole sentence showed (and played) as cut (coach 20 Nov).
+export function withNeighbours(words: { index: number; last: number; text: string }[], from: number, to: number, text: string, shown: string, gone?: (index: number) => boolean) {
 	let first = words.findIndex((w) => w.index === from);
 	let last = words.findIndex((w) => w.last === to);
 	if (first < 0 || last < 0 || !normText(text)) return { from, to };
 	for (let n = 0; n < MAX_NEIGHBOURS && first > 0; n++) {
 		const before = words[first - 1].text;
-		if (!opens(text, before) || opens(shown, before)) break;
+		if (gone?.(words[first - 1].index) || !opens(text, before) || opens(shown, before)) break;
 		first--;
 		shown = /[฀-๿]/.test(before) ? before + shown : `${before} ${shown}`;
 	}
 	for (let n = 0; n < MAX_NEIGHBOURS && last < words.length - 1; n++) {
 		const after = words[last + 1].text;
-		if (!closes(text, after) || closes(shown, after)) break;
+		if (gone?.(words[last + 1].index) || !closes(text, after) || closes(shown, after)) break;
 		last++;
 		shown = /[฀-๿]/.test(after) ? shown + after : `${shown} ${after}`;
 	}
