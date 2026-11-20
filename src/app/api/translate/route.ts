@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 
 	const style = readStyle(edit.style);
 	const segments = keepSegments(edit.duration, allCuts(edit));
-	const lines = subtitleLines(fixedWords(edit.words, edit.fixes, cutThaiWords), segments, style.look, style.size, style.letterSpacing);
+	const lines = subtitleLines(fixedWords(edit.words, edit.fixes, cutThaiWords, edit.deleted), segments, style.look, style.size, style.letterSpacing);
 	const texts = lines.map((l) => l.text.trim());
 
 	const savedKey = siblingKey(key, `translation-${language}.json`);

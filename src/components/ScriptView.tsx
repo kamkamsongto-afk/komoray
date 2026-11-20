@@ -398,8 +398,8 @@ export function ScriptView({
 	// Thai typed in becomes its words once newmm is here (loaded only for a video with Thai fixes, lib/thai-cut.ts).
 	const thaiCut = useThaiCut(fixesNeedThaiCut(fixes));
 	const lines = useMemo(
-		() => subtitleLines(fixedWords(words, fixes, thaiCut), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots),
-		[words, fixes, thaiCut, segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots],
+		() => subtitleLines(fixedWords(words, fixes, thaiCut, deleted), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots),
+		[words, fixes, thaiCut, deleted, segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots],
 	);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);

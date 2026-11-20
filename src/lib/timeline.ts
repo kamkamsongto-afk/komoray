@@ -4,7 +4,7 @@
 import type { SubtitleSpot } from "./subtitle-style";
 
 type Span = { start: number; end: number };
-type Word = { text: string; start: number; end: number; space?: boolean; glue?: boolean; br?: boolean }; // space: typed by the user, glue: typed onto the word before, br: two spaces typed before it = a new line (fixedWords)
+type Word = { text: string; start: number; end: number; space?: boolean; glue?: boolean; br?: boolean; gone?: boolean }; // space: typed by the user, glue: typed onto the word before, br: two spaces typed before it = a new line (fixedWords)
 
 export const FPS = 30;
 export const WIDTH = 1080;
@@ -181,6 +181,25 @@ function placeFrame(t: number, segments: Segment[]): number | null {
 	return s ? s.from + (f - s.trim) : null;
 }
 
+// Where a subtitle word goes on the final video: at its middle, or, when its middle was cut but part of it is still in
+// the video, the middle of the biggest part left (at least PART_LEFT frames). A cut drawn by hand took the first half of
+// "ภรรยา" (218.29-218.59 s, the word 218.33-218.82 s), its middle fell in it and the word vanished from the subtitles
+// though it is still heard (coach 20 Nov). Never a word deleted in the script (gone, fixedWords): the start of a deleted
+// "อายุ" was dragged back in on the timeline in the same video, and it must stay out. Same as place_word in render.py.
+const PART_LEFT = 4;
+function placeWord(start: number, end: number, segments: Segment[], gone?: boolean): { mid: number; half: number } | null {
+	const mid = placeFrame((start + end) / 2, segments);
+	if (mid !== null) return { mid, half: ((end - start) / 2) * FPS };
+	if (gone) return null;
+	let best: { mid: number; half: number } | null = null;
+	for (const s of segments) {
+		const a = Math.max(start * FPS, s.trim);
+		const b = Math.min(end * FPS, s.trim + s.frames);
+		if (b - a >= PART_LEFT && (!best || b - a > best.half * 2)) best = { mid: s.from + (a + b) / 2 - s.trim, half: (b - a) / 2 };
+	}
+	return best;
+}
+
 const isThai = (text: string) => /[฀-๿]/.test(text);
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
@@ -227,9 +246,9 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 
 	const placed: { text: string; start: number; end: number; space?: boolean; glue?: boolean; br?: boolean }[] = [];
 	for (const w of words) {
-		const mid = placeFrame((w.start + w.end) / 2, segments);
-		if (mid === null) continue;
-		const half = ((w.end - w.start) / 2) * FPS;
+		const at = placeWord(w.start, w.end, segments, w.gone);
+		if (!at) continue;
+		const { mid, half } = at;
 		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half, space: w.space, glue: w.glue, br: w.br });
 	}
 

@@ -1224,6 +1224,27 @@ def place_frame(t: float, segments: list[tuple[int, int, int]]) -> float | None:
     return None
 
 
+PART_LEFT = 4  # frames: a word whose middle was cut still shows if this much of it is left (placeWord in timeline.ts)
+
+
+def place_word(start: float, end: float, segments: list[tuple[int, int, int]], gone: bool = False) -> tuple[float, float] | None:
+    """(middle, half length) of a subtitle word on the final video, in frames: at its middle, or, when that was cut,
+    the middle of the biggest part of it still in the video (a cut drawn by hand over half a word), never for a word
+    deleted in the script (gone, from fixedWords). Same as placeWord."""
+    mid = place_frame((start + end) / 2, segments)
+    if mid is not None:
+        return mid, (end - start) / 2 * FPS
+    if gone:
+        return None
+    best = None
+    for out_start, trim, frames in segments:
+        a = max(start * FPS, trim)
+        b = min(end * FPS, trim + frames)
+        if b - a >= PART_LEFT and (best is None or b - a > best[1] * 2):
+            best = (out_start + (a + b) / 2 - trim, (b - a) / 2)
+    return best
+
+
 def break_frame(t: float, segments: list[tuple[int, int, int]]) -> float | None:
     """The output frame a Split breaks subtitle lines at (the breaks in subtitleLines, timeline.ts)."""
     placed = place_frame(t, segments)
@@ -1509,10 +1530,10 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     segments = frame_segments(keeps)
     placed = []
     for w in words:
-        mid = place_frame((w["start"] + w["end"]) / 2, segments)
-        if mid is None:
+        at = place_word(w["start"], w["end"], segments, bool(w.get("gone")))
+        if at is None:
             continue
-        half = (w["end"] - w["start"]) / 2 * FPS
+        mid, half = at
         placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half, "space": w.get("space"), "glue": w.get("glue"), "br": w.get("br")})
 
     # Group words into short lines.
