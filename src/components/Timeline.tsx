@@ -1175,7 +1175,8 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 
 			<div className="relative">
 			{/* To the start / to the end at the timeline's two sides (coach, 14 Nov: the four arrows in the middle of the
-			    waveform were in the way of picking). Only while the mouse is over the waveform; always on a phone. */}
+			    waveform were in the way of picking). Only while the mouse is over the waveform; always on a phone.
+			    z-[5], as the Zoom button: the timeline's pinned top (sticky, z-[3], solid since 17 Nov) came later and hid them (coach 20 Nov). */}
 			{!smallWave &&
 				(
 					[
@@ -1190,7 +1191,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 						onPointerLeave={() => setOverWave(false)}
 						aria-label={name}
 						title={name}
-						className={`absolute ${side} z-[3] h-7 w-7 items-center justify-center rounded-full border border-foreground/15 bg-background/95 text-foreground/70 shadow hover:text-foreground max-sm:flex [@media(hover:none)]:flex ${overWave ? "flex" : "hidden"}`}
+						className={`absolute ${side} z-[5] h-7 w-7 items-center justify-center rounded-full border border-foreground/15 bg-background/95 text-foreground/70 shadow hover:text-foreground max-sm:flex [@media(hover:none)]:flex ${overWave ? "flex" : "hidden"}`}
 						style={{ top: WAVE_TOP + wave / 2 - 14 }}
 					>
 						<Icon className="h-3.5 w-3.5" aria-hidden />
@@ -1202,7 +1203,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 				title="Zoom"
 				aria-label="Zoom"
 				aria-pressed={zoomEditing}
-				className={`absolute left-1 z-[3] flex h-6 w-6 items-center justify-center rounded-full text-xs shadow transition-opacity ${
+				className={`absolute left-1 z-[5] flex h-6 w-6 items-center justify-center rounded-full text-xs shadow transition-opacity ${
 					zoomEditing ? "bg-purple-600 text-white" : "bg-background/90 opacity-60 hover:opacity-100"
 				}`}
 				style={{ top: WAVE_TOP + wave - 26 }}
