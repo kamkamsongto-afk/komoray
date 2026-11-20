@@ -27,7 +27,7 @@ import { watermarkOn } from "@/lib/watermark-on";
 const LINK_SECONDS = 3600;
 // Part of every video's fingerprint (below). Change it whenever render.py makes the same edits look different
 // (a fix or a new look): else a press that changed nothing hands back the video made before the fix.
-const RENDER_REV = "2026-11-20b"; // a: English lines never end on a word that leads on ("I", "the"), break at , . or a pause. b: two spaces typed = a new line; retyped English words keep their times
+const RENDER_REV = "2026-11-20c"; // a: English lines never end on a word that leads on ("I", "the"), break at , . or a pause. b: two spaces typed = a new line; retyped English words keep their times. c: an English line ended by a pause gives a leading word ("I") to the next
 
 async function fingerprintOf(parts: unknown) {
 	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(parts)));
