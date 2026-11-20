@@ -6,6 +6,7 @@ import type { OwnFont } from "./font-info";
 import { projectFileSrc } from "./media-library";
 import { type FontId, type Format, readFont } from "./subtitle-style";
 import { readClipSound } from "./clip-sound";
+import { type Fades, fadesOn, readFades } from "./fades";
 
 // file: the customer's own finished banner, a picture or clip uploaded next to the video (12 Nov).
 export type BannerKind = "price" | "cta" | "follow" | "file";
@@ -43,7 +44,7 @@ export type Banner = {
 	volume?: number; // media "video": how loud its own sound is, none = silent (lib/clip-sound.ts). Added 12 Nov
 	muted?: boolean; // media "video": Mute ticked (keeps volume for when it is untied)
 	clipFrom?: number; // media "video": the second of the clip it plays from (Trim, lib/clip-sound.ts). Added 19 Nov
-};
+} & Fades; // Fade in / Fade out switches (lib/fades.ts). Added 20 Nov
 
 // How a banner arrives. Same keyframes as BANNER_ANIMS in render.py, which writes them as ASS tags.
 export type BannerAnim = "fade" | "pop" | "bounce" | "slideUp" | "slideSide" | "pulse";
@@ -68,11 +69,12 @@ export function bannerMotion(b: Banner, t: number) {
 	if (t < b.start || t >= b.end) return { opacity: 0, scale: 1, x: 0, y: 0 };
 	const anim = BANNER_ANIMS[b.anim ?? "fade"];
 	const ms = (t - b.start) * 1000;
-	const fadeIn = anim.fadeIn ? (t - b.start) / BANNER.fade : 1;
+	const on = fadesOn(b);
+	const fadeIn = anim.fadeIn && on.in ? (t - b.start) / BANNER.fade : 1;
 	const left = Math.max(0, 1 - ms / SLIDE_MS);
 	const swing = (ms % PULSE_MS) / (PULSE_MS / 2);
 	return {
-		opacity: Math.min(1, fadeIn, (b.end - t) / BANNER.fade),
+		opacity: Math.min(1, fadeIn, on.out ? (b.end - t) / BANNER.fade : 1),
 		scale: anim.keys ? scaleOn(anim.keys, ms) / 100 : b.anim === "pulse" ? 1 + 0.08 * (swing <= 1 ? swing : 2 - swing) : 1,
 		x: (anim.slide?.[0] ?? 0) * left,
 		y: (anim.slide?.[1] ?? 0) * left,
@@ -192,6 +194,7 @@ export function readBanners(value: unknown): Banner[] | null {
 			// An uploaded banner always sits where it was put (at first: the middle, near the top).
 			...(file && { file, media: file.endsWith(".mp4") ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),
 			...readClipSound(raw, Boolean(file?.endsWith(".mp4"))),
+			...readFades(raw),
 		});
 	}
 	return out;

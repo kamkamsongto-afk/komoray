@@ -8,6 +8,7 @@ import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
+import { FadeSwitches } from "./FadeSwitches";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { LayerTools } from "./LayerTools";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
@@ -217,6 +218,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 								ON_TIMELINE,
 								<TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />,
 							)}
+							<FadeSwitches item={f} onChange={(patch) => update(f.id, patch)} />
 							{row("Size", range(f.size, FRAME.size.min, FRAME.size.max, 0.01, percent(f.size), (size) => update(f.id, { size })))}
 							{row("Left / right", range(f.x, FRAME.move.min, FRAME.move.max, 0.005, percent(f.x), (x) => update(f.id, { x })))}
 							{row("Up / down", range(f.y, FRAME.move.min, FRAME.move.max, 0.005, percent(f.y), (y) => update(f.id, { y })))}
