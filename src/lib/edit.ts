@@ -120,17 +120,23 @@ const THAI_LETTER = /[฀-๿]/;
 // br: two spaces (or more) typed before it: a new subtitle line starts there (coach 20 Nov: Split was for moving
 // subtitles, not for where a line breaks). LINE_BREAK = the typed gap that means it.
 export const LINE_BREAK = /\s{2,}|\n/;
+// Two spaces typed before the first word: the line breaks before it too. The only way to break between words with a cut
+// between them, as one fix can't cover both sides (coach 20 Nov: "ก็คือ | ไม่อยากจะ" with cut words between).
+export const LEAD_BREAK = /^(?:\s{2,}|\s*\n)/;
+// A fix's text as kept: trimmed, but a leading break stays (as two spaces).
+export const fixText = (text: string) => (LEAD_BREAK.test(text) && text.trim() ? "  " : "") + text.trim();
 function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut?: ThaiCut): W[] {
 	const pieces: string[] = [];
 	const spaced: boolean[] = [];
 	const broken: boolean[] = [];
 	const gaps = text.trim().match(/\s+/g) ?? [];
+	const lead = LEAD_BREAK.test(text);
 	for (const [n, chunk] of text.trim().split(/\s+/).entries()) {
 		const words = cut && THAI_LETTER.test(chunk) ? cut(chunk).filter((w) => w.trim()) : [chunk];
 		for (const [k, word] of (words.length ? words : [chunk]).entries()) {
 			pieces.push(word);
 			spaced.push(n > 0 && k === 0);
-			broken.push(n > 0 && k === 0 && LINE_BREAK.test(gaps[n - 1]));
+			broken.push(k === 0 && (n > 0 ? LINE_BREAK.test(gaps[n - 1]) : lead));
 		}
 	}
 	if (pieces.length === 1) {
@@ -143,7 +149,7 @@ function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut
 			if (run[k - 1].end - run[s].start > run[best[1]].end - run[best[0]].start) best = [s, k - 1];
 			s = k;
 		}
-		return [{ ...run[0], text, start: run[best[0]].start, end: run[best[1]].end }];
+		return [{ ...run[0], text: text.trim(), start: run[best[0]].start, end: run[best[1]].end, ...(lead ? { br: true } : {}) }];
 	}
 	const spoken = run.reduce((sum, w) => sum + w.end - w.start, 0);
 	const letters = pieces.reduce((sum, p) => sum + spokenLetters(p), 0);
@@ -267,10 +273,10 @@ export function withNeighbours(words: { index: number; last: number; text: strin
 // Put a fix on words from..to, replacing any fix it overlaps. The original text (or nothing) removes it.
 export function setFix(fixes: Fix[], from: number, to: number, text: string, original: string): Fix[] {
 	const kept = fixes.filter((f) => f.to < from || f.from > to);
-	const clean = text.trim();
+	const clean = fixText(text);
 	// Too long: nothing changes, and the box says so. Cutting it here made the end of the text vanish from the script and the subtitles.
 	if (clean.length > MAX_FIX_LENGTH) return fixes;
-	if (clean && clean !== original) kept.push({ from, to, text: clean });
+	if (clean.trim() && clean !== original) kept.push({ from, to, text: clean });
 	return kept.sort((a, b) => a.from - b.from);
 }
 
@@ -282,7 +288,7 @@ export function readFixes(value: unknown, count: number): Fix[] | null {
 		const { from, to, text } = f ?? {};
 		if (!Number.isInteger(from) || !Number.isInteger(to) || typeof text !== "string") return null;
 		if (from! < 0 || to! < from! || to! >= count || !text.trim() || text.length > MAX_FIX_LENGTH) return null;
-		fixes.push({ from: from!, to: to!, text: text.trim() });
+		fixes.push({ from: from!, to: to!, text: fixText(text) });
 	}
 	fixes.sort((a, b) => a.from - b.from);
 	return fixes.every((f, i) => i === 0 || f.from > fixes[i - 1].to) ? fixes : null;

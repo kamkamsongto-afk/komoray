@@ -4,7 +4,7 @@ import { Columns2, Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pe
 import { type CSSProperties, Fragment, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
 import { fixesNeedThaiCut, useThaiCut } from "@/lib/thai-cut";
-import { allCuts, findInside, type Fix, fixedWords, LINE_BREAK, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
+import { allCuts, findInside, type Fix, fixedWords, LEAD_BREAK, LINE_BREAK, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
 import { addToLibrary, filesInUse, type LibraryItem, loadLibrary, projectFileSrc } from "@/lib/media-library";
@@ -148,6 +148,11 @@ const WordSpan = memo(function WordSpan({
 			>
 				{/* Two spaces typed in Edit text = a new subtitle line there (lib/edit.ts LINE_BREAK): a small ↵ shows where, as the
 				    browser shows two spaces as one (coach 20 Nov). */}
+				{item.fixed && LEAD_BREAK.test(item.text) && (
+					<span className="mx-0.5 align-super text-[0.65em] font-bold text-blue-600" title="A new subtitle line starts here (two spaces typed)">
+						↵
+					</span>
+				)}
 				{item.fixed && LINE_BREAK.test(item.text.trim())
 					? item.text
 							.trim()
@@ -162,7 +167,9 @@ const WordSpan = memo(function WordSpan({
 									{part}
 								</Fragment>
 							))
-					: item.text}
+					: item.fixed
+						? item.text.trim()
+						: item.text}
 			</span>
 		</>
 	);
