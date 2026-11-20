@@ -27,7 +27,7 @@ import { watermarkOn } from "@/lib/watermark-on";
 const LINK_SECONDS = 3600;
 // Part of every video's fingerprint (below). Change it whenever render.py makes the same edits look different
 // (a fix or a new look): else a press that changed nothing hands back the video made before the fix.
-const RENDER_REV = "2026-11-16c"; // c: words typed together stay on one subtitle line
+const RENDER_REV = "2026-11-20a"; // a: English lines never end on a word that leads on ("I", "the"), break at , . or a pause
 
 async function fingerprintOf(parts: unknown) {
 	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(parts)));

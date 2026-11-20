@@ -25,6 +25,11 @@ const LINE_LIMITS = {
 const THAI_NO_START = new Set(["นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"]);
 const THAI_STARTS = new Set(["แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"]);
 const START_BONUS = 8; // frames: a phrase start or a polite ending is worth a pause this long
+// Where an English line may break (coach 20 Nov: "With Komoray, I" left the I at the end): never after a word that
+// leads into the next one, best after , . ! ? or at a pause. Same as EN_NO_END / EN_PUNCT / english_break in render.py.
+const EN_NO_END = new Set(["a", "an", "the", "i", "i'm", "i've", "i'll", "i'd", "to", "of", "and", "or", "but", "my", "your", "his", "her", "our", "their", "its", "in", "on", "at", "for", "with", "from", "by", "as", "if", "so", "that", "this", "these", "those", "we", "you", "they", "he", "she", "we're", "you're", "they're", "it's", "is", "are", "was", "were", "not", "don't", "can't", "very", "just", "can", "will", "would", "could", "should", "into", "about", "than", "when", "because"]);
+const EN_PUNCT = /[.,!?;:…]["'”’)]*$/;
+const enWord = (text: string) => text.toLowerCase().replace(/’/g, "'").replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
 const THAI_LETTER_EM = 0.44; // how wide a Thai letter is, in text sizes: to work out what letter spacing costs
 const THAI_PAUSE = 0.15; // a pause this long inside a Thai line gets a space
 const LINE_BREAK_GAP = 0.5;
@@ -245,6 +250,22 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		return best;
 	};
 
+	// A full English line: k = how many words stay (at least half), the rest carried on if it fits. Not after a word that
+	// leads on ("I", "the"), best after a comma or full stop or at a pause. Same as english_break in render.py.
+	const englishBreak = (run: Placed[], next: Placed) => {
+		const all = [...run, next];
+		let best = run.length;
+		let bestScore = -Infinity;
+		for (let k = Math.ceil(run.length / 2); k <= run.length; k++) {
+			if (k < run.length && !fits(all.slice(k))) continue;
+			const [last, first] = [all[k - 1], all[k]];
+			const end = EN_PUNCT.test(last.text);
+			const score = first.start - last.end + (end ? START_BONUS : 0) - (!end && EN_NO_END.has(enWord(last.text)) ? 2 * START_BONUS : 0) + 0.3 * k;
+			if (score >= bestScore) [best, bestScore] = [k, score];
+		}
+		return best;
+	};
+
 	const groups: Placed[][] = [];
 	let current: Placed[] = [];
 	for (const w of placed) {
@@ -253,7 +274,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 			groups.push(current);
 			current = [];
 		} else if (current.length && !fits([...current, w])) {
-			const k = thai ? bestBreak(current, w) : current.length;
+			const k = thai ? bestBreak(current, w) : englishBreak(current, w);
 			groups.push(current.slice(0, k));
 			current = current.slice(k);
 		}

@@ -1271,6 +1271,14 @@ def thai_letters(text: str) -> int:
 THAI_NO_START = {"นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"}
 THAI_STARTS = {"แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"}
 START_BONUS = 8  # frames: a phrase start or a polite ending is worth a pause this long
+# Where an English line may break (coach 20 Nov: "With Komoray, I"): never after a word that leads into the next one,
+# best after , . ! ? or at a pause. Same as EN_NO_END / EN_PUNCT / englishBreak in src/lib/timeline.ts.
+EN_NO_END = {"a", "an", "the", "i", "i'm", "i've", "i'll", "i'd", "to", "of", "and", "or", "but", "my", "your", "his", "her", "our", "their", "its", "in", "on", "at", "for", "with", "from", "by", "as", "if", "so", "that", "this", "these", "those", "we", "you", "they", "he", "she", "we're", "you're", "they're", "it's", "is", "are", "was", "were", "not", "don't", "can't", "very", "just", "can", "will", "would", "could", "should", "into", "about", "than", "when", "because"}
+EN_PUNCT = re.compile(r"[.,!?;:…][\"'”’)]*$")
+
+
+def en_word(text: str) -> str:
+    return re.sub(r"^[^a-z0-9']+|[^a-z0-9']+$", "", text.lower().replace("’", "'"))
 THAI_LETTER_EM = 0.44  # how wide a Thai letter is, in text sizes: to work out what letter spacing costs (timeline.ts)
 
 
@@ -1297,6 +1305,20 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
                 best, best_score = k, score
         return best
 
+    def english_break(run: list[dict], nxt: dict) -> int:
+        # A full English line: k = how many words stay (at least half), the rest carried on if it fits (englishBreak).
+        every = run + [nxt]
+        best, best_score = len(run), -math.inf
+        for k in range(math.ceil(len(run) / 2), len(run) + 1):
+            if k < len(run) and not fits(every[k:]):
+                continue
+            last, first = every[k - 1], every[k]
+            end = bool(EN_PUNCT.search(last["text"]))
+            score = first["start"] - last["end"] + (START_BONUS if end else 0) - (2 * START_BONUS if not end and en_word(last["text"]) in EN_NO_END else 0) + 0.3 * k
+            if score >= best_score:
+                best, best_score = k, score
+        return best
+
     lines, current = [], []
     for w in placed:
         crosses_split = bool(current) and any(current[-1]["start"] < b <= w["start"] + 0.01 for b in (breaks or []))
@@ -1304,7 +1326,7 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
             lines.append(current)
             current = []
         elif current and not fits(current + [w]):
-            k = best_break(current, w) if thai else len(current)
+            k = best_break(current, w) if thai else english_break(current, w)
             lines.append(current[:k])
             current = current[k:]
         current.append(w)
