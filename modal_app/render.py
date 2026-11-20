@@ -1322,7 +1322,8 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
     lines, current = [], []
     for w in placed:
         crosses_split = bool(current) and any(current[-1]["start"] < b <= w["start"] + 0.01 for b in (breaks or []))
-        if crosses_split or (current and w["start"] - current[-1]["end"] > gap_frames):
+        # br: two spaces typed before it in Edit text, a new line here (coach 20 Nov, subtitleLines in timeline.ts).
+        if crosses_split or (current and w.get("br")) or (current and w["start"] - current[-1]["end"] > gap_frames):
             lines.append(current)
             current = []
         elif current and not fits(current + [w]):
@@ -1500,7 +1501,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         if mid is None:
             continue
         half = (w["end"] - w["start"]) / 2 * FPS
-        placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half, "space": w.get("space"), "glue": w.get("glue")})
+        placed.append({"text": fix_thai(w["text"]), "start": max(0.0, mid - half), "end": mid + half, "space": w.get("space"), "glue": w.get("glue"), "br": w.get("br")})
 
     # Group words into short lines.
     gap_frames = LINE_BREAK_GAP * FPS
