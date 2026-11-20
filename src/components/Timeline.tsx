@@ -1292,7 +1292,8 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 								const [x0, x1] = [xOf(a), xOf(b)];
 								if (x1 - x0 < 2) return null;
 								const own = spots.find((s) => a + 0.01 >= s.start && a + 0.01 < s.end)?.position;
-								const here = i === headPiece;
+								// Only while nothing else is picked or being edited (coach 20 Nov: a zoom part picked and the piece outlined too).
+								const here = i === headPiece && !selection && !pickedItem && !zoomEditing;
 								return (
 									<div
 										key={`piece${a}`}

@@ -34,7 +34,7 @@ import { type Clock, FINAL_CLOCK, rangeText, RowFit } from "./TimeField";
 import { fitInRow, loadRows } from "@/lib/lane-rows";
 import { spotInside } from "@/lib/layers";
 import { Timeline } from "./Timeline";
-import { PART_ZOOMS, type PartZoom, setZoomPart, ZOOM_NAMES, type ZoomPart } from "@/lib/zoom";
+import { PART_AMOUNT, PART_ZOOMS, type PartZoom, setZoomPart, ZOOM_NAMES, type ZoomPart } from "@/lib/zoom";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -300,11 +300,17 @@ export function ScriptView({
 	const openPanel = (next: Panel) => {
 		setMode("preview");
 		setPanel(next);
-		if (next === "zoom") setZoomTab("part");
+		if (next === "zoom") {
+			setZoomTab("part");
+			setZoomDraft(null);
+		}
 	};
 	// The Zoom box in two (coach 20 Nov: a part picked on the timeline opened a box that changed the whole video's zoom):
 	// This part (first) for the stretch picked on the timeline, Whole video for everywhere else.
 	const [zoomTab, setZoomTab] = useState<"part" | "whole">("part");
+	// Whole video: changes wait in a draft until Apply, and Apply asks first (coach 20 Nov: one slip changed the whole video).
+	const [zoomDraft, setZoomDraft] = useState<SubtitleStyle | null>(null);
+	const [confirmWhole, setConfirmWhole] = useState(false);
 	const [timelinePick, setTimelinePick] = useState<{ start: number; end: number } | null>(null);
 	const onTimelinePick = useCallback((picked: { start: number; end: number } | null) => {
 		setTimelinePick(picked);
@@ -706,7 +712,9 @@ export function ScriptView({
 			);
 		const own = (spans: { start: number; end: number }[]) => spans.some((n) => n.start <= pick.start + 0.001 && n.end >= pick.end - 0.001);
 		const now: PartZoom | "off" | null = own(noZoom) ? "off" : (PART_ZOOMS.find((z) => own(zoomParts.filter((n) => n.zoom === z))) ?? null);
-		const hasOwn = [...noZoom, ...zoomParts].some((n) => n.end > pick.start && n.start < pick.end);
+		// Its own Zoom amount (coach 20 Nov), else the whole video's; kept when its kind changes.
+		const amount = zoomParts.find((n) => n.start <= pick.start + 0.001 && n.end >= pick.end - 0.001)?.amount;
+		const shown = amount ?? subtitle.zoomAmount;
 		return (
 			<div className="flex flex-col gap-1.5 rounded-lg border border-purple-500/40 p-2 text-xs">
 				<span className="text-foreground/70">
@@ -719,17 +727,27 @@ export function ScriptView({
 							key={z}
 							role="radio"
 							aria-checked={now === z}
-							onClick={() => zoomRange(pick.start, pick.end, z)}
+							onClick={() => zoomRange(pick.start, pick.end, z, z === "off" ? undefined : amount)}
 							className={`rounded-md border px-2 py-0.5 ${now === z ? "border-purple-600 bg-purple-600 text-white" : "border-foreground/20 hover:bg-purple-500/15"}`}
 						>
 							{z === "off" ? "No zoom" : ZOOM_NAMES[z]}
 						</button>
 					))}
 				</div>
-				{hasOwn && (
-					<button onClick={() => zoomRange(pick.start, pick.end, null)} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
-						Same as the whole video
-					</button>
+				{now !== null && now !== "off" && (
+					<label className="flex items-center gap-2 text-foreground/70">
+						<span className="w-24 shrink-0">Zoom amount</span>
+						<input
+							type="range"
+							min={PART_AMOUNT.min}
+							max={PART_AMOUNT.max}
+							step={0.01}
+							value={shown}
+							onChange={(e) => zoomRange(pick.start, pick.end, now, Number(e.target.value))}
+							className="flex-1"
+						/>
+						<span className="w-8 text-right tabular-nums">{Math.round((shown - 1) * 100)}%</span>
+					</label>
 				)}
 			</div>
 		);
@@ -737,11 +755,12 @@ export function ScriptView({
 
 	// Turn Auto zoom on or off for a stretch of the source.
 	// Give a stretch of the source its own zoom: a kind, "off" (no zoom), or null (back to the whole video's zoom).
-	const zoomRange = (a: number, b: number, zoom: PartZoom | "off" | null) => {
+	// amount: its own Zoom amount (the Zoom box's This part), left out: the whole video's.
+	const zoomRange = (a: number, b: number, zoom: PartZoom | "off" | null, amount?: number) => {
 		const span = { start: a, end: b };
 		onZoomChange({
 			noZoom: zoom === "off" ? mergeSpans([...noZoom, span]) : subtractSpans(noZoom, [span]),
-			zoomParts: setZoomPart(zoomParts, span, zoom === "off" ? null : zoom),
+			zoomParts: setZoomPart(zoomParts, span, zoom === "off" ? null : zoom, amount),
 		});
 	};
 
@@ -1242,8 +1261,8 @@ export function ScriptView({
 							</div>
 					{panel !== "banners" && panel !== "cutout" && panel !== "frame" && panel !== "layout" && panel !== "import" && (
 						<SubtitleControls
-							style={subtitle}
-							onChange={onSubtitleChange}
+							style={panel === "zoom" && zoomDraft ? zoomDraft : subtitle}
+							onChange={panel === "zoom" ? setZoomDraft : onSubtitleChange}
 							thai={thaiClip}
 							section={panel}
 							bodyHidden={panel === "zoom" && zoomTab === "part"}
@@ -1261,7 +1280,10 @@ export function ScriptView({
 												key={id}
 												role="tab"
 												aria-selected={zoomTab === id}
-												onClick={() => setZoomTab(id)}
+												onClick={() => {
+													setZoomTab(id);
+													setZoomDraft(null);
+												}}
 												className={`rounded-md px-2 py-1 text-xs whitespace-nowrap ${zoomTab === id ? "bg-purple-500/20 font-medium ring-1 ring-inset ring-purple-500" : "text-foreground/70 hover:text-foreground"}`}
 											>
 												{name}
@@ -1297,12 +1319,50 @@ export function ScriptView({
 										</span>
 									</div>
 									)}
-									{zoomTab === "whole" && <p className="text-xs text-foreground/60">Everywhere that has no zoom of its own (the purple parts keep theirs).</p>}
+									{zoomTab === "whole" && <p className="text-xs text-foreground/60">Everywhere that has no zoom of its own (the purple parts keep theirs). Nothing changes until you press Apply.</p>}
 									</div>
 								) : undefined
 							}
 							footer={
-								panel === "brand" ? (
+								panel === "zoom" && zoomTab === "whole" ? (
+									<div className="flex items-center gap-2">
+										<button
+											onClick={() => setConfirmWhole(true)}
+											disabled={!zoomDraft}
+											className="rounded-md bg-purple-600 px-3 py-1 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-40"
+										>
+											Apply
+										</button>
+										{zoomDraft && (
+											<button onClick={() => setZoomDraft(null)} className="rounded-md border border-foreground/20 px-3 py-1 text-sm hover:bg-foreground/5">
+												Cancel
+											</button>
+										)}
+										{confirmWhole && zoomDraft && (
+											<div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmWhole(false)}>
+												<div onClick={(e) => e.stopPropagation()} className="flex max-w-sm flex-col gap-3 rounded-xl bg-background p-4 text-foreground shadow-xl">
+													<p className="font-medium">Change the zoom of the whole video?</p>
+													<p className="text-sm text-foreground/70">Every part without its own zoom changes. The purple parts keep theirs.</p>
+													<div className="flex justify-end gap-2">
+														<button onClick={() => setConfirmWhole(false)} className="rounded-md border border-foreground/20 px-3 py-1 text-sm hover:bg-foreground/5">
+															Cancel
+														</button>
+														<button
+															onClick={() => {
+																onSubtitleChange({ ...subtitle, zoom: zoomDraft.zoom, zoomAmount: zoomDraft.zoomAmount, zoomPeriod: zoomDraft.zoomPeriod });
+																setZoomDraft(null);
+																setConfirmWhole(false);
+															}}
+															className="rounded-md bg-purple-600 px-3 py-1 text-sm font-medium text-white hover:bg-purple-700"
+														>
+															Apply to the whole video
+														</button>
+													</div>
+												</div>
+											</div>
+										)}
+									</div>
+								) : panel === "brand" ? (
 									<div className="flex flex-col gap-2">
 										{kits && kits.length > 0 && (
 											<label className="flex flex-wrap items-center gap-2 text-sm">

@@ -14,7 +14,10 @@ import { FPS, type Segment } from "./timeline";
 type Span = { start: number; end: number };
 
 export type PartZoom = "in" | "out" | "smooth" | "cuts";
-export type ZoomPart = Span & { zoom: PartZoom };
+// amount: how close this part gets (coach 20 Nov: Zoom amount for this part), as the style's zoomAmount; left out:
+// the whole video's. Same as the 6th item of zoom_part_frames' runs in render.py.
+export type ZoomPart = Span & { zoom: PartZoom; amount?: number };
+export const PART_AMOUNT = { min: 1.04, max: 1.3 }; // LIMITS.zoomAmount in subtitle-style.ts
 export const PART_ZOOMS: PartZoom[] = ["in", "out", "smooth", "cuts"];
 export const ZOOM_NAMES: Record<PartZoom, string> = { in: "Zoom in", out: "Zoom out", smooth: "Back and forth", cuts: "Jump cut" };
 export const PART_GLIDE = 0.8; // seconds a part's push in (or pull back) takes, or the whole part if shorter
@@ -29,17 +32,18 @@ export function readZoomParts(value: unknown, duration: number): ZoomPart[] | nu
 	if (!Array.isArray(value) || value.length > MAX_ZOOM_PARTS) return null;
 	const parts: ZoomPart[] = [];
 	for (const v of value as Partial<ZoomPart>[]) {
-		const { start, end, zoom } = v ?? {};
+		const { start, end, zoom, amount } = v ?? {};
 		if (typeof start !== "number" || typeof end !== "number" || !Number.isFinite(start) || !Number.isFinite(end)) return null;
 		if (!PART_ZOOMS.includes(zoom as PartZoom) || start < 0 || end <= start || start > duration) return null;
-		parts.push({ start: Math.round(start * 1000) / 1000, end: Math.round(Math.min(end, duration) * 1000) / 1000, zoom: zoom as PartZoom });
+		const own = typeof amount === "number" && Number.isFinite(amount) ? Math.round(Math.min(PART_AMOUNT.max, Math.max(PART_AMOUNT.min, amount)) * 100) / 100 : undefined;
+		parts.push({ start: Math.round(start * 1000) / 1000, end: Math.round(Math.min(end, duration) * 1000) / 1000, zoom: zoom as PartZoom, ...(own && { amount: own }) });
 	}
 	parts.sort((a, b) => a.start - b.start);
 	return parts.filter((p, i) => i === 0 || p.start >= parts[i - 1].end - 0.0005);
 }
 
 // The parts with `span` given this kind (or taken out of them: null). Parts it overlaps keep what is outside it.
-export function setZoomPart(parts: ZoomPart[], span: Span, zoom: PartZoom | null): ZoomPart[] {
+export function setZoomPart(parts: ZoomPart[], span: Span, zoom: PartZoom | null, amount?: number): ZoomPart[] {
 	const out: ZoomPart[] = [];
 	for (const p of parts) {
 		if (p.end <= span.start || p.start >= span.end) out.push(p);
@@ -48,14 +52,14 @@ export function setZoomPart(parts: ZoomPart[], span: Span, zoom: PartZoom | null
 			if (p.end > span.end) out.push({ ...p, start: span.end });
 		}
 	}
-	if (zoom) out.push({ ...span, zoom });
+	if (zoom) out.push({ ...span, zoom, ...(amount && { amount }) });
 	return out.sort((a, b) => a.start - b.start);
 }
 
 // Each part as frames of the final video: [from, to) with its kind. A part across a cut is one run, so
 // its zoom carries on over the cut. Same as zoom_part_frames in render.py.
 // at, span: where the part's own push in (or pull back) starts and how long the part was, before PART_HOLD moved its edge.
-export type ZoomRun = { from: number; to: number; zoom: PartZoom; at: number; span: number };
+export type ZoomRun = { from: number; to: number; zoom: PartZoom; at: number; span: number; amount?: number };
 export function zoomPartFrames(segments: Segment[], parts: ZoomPart[]): ZoomRun[] {
 	const runs: ZoomRun[] = [];
 	for (const p of parts) {
@@ -69,7 +73,7 @@ export function zoomPartFrames(segments: Segment[], parts: ZoomPart[]): ZoomRun[
 			if (run && from === run.to) run.to = to;
 			else {
 				if (run) runs.push(run);
-				run = { from, to, zoom: p.zoom, at: from, span: 0 };
+				run = { from, to, zoom: p.zoom, at: from, span: 0, amount: p.amount };
 			}
 		}
 		if (run) runs.push(run);
@@ -145,7 +149,7 @@ export function zoomTrack(segments: Segment[], noZoom: Span[], style: ZoomStyle,
 	const runs = zoomPartFrames(segments, parts);
 	return (f) => {
 		const run = runs.find((r) => f >= r.from && f < r.to);
-		return run ? partZoom(run, f, style.zoomAmount) : base(f);
+		return run ? partZoom(run, f, run.amount ?? style.zoomAmount) : base(f);
 	};
 }
 
