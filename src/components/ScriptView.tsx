@@ -30,11 +30,11 @@ import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
 import { waitLabel } from "@/lib/use-cutout";
 import { AudioControls } from "./AudioControls";
-import { type Clock, FINAL_CLOCK, RowFit } from "./TimeField";
+import { type Clock, FINAL_CLOCK, rangeText, RowFit } from "./TimeField";
 import { fitInRow, loadRows } from "@/lib/lane-rows";
 import { spotInside } from "@/lib/layers";
 import { Timeline } from "./Timeline";
-import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
+import { PART_AMOUNT, PART_ZOOMS, type PartZoom, setZoomPart, ZOOM_NAMES, type ZoomPart } from "@/lib/zoom";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -316,7 +316,22 @@ export function ScriptView({
 	const openPanel = (next: Panel) => {
 		setMode("preview");
 		setPanel(next);
+		if (next === "zoom") {
+			setZoomTab("part");
+			setZoomDraft(null);
+		}
 	};
+	// The Zoom box in two (coach 20 Nov: a part picked on the timeline opened a box that changed the whole video's zoom):
+	// This part (first) for the stretch picked on the timeline, Whole video for everywhere else.
+	const [zoomTab, setZoomTab] = useState<"part" | "whole">("part");
+	// Whole video: changes wait in a draft until Apply, and Apply asks first (coach 20 Nov: one slip changed the whole video).
+	const [zoomDraft, setZoomDraft] = useState<SubtitleStyle | null>(null);
+	const [confirmWhole, setConfirmWhole] = useState(false);
+	const [timelinePick, setTimelinePick] = useState<{ start: number; end: number } | null>(null);
+	const onTimelinePick = useCallback((picked: { start: number; end: number } | null) => {
+		setTimelinePick(picked);
+		if (picked) setZoomTab("part");
+	}, [setZoomTab]);
 	const playerRef = useRef<PreviewHandle>(null);
 	// Our own player (smooth on every browser) once the preview copy is ready and the browser can
 	// run it; else the <video> player. ?engine=old in the address forces the old one, to compare.
@@ -700,13 +715,68 @@ export function ScriptView({
 	};
 	const handSpans = useMemo(() => mergeSpans([...manual, ...keep]), [manual, keep]);
 
+	// The Zoom box's This part tab: how the stretch picked on the timeline zooms (the same choices as the bar over the
+	// timeline, Timeline.tsx). Nothing picked: how to pick one.
+	function zoomPartBox() {
+		const pick = timelinePick;
+		const kept = pick && segments.some((s) => Math.min(pick.end * FPS, s.trim + s.frames) - Math.max(pick.start * FPS, s.trim) > 1);
+		if (!pick || !kept)
+			return (
+				<p className="rounded-lg border border-dashed border-purple-500/50 p-2 text-xs text-foreground/70">
+					{pick ? "That part is cut from the video. Pick a part that stays." : "Pick a part: click a purple zoom part on the timeline, or drag across the timeline (or double-click a sentence). Then choose how it zooms here."}
+				</p>
+			);
+		const own = (spans: { start: number; end: number }[]) => spans.some((n) => n.start <= pick.start + 0.001 && n.end >= pick.end - 0.001);
+		const now: PartZoom | "off" | null = own(noZoom) ? "off" : (PART_ZOOMS.find((z) => own(zoomParts.filter((n) => n.zoom === z))) ?? null);
+		// Its own Zoom amount (coach 20 Nov), else the whole video's; kept when its kind changes.
+		const amount = zoomParts.find((n) => n.start <= pick.start + 0.001 && n.end >= pick.end - 0.001)?.amount;
+		const shown = amount ?? subtitle.zoomAmount;
+		return (
+			<div className="flex flex-col gap-1.5 rounded-lg border border-purple-500/40 p-2 text-xs">
+				<span className="text-foreground/70">
+					This part: <span className="font-medium text-foreground tabular-nums">{rangeText(toOutSeconds(pick.start, segments), toOutSeconds(pick.end, segments), ruler)}</span>
+					{now === null && " (zooms like the whole video now)"}
+				</span>
+				<div className="flex flex-wrap gap-1" role="radiogroup" aria-label="How this part zooms">
+					{([...PART_ZOOMS, "off"] as const).map((z) => (
+						<button
+							key={z}
+							role="radio"
+							aria-checked={now === z}
+							onClick={() => zoomRange(pick.start, pick.end, z, z === "off" ? undefined : amount)}
+							className={`rounded-md border px-2 py-0.5 ${now === z ? "border-purple-600 bg-purple-600 text-white" : "border-foreground/20 hover:bg-purple-500/15"}`}
+						>
+							{z === "off" ? "No zoom" : ZOOM_NAMES[z]}
+						</button>
+					))}
+				</div>
+				{now !== null && now !== "off" && (
+					<label className="flex items-center gap-2 text-foreground/70">
+						<span className="w-24 shrink-0">Zoom amount</span>
+						<input
+							type="range"
+							min={PART_AMOUNT.min}
+							max={PART_AMOUNT.max}
+							step={0.01}
+							value={shown}
+							onChange={(e) => zoomRange(pick.start, pick.end, now, Number(e.target.value))}
+							className="flex-1"
+						/>
+						<span className="w-8 text-right tabular-nums">{Math.round((shown - 1) * 100)}%</span>
+					</label>
+				)}
+			</div>
+		);
+	}
+
 	// Turn Auto zoom on or off for a stretch of the source.
 	// Give a stretch of the source its own zoom: a kind, "off" (no zoom), or null (back to the whole video's zoom).
-	const zoomRange = (a: number, b: number, zoom: PartZoom | "off" | null) => {
+	// amount: its own Zoom amount (the Zoom box's This part), left out: the whole video's.
+	const zoomRange = (a: number, b: number, zoom: PartZoom | "off" | null, amount?: number) => {
 		const span = { start: a, end: b };
 		onZoomChange({
 			noZoom: zoom === "off" ? mergeSpans([...noZoom, span]) : subtractSpans(noZoom, [span]),
-			zoomParts: setZoomPart(zoomParts, span, zoom === "off" ? null : zoom),
+			zoomParts: setZoomPart(zoomParts, span, zoom === "off" ? null : zoom, amount),
 		});
 	};
 
@@ -1207,12 +1277,37 @@ export function ScriptView({
 							</div>
 					{panel !== "banners" && panel !== "cutout" && panel !== "frame" && panel !== "layout" && panel !== "import" && (
 						<SubtitleControls
-							style={subtitle}
-							onChange={onSubtitleChange}
+							style={panel === "zoom" && zoomDraft ? zoomDraft : subtitle}
+							onChange={panel === "zoom" ? setZoomDraft : onSubtitleChange}
 							thai={thaiClip}
 							section={panel}
+							bodyHidden={panel === "zoom" && zoomTab === "part"}
 							top={
 								panel === "zoom" ? (
+									<div className="flex flex-col gap-2">
+									<div role="tablist" aria-label="What to zoom" className="grid grid-cols-2 gap-1 rounded-lg bg-foreground/5 p-0.5">
+										{(
+											[
+												["part", "Edit zoom: this part"],
+												["whole", "Edit zoom: whole video"],
+											] as const
+										).map(([id, name]) => (
+											<button
+												key={id}
+												role="tab"
+												aria-selected={zoomTab === id}
+												onClick={() => {
+													setZoomTab(id);
+													setZoomDraft(null);
+												}}
+												className={`rounded-md px-2 py-1 text-xs whitespace-nowrap ${zoomTab === id ? "bg-purple-500/20 font-medium ring-1 ring-inset ring-purple-500" : "text-foreground/70 hover:text-foreground"}`}
+											>
+												{name}
+											</button>
+										))}
+									</div>
+									{zoomTab === "part" && zoomPartBox()}
+									{zoomTab === "part" && (
 									<div className="flex flex-col gap-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 p-2 text-xs">
 										<div className="flex flex-wrap items-center gap-2">
 											<button
@@ -1239,10 +1334,68 @@ export function ScriptView({
 											Drag across the timeline to pick any part, then choose how it zooms.
 										</span>
 									</div>
+									)}
+									{zoomTab === "whole" && <p className="text-xs text-foreground/60">How the whole video zooms. Nothing changes until you press Apply, which asks whether the purple parts change too.</p>}
+									</div>
 								) : undefined
 							}
 							footer={
-								panel === "brand" ? (
+								panel === "zoom" && zoomTab === "whole" ? (
+									<div className="flex items-center gap-2">
+										<button
+											onClick={() => setConfirmWhole(true)}
+											disabled={!zoomDraft}
+											className="rounded-md bg-purple-600 px-3 py-1 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-40"
+										>
+											Apply
+										</button>
+										{zoomDraft && (
+											<button onClick={() => setZoomDraft(null)} className="rounded-md border border-foreground/20 px-3 py-1 text-sm hover:bg-foreground/5">
+												Cancel
+											</button>
+										)}
+										{confirmWhole && zoomDraft && (
+											<div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmWhole(false)}>
+												<div onClick={(e) => e.stopPropagation()} className="flex max-w-sm flex-col gap-3 rounded-xl bg-background p-4 text-foreground shadow-xl">
+													<p className="font-medium">Change the zoom of the whole video?</p>
+													{/* With parts of their own (purple, or No zoom): everywhere clears them too (coach 20 Nov: None + Apply
+													    left the purple parts zooming), or only the rest, as before. */}
+													{(() => {
+														const own = zoomParts.length + noZoom.length;
+														const apply = (everywhere: boolean) => {
+															onSubtitleChange({ ...subtitle, zoom: zoomDraft.zoom, zoomAmount: zoomDraft.zoomAmount, zoomPeriod: zoomDraft.zoomPeriod });
+															if (everywhere && own) onZoomChange({ noZoom: [], zoomParts: [] });
+															setZoomDraft(null);
+															setConfirmWhole(false);
+														};
+														return (
+															<>
+																<p className="text-sm text-foreground/70">
+																	{own
+																		? `This video has ${own} ${own === 1 ? "part" : "parts"} with a zoom of ${own === 1 ? "its" : "their"} own (purple on the timeline). Apply everywhere removes ${own === 1 ? "it" : "them"}.`
+																		: "The whole video zooms this way."}
+																</p>
+																<div className="flex flex-wrap justify-end gap-2">
+																	<button onClick={() => setConfirmWhole(false)} className="rounded-md border border-foreground/20 px-3 py-1 text-sm hover:bg-foreground/5">
+																		Cancel
+																	</button>
+																	{own > 0 && (
+																		<button onClick={() => apply(false)} className="rounded-md border border-purple-500/50 px-3 py-1 text-sm hover:bg-purple-500/10">
+																			Only where there is no purple part
+																		</button>
+																	)}
+																	<button onClick={() => apply(true)} className="rounded-md bg-purple-600 px-3 py-1 text-sm font-medium text-white hover:bg-purple-700">
+																		{own ? "Apply everywhere" : "Apply to the whole video"}
+																	</button>
+																</div>
+															</>
+														);
+													})()}
+												</div>
+											</div>
+										)}
+									</div>
+								) : panel === "brand" ? (
 									<div className="flex flex-col gap-2">
 										{kits && kits.length > 0 && (
 											<label className="flex flex-wrap items-center gap-2 text-sm">
@@ -1686,6 +1839,7 @@ export function ScriptView({
 					noZoom={noZoom}
 					zoomParts={zoomParts}
 					onZoomRange={zoomRange}
+					onSelectionChange={onTimelinePick}
 					onPlayFrom={(t) => seek(t)}
 					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}
 				/>

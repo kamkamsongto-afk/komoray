@@ -1723,8 +1723,9 @@ def no_zoom_frames(segments: list[tuple[int, int, int]], spans: list[dict] | Non
     return merged
 
 
-def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple[int, int, str, int, int]]:
-    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind, at, span).
+def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple]:
+    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind, at, span, amount).
+    amount: the part's own Zoom amount (coach 20 Nov), None = the whole video's.
     A part across a cut is one run, so its zoom carries on over the cut. at, span: where its own push in (or pull back)
     starts and how long it was before PART_HOLD moved its edge to a cut. Same as zoomPartFrames in src/lib/zoom.ts."""
     runs = []
@@ -1742,10 +1743,10 @@ def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | N
             else:
                 if run:
                     runs.append(tuple(run))
-                run = [lo, hi, n["zoom"]]
+                run = [lo, hi, n["zoom"], part_amount(n)]
         if run:
             runs.append(tuple(run))
-    runs = [[lo, hi, kind, lo, hi - lo] for lo, hi, kind in sorted(runs, key=lambda r: r[0])]
+    runs = [[lo, hi, kind, lo, hi - lo, own] for lo, hi, kind, own in sorted(runs, key=lambda r: r[0])]
     cuts = [start for start, _, _ in segments[1:]]
     hold = PART_HOLD * FPS
 
@@ -1764,10 +1765,16 @@ def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | N
     return [tuple(r) for r in runs]
 
 
-def part_zoom_expr(start: int, run: tuple[int, int, str, int, int], amount: float = ZOOM) -> str:
+def part_amount(n: dict) -> float | None:
+    """A zoom part's own Zoom amount, kept inside PART_AMOUNT (readZoomParts in zoom.ts), or None."""
+    a = n.get("amount")
+    return round(min(1.3, max(1.04, float(a))), 2) if isinstance(a, (int, float)) else None
+
+
+def part_zoom_expr(start: int, run: tuple, amount: float = ZOOM) -> str:
     """A zoom part's zoom as an ffmpeg expression of the frame number (`in` counts from 1) of a shot
     starting at output frame `start`. Same as partZoom in src/lib/zoom.ts."""
-    lo, hi, kind, at, span = run
+    lo, hi, kind, at, span = run[:5]
     frame = f"(in-1+{start})"
     length = hi - lo
     if kind == "smooth":
@@ -1795,7 +1802,7 @@ def zoom_shots(
         for a, b in zip(ordered, ordered[1:]):
             run = next((r for r in runs or [] if r[0] <= start + a and start + b <= r[1]), None)
             inside = any(x <= start + a and start + b <= y for x, y in off)
-            level = amount if (run and run[2] == "cuts") or (not run and zoom == "cuts" and i % 2 == 1 and not inside) else 1.0
+            level = (run[5] or amount) if run and run[2] == "cuts" else amount if (not run and zoom == "cuts" and i % 2 == 1 and not inside) else 1.0
             shots.append((i, start + a, trim + a, b - a, level, run))
     return shots
 
@@ -1967,7 +1974,8 @@ def ffmpeg_command(
         piece_trim, piece_frames = pieces[i][1], pieces[i][2]
         focus = focus_for(faces, piece_trim / FPS, (piece_trim + piece_frames) / FPS)  # source seconds, not moved by seek
         if run and run[2] != "cuts":
-            framing = smooth_filter(aspect, focus, part_zoom_expr(out_frame, run, zoom_amount), size, zoom_amount)
+            own = run[5] or zoom_amount  # the part's own Zoom amount, else the whole video's
+            framing = smooth_filter(aspect, focus, part_zoom_expr(out_frame, run, own), size, own)
         elif not run and zoom in ("smooth", "in", "out"):
             framing = smooth_filter(aspect, focus, smooth_zoom_expr(out_frame, frames, off, zoom_amount, zoom_period, zoom, ramps[i]), size, zoom_amount)
         else:

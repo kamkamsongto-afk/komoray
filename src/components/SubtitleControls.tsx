@@ -29,6 +29,7 @@ type Props = {
 	thai: boolean; // a Thai video: English-only fonts can't be picked
 	footer?: ReactNode;
 	top?: ReactNode; // shown first, above the section's own settings
+	bodyHidden?: boolean; // only top and footer (the Zoom box's This part tab)
 	section?: ControlSection; // show only this part (the editor's panels); left out: everything (Brand Kit page)
 };
 
@@ -44,8 +45,8 @@ const ZOOM_CHOICES: { id: Zoom; name: string; hint: string }[] = [
 
 // How the subtitles look: style, font, brand colour, channel name, size and outline. Used in the
 // editor (for one video) and on the Brand Kit page (for every new video).
-export function SubtitleControls({ style, onChange, thai, footer, top, section }: Props) {
-	const on = (part: ControlSection) => !section || section === part;
+export function SubtitleControls({ style, onChange, thai, footer, top, section, bodyHidden }: Props) {
+	const on = (part: ControlSection) => !bodyHidden && (!section || section === part);
 	// The user's own uploaded font (one per account), if any.
 	const [own, setOwn] = useState<OwnFont | null>(null);
 	const [uploading, setUploading] = useState(false);
