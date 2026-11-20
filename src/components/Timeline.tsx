@@ -61,7 +61,7 @@ type Props = {
 	onMakePart?: (start: number, end: number) => void; // Make video for only the picked stretch (source seconds). Left out: not now
 	revealed: { id: string; n: number } | null; // picked in a box: pick its strip here and scroll to it (n: each ask)
 	splits: number[]; // where Split divided the sound and the words, seconds of the original video
-	onSplitsChange: (splits: number[]) => void;
+	onSplitsChange: (splits: number[], spots?: SubtitleSpot[]) => void; // spots: when a dragged Split took a piece's own height along
 	spots?: SubtitleSpot[]; // pieces whose subtitles have their own height (shown on each piece)
 	subtitlePosition?: number; // the subtitles' height everywhere else
 	onShowCutsChange?: (on: boolean) => void; // Show cuts switched: the boxes show their times on the same clock as the ruler
@@ -209,6 +209,7 @@ export function Timeline({
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const headRef = useRef<HTMLDivElement>(null);
+	const headLaneRef = useRef<HTMLDivElement>(null); // the playhead's line on down through the rows of strips
 	const timeTextRef = useRef<HTMLSpanElement>(null);
 	const [viewWidth, setViewWidth] = useState(800);
 	const [pps, setPps] = useState(START_PPS);
@@ -552,6 +553,19 @@ export function Timeline({
 		const word = words.find((w) => t > w.start && t < w.end);
 		return Math.round((word ? (t - word.start < word.end - t ? word.start : word.end) : t) * 1000) / 1000;
 	};
+	// A Split dragged sideways (coach 20 Nov): shown where it goes while held, then put on the nearest word edge. A piece's
+	// own subtitle height (spot) that ended or started at it moves with it. Never past the Splits beside it.
+	const [splitDrag, setSplitDrag] = useState<{ from: number; to: number } | null>(null);
+	const dropSplit = () => {
+		const d = splitDrag;
+		setSplitDrag(null);
+		if (!d) return;
+		const to = wordEdge(d.to);
+		if (Math.abs(to - d.from) < 0.005 || splits.some((s) => s !== d.from && Math.abs(s - to) < MIN_PICK)) return;
+		const near = (a: number) => Math.abs(a - d.from) < 0.002;
+		const moved = spots.map((sp) => ({ ...sp, start: near(sp.start) ? to : sp.start, end: near(sp.end) ? to : sp.end })).filter((sp) => sp.end > sp.start);
+		onSplitsChange(splits.map((s) => (s === d.from ? to : s)).sort((a, b) => a - b), moved);
+	};
 	const split = () => {
 		// A whole piece picked (a click, once Split) adds nothing: then it splits at the playhead, as before.
 		const both = selection && addSplits(splits, [wordEdge(selection.start), selection.end < duration - MIN_PICK ? wordEdge(selection.end) : 0], MIN_PICK);
@@ -759,6 +773,7 @@ export function Timeline({
 			}
 			const x = xOf(t);
 			if (headRef.current) headRef.current.style.transform = `translateX(${x}px)`;
+			if (headLaneRef.current) headLaneRef.current.style.transform = `translateX(${x}px)`;
 			if (timeTextRef.current) timeTextRef.current.textContent = clockTenths(showCuts ? t : toOutSeconds(t, segments));
 			const el = scrollRef.current;
 			if (el && playing && follow.current && (x < el.scrollLeft || x > el.scrollLeft + el.clientWidth - 40)) el.scrollLeft = x - 40;
@@ -1290,8 +1305,31 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 									</div>
 								);
 							})}
-						{splits.map((s) => (
-							<div key={s} className="pointer-events-none absolute top-0 z-[1] w-0.5 bg-amber-500" style={{ left: xOf(s), height }}>
+						{splits.map((s, i) => (
+							<div key={s} className="pointer-events-none absolute top-0 z-[1] w-0.5 bg-amber-500" style={{ left: xOf(splitDrag?.from === s ? splitDrag.to : s), height }}>
+								{/* Grab the line to move the Split (dropSplit). */}
+								<div
+									title="Drag to move this split"
+									className="pointer-events-auto absolute top-4 bottom-0 -left-1.5 w-3.5 cursor-ew-resize touch-none"
+									onPointerDown={(e) => {
+										e.stopPropagation();
+										e.currentTarget.setPointerCapture(e.pointerId);
+										follow.current = false;
+										setSplitDrag({ from: s, to: s });
+									}}
+									onPointerMove={(e) => {
+										e.stopPropagation();
+										if (splitDrag?.from !== s) return;
+										const [lo, hi] = [(splits[i - 1] ?? 0) + MIN_PICK, (splits[i + 1] ?? duration) - MIN_PICK];
+										setSplitDrag({ from: s, to: Math.min(hi, Math.max(lo, timeAt(xAt(e.clientX)))) });
+									}}
+									onPointerUp={(e) => {
+										e.stopPropagation();
+										follow.current = true;
+										dropSplit();
+									}}
+									onPointerCancel={() => setSplitDrag(null)}
+								/>
 								<button onClick={() => onSplitsChange(splits.filter((x) => x !== s))} aria-label="Remove this split" title="Remove this split" className="pointer-events-auto absolute top-0 -left-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-500 text-black hover:bg-amber-400">
 									<X className="h-2.5 w-2.5" aria-hidden />
 								</button>
@@ -1412,6 +1450,16 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 							</div>
 						);
 					})}
+					{/* The playhead and the picked stretch's edges carried on down through every row of strips, so a strip's
+					    edge can be lined up with them (coach 20 Nov). */}
+					{laneRows > 0 && (
+						<div ref={headLaneRef} aria-hidden className="pointer-events-none absolute left-0 z-[2] -ml-px w-0.5 bg-blue-600/70" style={{ top: height, height: laneHeight }} />
+					)}
+					{laneRows > 0 &&
+						selection &&
+						[selection.start, selection.end].map((t, k) => (
+							<div key={`edge${k}`} aria-hidden className="pointer-events-none absolute z-[2] border-l border-dashed border-blue-600/80" style={{ left: xOf(t), top: height, height: laneHeight }} />
+						))}
 				</div>
 			</div>
 			</div>

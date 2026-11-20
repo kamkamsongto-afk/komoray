@@ -1646,7 +1646,7 @@ export function ScriptView({
 					splits={subtitle.splits ?? []}
 					spots={subtitle.spots ?? []}
 					subtitlePosition={subtitle.position}
-					onSplitsChange={(splits) => onSubtitleChange({ ...subtitle, splits })}
+					onSplitsChange={(splits, spots) => onSubtitleChange({ ...subtitle, splits, ...(spots && { spots }) })}
 					onShowCutsChange={setShowCuts}
 					rowMemo={rowMemo}
 					rowsKey={rowsKey}
