@@ -27,7 +27,7 @@ import { watermarkOn } from "@/lib/watermark-on";
 const LINK_SECONDS = 3600;
 // Part of every video's fingerprint (below). Change it whenever render.py makes the same edits look different
 // (a fix or a new look): else a press that changed nothing hands back the video made before the fix.
-const RENDER_REV = "2026-11-20c"; // a: English lines never end on a word that leads on ("I", "the"), break at , . or a pause. b: two spaces typed = a new line; retyped English words keep their times. c: an English line ended by a pause gives a leading word ("I") to the next
+const RENDER_REV = "2026-11-20d"; // a: English lines never end on a word that leads on ("I", "the"), break at , . or a pause. b: two spaces typed = a new line; retyped English words keep their times. c: an English line ended by a pause gives a leading word ("I") to the next. d: a word half cut by hand still shows in the subtitles
 
 async function fingerprintOf(parts: unknown) {
 	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(parts)));
@@ -171,7 +171,7 @@ export async function POST(request: Request) {
 			// Modal just removes every cut, so hand it the deleted words and the timeline's hand cuts as cuts too,
 			// and the words already fixed: it only uses them for subtitles.
 			// faces: frame wide videos around the speaker, as the preview does (lib/framing.ts).
-			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes, cutThaiWords), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles, ...(part && { part }) },
+			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes, cutThaiWords, edit.deleted), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles, ...(part && { part }) },
 			// How the subtitles look, from the editor (lib/subtitle-style.ts).
 			style,
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.

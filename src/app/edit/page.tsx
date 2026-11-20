@@ -813,7 +813,7 @@ export default function EditPage() {
 		const segments = keepSegments(analysis.duration, allCuts(analysis));
 		// Thai typed in is cut into words, as in the video (lib/thai-cut.ts).
 		const cut = fixesNeedThaiCut(analysis.fixes) ? await loadThaiCut() : undefined;
-		saveSrt(toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? [], cut), segments, subtitle.look, subtitle.size, subtitle.letterSpacing)), "");
+		saveSrt(toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? [], cut, analysis.deleted), segments, subtitle.look, subtitle.size, subtitle.letterSpacing)), "");
 	}
 
 	function saveSrt(srt: string, suffix: string) {

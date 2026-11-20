@@ -185,16 +185,21 @@ function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut
 
 // The words as they should read in subtitles: a fix takes the place of the words it covers.
 // cut: Thai typed with no spaces becomes its words (left out: such a fix stays one word).
-export function fixedWords<W extends Span & { text: string }>(words: W[], fixes: Fix[] = [], cut?: ThaiCut): W[] {
+// deleted: those words get gone: true, so a word deleted in the script never shows in the subtitles even when part of
+// its sound was dragged back in on the timeline (placeWord in timeline.ts, place_word in render.py).
+export function fixedWords<W extends Span & { text: string }>(words: W[], fixes: Fix[] = [], cut?: ThaiCut, deleted: number[] = []): (W & { gone?: true })[] {
 	const byStart = new Map(fixes.map((f) => [f.from, f]));
-	const out: W[] = [];
+	const gone = new Set(deleted);
+	const out: (W & { gone?: true })[] = [];
 	for (let i = 0; i < words.length; i++) {
 		const fix = byStart.get(i);
 		if (!fix) {
-			out.push(words[i]);
+			out.push(gone.has(i) ? { ...words[i], gone: true } : words[i]);
 			continue;
 		}
-		out.push(...splitFix(words.slice(fix.from, fix.to + 1), fix.text, cut));
+		// A fix is gone only when every word under it is.
+		const allGone = Array.from({ length: fix.to - fix.from + 1 }, (_, k) => fix.from + k).every((k) => gone.has(k));
+		out.push(...splitFix(words.slice(fix.from, fix.to + 1), fix.text, cut).map((w) => (allGone ? { ...w, gone: true as const } : w)));
 		i = fix.to;
 	}
 	return out;
