@@ -45,6 +45,7 @@ type Props = {
 	noZoom: { start: number; end: number }[]; // parts with Auto zoom turned off
 	zoomParts: ZoomPart[]; // parts with their own kind of zoom
 	onZoomRange: (start: number, end: number, zoom: PartZoom | "off" | null) => void; // null: back to the whole video's zoom
+	onSelectionChange?: (picked: { start: number; end: number } | null) => void; // the picked stretch (the Zoom box's This part)
 	onPlayFrom: (source: number) => void; // play from here (to hear a cut edge just moved)
 	banners: Banner[];
 	onBannersChange: (banners: Banner[]) => void; // dragged along the timeline
@@ -183,6 +184,7 @@ export function Timeline({
 	noZoom,
 	zoomParts,
 	onZoomRange,
+	onSelectionChange,
 	onPlayFrom,
 	banners,
 	onBannersChange,
@@ -221,6 +223,7 @@ export function Timeline({
 	const [openGroup, setOpenGroup] = useState<number | null>(null);
 	// The stretch picked by dragging, in source seconds: cut it or keep it.
 	const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
+	useEffect(() => onSelectionChange?.(selection), [selection, onSelectionChange]);
 	// A cut's edge being dragged (Show cuts on): which cut, which side, and where it is now.
 	const [edge, setEdge] = useState<{ cut: [number, number]; side: "start" | "end"; to: number } | null>(null);
 	const anchor = useRef<{ time: number; at: number } | null>(null); // keep this moment under this x after zooming

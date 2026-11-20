@@ -30,11 +30,11 @@ import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
 import { waitLabel } from "@/lib/use-cutout";
 import { AudioControls } from "./AudioControls";
-import { type Clock, FINAL_CLOCK, RowFit } from "./TimeField";
+import { type Clock, FINAL_CLOCK, rangeText, RowFit } from "./TimeField";
 import { fitInRow, loadRows } from "@/lib/lane-rows";
 import { spotInside } from "@/lib/layers";
 import { Timeline } from "./Timeline";
-import { type PartZoom, setZoomPart, type ZoomPart } from "@/lib/zoom";
+import { PART_ZOOMS, type PartZoom, setZoomPart, ZOOM_NAMES, type ZoomPart } from "@/lib/zoom";
 
 type Word = { text: string; start: number; end: number };
 type Cut = { start: number; end: number };
@@ -300,7 +300,16 @@ export function ScriptView({
 	const openPanel = (next: Panel) => {
 		setMode("preview");
 		setPanel(next);
+		if (next === "zoom") setZoomTab("part");
 	};
+	// The Zoom box in two (coach 20 Nov: a part picked on the timeline opened a box that changed the whole video's zoom):
+	// This part (first) for the stretch picked on the timeline, Whole video for everywhere else.
+	const [zoomTab, setZoomTab] = useState<"part" | "whole">("part");
+	const [timelinePick, setTimelinePick] = useState<{ start: number; end: number } | null>(null);
+	const onTimelinePick = useCallback((picked: { start: number; end: number } | null) => {
+		setTimelinePick(picked);
+		if (picked) setZoomTab("part");
+	}, [setZoomTab]);
 	const playerRef = useRef<PreviewHandle>(null);
 	// Our own player (smooth on every browser) once the preview copy is ready and the browser can
 	// run it; else the <video> player. ?engine=old in the address forces the old one, to compare.
@@ -683,6 +692,48 @@ export function ScriptView({
 		onTimelineChange({ deleted, manual: subtractSpans(manual, [span]), keep: subtractSpans(keep, [span]) });
 	};
 	const handSpans = useMemo(() => mergeSpans([...manual, ...keep]), [manual, keep]);
+
+	// The Zoom box's This part tab: how the stretch picked on the timeline zooms (the same choices as the bar over the
+	// timeline, Timeline.tsx). Nothing picked: how to pick one.
+	function zoomPartBox() {
+		const pick = timelinePick;
+		const kept = pick && segments.some((s) => Math.min(pick.end * FPS, s.trim + s.frames) - Math.max(pick.start * FPS, s.trim) > 1);
+		if (!pick || !kept)
+			return (
+				<p className="rounded-lg border border-dashed border-purple-500/50 p-2 text-xs text-foreground/70">
+					{pick ? "That part is cut from the video. Pick a part that stays." : "Pick a part: click a purple zoom part on the timeline, or drag across the timeline (or double-click a sentence). Then choose how it zooms here."}
+				</p>
+			);
+		const own = (spans: { start: number; end: number }[]) => spans.some((n) => n.start <= pick.start + 0.001 && n.end >= pick.end - 0.001);
+		const now: PartZoom | "off" | null = own(noZoom) ? "off" : (PART_ZOOMS.find((z) => own(zoomParts.filter((n) => n.zoom === z))) ?? null);
+		const hasOwn = [...noZoom, ...zoomParts].some((n) => n.end > pick.start && n.start < pick.end);
+		return (
+			<div className="flex flex-col gap-1.5 rounded-lg border border-purple-500/40 p-2 text-xs">
+				<span className="text-foreground/70">
+					This part: <span className="font-medium text-foreground tabular-nums">{rangeText(toOutSeconds(pick.start, segments), toOutSeconds(pick.end, segments), ruler)}</span>
+					{now === null && " (zooms like the whole video now)"}
+				</span>
+				<div className="flex flex-wrap gap-1" role="radiogroup" aria-label="How this part zooms">
+					{([...PART_ZOOMS, "off"] as const).map((z) => (
+						<button
+							key={z}
+							role="radio"
+							aria-checked={now === z}
+							onClick={() => zoomRange(pick.start, pick.end, z)}
+							className={`rounded-md border px-2 py-0.5 ${now === z ? "border-purple-600 bg-purple-600 text-white" : "border-foreground/20 hover:bg-purple-500/15"}`}
+						>
+							{z === "off" ? "No zoom" : ZOOM_NAMES[z]}
+						</button>
+					))}
+				</div>
+				{hasOwn && (
+					<button onClick={() => zoomRange(pick.start, pick.end, null)} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
+						Same as the whole video
+					</button>
+				)}
+			</div>
+		);
+	}
 
 	// Turn Auto zoom on or off for a stretch of the source.
 	// Give a stretch of the source its own zoom: a kind, "off" (no zoom), or null (back to the whole video's zoom).
@@ -1195,8 +1246,30 @@ export function ScriptView({
 							onChange={onSubtitleChange}
 							thai={thaiClip}
 							section={panel}
+							bodyHidden={panel === "zoom" && zoomTab === "part"}
 							top={
 								panel === "zoom" ? (
+									<div className="flex flex-col gap-2">
+									<div role="tablist" aria-label="What to zoom" className="grid grid-cols-2 gap-1 rounded-lg bg-foreground/5 p-0.5">
+										{(
+											[
+												["part", "Edit zoom: this part"],
+												["whole", "Edit zoom: whole video"],
+											] as const
+										).map(([id, name]) => (
+											<button
+												key={id}
+												role="tab"
+												aria-selected={zoomTab === id}
+												onClick={() => setZoomTab(id)}
+												className={`rounded-md px-2 py-1 text-xs whitespace-nowrap ${zoomTab === id ? "bg-purple-500/20 font-medium ring-1 ring-inset ring-purple-500" : "text-foreground/70 hover:text-foreground"}`}
+											>
+												{name}
+											</button>
+										))}
+									</div>
+									{zoomTab === "part" && zoomPartBox()}
+									{zoomTab === "part" && (
 									<div className="flex flex-col gap-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 p-2 text-xs">
 										<div className="flex flex-wrap items-center gap-2">
 											<button
@@ -1222,6 +1295,9 @@ export function ScriptView({
 													: "The AI picks the moments worth a zoom, and how each one zooms."}{" "}
 											Drag across the timeline to pick any part, then choose how it zooms.
 										</span>
+									</div>
+									)}
+									{zoomTab === "whole" && <p className="text-xs text-foreground/60">Everywhere that has no zoom of its own (the purple parts keep theirs).</p>}
 									</div>
 								) : undefined
 							}
@@ -1670,6 +1746,7 @@ export function ScriptView({
 					noZoom={noZoom}
 					zoomParts={zoomParts}
 					onZoomRange={zoomRange}
+					onSelectionChange={onTimelinePick}
 					onPlayFrom={(t) => seek(t)}
 					onListen={(from) => seek(Math.max(0, words[from].start - 0.3), gone.has(from))}
 				/>
