@@ -134,8 +134,9 @@ export default function Home() {
 							<div className="k-vis">
 								<HelloWord />
 							</div>
-							<h3>Subtitles in 33 languages</h3>
-							<p>Translate your subtitles and download them as .srt.</p>
+							{/* Translation is hidden (coach 18 Nov), so only what comes from the voice: LANGUAGES in lib/languages.ts. */}
+							<h3>Subtitles from your own voice</h3>
+							<p>Made from what you say, in 16 languages. Download them as .srt too.</p>
 						</article>
 					</div>
 				</div>

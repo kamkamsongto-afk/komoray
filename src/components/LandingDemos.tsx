@@ -213,7 +213,7 @@ export function ShapeCard() {
 	);
 }
 
-const HELLO: [string, string][] = [["en", "Hello"], ["th", "สวัสดี"], ["es", "Hola"], ["fr", "Bonjour"], ["de", "Hallo"], ["pt", "Olá"], ["ja", "こんにちは"]];
+const HELLO: [string, string][] = [["en", "Hello"], ["th", "สวัสดี"], ["es", "Hola"], ["fr", "Bonjour"], ["de", "Hallo"], ["pt", "Olá"], ["it", "Ciao"]];
 
 export function HelloWord() {
 	const [code, word] = HELLO[useTick(1800) % HELLO.length];
@@ -324,7 +324,7 @@ export function LayoutCard() {
 						<LoopVideo name="layout" />
 					</div>
 					<div className="k-layother">
-						<Image src="/landing/layout-other.webp" alt="" width={720} height={1080} unoptimized />
+						<Image src="/landing/layout-other-v2.webp" alt="" width={720} height={1004} unoptimized />
 					</div>
 				</div>
 			</div>
