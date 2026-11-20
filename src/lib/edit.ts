@@ -117,14 +117,20 @@ const THAI_LETTER = /[฀-๿]/;
 // treat the whole phrase as one word. The time is shared by letters over when the words were really
 // said (never the pauses between them, which may be cut). space: the user typed a space before it.
 // Thai typed with no spaces is several words too, once cut (coach 15 Nov: a retyped line lit up as one block).
+// br: two spaces (or more) typed before it: a new subtitle line starts there (coach 20 Nov: Split was for moving
+// subtitles, not for where a line breaks). LINE_BREAK = the typed gap that means it.
+export const LINE_BREAK = /\s{2,}|\n/;
 function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut?: ThaiCut): W[] {
 	const pieces: string[] = [];
 	const spaced: boolean[] = [];
+	const broken: boolean[] = [];
+	const gaps = text.trim().match(/\s+/g) ?? [];
 	for (const [n, chunk] of text.trim().split(/\s+/).entries()) {
 		const words = cut && THAI_LETTER.test(chunk) ? cut(chunk).filter((w) => w.trim()) : [chunk];
 		for (const [k, word] of (words.length ? words : [chunk]).entries()) {
 			pieces.push(word);
 			spaced.push(n > 0 && k === 0);
+			broken.push(n > 0 && k === 0 && LINE_BREAK.test(gaps[n - 1]));
 		}
 	}
 	if (pieces.length === 1) {
@@ -157,13 +163,17 @@ function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut
 		for (let k = run.indexOf(from); k < run.indexOf(to.word); k++) if (run[k + 1].start - run[k].end > PAUSE_INSIDE_FIX) return run[k].end;
 		return to.time;
 	};
+	// As many words as were said, none Thai (spelling fixed, or only two spaces typed for a new line): each keeps the time
+	// it was said, so the Highlight look doesn't drift from the voice.
+	const same = pieces.length === run.length && !THAI_LETTER.test(text);
 	let done = 0;
 	return pieces.map((piece, k) => {
 		const from = at((spoken * done) / letters);
 		done += spokenLetters(piece);
 		// glue: cut out of words typed together ("ของโค้ช"), so a subtitle line never breaks before it (coach 16 Nov).
 		const glue = k > 0 && !spaced[k];
-		return { ...run[0], text: piece, start: from.time, end: endOf(from.word, at((spoken * done) / letters)), ...(spaced[k] ? { space: true } : {}), ...(glue ? { glue: true } : {}) };
+		const time = same ? { start: run[k].start, end: run[k].end } : { start: from.time, end: endOf(from.word, at((spoken * done) / letters)) };
+		return { ...run[0], text: piece, ...time, ...(spaced[k] ? { space: true } : {}), ...(glue ? { glue: true } : {}), ...(broken[k] ? { br: true } : {}) };
 	});
 }
 

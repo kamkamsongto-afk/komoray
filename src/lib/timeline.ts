@@ -4,7 +4,7 @@
 import type { SubtitleSpot } from "./subtitle-style";
 
 type Span = { start: number; end: number };
-type Word = { text: string; start: number; end: number; space?: boolean; glue?: boolean }; // space: typed by the user, glue: typed onto the word before (fixedWords)
+type Word = { text: string; start: number; end: number; space?: boolean; glue?: boolean; br?: boolean }; // space: typed by the user, glue: typed onto the word before, br: two spaces typed before it = a new line (fixedWords)
 
 export const FPS = 30;
 export const WIDTH = 1080;
@@ -220,12 +220,12 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	const maxFrames = (thai ? limits.thaiSeconds : limits.seconds) * FPS;
 	const gapFrames = LINE_BREAK_GAP * FPS;
 
-	const placed: { text: string; start: number; end: number; space?: boolean; glue?: boolean }[] = [];
+	const placed: { text: string; start: number; end: number; space?: boolean; glue?: boolean; br?: boolean }[] = [];
 	for (const w of words) {
 		const mid = placeFrame((w.start + w.end) / 2, segments);
 		if (mid === null) continue;
 		const half = ((w.end - w.start) / 2) * FPS;
-		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half, space: w.space, glue: w.glue });
+		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half, space: w.space, glue: w.glue, br: w.br });
 	}
 
 	type Placed = (typeof placed)[number];
@@ -270,7 +270,8 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	let current: Placed[] = [];
 	for (const w of placed) {
 		const crossesSplit = current.length > 0 && breaks.some((b) => current[current.length - 1].start < b && b <= w.start + 0.01);
-		if (crossesSplit || (current.length && w.start - current[current.length - 1].end > gapFrames)) {
+		// br: two spaces typed before it in Edit text, a new line here (coach 20 Nov). Same in group_lines (render.py).
+		if (crossesSplit || (current.length && w.br) || (current.length && w.start - current[current.length - 1].end > gapFrames)) {
 			groups.push(current);
 			current = [];
 		} else if (current.length && !fits([...current, w])) {
