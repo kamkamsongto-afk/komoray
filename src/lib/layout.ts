@@ -38,6 +38,11 @@ export type VideoLayout = {
 	fileZoom?: number;
 	fileX?: number;
 	fileY?: number;
+	// Zoom in / Zoom out (coach 20 Nov, as Cutout's Movement): the picture or clip grows (in) or shrinks (out) slowly
+	// around its part's middle while the layout shows, on top of Size; fileMotionZoom: how much bigger it gets in that
+	// time (LAYOUT.motionZoom). Left out: still. Same as layoutFileZoom = layout_file_zoom in render.py.
+	fileMotion?: "in" | "out";
+	fileMotionZoom?: number;
 	name?: string;
 };
 
@@ -50,6 +55,7 @@ export const LAYOUT = {
 	maxItems: 10,
 	seconds: 5,
 	fileZoom: { min: 1, max: 3 },
+	motionZoom: { start: 0.2, min: 0.05, max: 0.6 }, // the same as Cutout's Zoom speed (INSERT.zoom in behind.ts)
 };
 
 export const LAYOUT_KINDS: { id: LayoutKind; name: string }[] = [
@@ -151,6 +157,14 @@ export function layoutFilePlace(l: VideoLayout, w: number, h: number, ratio: num
 	return { x: along(w, fw, l.fileX ?? 0.5), y: along(h, fh, l.fileY ?? 0.5), w: fw, h: fh };
 }
 
+// How much bigger the picture or clip is at final-video second t (Zoom in / Zoom out), around its part's middle.
+// Same as layout_file_zoom in render.py.
+export function layoutFileZoom(l: VideoLayout, t: number) {
+	if (!l.file || !l.fileMotion) return 1;
+	const p = Math.min(1, Math.max(0, (t - l.start) / (l.end - l.start)));
+	return 1 + (l.fileMotionZoom ?? LAYOUT.motionZoom.start) * (l.fileMotion === "in" ? p : 1 - p);
+}
+
 // Dropped on the video: a file from the computer, or a project file dragged from the Layout box (LAYOUT_DRAG).
 export type LayoutDrop = { file?: File; item?: { file: string; media: "image" | "video" } };
 export const LAYOUT_DRAG = "application/x-komoray-media";
@@ -192,6 +206,7 @@ export function readLayouts(value: unknown): VideoLayout[] | null {
 			...(file && Number(l.fileZoom) > LAYOUT.fileZoom.min && { fileZoom: round(num(l.fileZoom, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 1), 100) }),
 			...(file && l.fileX !== undefined && { fileX: round(num(l.fileX, 0, 1, 0.5)) }),
 			...(file && l.fileY !== undefined && { fileY: round(num(l.fileY, 0, 1, 0.5)) }),
+			...(file && (l.fileMotion === "in" || l.fileMotion === "out") && { fileMotion: l.fileMotion as "in" | "out", fileMotionZoom: round(num(l.fileMotionZoom, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, LAYOUT.motionZoom.start), 100) }),
 			...(typeof l.name === "string" && l.name.trim() && { name: l.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});
 	}

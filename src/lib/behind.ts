@@ -7,6 +7,7 @@ import { FONTS, type FontId } from "./subtitle-style";
 import { FPS, type Segment } from "./timeline";
 import type { Window } from "./cutout";
 import { readClipSound } from "./clip-sound";
+import { type Fades, fadeLevel, fadesOn, readFades } from "./fades";
 
 // How a text arrives. run*: slides across the screen all the time it shows (a news ticker).
 export type BehindFx = "fade" | "burst" | "drop" | "pulse" | "runLeft" | "runRight";
@@ -45,14 +46,14 @@ export type BehindText = {
 	// None = as before. Same as the backdrop in cutout_filters (render.py).
 	dim?: number;
 	blur?: number;
-};
+} & Fades; // Fade in / Fade out switches (lib/fades.ts). Added 20 Nov
 
 export const BACKDROP = { dim: { max: 0.8 }, blur: { max: 40 }, darken: { dim: 0.55 }, blurry: { blur: 14, dim: 0.15 } };
 
 // How far a text's backdrop shows at final-video second t: 0..1, fading in and out with BEHIND.fade.
 export function backdropShown(t: BehindText, at: number) {
 	if ((!t.dim && !t.blur) || at < t.start || at >= t.end) return 0;
-	return Math.max(0, Math.min(1, (at - t.start) / BEHIND.fade, (t.end - at) / BEHIND.fade));
+	return fadeLevel(t, at, BEHIND.fade);
 }
 
 // A picture or clip (uploaded next to the video as insert-<id>.<ext>) filling the screen behind the speaker,
@@ -82,7 +83,7 @@ export type Insert = {
 	volume?: number; // clips only: how loud its own sound is, none = silent (lib/clip-sound.ts). Added 12 Nov
 	muted?: boolean; // clips only: Mute ticked (keeps volume for when it is untied)
 	clipFrom?: number; // clips only: the second of the clip it plays from (Trim, lib/clip-sound.ts). Added 19 Nov
-};
+} & Fades; // Fade in / Fade out switches (lib/fades.ts): the picture and the smaller speaker together. Added 20 Nov
 
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
 export const NO_LAYERS: CutoutLayers = { texts: [], inserts: [] };
@@ -118,24 +119,28 @@ export function behindMotion(b: BehindText, t: number, width: number, height: nu
 	if (t < b.start || t >= b.end) return [];
 	const s = t - b.start;
 	const k = ARRIVE_TIME[b.speed];
-	const out = Math.min(1, (b.end - t) / BEHIND.fade);
+	const on = fadesOn(b);
+	const out = on.out ? Math.min(1, (b.end - t) / BEHIND.fade) : 1;
+	// Fade in switched off: solid from its first frame, whatever the effect (the arrival's own fade is that fade).
+	const arrive = (opacity: number) => (on.in ? opacity : 1);
 	const y = b.y * height;
 	const pose = (opacity: number, py = y, sx = 1, sy = sx, x = width / 2, align: Pose["align"] = "center"): Pose => ({ opacity: opacity * out, x, y: py, sx, sy, align });
 	switch (b.fx) {
 		case "fade": {
+			if (!on.in) return [pose(1, y)];
 			const p = smooth(s / (0.8 * k));
 			return [pose(p, y + 40 * (1 - p))];
 		}
 		case "pulse": {
 			const q = s % 0.9;
 			const beat = 0.09 * Math.exp(-(((q - 0.05) / 0.05) ** 2)) + 0.05 * Math.exp(-(((q - 0.25) / 0.05) ** 2));
-			return [pose(Math.min(1, s / 0.2), y, 1 + beat)];
+			return [pose(arrive(Math.min(1, s / 0.2)), y, 1 + beat)];
 		}
 		case "burst": {
 			const span = 0.45 * k;
 			const scale = 0.25 + 0.75 * easeOutBack(Math.min(s / span, 1));
 			const py = y + 0.12 * height * (1 - smooth(s / (0.3 * k)));
-			const poses = [pose(Math.min(1, s / 0.08), py, scale)];
+			const poses = [pose(arrive(Math.min(1, s / 0.08)), py, scale)];
 			const fade = Math.max(0, 1 - s / span);
 			if (fade > 0) poses.push(pose(0.35 * fade, py, scale * (1 + 0.18 * (1 - fade))), pose(0.15 * fade, py, scale * (1 + 0.4 * (1 - fade))));
 			return poses;
@@ -148,16 +153,16 @@ export function behindMotion(b: BehindText, t: number, width: number, height: nu
 			return [pose(1, y + 20 * squash, 1 + 0.12 * squash, 1 - 0.18 * squash)];
 		}
 		case "runLeft":
-			return [pose(Math.min(1, s / 0.3), y, 1, 1, 0.1 * width - RUN_SPEED[b.speed] * s, "left")];
+			return [pose(arrive(Math.min(1, s / 0.3)), y, 1, 1, 0.1 * width - RUN_SPEED[b.speed] * s, "left")];
 		case "runRight":
-			return [pose(Math.min(1, s / 0.3), y, 1, 1, 0.9 * width + RUN_SPEED[b.speed] * s, "right")];
+			return [pose(arrive(Math.min(1, s / 0.3)), y, 1, 1, 0.9 * width + RUN_SPEED[b.speed] * s, "right")];
 	}
 }
 
 // How much of the inserted picture shows (it fades in and out), at final-video second t.
 export function insertShown(i: Insert, t: number) {
 	if (t < i.start || t >= i.end) return 0;
-	return Math.min(1, (t - i.start) / INSERT.fade, (i.end - t) / INSERT.fade);
+	return fadeLevel(i, t, INSERT.fade);
 }
 
 // Has the customer moved, turned or resized the picture? Then it sits on black, and is the whole picture, not
@@ -265,6 +270,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			lineGap: Math.round(num(t.lineGap, BEHIND.lineGap.min, BEHIND.lineGap.max, 0)),
 			...(num(t.dim, 0, BACKDROP.dim.max, 0) > 0 && { dim: round(num(t.dim, 0, BACKDROP.dim.max, 0), 100) }),
 			...(num(t.blur, 0, BACKDROP.blur.max, 0) >= 1 && { blur: Math.round(num(t.blur, 0, BACKDROP.blur.max, 0)) }),
+			...readFades(t),
 		});
 	}
 	const inserts: Insert[] = [];
@@ -292,6 +298,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			picMotion: i.picMotion === "in" || i.picMotion === "out" ? i.picMotion : "still",
 			picZoom: round(num(i.picZoom, INSERT.zoom.min, INSERT.zoom.max, INSERT.zoom.start)),
 			...readClipSound(i, /\.(mp4|mov)$/.test(i.file)),
+			...readFades(i),
 		});
 	}
 	return { texts, inserts };

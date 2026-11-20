@@ -7,7 +7,7 @@ import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileS
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
-import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
+import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
@@ -768,13 +768,16 @@ export function PlayerFrame({
 			: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 		return (
 			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
-				{src &&
-					(l.media === "video" ? (
-						<InsertClip src={src} at={outTime - l.start} from={l.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(l)} length={l.end - l.start} />
-					) : (
-						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-						<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
-					))}
+				{/* Zoom in / Zoom out around the part's middle (layoutFileZoom), as layout_file_zoom in render.py. */}
+				<div className="absolute inset-0" style={{ transform: `scale(${layoutFileZoom(l, outTime)})` }}>
+					{src &&
+						(l.media === "video" ? (
+							<InsertClip src={src} at={outTime - l.start} from={l.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(l)} length={l.end - l.start} />
+						) : (
+							// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+							<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
+						))}
+				</div>
 			</div>
 		);
 	}

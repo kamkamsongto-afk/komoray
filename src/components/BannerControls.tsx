@@ -8,6 +8,7 @@ import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-sty
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
+import { FadeSwitches } from "./FadeSwitches";
 import { LayerTools } from "./LayerTools";
 import { clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
@@ -413,6 +414,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 								</option>
 							))}
 						</select>
+						<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
 						{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 						{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
 						{b.media === "video" && <ClipSound sound={b} onChange={(patch) => update(b.id, patch)} />}
@@ -444,6 +446,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 							<option value="bottom">Bottom</option>
 						</select>
 					</div>
+					<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
 					<div className="flex items-center gap-2 text-xs text-foreground/70">
 						<span className="w-16 shrink-0">Font</span>
 						<select

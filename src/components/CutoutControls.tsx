@@ -10,6 +10,7 @@ import { type useCutout, waitLabel } from "@/lib/use-cutout";
 import { Confirm, ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
+import { FadeSwitches } from "./FadeSwitches";
 import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
@@ -530,6 +531,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									))}
 								</select>,
 							)}
+							<FadeSwitches item={t} onChange={(patch) => updateText(t.id, patch)} />
 							{/* How fast the words move, nothing to do with the cutout's quality. Heartbeat has one speed. */}
 							{t.fx !== "pulse" &&
 								row(
@@ -632,6 +634,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{notCutYet}
 						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
 							{row("Name", <input value={i.name ?? ""} maxLength={BEHIND.maxName} placeholder={i.kind === "video" ? "Clip" : "Picture"} onChange={(e) => updateInsert(i.id, { name: e.target.value })} onBlur={(e) => updateInsert(i.id, { name: cleanInsertName(e.target.value) || undefined })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
+							<FadeSwitches item={i} onChange={(patch) => updateInsert(i.id, patch)} />
 						</div>
 						{/* You, in a box that folds away (coach, 12 Nov): most of the time only the picture is changed. */}
 						<div className="rounded-lg border border-foreground/15">

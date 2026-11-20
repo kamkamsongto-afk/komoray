@@ -328,20 +328,33 @@ def alpha_of(opacity: float) -> str:
     return f"&H{round((1 - min(1.0, max(0.0, opacity))) * 255):02X}&"
 
 
-def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float) -> str:
-    """The tags that make a banner's part arrive at (x, y). factor: its size, 1 = normal."""
+def fades_of(item: dict) -> tuple[bool, bool]:
+    """Fade in / Fade out switches (coach 20 Nov, fadesOn in lib/fades.ts): both on unless saved as false."""
+    return item.get("fadeIn") is not False, item.get("fadeOut") is not False
+
+
+def alpha_fades(start: float, end: float, seconds: float, fades: tuple[bool, bool]) -> str:
+    """ffmpeg: the alpha fading in at start and out up to end over `seconds`, each only where its switch is on
+    (fadeLevel in lib/fades.ts). Empty, or ending with a comma."""
+    out = f"fade=t=in:st={start:.3f}:d={seconds:.3f}:alpha=1," if fades[0] else ""
+    return out + (f"fade=t=out:st={max(start, end - seconds):.3f}:d={seconds:.3f}:alpha=1," if fades[1] else "")
+
+
+def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float, fades: tuple[bool, bool] = (True, True)) -> str:
+    """The tags that make a banner's part arrive at (x, y). factor: its size, 1 = normal. fades: its switches (fades_of)."""
     spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
     fade = int(BANNER["fade"] * 1000)
+    fade_in, fade_out = spec["fade_in"] and fades[0], fades[1]
     slide = spec.get("slide")
     tags = f"\\move({x + slide[0]:.0f},{y + slide[1]:.0f},{x:.0f},{y:.0f},0,{SLIDE_MS})" if slide else f"\\pos({x:.0f},{y:.0f})"
     ms = int(seconds * 1000)
-    if spec["fade_in"] and ms < 2 * fade:
+    if fade_in and fade_out and ms < 2 * fade:
         # Shorter than both fades: the preview takes the smaller of the two (bannerMotion), so it is most solid
         # halfway, at seconds/2/fade. \fad would finish the fade in first, then jump down to the fade out.
         top = round((1 - ms / 2 / fade) * 255)
         tags += f"\\fade(255,{top},255,0,{ms // 2},{ms // 2},{ms})"
     else:
-        tags += f"\\fad({fade if spec['fade_in'] else 0},{fade})"
+        tags += f"\\fad({fade if fade_in else 0},{fade if fade_out else 0})"
     keys = spec.get("keys")
     if anim == "pulse":
         keys, at = [(0, 100)], 0
@@ -362,13 +375,14 @@ def banner_pose(b: dict, t: float) -> tuple[float, float, float, float]:
     anim = b.get("anim") or "fade"
     spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
     ms = (t - start) * 1000
-    fade_in = (t - start) / BANNER["fade"] if spec["fade_in"] else 1.0
+    on_in, on_out = fades_of(b)
+    fade_in = (t - start) / BANNER["fade"] if spec["fade_in"] and on_in else 1.0
     left = max(0.0, 1 - ms / SLIDE_MS)
     swing = (ms % PULSE_MS) / (PULSE_MS / 2)
     keys = spec.get("keys")
     scale = scale_at(keys, ms) / 100 if keys else (1 + 0.08 * (swing if swing <= 1 else 2 - swing) if anim == "pulse" else 1.0)
     slide = spec.get("slide") or (0, 0)
-    return min(1.0, fade_in, (end - t) / BANNER["fade"]), scale, slide[0] * left, slide[1] * left
+    return min(1.0, fade_in, (end - t) / BANNER["fade"] if on_out else 1.0), scale, slide[0] * left, slide[1] * left
 
 
 def row_shifts(align, widths: list[float]) -> list[float]:
@@ -408,7 +422,7 @@ def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, mid
     if last / FPS < end:
         # Settled: still until the end, then the fade out, as banner_motion does it.
         rest = f"{ass_time(last / FPS)},{ass_time(end)}"
-        fade = int(BANNER["fade"] * 1000)
+        fade = int(BANNER["fade"] * 1000) if fades_of(b)[1] else 0
         if not b.get("noBox"):
             events.append(f"Dialogue: {layer},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
@@ -489,9 +503,9 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2, shifts)
             continue
         if not b.get("noBox"):
-            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1)}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1, fades_of(b))}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
-            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size)}}}{row_text}")
+            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b))}}}{row_text}")
     return events
 
 
@@ -526,9 +540,13 @@ def behind_motion(b: dict, t: float, width: int, height: int) -> list[dict]:
         return []
     s = t - start
     k = ARRIVE_TIME.get(b.get("speed"), 1)
-    out = min(1.0, (end - t) / BEHIND["fade"])
+    on_in, on_out = fades_of(b)
+    out = min(1.0, (end - t) / BEHIND["fade"]) if on_out else 1.0
     y = float(b["y"]) * height
     size = float(b["size"])
+
+    def arrive(opacity):  # Fade in switched off: solid from its first frame, whatever the effect
+        return opacity if on_in else 1.0
 
     def pose(opacity, py=y, sx=1.0, sy=None, x=width / 2, align="center"):
         return {"opacity": opacity * out, "x": x, "y": py, "sx": sx, "sy": sx if sy is None else sy, "align": align}
@@ -537,13 +555,13 @@ def behind_motion(b: dict, t: float, width: int, height: int) -> list[dict]:
     if fx == "pulse":
         q = s % 0.9
         beat = 0.09 * math.exp(-(((q - 0.05) / 0.05) ** 2)) + 0.05 * math.exp(-(((q - 0.25) / 0.05) ** 2))
-        return [pose(min(1.0, s / 0.2), y, 1 + beat)]
+        return [pose(arrive(min(1.0, s / 0.2)), y, 1 + beat)]
     if fx == "burst":
         span = 0.45 * k
         p = min(s / span, 1.0)
         scale = 0.25 + 0.75 * (1 + 2.9 * (p - 1) ** 3 + 1.9 * (p - 1) ** 2)
         py = y + 0.12 * height * (1 - _smooth(s / (0.3 * k)))
-        poses = [pose(min(1.0, s / 0.08), py, scale)]
+        poses = [pose(arrive(min(1.0, s / 0.08)), py, scale)]
         fade = max(0.0, 1 - s / span)
         if fade > 0:
             poses += [pose(0.35 * fade, py, scale * (1 + 0.18 * (1 - fade))), pose(0.15 * fade, py, scale * (1 + 0.4 * (1 - fade)))]
@@ -556,9 +574,11 @@ def behind_motion(b: dict, t: float, width: int, height: int) -> list[dict]:
         squash = math.exp(-q / 0.07) * math.cos(q * 45)
         return [pose(1, y + 20 * squash, 1 + 0.12 * squash, 1 - 0.18 * squash)]
     if fx == "runLeft":
-        return [pose(min(1.0, s / 0.3), y, 1, 1, 0.1 * width - RUN_SPEED.get(b.get("speed"), 300) * s, "left")]
+        return [pose(arrive(min(1.0, s / 0.3)), y, 1, 1, 0.1 * width - RUN_SPEED.get(b.get("speed"), 300) * s, "left")]
     if fx == "runRight":
-        return [pose(min(1.0, s / 0.3), y, 1, 1, 0.9 * width + RUN_SPEED.get(b.get("speed"), 300) * s, "right")]
+        return [pose(arrive(min(1.0, s / 0.3)), y, 1, 1, 0.9 * width + RUN_SPEED.get(b.get("speed"), 300) * s, "right")]
+    if not on_in:  # fade, switched off: no arrival at all
+        return [pose(1, y)]
     p = _smooth(s / (0.8 * k))  # fade
     return [pose(p, y + 40 * (1 - p))]
 
@@ -633,6 +653,16 @@ def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
     )
 
 
+def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a Layout's picture or clip growing (fileMotion "in") or shrinking ("out") around its part's middle while
+    the layout shows, on top of its Size (coach 20 Nov). Same as layoutFileZoom in layout.ts; done as picture_zoom does it."""
+    motion = l.get("fileMotion")
+    if not l.get("file") or motion not in ("in", "out"):
+        return ""
+    amount = min(0.6, max(0.05, float(l.get("fileMotionZoom") or INSERT_ZOOM)))  # LAYOUT.motionZoom in layout.ts
+    return picture_zoom({"picMotion": motion, "picZoom": amount}, seconds, size)
+
+
 def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: dict, inputs: dict) -> str:
     """Puts the cutout layers on the joined video `base`, in the preview's order (PlayerFrame): text behind
     the speaker, then each picture or clip fading in over the whole picture, then the speaker cut out
@@ -659,8 +689,9 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
         parts.append(f"{base}split=2[cdm{j}][cdi{j}]")
         parts.append(
             f"[cdi{j}]trim=start={a:.3f}:end={b:.3f},{f'gblur=sigma={blur:.0f},' if blur >= 1 else ''}"
-            f"{f'drawbox=c=black@{dim:.2f}:t=fill,' if dim > 0 else ''}format=yuva420p,"
-            f"fade=t=in:st={a:.3f}:d={fade}:alpha=1,fade=t=out:st={max(a, b - fade):.3f}:d={fade}:alpha=1[cdk{j}]"
+            f"{f'drawbox=c=black@{dim:.2f}:t=fill,' if dim > 0 else ''}"
+            + f"format=yuva420p,{alpha_fades(a, b, fade, fades_of(t))}".rstrip(",")
+            + f"[cdk{j}]"
         )
         parts.append(f"[cdm{j}][cdk{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[cdo{j}]")
         base = f"[cdo{j}]"
@@ -672,10 +703,7 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
         d = b - a
         # A clip or a GIF that ends early stays on its last frame, as a browser shows it.
         hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if ins.get("kind") == "video" or str(ins.get("file", "")).endswith(".gif") else ""
-        fades = (
-            f"format=yuva420p,fade=t=in:st=0:d={INSERT_FADE}:alpha=1,fade=t=out:st={max(0.0, d - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1,"
-            f"setpts=PTS-STARTPTS+{a:.3f}/TB[ins{j}]"
-        )
+        fades = f"format=yuva420p,{alpha_fades(0.0, d, INSERT_FADE, fades_of(ins))}setpts=PTS-STARTPTS+{a:.3f}/TB[ins{j}]"
         zoom = picture_zoom(ins, d, size)
         grow, turn = float(ins.get("picScale", 1)), float(ins.get("picRotate", 0))
         dx, dy = float(ins.get("picX", 0)) * W, float(ins.get("picY", 0)) * H
@@ -722,8 +750,7 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
             parts.append(f"[cpe{j}][cg{j}]blend=all_mode=multiply:shortest=1[cpf{j}]")
             speaker = f"[cpb{j}][cpf{j}]alphamerge,"
         parts.append(
-            f"{speaker}scale={w}:-2,format=yuva420p,fade=t=in:st={a:.3f}:d={INSERT_FADE}:alpha=1,"
-            f"fade=t=out:st={max(a, b - INSERT_FADE):.3f}:d={INSERT_FADE}:alpha=1[csm{j}]"
+            f"{speaker}scale={w}:-2," + f"format=yuva420p,{alpha_fades(a, b, INSERT_FADE, fades_of(ins))}".rstrip(",") + f"[csm{j}]"
         )
         lift = float(ins.get("speakerLift", 0)) * H
         on_top = f"*not({later[id(ins)]})" if later[id(ins)] else ""
@@ -874,9 +901,7 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             out = f"[fcb{j}]"
         # Fades in and out over the picture under it (frameShown in frame-me.ts). Timestamps are the whole video's here.
         fade_in = min(FRAME_FADE, d / 2)
-        parts.append(
-            f"{out}format=yuva420p,fade=t=in:st={a:.3f}:d={fade_in:.3f}:alpha=1,fade=t=out:st={b - fade_in:.3f}:d={fade_in:.3f}:alpha=1[fcf{j}]"
-        )
+        parts.append(f"{out}" + f"format=yuva420p,{alpha_fades(a, b, fade_in, fades_of(f))}".rstrip(",") + f"[fcf{j}]")
         parts.append(f"[fmq{j}][fcf{j}]overlay[fcx{j}]")
         parts.append(f"{base}[fcx{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[fmo{j}]")
         base = f"[fmo{j}]"
@@ -977,7 +1002,7 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
             parts.append(
                 f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale=w='ceil(iw*{grow}/2)*2':h='ceil(ih*{grow}/2)*2',"
                 f"crop={ow}:{oh}:x='clip(iw*{fx:g}-{ow / 2:g},0,iw-{ow})':y='clip(ih*{fy:g}-{oh / 2:g},0,ih-{oh})',setsar=1,"
-                f"format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[lyf{j}]"
+                f"{layout_file_zoom(l, d, (ow, oh))}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[lyf{j}]"
             )
         else:
             colour = str(l.get("color") or "#000000").lstrip("#")
@@ -1066,14 +1091,16 @@ def banner_file_filters(parts: list[str], base: str, size: tuple[int, int], bann
                 f"format=yuva420p,perspective=x0='{mx}':y0='{my}':x1='W-{mx}':y1='{my}':x2='{mx}':y2='H-{my}':x3='W-{mx}':y3='H-{my}'"
                 ":interpolation=linear:eval=frame,"
             )
-        fade_in = f"fade=t=in:st=0:d={fade}:alpha=1," if spec["fade_in"] else ""
-        fades = f"{fade_in}fade=t=out:st={max(0.0, d - fade):.3f}:d={fade}:alpha=1,"
+        on_in, on_out = fades_of(b)
+        fade_in = f"fade=t=in:st=0:d={fade}:alpha=1," if spec["fade_in"] and on_in else ""
+        fades = fade_in + (f"fade=t=out:st={max(0.0, d - fade):.3f}:d={fade}:alpha=1," if on_out else "")
         shown = ""
-        if d < 2 * fade:
+        if d < 2 * fade and fades:
             # Shorter than both fades: the preview takes the smaller of the two (bannerMotion), two fades in a row
             # multiply them (Codex review, 12 Nov). So the preview's rule, on these few frames only.
-            fall = f"({d:.3f}-T)/{fade}"
-            level = f"min(1,min(T/{fade},{fall}))" if spec["fade_in"] else f"min(1,{fall})"
+            level = "1"
+            for term in ([f"T/{fade}"] if fade_in else []) + ([f"({d:.3f}-T)/{fade}"] if on_out else []):
+                level = f"min({level},{term})"
             shown = f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*{level}',"
             fades = ""
         # A clip or a GIF that ends early stays on its last frame, as the preview shows it (same as an insert).
