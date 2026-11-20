@@ -12,6 +12,7 @@ import type { AccessStatus } from "@/lib/access";
 import { browserLanguage, isLanguage } from "@/lib/languages";
 import { MAX_FILE_GB } from "@/lib/limits";
 import { shortDate } from "@/lib/plans";
+import { takePending } from "@/lib/pending-upload";
 import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
 import { ding } from "@/lib/ding";
@@ -149,6 +150,19 @@ export default function UploadPage() {
 	useEffect(() => {
 		if (user) void loadAccess();
 	}, [user, loadAccess]);
+
+	// A video dropped on the home page before signing in (lib/pending-upload.ts): upload it now. Taken once, so a
+	// refresh doesn't upload it twice; someone not let in yet doesn't keep it in their browser either.
+	const tookPending = useRef(false);
+	useEffect(() => {
+		if (!user || !access || tookPending.current || !new URLSearchParams(window.location.search).has("pending")) return;
+		tookPending.current = true;
+		window.history.replaceState(null, "", "/upload");
+		void takePending().then((file) => {
+			if (file && access.allowed) void handleFile(file);
+		});
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [user, access]);
 
 	// Opened from My projects (/upload?key=…): pick up where that video left off.
 	useEffect(() => {

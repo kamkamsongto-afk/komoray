@@ -1,31 +1,18 @@
 import Image from "next/image";
 import Link from "next/link";
-import { HeroVideo } from "@/components/HeroVideo";
+import { AfterVideo, HeroDrop, LoopVideo } from "@/components/HomeMedia";
 import { CutoutCard, FrameCard, HelloWord, LayoutCard, LooksCard, PaceCard, ScriptDemo, ShapeCard, WordsDemo } from "@/components/LandingDemos";
 import { WaitlistForm } from "@/components/WaitlistForm";
 import "./landing.css";
 
-// Small fish crossing in front of the video, each on its own time, so no two passes of the video look the same: top, width, seconds, start, blur.
-const FISH: [string, number, number, number, number][] = [
-	["18%", 26, 37, 5, 0.4],
-	["34%", 40, 53, 30, 0.8],
-	["52%", 20, 41, 22, 0.3],
-	["26%", 64, 71, 12, 2],
-	["64%", 30, 59, 44, 0.6],
-	["44%", 92, 97, 70, 4],
-];
-const ROOMS = ["home", "city", "mountain", "kitchen", "country"];
 const STEPS: [string, string, string][] = [
 	["01", "Shoot", "Upload from your computer, or send it from your phone with a QR code."],
 	["02", "Review", "Silences and repeated takes are marked. Your script and subtitles are ready. Undo anything."],
 	["03", "Make video", "Preview it, press Make video, and download the file. You make the final call."],
 ];
 
-function Photo({ name, priority }: { name: string; priority?: boolean }) {
-	return <Image src={`/landing/${name}.webp`} alt="" width={448} height={896} unoptimized priority={priority} />;
-}
-
 // Only what the product really does today: no numbers until they are measured with real creators.
+// Every picture and clip here was filmed by the coach (20 Nov, for Paddle's review: no AI-made pictures).
 export default function Home() {
 	return (
 		<main className="k-root">
@@ -45,28 +32,29 @@ export default function Home() {
 						</a>
 					</div>
 				</nav>
+				{/* Left: drop a video to try it. Right: the coach's raw take, and the same take cut with Komoray (20 Nov). */}
 				<section className="k-hero">
-					<div className="k-scene" aria-hidden>
-						<HeroVideo />
-						{FISH.map(([top, size, seconds, delay, blur], i) => (
-							<svg key={i} className={`k-fish ${i % 2 ? "k-fish-back" : ""}`} viewBox="0 0 60 24" style={{ top, width: size, animationDuration: `${seconds}s`, animationDelay: `-${delay}s`, filter: `blur(${blur}px)` }}>
-								<path d="M2 12C12 2 30 1 44 10L58 2C56 9 56 15 58 22L44 14C30 23 12 22 2 12Z" />
-							</svg>
-						))}
-					</div>
-					<div className="k-mono k-note">AI-generated video</div>
 					<div className="k-herotext">
 						<h1 className="k-herohead">You shoot. Komoray makes you shine.</h1>
 						<p className="k-herolead">The AI studio for people who talk to camera. Your raw take goes in. A clean first cut, script and subtitles come out, ready for your final call.</p>
-						<a className="k-herocta" href="#access">
-							Get early access
-							<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-								<path d="M5 2l5 5-5 5" />
-							</svg>
-						</a>
-						<Link className="k-herocta k-herocta-ghost" href="/pricing">
+						<HeroDrop />
+						<Link className="k-herolink" href="/pricing">
 							See pricing
 						</Link>
+					</div>
+					<div className="k-heroclips">
+						<figure className="k-clip k-clip-before">
+							<div className="k-clipbox">
+								<LoopVideo name="before" />
+							</div>
+							<figcaption className="k-mono">Before · raw take</figcaption>
+						</figure>
+						<figure className="k-clip k-clip-after">
+							<div className="k-clipbox">
+								<AfterVideo />
+							</div>
+							<figcaption className="k-mono">After · cut with Komoray</figcaption>
+						</figure>
 					</div>
 				</section>
 			</div>
@@ -83,26 +71,8 @@ export default function Home() {
 				</div>
 			</section>
 
-			<section className="k-sec">
-				<div className="k-wrap">
-					<p className="k-mono k-eyebrow">Wherever you film</p>
-					<h2 className="k-h2">
-						Your face. Your room.
-						<br />
-						Your voice.
-					</h2>
-					<div className="k-rooms">
-						{ROOMS.map((name) => (
-							<div key={name} className="k-room">
-								<Photo name={name} />
-							</div>
-						))}
-					</div>
-					<p className="k-mono k-small">Illustrative images</p>
-				</div>
-			</section>
-
-			<section className="k-sec" id="words" style={{ paddingTop: 0 }}>
+			{/* "Your face. Your room. Your voice." is hidden (coach 20 Nov): its pictures were AI-made. */}
+			<section className="k-sec" id="words">
 				<div className="k-wrap k-words">
 					<div>
 						<p className="k-mono k-eyebrow">My words</p>
@@ -126,7 +96,6 @@ export default function Home() {
 						<CutoutCard />
 						<LayoutCard />
 					</div>
-					<p className="k-mono k-small">Illustrative images</p>
 				</div>
 			</section>
 
@@ -145,7 +114,7 @@ export default function Home() {
 						<article className="k-card">
 							<div className="k-vis k-zoom">
 								<div className="k-frame">
-									<Photo name="kitchen" />
+									<LoopVideo name="zoom" />
 								</div>
 							</div>
 							<h3>A second camera feel</h3>
@@ -154,7 +123,7 @@ export default function Home() {
 						<article className="k-card">
 							<div className="k-vis">
 								<div className="k-frame">
-									<Photo name="city" />
+									<LoopVideo name="banner" />
 									<div className="k-bannerpop">Link in bio</div>
 								</div>
 							</div>

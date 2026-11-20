@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { type PointerEvent, type ReactNode, useEffect, useId, useState } from "react";
-import { FRAME_SHAPES, type FrameShape, shapePolygon } from "@/lib/frame-me";
+import { CutoutVideo, LoopVideo } from "@/components/HomeMedia";
+import { FRAME_SHAPES, type FrameShape, framePoints, shapePolygon } from "@/lib/frame-me";
 import { LAYOUT_KINDS, type LayoutKind } from "@/lib/layout";
 
 // The small things people can try on the home page. Nothing here touches a real video.
@@ -70,7 +71,7 @@ export function ScriptDemo() {
 			</div>
 			<div className="k-player">
 				<div className="k-screen">
-					<Image src="/landing/kitchen.webp" alt="" width={448} height={896} unoptimized />
+					<LoopVideo name="words" />
 					<div className="k-caption">{caption}</div>
 				</div>
 				<div className="k-playerbar">
@@ -202,7 +203,7 @@ export function ShapeCard() {
 		<article className="k-card">
 			<div className="k-vis k-vis-shape">
 				<div className="k-shape" style={{ width, height }}>
-					<Image src="/landing/mountain-wide.webp" alt="" width={870} height={490} unoptimized />
+					<LoopVideo name="frame" />
 				</div>
 			</div>
 			<h3>Every shape</h3>
@@ -253,8 +254,6 @@ function useAuto<T>(options: T[], ms: number): [T, (value: T) => void] {
 
 const FRAME_DEMO: FrameShape[] = ["circle", "heart", "star", "rounded"];
 const FRAME_CHIPS = FRAME_DEMO.map((id): [FrameShape, string] => [id, FRAME_SHAPES.find((s) => s.id === id)?.name ?? id]);
-// The picture is 1 wide and 2 tall; the face sits about here in it.
-const FACE = { x: 0.53, y: 0.44, zoom: 1.45 };
 
 export function FrameCard() {
 	const [shape, setShape] = useAuto(FRAME_DEMO, 2400);
@@ -262,19 +261,21 @@ export function FrameCard() {
 	const w = 100;
 	const h = w * (FRAME_SHAPES.find((s) => s.id === shape)?.ratio ?? 1);
 	const points = shapePolygon(shape, w, h);
-	const pw = w * FACE.zoom;
+	// The coach's clip inside the shape (20 Nov), its still picture blurred behind, as Frame Me's blur does.
+	const shapeClip = `polygon(${framePoints(shape).map(([x, y]) => `${((x + 0.5) * 100).toFixed(2)}% ${((y + 0.5) * 100).toFixed(2)}%`).join(", ")})`;
 	return (
 		<TiltCard>
 			<div className="k-vis">
 				<div className="k-frame k-stage">
-					<Image className="k-frameback" src="/landing/home.webp" alt="" width={448} height={896} unoptimized />
-					<svg key={shape} className="k-frameme" viewBox={`-4 -4 ${w + 8} ${h + 8}`} aria-hidden>
-						<clipPath id={clip}>
-							<polygon points={points} />
-						</clipPath>
-						<image href="/landing/home.webp" x={w / 2 - FACE.x * pw} y={h / 2 - FACE.y * pw * 2} width={pw} height={pw * 2} preserveAspectRatio="none" clipPath={`url(#${clip})`} />
-						<polygon points={points} fill="none" stroke="#B9F36A" strokeWidth="2.5" strokeLinejoin="round" />
-					</svg>
+					<Image className="k-frameback" src="/landing/frame-poster.webp" alt="" width={480} height={854} unoptimized />
+					<div className="k-frameme" style={{ aspectRatio: `${w} / ${h}` }}>
+						<div className="k-frameclip" style={{ clipPath: shapeClip }}>
+							<LoopVideo name="frame" />
+						</div>
+						<svg key={shape} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden>
+							<polygon id={clip} points={points} fill="none" stroke="#B9F36A" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+						</svg>
+					</div>
 				</div>
 			</div>
 			<h3>Frame Me</h3>
@@ -294,11 +295,11 @@ export function CutoutCard() {
 		<TiltCard>
 			<div className="k-vis">
 				<div className="k-frame k-stage">
-					<Image src="/landing/city.webp" alt="" width={448} height={896} unoptimized />
+					<Image src="/landing/cutout-bg.webp" alt="" width={720} height={1080} unoptimized />
 					<div key={motion} className={`k-behind k-behind-${motion}`} aria-hidden>
 						{motion === "run" ? "NEW DROP · NEW DROP · NEW DROP · " : "WOW"}
 					</div>
-					<Image className="k-cutme" src="/landing/city-cut.webp" alt="" width={448} height={896} unoptimized />
+					<CutoutVideo className="k-cutme" />
 				</div>
 			</div>
 			<h3>Cutout</h3>
@@ -320,10 +321,10 @@ export function LayoutCard() {
 			<div className="k-vis">
 				<div className={`k-frame k-stage k-layout k-layout-${kind} ${split ? "k-layout-on" : ""}`}>
 					<div className="k-layme">
-						<Image src="/landing/kitchen.webp" alt="" width={448} height={896} unoptimized />
+						<LoopVideo name="layout" />
 					</div>
 					<div className="k-layother">
-						<Image src="/landing/mountain-wide.webp" alt="" width={870} height={490} unoptimized />
+						<Image src="/landing/layout-other.webp" alt="" width={720} height={1080} unoptimized />
 					</div>
 				</div>
 			</div>
