@@ -1319,7 +1319,7 @@ export function ScriptView({
 										</span>
 									</div>
 									)}
-									{zoomTab === "whole" && <p className="text-xs text-foreground/60">Everywhere that has no zoom of its own (the purple parts keep theirs). Nothing changes until you press Apply.</p>}
+									{zoomTab === "whole" && <p className="text-xs text-foreground/60">How the whole video zooms. Nothing changes until you press Apply, which asks whether the purple parts change too.</p>}
 									</div>
 								) : undefined
 							}
@@ -1342,22 +1342,39 @@ export function ScriptView({
 											<div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmWhole(false)}>
 												<div onClick={(e) => e.stopPropagation()} className="flex max-w-sm flex-col gap-3 rounded-xl bg-background p-4 text-foreground shadow-xl">
 													<p className="font-medium">Change the zoom of the whole video?</p>
-													<p className="text-sm text-foreground/70">Every part without its own zoom changes. The purple parts keep theirs.</p>
-													<div className="flex justify-end gap-2">
-														<button onClick={() => setConfirmWhole(false)} className="rounded-md border border-foreground/20 px-3 py-1 text-sm hover:bg-foreground/5">
-															Cancel
-														</button>
-														<button
-															onClick={() => {
-																onSubtitleChange({ ...subtitle, zoom: zoomDraft.zoom, zoomAmount: zoomDraft.zoomAmount, zoomPeriod: zoomDraft.zoomPeriod });
-																setZoomDraft(null);
-																setConfirmWhole(false);
-															}}
-															className="rounded-md bg-purple-600 px-3 py-1 text-sm font-medium text-white hover:bg-purple-700"
-														>
-															Apply to the whole video
-														</button>
-													</div>
+													{/* With parts of their own (purple, or No zoom): everywhere clears them too (coach 20 Nov: None + Apply
+													    left the purple parts zooming), or only the rest, as before. */}
+													{(() => {
+														const own = zoomParts.length + noZoom.length;
+														const apply = (everywhere: boolean) => {
+															onSubtitleChange({ ...subtitle, zoom: zoomDraft.zoom, zoomAmount: zoomDraft.zoomAmount, zoomPeriod: zoomDraft.zoomPeriod });
+															if (everywhere && own) onZoomChange({ noZoom: [], zoomParts: [] });
+															setZoomDraft(null);
+															setConfirmWhole(false);
+														};
+														return (
+															<>
+																<p className="text-sm text-foreground/70">
+																	{own
+																		? `This video has ${own} ${own === 1 ? "part" : "parts"} with a zoom of ${own === 1 ? "its" : "their"} own (purple on the timeline). Apply everywhere removes ${own === 1 ? "it" : "them"}.`
+																		: "The whole video zooms this way."}
+																</p>
+																<div className="flex flex-wrap justify-end gap-2">
+																	<button onClick={() => setConfirmWhole(false)} className="rounded-md border border-foreground/20 px-3 py-1 text-sm hover:bg-foreground/5">
+																		Cancel
+																	</button>
+																	{own > 0 && (
+																		<button onClick={() => apply(false)} className="rounded-md border border-purple-500/50 px-3 py-1 text-sm hover:bg-purple-500/10">
+																			Only where there is no purple part
+																		</button>
+																	)}
+																	<button onClick={() => apply(true)} className="rounded-md bg-purple-600 px-3 py-1 text-sm font-medium text-white hover:bg-purple-700">
+																		{own ? "Apply everywhere" : "Apply to the whole video"}
+																	</button>
+																</div>
+															</>
+														);
+													})()}
 												</div>
 											</div>
 										)}
