@@ -2,6 +2,7 @@
 
 import { ArrowLeft, ArrowLeftRight, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LIMITS } from "@/lib/subtitle-style";
 import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { knownLibrary, LIBRARY_ACCEPT, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
@@ -24,6 +25,8 @@ type Props = {
 	note?: string; // a file dropped on the video: being added to Import, or why it couldn't be
 	libraryVersion?: number; // goes up when Import got a new file: the pictures here are asked for again
 	onImportFile?: (file: File, id: string) => void; // a file from the computer: into Import, then into this layout's other part
+	// Subtitles while it shows (coach 20 Nov, placeStretch in lib/timeline.ts): their own height, or null = the rest's.
+	subtitles?: { at: (l: VideoLayout) => number | null; normal: number; set: (l: VideoLayout, position: number | null) => void };
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -44,7 +47,7 @@ function KindIcon({ kind, meFirst = true, split = 0.5, size = 22 }: { kind: Layo
 // The editor's Layout box (coach, 14 Nov): for a stretch of the video, the screen is split, you in one part and a
 // picture or clip from Import in the other, top / bottom or side by side, sliding in or with a flash.
 // Drawn by PlayerFrame, made by layout_filters (render.py).
-export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0, onImportFile, ruler = FINAL_CLOCK }: Props) {
+export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0, onImportFile, ruler = FINAL_CLOCK, subtitles }: Props) {
 	// Import file (coach 15 Nov): one hidden picker, told which layout it is for when its button is pressed.
 	const fileRef = useRef<HTMLInputElement>(null);
 	const importFor = useRef<string | null>(null);
@@ -256,6 +259,32 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								Center me
 							</button>
 						</div>
+
+						{subtitles && (() => {
+							// Subtitles here (coach 20 Nov): top / bottom put them over a face or over what is shown. Their own height for
+							// this layout's time only, in one step; the timeline shows it as its own piece.
+							const own = subtitles.at(l);
+							const seam = l.meFirst ? 1 - l.split : l.split; // the line between the two parts, from the bottom
+							return (
+								<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+									<span className="text-xs font-medium text-foreground/80">Subtitles here</span>
+									{row("Height", range(own ?? subtitles.normal, LIMITS.position.min, LIMITS.position.max, 0.01, own === null ? "As the rest" : percent(own), (v) => subtitles.set(l, Math.round(v * 1000) / 1000)))}
+									<div className="flex flex-wrap gap-1">
+										{l.kind === "stack" && (
+											<button onClick={() => subtitles.set(l, Math.min(LIMITS.position.max, Math.max(LIMITS.position.min, Math.round((seam - 0.03) * 1000) / 1000)))} className="rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+												On the line between
+											</button>
+										)}
+										{own !== null && (
+											<button onClick={() => subtitles.set(l, null)} className="rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+												Same as the rest
+											</button>
+										)}
+									</div>
+									<p className="text-xs text-foreground/60">Only while this layout shows. Or pause on it and drag the subtitles. If you move the layout later, set this again.</p>
+								</div>
+							);
+						})()}
 
 						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
 							<span className="text-xs font-medium text-foreground/80">The other part</span>

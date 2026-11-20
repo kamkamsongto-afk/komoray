@@ -12,7 +12,7 @@ import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { DEFAULT_STYLE, fontMetrics, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { findRepeatedTakes, groupTakes, type TakeGroup } from "@/lib/takes";
-import { FPS, keepSegments, subtitleLines, toOutSeconds, toSourceSeconds, totalFrames } from "@/lib/timeline";
+import { FPS, keepSegments, placeStretch, stretchPlace, subtitleLines, toOutSeconds, toSourceSeconds, totalFrames } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
 import { studioSupported } from "@/lib/player/engine";
 import { type PreviewHandle, PreviewPlayer } from "./PreviewPlayer";
@@ -1326,6 +1326,11 @@ export function ScriptView({
 							note={layoutNote}
 							libraryVersion={libraryVersion}
 							onImportFile={(file, id) => void dropOnLayout({ file }, id)}
+							subtitles={{
+								at: (l) => stretchPlace(subtitle.spots, l.start, segments),
+								normal: subtitle.position,
+								set: (l, position) => onSubtitleChange({ ...subtitle, ...placeStretch(subtitle, l.start, l.end, segments, position) }),
+							}}
 						/>
 					)}
 					{panel === "import" && (
@@ -1639,7 +1644,9 @@ export function ScriptView({
 					onCutoutChange={onCutoutChange}
 					revealed={revealed}
 					splits={subtitle.splits ?? []}
-					onSplitsChange={(splits) => onSubtitleChange({ ...subtitle, splits })}
+					spots={subtitle.spots ?? []}
+					subtitlePosition={subtitle.position}
+					onSplitsChange={(splits, spots) => onSubtitleChange({ ...subtitle, splits, ...(spots && { spots }) })}
 					onShowCutsChange={setShowCuts}
 					rowMemo={rowMemo}
 					rowsKey={rowsKey}

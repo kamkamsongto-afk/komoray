@@ -58,6 +58,30 @@ export function setSpot(spots: SubtitleSpot[] | undefined, start: number, end: n
 	});
 	return [...kept, { start, end, position }];
 }
+// Splits to add at these moments of the original video: none where one already is (within `near` seconds).
+export function addSplits(splits: number[] | undefined, at: number[], near = 0.05) {
+	const all = [...(splits ?? [])];
+	for (const t of at) if (t > 0 && !all.some((s) => Math.abs(s - t) < near)) all.push(Math.round(t * 1000) / 1000);
+	return all.sort((a, b) => a - b);
+}
+
+// Subtitles of their own place for a stretch of the final video (start / end: its seconds), e.g. while a Layout shows
+// (coach 20 Nov: top / bottom put the subtitles over a face or over what is shown). One step for what took several
+// Splits and a drag: Splits at both edges (on the original video, so no line runs across them) and a spot over it.
+// position null: back to the place of the rest (its spot goes, the Splits stay). Only Splits and spots, which
+// build_subtitles in render.py already reads: nothing new for the final video.
+export function placeStretch(sub: { splits?: number[]; spots?: SubtitleSpot[] }, start: number, end: number, segments: Segment[], position: number | null) {
+	const [a, b] = [toSourceSeconds(start, segments), toSourceSeconds(end, segments)];
+	if (b <= a) return sub;
+	const spots = setSpot(sub.spots, a, b, position ?? 0).filter((s) => position !== null || s.start !== a || s.end !== b);
+	return { ...sub, splits: addSplits(sub.splits, [a, b]), spots };
+}
+// The spot over a stretch of the final video, if its subtitles have their own place (placeStretch).
+export const stretchPlace = (spots: SubtitleSpot[] | undefined, start: number, segments: Segment[]) => {
+	const a = toSourceSeconds(start, segments) + 0.01;
+	return spots?.find((s) => a >= s.start && a < s.end)?.position ?? null;
+};
+
 // A hundredth of a second in, so a line starting exactly on a Split counts as after it. Same as source_at in render.py.
 function lineSource(frame: number, segments: Segment[]) {
 	const seg = segments.findLast((s) => s.from <= frame && frame <= s.from + s.frames); // the last: right after a cut, the piece that starts there
