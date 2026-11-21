@@ -33,6 +33,7 @@ import { AudioControls } from "./AudioControls";
 import { type Clock, FINAL_CLOCK, rangeText, RowFit } from "./TimeField";
 import { fitInRow, loadRows } from "@/lib/lane-rows";
 import { spotInside } from "@/lib/layers";
+import { logoUrl } from "@/lib/logo";
 import { Timeline } from "./Timeline";
 import { PART_AMOUNT, PART_ZOOMS, type PartZoom, setZoomPart, ZOOM_NAMES, type ZoomPart } from "@/lib/zoom";
 
@@ -938,7 +939,7 @@ export function ScriptView({
 				} catch {}
 				setKits(list);
 				// Every kit's logo fetched now, so picking a kit shows its logo at once (coach, 17 Nov; PlayerFrame LogoPicture).
-				for (const kit of list) if (kit.style.logoImage) new Image().src = `/api/logo?v=${kit.style.logoImage.version}`;
+				for (const kit of list) if (kit.style.logoImage) new Image().src = logoUrl(kit.style.logoImage.version);
 				setInUse([kept, startKit, data?.defaultId].find((id) => id && list.some((k) => k.id === id)) ?? null);
 			});
 	}, [panel, kitMemory, startKit]);

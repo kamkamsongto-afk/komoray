@@ -63,9 +63,9 @@ export async function putObject(key: string, body: string | Uint8Array<ArrayBuff
 }
 
 // Write only if the file isn't there yet. Two requests at once can't both win. false = it was already there.
-export async function putIfAbsent(key: string, body: string, contentType: string) {
+export async function putIfAbsent(key: string, body: string | Uint8Array<ArrayBuffer>, contentType: string) {
 	const { client, objectUrl } = r2();
-	const bytes = new TextEncoder().encode(body);
+	const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
 	const signed = await client.sign(objectUrl(key), {
 		method: "PUT",
 		body: bytes,

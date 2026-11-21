@@ -9,6 +9,7 @@ import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
 import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
+import { logoUrl } from "@/lib/logo";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -383,10 +384,21 @@ function LayoutFileHandle({ l, box, place, scale, onChange }: { l: VideoLayout; 
 // before it (coach, 17 Nov: picking another Brand Kit kept the old channel's logo on for seconds, which looked wrong).
 function LogoPicture({ version, place, opacity }: { version: number; place: CSSProperties; opacity: number }) {
 	const [ready, setReady] = useState(false);
+	// No file of its own (lib/logo.ts): said on the video, as Make video stops for it too. Never another picture.
+	const [missing, setMissing] = useState(false);
+	if (missing) {
+		return (
+			<div
+				style={{ ...place, aspectRatio: "3 / 1", borderRadius: 16, background: "rgba(220,38,38,0.9)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "white", fontSize: 26, lineHeight: 1.2, fontFamily: "sans-serif", padding: 8 }}
+			>
+				Logo missing: upload it again in Brand
+			</div>
+		);
+	}
 	return (
 		<>
 			{/* eslint-disable-next-line @next/next/no-img-element */}
-			<img src={`/api/logo?v=${version}`} alt="" onLoad={() => setReady(true)} onError={() => setReady(true)} style={{ ...place, height: "auto", opacity: ready ? opacity : 0 }} />
+			<img src={logoUrl(version)} alt="" onLoad={() => setReady(true)} onError={() => setMissing(true)} style={{ ...place, height: "auto", opacity: ready ? opacity : 0 }} />
 			{!ready && (
 				<div
 					className="animate-pulse"
