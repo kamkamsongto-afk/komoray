@@ -137,8 +137,9 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 	return (
 		<div className={`flex flex-col gap-2 p-3 ${section ? "" : "rounded-lg border border-foreground/15"}`}>
 			{top}
-			{on("shape") && <div className="flex items-start gap-3 text-sm text-foreground/70">
-				<span className="w-24 shrink-0 pt-2">Video shape</span>
+			{on("shape") && <Zone on={!section} title="Video shape" tint="blue">
+			<div className="flex items-start gap-3 text-sm text-foreground/70">
+				{section && <span className="w-24 shrink-0 pt-2">Video shape</span>}
 				{/* A picture of each shape instead of a list (coach, 6 Nov): what it is for shows on hover. */}
 				<div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Video shape">
 					{(Object.keys(FORMATS) as Format[]).map((f) => {
@@ -167,9 +168,9 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 						);
 					})}
 				</div>
-			</div>}
-			{on("text") && <>
-			{!section && <p className="text-sm font-medium">Subtitles</p>}
+			</div>
+			</Zone>}
+			{on("text") && <Zone on={!section} title="Subtitles" tint="violet">
 			<label className="flex items-center gap-2 text-sm">
 				<input type="checkbox" checked={style.subtitles} onChange={(e) => onChange({ ...style, subtitles: e.target.checked })} />
 				Show subtitles on the video
@@ -266,8 +267,8 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 			{style.look === "box" && slider("Box opacity", "boxOpacity", (n) => `${Math.round(n * 100)}%`)}
 			{section === "text" && style.look === "highlight" && colours("Highlight", "color", COLORS)}
 			<p className="text-xs text-foreground/60">Drag the subtitles on the video to move them up or down.</p>
-			</>}
-			{on("brand") && <>
+			</Zone>}
+			{on("brand") && <Zone on={!section} title="Brand & logo" tint="amber">
 			{colours("Brand color", "color", COLORS, "Used by the Highlight style and banners")}
 			<label className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Channel name</span>
@@ -364,8 +365,9 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 					</label>
 				</>
 			)}
-			</>}
-			{on("zoom") && <>
+			</Zone>}
+			{/* The editor's Zoom box only: not on the Brand Kit page (withVideoZoom in lib/subtitle-style.ts). */}
+			{section === "zoom" && !bodyHidden && <>
 			{/* Short names (coach, 6 Nov): what each one does shows on hover. */}
 			<div className="flex items-start gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0 pt-1" title={section ? "Everywhere that has no zoom part of its own" : undefined}>
@@ -422,5 +424,22 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 			</>}
 			{footer}
 		</div>
+	);
+}
+
+// The Brand Kit page's areas, each its own tint so they read apart (coach 21 Nov). In the editor's panels (on false)
+// the settings show as they are: each panel is one area already.
+const ZONE_TINTS = {
+	blue: "border-blue-500/40 bg-blue-500/10",
+	violet: "border-violet-500/40 bg-violet-500/10",
+	amber: "border-amber-500/50 bg-amber-500/10",
+} as const;
+function Zone({ on, title, tint, children }: { on: boolean; title: string; tint: keyof typeof ZONE_TINTS; children: ReactNode }) {
+	if (!on) return <>{children}</>;
+	return (
+		<section className={`flex flex-col gap-2 rounded-lg border p-3 ${ZONE_TINTS[tint]}`}>
+			<p className="text-sm font-semibold">{title}</p>
+			{children}
+		</section>
 	);
 }

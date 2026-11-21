@@ -100,6 +100,16 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	audioAmount: 1,
 };
 
+// Zoom belongs to each video, never to a Brand Kit (coach 21 Nov: under the logo settings it read as zooming the logo).
+// A kit's look keeps the video's own zoom: the Auto zoom asked for at upload when it first opens, then the Zoom box.
+// Kits saved before still hold zoom fields; this is where they stop counting.
+export const withVideoZoom = (kitLook: SubtitleStyle, video: Pick<SubtitleStyle, "zoom" | "zoomAmount" | "zoomPeriod">): SubtitleStyle => ({
+	...kitLook,
+	zoom: video.zoom,
+	zoomAmount: video.zoomAmount,
+	zoomPeriod: video.zoomPeriod,
+});
+
 export const MAX_LOGO_LENGTH = 30;
 // Brand colours to pick from in one click (any other colour works too).
 // Four quick colours in every menu, then the rectangle for any other (coach, 10 Nov).

@@ -10,7 +10,7 @@ import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/b
 import { addToLibrary, filesInUse, type LibraryItem, loadLibrary, projectFileSrc } from "@/lib/media-library";
 import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
-import { DEFAULT_STYLE, fontMetrics, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
+import { DEFAULT_STYLE, fontMetrics, outputSize, type SubtitleStyle, withVideoZoom } from "@/lib/subtitle-style";
 import { findRepeatedTakes, groupTakes, type TakeGroup } from "@/lib/takes";
 import { FPS, keepSegments, placeStretch, stretchPlace, subtitleLines, toOutSeconds, toSourceSeconds, totalFrames } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
@@ -945,7 +945,8 @@ export function ScriptView({
 	}, [panel, kitMemory, startKit]);
 	// A kit's look as it goes on this video: an English-only font has no Thai letters, so a Thai video uses Kanit
 	// instead, as when a video first opens (edit page; Codex review 13 Nov).
-	const onThisVideo = (kit: Kit) => ({ ...kit.style, font: thaiClip && !fontMetrics(kit.style).thai ? DEFAULT_STYLE.font : kit.style.font });
+	// Its zoom stays this video's own (withVideoZoom, coach 21 Nov), so a kit never changes the zoom, nor counts it as a change.
+	const onThisVideo = (kit: Kit) => ({ ...withVideoZoom(kit.style, subtitle), font: thaiClip && !fontMetrics(kit.style).thai ? DEFAULT_STYLE.font : kit.style.font });
 	// Same look, whatever order the settings are in; where subtitles were split or moved belongs to the video.
 	const lookKey = (style: SubtitleStyle) => {
 		const sorted = (v: unknown): unknown => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])])) : v);
