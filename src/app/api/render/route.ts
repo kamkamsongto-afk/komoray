@@ -4,6 +4,8 @@ import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
 import { logoPictureKey } from "@/lib/logo";
 import { MY_FILE_ID, myFileKey } from "@/lib/my-files";
+import { filesInUse } from "@/lib/media-library";
+import { missingRefs, projectFileKey } from "@/lib/project-files";
 import type { Faces } from "@/lib/framing";
 import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
 import { cutThaiWords } from "@/lib/newmm";
@@ -106,6 +108,12 @@ export async function POST(request: Request) {
 		if (missing) return Response.json({ error: `Your font "${missing.family}" is missing. Please pick or upload it again in the font list, then press Make video.` }, { status: 409 });
 		fontFiles = Object.fromEntries(found.map((f) => [f.id, f.key!]));
 	}
+	// Pictures and clips from My files (MY_REF) on the video: there, or the video is not made, as for the logo and fonts.
+	const ownerId = (await currentUser()).user?.id ?? "";
+	const usedNames = [...filesInUse({ ...edit, cutout: access.features.cutout.on ? edit.cutout : undefined })]; // Pic/Clip only goes in with Cutout on (below)
+	const gone = await missingRefs(usedNames, ownerId);
+	if (gone.length) return Response.json({ error: `${gone.length === 1 ? "A picture or clip" : `${gone.length} pictures or clips`} from My files on this video ${gone.length === 1 ? "is" : "are"} missing (deleted or replaced). Put another in its place, then press Make video.` }, { status: 409 });
+
 	// The one own font from before My files, on a plan that has own fonts: there, or the video is not made (agent review
 	// 21 Nov: it became Kanit without a word). On Free it is Kanit by the plan, as before (below).
 	const olderFont = ownFonts.find((f) => f && !f.file);
@@ -180,12 +188,12 @@ export async function POST(request: Request) {
 
 	// Uploaded banners (kind "file"): Modal gets a short-lived link to each one's file.
 	const bannerNames = [...new Set((edit.banners ?? []).flatMap((b) => (b.kind === "file" && b.file ? [b.file] : [])))];
-	const bannerFiles = Object.fromEntries(await Promise.all(bannerNames.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
+	const bannerFiles = Object.fromEntries(await Promise.all(bannerNames.map(async (name) => [name, await signedUrl(projectFileKey(key, name, ownerId), "GET", LINK_SECONDS)])));
 
 	// Frame Me backgrounds that are a picture or clip from the project: a short-lived link to each (frame_filters in render.py).
 	// Layout's other part too (layout_filters): the same list of links, by file name.
 	const frameNames = [...new Set([...(edit.frames ?? []).flatMap((f) => (f.back === "file" && f.file ? [f.file] : [])), ...(edit.layouts ?? []).flatMap((l) => (l.file ? [l.file] : []))])];
-	const frameFiles = Object.fromEntries(await Promise.all(frameNames.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
+	const frameFiles = Object.fromEntries(await Promise.all(frameNames.map(async (name) => [name, await signedUrl(projectFileKey(key, name, ownerId), "GET", LINK_SECONDS)])));
 
 	// The logo picture: Modal gets a short-lived link to the very file checked above (no picture → the channel name).
 	if (logoFile) style.logoUrl = await signedUrl(logoFile, "GET", LINK_SECONDS);
@@ -199,7 +207,7 @@ export async function POST(request: Request) {
 	if (layers) {
 		const matte = await signedUrl(siblingKey(key, "matte.mp4"), "GET", LINK_SECONDS);
 		const names = [...new Set(layers.inserts.map((i) => i.file))];
-		const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
+		const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(projectFileKey(key, name, ownerId), "GET", LINK_SECONDS)])));
 		cutout = { ...layers, files, matteUrl: matte };
 	}
 

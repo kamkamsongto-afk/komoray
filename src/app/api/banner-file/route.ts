@@ -3,6 +3,8 @@ import { BANNER_FILE, BANNER_FILE_NAME } from "@/lib/banners";
 import { signedUrl, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { uploadBlocked } from "@/lib/storage";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
+import { MY_REF } from "@/lib/my-files";
+import { projectFileKey } from "@/lib/project-files";
 
 // The customer's own finished banner (a picture, GIF or clip: kind "file" in lib/banners.ts), uploaded next to the video.
 //   POST { key, contentType, size }  →  { uploadUrl, file, media }   (the browser PUTs the file to uploadUrl)
@@ -42,6 +44,7 @@ export async function GET(request: Request) {
 	const params = new URL(request.url).searchParams;
 	const key = params.get("key");
 	const file = params.get("file");
-	if (!key || !VIDEO_KEY.test(key) || !file || !BANNER_FILE_NAME.test(file) || !(await ownsVideo(key))) return new Response("Not found", { status: 404 });
-	return Response.redirect(await signedUrl(siblingKey(key, file), "GET", VIEW_SECONDS), 302);
+	if (!key || !VIDEO_KEY.test(key) || !file || !(BANNER_FILE_NAME.test(file) || MY_REF.test(file)) || !(await ownsVideo(key))) return new Response("Not found", { status: 404 });
+	const { user } = await currentUser();
+	return Response.redirect(await signedUrl(projectFileKey(key, file, user?.id ?? ""), "GET", VIEW_SECONDS), 302);
 }

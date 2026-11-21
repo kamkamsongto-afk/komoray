@@ -1,9 +1,11 @@
 "use client";
 
-import { Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
-import { type MyFile, type MyFileKind, myFileUrl } from "@/lib/my-files";
+import { MY_FILE_SECTION, type MyFile, type MyFileKind, myClipUrl, myFileUrl } from "@/lib/my-files";
+import { MY_FILES_ACCEPT, uploadToMyFiles } from "@/lib/my-files-upload";
+import { ClashNote } from "@/components/MyFilePickers";
 
 // My files (coach 21 Nov): the logos and fonts kept once per account (lib/my-files.ts), where each one is used, and the
 // storage they and the videos take. Rename and Replace never change a file's bytes (a new file is made); Delete only
@@ -12,10 +14,19 @@ type Use = { kits: string[]; banners: number; projects: number };
 type Storage = { used: number; files: number; storageGb: number | null };
 const GB = 1024 ** 3;
 const size = (bytes: number) => (bytes >= GB ? `${(bytes / GB).toFixed(1)} GB` : bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
-const KINDS: Record<MyFileKind, { title: string; accept: string }> = {
-	logo: { title: "Logos", accept: "image/png,image/jpeg,image/webp" },
-	font: { title: "Fonts", accept: ".ttf,.otf,font/ttf,font/otf" },
+// What Replace takes for each kind (a clip can't be replaced yet: it goes up straight to R2, api/files clipUpload).
+const KINDS: Record<MyFileKind, { label: string; accept: string | null }> = {
+	logo: { label: "Logo", accept: "image/png,image/jpeg,image/webp" },
+	image: { label: "Picture", accept: "image/png,image/jpeg,image/webp,image/gif" },
+	font: { label: "Font", accept: ".ttf,.otf,font/ttf,font/otf" },
+	video: { label: "Clip", accept: null },
 };
+// The parts of My files (coach 21 Nov): Video, Audio (sound files, coming) and File (pictures and fonts).
+const SECTIONS = [
+	{ id: "file", title: "File" },
+	{ id: "video", title: "Video" },
+	{ id: "audio", title: "Audio" },
+] as const;
 const unused = (u?: Use) => !u || (u.kits.length === 0 && !u.banners && u.projects === 0);
 const usedText = (u?: Use) => {
 	if (unused(u)) return "Not used";
@@ -47,7 +58,9 @@ export default function FilesPage() {
 	const [files, setFiles] = useState<MyFile[] | null>(null);
 	const [use, setUse] = useState<Record<string, Use>>({});
 	const [storage, setStorage] = useState<Storage | null>(null);
-	const [tab, setTab] = useState<"all" | MyFileKind>("all");
+	const [tab, setTab] = useState<(typeof SECTIONS)[number]["id"]>("file");
+	const [clash, setClash] = useState<{ file: File; conflict: { name: string } } | null>(null);
+	const pickRef = useRef<HTMLInputElement>(null);
 	const [onlyUnused, setOnlyUnused] = useState(false);
 	const [busy, setBusy] = useState<string | null>(null); // the file being renamed, replaced or deleted
 	const [note, setNote] = useState("");
@@ -70,6 +83,23 @@ export default function FilesPage() {
 	useEffect(() => {
 		if (user) load();
 	}, [user]);
+
+	// + Upload: each file into its own part (lib/my-files-upload.ts). One file named like one already there asks first.
+	async function uploadAll(picked: File[], then?: "use" | "keep") {
+		setBusy("upload");
+		setNote("");
+		setClash(null);
+		const failed: string[] = [];
+		for (const file of picked) {
+			const sent = await uploadToMyFiles(file, then ?? (picked.length > 1 ? "keep" : undefined));
+			if ("conflict" in sent) setClash({ file, conflict: sent.conflict });
+			else if ("error" in sent) failed.push(sent.error);
+			else setTab(MY_FILE_SECTION[sent.file.kind]);
+		}
+		setBusy(null);
+		if (failed.length) setNote(failed.join(" · "));
+		load();
+	}
 
 	async function rename(id: string, name: string) {
 		setBusy(id);
@@ -122,7 +152,7 @@ export default function FilesPage() {
 		);
 	}
 
-	const shown = (files ?? []).filter((f) => (tab === "all" || f.kind === tab) && (!onlyUnused || unused(use[f.id])));
+	const shown = (files ?? []).filter((f) => MY_FILE_SECTION[f.kind] === tab && (!onlyUnused || unused(use[f.id])));
 	const unusedCount = (files ?? []).filter((f) => unused(use[f.id])).length;
 	const videos = storage ? storage.used - storage.files : 0;
 	return (
@@ -130,7 +160,7 @@ export default function FilesPage() {
 			<AccountBar user={user} />
 			<div className="flex flex-col gap-1">
 				<h1 className="text-2xl font-semibold">My files</h1>
-				<p className="text-sm text-foreground/60">Logos and fonts you uploaded once, ready for every Brand Kit and video. Add new ones from Brand Kit or a video&apos;s settings.</p>
+				<p className="text-sm text-foreground/60">Everything you upload is kept here once, ready for every video and Brand Kit: pictures, clips, logos and fonts.</p>
 			</div>
 
 			{storage && (
@@ -158,12 +188,28 @@ export default function FilesPage() {
 
 			<div className="flex flex-wrap items-center justify-between gap-3">
 				<div className="flex gap-1 rounded-lg border border-foreground/20 p-0.5 text-sm" role="tablist">
-					{(["all", "logo", "font"] as const).map((k) => (
-						<button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={`rounded-md px-3 py-1 ${tab === k ? "bg-foreground text-background" : "hover:bg-foreground/5"}`}>
-							{k === "all" ? "All" : KINDS[k].title}
+					{SECTIONS.map((k) => (
+						<button key={k.id} role="tab" aria-selected={tab === k.id} onClick={() => setTab(k.id)} className={`rounded-md px-3 py-1 ${tab === k.id ? "bg-foreground text-background" : "hover:bg-foreground/5"}`}>
+							{k.title} ({(files ?? []).filter((f) => MY_FILE_SECTION[f.kind] === k.id).length})
 						</button>
 					))}
 				</div>
+				{/* One + Upload for everything: each file goes into its part by itself (coach 21 Nov). */}
+				<button onClick={() => pickRef.current?.click()} disabled={!!busy} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+					<Plus size={14} /> {busy === "upload" ? "Uploading…" : "Upload"}
+				</button>
+				<input
+					ref={pickRef}
+					type="file"
+					multiple
+					accept={MY_FILES_ACCEPT}
+					className="hidden"
+					onChange={(e) => {
+						const picked = [...(e.target.files ?? [])];
+						e.target.value = "";
+						if (picked.length) void uploadAll(picked);
+					}}
+				/>
 				<label className="flex items-center gap-2 text-sm text-foreground/70">
 					<input type="checkbox" checked={onlyUnused} onChange={(e) => setOnlyUnused(e.target.checked)} />
 					Only files not used ({unusedCount})
@@ -171,21 +217,26 @@ export default function FilesPage() {
 			</div>
 
 			{note && <p className="rounded-md border border-foreground/15 bg-foreground/5 px-3 py-2 text-sm">{note}</p>}
+			{clash && <ClashNote clash={clash} what="file" onUse={() => void uploadAll([clash.file], "use")} onKeep={() => void uploadAll([clash.file], "keep")} onCancel={() => setClash(null)} />}
 
 			{files === null ? (
 				<p className="text-sm text-foreground/60">Loading…</p>
+			) : tab === "audio" ? (
+				<p className="text-sm text-foreground/60">Music and sound effects to put under your videos are coming here soon.</p>
 			) : shown.length === 0 ? (
-				<p className="text-sm text-foreground/60">{files.length ? "Nothing here." : "No files yet. Upload a logo or font in Brand Kit, and it is kept here."}</p>
+				<p className="text-sm text-foreground/60">{onlyUnused ? "Nothing here." : tab === "video" ? "No clips yet. + Upload an MP4 (up to 150 MB)." : "No pictures or fonts yet. + Upload a JPG, PNG, WebP, GIF, TTF or OTF."}</p>
 			) : (
 				<ul className="grid gap-3 sm:grid-cols-2">
 					{shown.map((f) => (
 						<li key={f.id} className={`flex flex-col gap-2 rounded-lg border border-foreground/15 p-3 ${busy === f.id ? "opacity-50" : ""}`}>
 							<div className="flex h-20 items-center justify-center overflow-hidden rounded-md bg-[repeating-conic-gradient(rgba(127,127,127,0.18)_0%_25%,transparent_0%_50%)] bg-[length:16px_16px]">
-								{f.kind === "logo" ? (
+								{f.kind === "font" ? (
+									<FontSample file={f} />
+								) : f.kind === "video" ? (
+									<video src={`${myClipUrl(f.id)}#t=0.5`} muted playsInline preload="metadata" controls className="max-h-20 max-w-full" />
+								) : (
 									// eslint-disable-next-line @next/next/no-img-element -- the person's own picture, by its id
 									<img src={myFileUrl(f.id)} alt="" className="max-h-16 max-w-full object-contain" />
-								) : (
-									<FontSample file={f} />
 								)}
 							</div>
 							{renaming?.id === f.id ? (
@@ -208,26 +259,28 @@ export default function FilesPage() {
 								</p>
 							)}
 							<p className="text-xs text-foreground/60">
-								{f.kind === "logo" ? "Logo" : `Font · ${f.family ?? ""}`} · {size(f.size)} · {new Date(f.at).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
+								{f.kind === "font" ? `Font · ${f.family ?? ""}` : f.kind === "video" && f.seconds ? `Clip · ${Math.round(f.seconds)}s` : KINDS[f.kind].label} · {size(f.size)} · {new Date(f.at).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
 							</p>
 							<p className={`text-xs ${unused(use[f.id]) ? "text-foreground/50" : "text-green-700 dark:text-green-400"}`}>{usedText(use[f.id])}</p>
 							<div className="flex flex-wrap gap-2 text-xs">
 								<button onClick={() => setRenaming({ id: f.id, name: f.name })} disabled={!!busy} className="flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
 									<Pencil size={12} /> Rename
 								</button>
-								<label className={`flex cursor-pointer items-center gap-1 rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5 ${busy ? "pointer-events-none opacity-50" : ""}`} title="Upload a new file in its place. Brand Kits using it change to the new one; videos made before keep this one.">
-									<RefreshCw size={12} /> Replace
-									<input
-										type="file"
-										accept={KINDS[f.kind].accept}
-										className="hidden"
-										onChange={(e) => {
-											const file = e.target.files?.[0];
-											if (file) void replace(f, file);
-											e.target.value = "";
-										}}
-									/>
-								</label>
+								{KINDS[f.kind].accept && (
+									<label className={`flex cursor-pointer items-center gap-1 rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5 ${busy ? "pointer-events-none opacity-50" : ""}`} title="Upload a new file in its place. Brand Kits using it change to the new one; videos made before keep this one.">
+										<RefreshCw size={12} /> Replace
+										<input
+											type="file"
+											accept={KINDS[f.kind].accept ?? undefined}
+											className="hidden"
+											onChange={(e) => {
+												const file = e.target.files?.[0];
+												if (file) void replace(f, file);
+												e.target.value = "";
+											}}
+										/>
+									</label>
+								)}
 								<button
 									onClick={() => void remove(f)}
 									disabled={!!busy || !unused(use[f.id])}

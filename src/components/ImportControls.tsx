@@ -2,8 +2,9 @@
 
 import { FolderHeart, Film, ImageIcon, Layers, Plus, Tag, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clipLength, hasClearParts, knownLibrary, LIBRARY, LIBRARY_ACCEPT, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
-import { type MyFile, myFileUrl } from "@/lib/my-files";
+import { itemOfMyFile, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { PICTURES_CLIPS_ACCEPT, uploadToMyFiles } from "@/lib/my-files-upload";
+import { ClashNote } from "./MyFilePickers";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 
@@ -17,8 +18,9 @@ type Props = {
 const size = (bytes: number) => (bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`);
 const videoKey = () => new URLSearchParams(window.location.search).get("key");
 
-// The editor's Import box: pictures and clips kept in this project, to use as a banner or in Pic/Clip as
-// often as you like without uploading again (lib/media-library.ts).
+// The editor's My files box (coach 21 Nov; was Import): + Upload puts pictures and clips into My files, + My files picks
+// one from there, and the box shows what is on this video now. A project points at My files by reference, never a copy
+// (MY_REF in lib/my-files.ts). Pictures and clips kept in a project before (its own Import) still show and work.
 export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploading }: Props) {
 	// What this tab already knows at once (the editor asked as it opened), then the fresh list.
 	const [items, setItems] = useState<LibraryItem[] | null>(() => (typeof window === "undefined" ? null : (knownLibrary(videoKey()) ?? null)));
@@ -42,57 +44,38 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 		};
 	}, []);
 
-	async function upload(files: File[]) {
-		const key = videoKey();
-		if (!key) return;
+	const [clash, setClash] = useState<{ file: File; conflict: { name: string } } | null>(null);
+	const [fresh, setFresh] = useState<string | null>(null); // the file just uploaded, shown first and marked in My files
+	async function upload(files: File[], then?: "use" | "keep") {
 		setNote("");
+		setClash(null);
 		onUploading?.(true);
 		const failed: string[] = [];
+		let last: string | null = null;
 		for (const [n, file] of files.entries()) {
 			setUploading(files.length > 1 ? `${n + 1} of ${files.length}` : "");
-			const [clear, seconds] = await Promise.all([hasClearParts(file), file.type.startsWith("video/") ? clipLength(file) : null]);
-			const res = await fetch("/api/library", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, contentType: file.type, size: file.size }) }).catch(() => null);
-			const data = (await res?.json().catch(() => null)) as { uploadUrl?: string; file?: string; error?: string } | null;
-			if (!res?.ok || !data?.uploadUrl || !data.file) {
-				failed.push(`${file.name}: ${data?.error ?? "could not upload"}`);
+			// One file: a name already used is asked about (Use that one / Keep both). Several: both are kept.
+			const sent = await uploadToMyFiles(file, then ?? (files.length > 1 ? "keep" : undefined), ["image", "video"]);
+			if ("conflict" in sent) {
+				setClash({ file, conflict: sent.conflict });
 				continue;
 			}
-			const put = await fetch(data.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file }).catch(() => null);
-			const done = put?.ok ? await fetch("/api/library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, file: data.file, name: file.name, clear, seconds }) }).catch(() => null) : null;
-			if (!done?.ok) failed.push(`${file.name}: the upload stopped`);
+			if ("error" in sent) failed.push(sent.error);
+			else last = itemOfMyFile(sent.file).file;
 		}
 		setUploading(null);
-		onUploading?.(false, failed.length < files.length);
+		onUploading?.(false, last !== null);
 		if (failed.length) setNote(failed.join(" · "));
 		await load(true);
-	}
-
-	// Import from My files (coach 21 Nov): their logos, picked once into this project (a copy: api/library fromMyFile).
-	const [mine, setMine] = useState<MyFile[] | null>(null);
-	const [picking, setPicking] = useState(false);
-	function openMine() {
-		setPicking((on) => !on);
-		if (mine === null) {
-			void fetch("/api/files?kind=logo")
-				.then((res) => (res.ok ? (res.json() as Promise<{ files: MyFile[] }>) : { files: [] }))
-				.then((data) => setMine(data.files))
-				.catch(() => setMine([]));
+		if (last) {
+			setFresh(last);
+			setPicking(true);
 		}
 	}
-	async function importMine(file: MyFile) {
-		const key = videoKey();
-		if (!key) return;
-		setNote("");
-		setUploading("");
-		onUploading?.(true);
-		const res = await fetch("/api/library", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, fromMyFile: file.id }) }).catch(() => null);
-		const data = (await res?.json().catch(() => null)) as { error?: string } | null;
-		setUploading(null);
-		onUploading?.(false, !!res?.ok);
-		if (!res?.ok) setNote(data?.error ?? "Could not bring it in. Please try again.");
-		else setPicking(false);
-		await load(true);
-	}
+
+	// + My files: everything kept there, Video and File (pictures) apart, to put on this video at once.
+	const [picking, setPicking] = useState(false);
+	const [section, setSection] = useState<"video" | "image">("image");
 
 	async function remove(item: LibraryItem) {
 		const key = videoKey();
@@ -103,9 +86,10 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 		await load(true);
 	}
 
-	const full = (items?.length ?? 0) >= LIBRARY.maxItems;
 	const isUsed = (item: LibraryItem) => usedNow.has(item.file) || !!item.used;
-	const deleteButton = (item: LibraryItem, small: string) => (
+	const deleteButton = (item: LibraryItem, small: string) =>
+		// Only a picture or clip kept in this project before can go from here; My files' own are deleted on the My files page.
+		item.mine ? null : (
 		<button
 			onClick={() => setRemoving(item)}
 			disabled={isUsed(item)}
@@ -115,9 +99,9 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 		>
 			<Trash2 className="h-3 w-3" aria-hidden />
 		</button>
-	);
+		);
 	const listRow = (item: LibraryItem) => (
-		<li key={item.file} className="flex items-center gap-2 rounded-md border border-foreground/15 bg-background/60 p-1 text-xs">
+		<li key={item.file} className={`flex items-center gap-2 rounded-md border bg-background/60 p-1 text-xs ${item.file === fresh ? "border-blue-600" : "border-foreground/15"}`}>
 			<span className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-black/60">
 				{item.media === "video" ? (
 					<video src={`${projectFileSrc(item.file)}#t=0.5`} muted playsInline preload="metadata" className="absolute inset-0 h-full w-full object-cover" />
@@ -147,7 +131,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 		</li>
 	);
 	const gridCard = (item: LibraryItem) => (
-		<li key={item.file} className="flex flex-col overflow-hidden rounded-md border border-foreground/15 bg-background/60 text-xs">
+		<li key={item.file} className={`flex flex-col overflow-hidden rounded-md border bg-background/60 text-xs ${item.file === fresh ? "border-blue-600" : "border-foreground/15"}`}>
 			<div className="relative aspect-video bg-black/60" style={item.clear ? { backgroundImage: "repeating-conic-gradient(#8884 0% 25%, transparent 0% 50%)", backgroundSize: "16px 16px" } : undefined}>
 				{item.media === "video" ? (
 					<video src={`${projectFileSrc(item.file)}#t=0.5`} muted playsInline preload="metadata" className="absolute inset-0 h-full w-full object-contain" />
@@ -180,43 +164,20 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 	);
 	return (
 		<div className="flex flex-col gap-2 p-3 pt-1">
-			{/* Where it comes from (coach 21 Nov): the computer, or the pictures already kept in My files. */}
+			{/* Only two ways in (coach 21 Nov): + Upload (into My files) and + My files (pick one). */}
 			<span className="grid grid-cols-2 gap-2">
-				<button onClick={() => fileRef.current?.click()} disabled={uploading !== null || full} className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-dashed border-foreground/30 px-1.5 py-1.5 text-xs hover:bg-foreground/5 disabled:opacity-40">
-					<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading${uploading ? ` ${uploading}` : ""}…` : "Import from computer"}
+				<button onClick={() => fileRef.current?.click()} disabled={uploading !== null} className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-dashed border-foreground/30 px-1.5 py-1.5 text-xs hover:bg-foreground/5 disabled:opacity-40">
+					<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading${uploading ? ` ${uploading}` : ""}…` : "Upload"}
 				</button>
-				<button onClick={openMine} disabled={uploading !== null || full} aria-expanded={picking} className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-dashed px-1.5 py-1.5 text-xs disabled:opacity-40 ${picking ? "border-blue-600 bg-blue-600/10" : "border-foreground/30 hover:bg-foreground/5"}`}>
-					<FolderHeart className="h-3.5 w-3.5" aria-hidden /> Import from My files
+				<button onClick={() => setPicking((on) => !on)} aria-expanded={picking} className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-dashed px-1.5 py-1.5 text-xs ${picking ? "border-blue-600 bg-blue-600/10" : "border-foreground/30 hover:bg-foreground/5"}`}>
+					<FolderHeart className="h-3.5 w-3.5" aria-hidden /> My files
 				</button>
 			</span>
-			{picking && (
-				<div className="flex flex-col gap-1.5 rounded-md border border-blue-600/40 bg-blue-600/5 p-2">
-					{mine === null ? (
-						<p className="text-xs text-foreground/60">Loading My files…</p>
-					) : mine.length === 0 ? (
-						<p className="text-xs text-foreground/60">No pictures in My files yet. Logos you upload in Brand Kit are kept there.</p>
-					) : (
-						<ul className="grid grid-cols-3 gap-1.5">
-							{mine.map((f) => (
-								<li key={f.id}>
-									<button onClick={() => void importMine(f)} disabled={uploading !== null} title={`Bring "${f.name}" into this project`} className="flex w-full flex-col items-center gap-0.5 rounded border border-foreground/15 bg-background p-1 text-[10px] hover:border-blue-600 disabled:opacity-40">
-										<span className="flex h-10 w-full items-center justify-center bg-[repeating-conic-gradient(rgba(127,127,127,0.18)_0%_25%,transparent_0%_50%)] bg-[length:10px_10px]">
-											{/* eslint-disable-next-line @next/next/no-img-element -- their own picture, by its id */}
-											<img src={myFileUrl(f.id)} alt="" className="max-h-9 max-w-full object-contain" />
-										</span>
-										<span className="w-full truncate">{f.name}</span>
-									</button>
-								</li>
-							))}
-						</ul>
-					)}
-				</div>
-			)}
 			<input
 				ref={fileRef}
 				type="file"
 				multiple
-				accept={LIBRARY_ACCEPT}
+				accept={PICTURES_CLIPS_ACCEPT}
 				className="hidden"
 				onChange={(e) => {
 					const files = [...(e.target.files ?? [])];
@@ -224,6 +185,27 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 					if (files.length) void upload(files);
 				}}
 			/>
+			{clash && <ClashNote clash={clash} what="file" onUse={() => void upload([clash.file], "use")} onKeep={() => void upload([clash.file], "keep")} onCancel={() => setClash(null)} />}
+			{picking && (
+				<section className="flex flex-col gap-1.5 rounded-lg border border-blue-600/40 bg-blue-600/5 p-2">
+					<div className="flex items-center gap-1 text-xs" role="tablist">
+						{(["image", "video"] as const).map((k) => (
+							<button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)} className={`rounded-md px-2 py-0.5 ${section === k ? "bg-foreground text-background" : "hover:bg-foreground/5"}`}>
+								{k === "image" ? "File" : "Video"}
+							</button>
+						))}
+						<a href="/files" target="_blank" className="ml-auto text-foreground/60 underline hover:text-foreground">
+							Open My files
+						</a>
+					</div>
+					{(() => {
+						const list = (items ?? []).filter((i) => i.mine && i.media === section).sort((a, b) => (a.file === fresh ? -1 : b.file === fresh ? 1 : 0));
+						if (items === null) return <p className="text-xs text-foreground/60">Loading My files…</p>;
+						if (!list.length) return <p className="text-xs text-foreground/60">{section === "video" ? "No clips in My files yet. + Upload an MP4." : "No pictures in My files yet. + Upload a JPG, PNG, WebP or GIF."}</p>;
+						return view === "list" ? <ul className="flex flex-col gap-1">{list.map(listRow)}</ul> : <ul className="grid grid-cols-2 gap-2">{list.map(gridCard)}</ul>;
+					})()}
+				</section>
+			)}
 			{note && <p className="text-xs text-red-500">{note}</p>}
 			{items === null ? (
 				// Shaped like the files to come, so it reads as "on its way", not "empty".
@@ -235,9 +217,9 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 					</ul>
 					<p className="text-xs text-foreground/60">Loading your files…</p>
 				</div>
-			) : items.length === 0 ? (
+			) : !items.some((i) => isUsed(i) || !i.mine) ? (
 				<p className="text-xs text-foreground/60">
-					Bring in the pictures and clips you use often (JPG, PNG, WebP, GIF up to {LIBRARY.maxBytes.image / 1_000_000} MB, MP4 up to {LIBRARY.maxBytes.video / 1_000_000} MB). They stay in this project: use each one as a banner or in Pic/Clip as often as you like.
+					Nothing on this video yet. + Upload pictures (JPG, PNG, WebP, GIF up to 10 MB) and clips (MP4 up to 150 MB): they are kept in My files for every video. Or pick one in + My files.
 				</p>
 			) : (
 				// What is on the timeline now apart from the rest (coach 21 Nov), so it reads at once which ones are in use.
@@ -250,7 +232,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 					{(
 						[
 							{ title: "On timeline now", list: items.filter(isUsed), tone: "border-green-600/40 bg-green-600/10", head: "text-green-700 dark:text-green-400" },
-							{ title: "Not on the timeline yet", list: items.filter((i) => !isUsed(i)), tone: "border-foreground/15", head: "text-foreground/60" },
+							{ title: "Kept in this video before", list: items.filter((i) => !i.mine && !isUsed(i)), tone: "border-foreground/15", head: "text-foreground/60" },
 						] as const
 					).map(
 						(group) =>
@@ -265,7 +247,6 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 					)}
 				</>
 			)}
-			{items && items.length > 0 && <p className="text-xs text-foreground/60">Kept with this project: {items.length} of {LIBRARY.maxItems} files.</p>}
 			{removing && (
 				<ConfirmDelete
 					name={`"${removing.name}"`}

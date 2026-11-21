@@ -7,6 +7,7 @@ import { projectFileSrc } from "./media-library";
 import { type FontId, type Format, readFont } from "./subtitle-style";
 import { readClipSound } from "./clip-sound";
 import { type Fades, fadesOn, readFades } from "./fades";
+import { MY_REF } from "./my-files";
 
 // file: the customer's own finished banner, a picture or clip uploaded next to the video (12 Nov).
 export type BannerKind = "price" | "cta" | "follow" | "file";
@@ -165,7 +166,8 @@ export function readBanners(value: unknown): Banner[] | null {
 		const start = Number(raw.start);
 		const end = Number(raw.end);
 		if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
-		const file = kind === "file" && typeof raw.file === "string" && BANNER_FILE_NAME.test(raw.file) ? raw.file : undefined;
+		// Its own file next to the video, or one from My files by reference (MY_REF, coach 21 Nov).
+		const file = kind === "file" && typeof raw.file === "string" && (BANNER_FILE_NAME.test(raw.file) || MY_REF.test(raw.file)) ? raw.file : undefined;
 		if (kind === "file" && !file) continue;
 		const text = cleanBannerText(String(raw.text ?? ""), file ? 1 : BANNER.maxLines) || (file ? BANNER_KINDS.file.text : "");
 		if (!text) continue;

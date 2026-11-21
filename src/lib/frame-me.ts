@@ -5,6 +5,7 @@
 
 import { readClipSound } from "./clip-sound";
 import { type Fades, fadeLevel, readFades } from "./fades";
+import { MY_REF } from "./my-files";
 
 export type FrameShape = "circle" | "oval" | "square" | "rounded" | "triangle" | "star" | "heart";
 export type FrameBack = "blur" | "color" | "file";
@@ -182,7 +183,7 @@ export function readFrames(value: unknown): FrameMe[] | null {
 		const end = Number(f?.end);
 		if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
 		const shape = FRAME_SHAPES.some((s) => s.id === f.shape) ? (f.shape as FrameShape) : "circle";
-		const file = typeof f.file === "string" && FRAME_FILE.test(f.file) ? f.file : undefined;
+		const file = typeof f.file === "string" && (FRAME_FILE.test(f.file) || MY_REF.test(f.file)) ? f.file : undefined; // or from My files (MY_REF)
 		const back: FrameBack = f.back === "color" ? "color" : f.back === "file" && file ? "file" : "blur";
 		frames.push({
 			id: String(f.id ?? "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || crypto.randomUUID(),

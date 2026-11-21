@@ -6,6 +6,8 @@ import type { Banner } from "./banners";
 import type { CutoutLayers } from "./behind";
 import type { FrameMe } from "./frame-me";
 import type { VideoLayout } from "./layout";
+import { MY_REF, type MyFile, myRefOf } from "./my-files";
+import { uploadToMyFiles } from "./my-files-upload";
 
 export type LibraryItem = {
 	file: string; // its name in the video's folder
@@ -16,11 +18,14 @@ export type LibraryItem = {
 	clear?: boolean; // a picture with see-through parts
 	seconds?: number; // a clip: how long it plays
 	used?: boolean; // in this video now, as a banner or in Pic/Clip (worked out on every look, not saved)
+	mine?: boolean; // kept in My files (file is a reference, MY_REF), not in this project's folder
 };
 
 export const MEDIA_FILE = /^media-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4)$/;
 // Every file a project can show on its video: Import's own, and those added before it.
 export const PROJECT_FILE = /^(media|banner|insert)-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4|mov)$/;
+// Or one from My files by reference (MY_REF in my-files.ts, coach 21 Nov): what a project can show, wherever it is kept.
+export const isProjectFile = (file: string) => PROJECT_FILE.test(file) || MY_REF.test(file);
 export const LIBRARY = { maxItems: 40, maxName: 60, maxBytes: { image: 10_000_000, video: 150_000_000 } };
 // What the browser can show in the preview and render.py can put on the final video. Clips: MP4 only for now.
 export const LIBRARY_TYPES: Record<string, { ext: string; media: "image" | "video" }> = {
@@ -94,20 +99,19 @@ export function clipLength(file: File): Promise<number | null> {
 	});
 }
 
-// One file into the project's Import, as the Import box does it (ask for a link, send the file there, list it):
-// for a picture or clip dropped straight on the video (Layout, coach 14 Nov). In the browser only.
-export async function addToLibrary(key: string, file: File): Promise<{ item: LibraryItem } | { error: string }> {
-	const type = LIBRARY_TYPES[file.type];
-	if (!type) return { error: `${file.name}: use a JPG, PNG, WebP or GIF picture, or an MP4 clip` };
-	if (file.size > LIBRARY.maxBytes[type.media]) return { error: `${file.name}: too big (up to ${LIBRARY.maxBytes[type.media] / 1_000_000} MB)` };
-	const [clear, seconds] = await Promise.all([hasClearParts(file), type.media === "video" ? clipLength(file) : null]);
-	const res = await fetch("/api/library", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, contentType: file.type, size: file.size }) }).catch(() => null);
-	const data = (await res?.json().catch(() => null)) as { uploadUrl?: string; file?: string; error?: string } | null;
-	if (!res?.ok || !data?.uploadUrl || !data.file) return { error: `${file.name}: ${data?.error ?? "could not upload"}` };
-	const put = await fetch(data.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file }).catch(() => null);
-	const done = put?.ok ? await fetch("/api/library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, file: data.file, name: file.name, clear, seconds }) }).catch(() => null) : null;
-	const listed = (await done?.json().catch(() => null)) as { item?: LibraryItem } | null;
-	return done?.ok && listed?.item ? { item: listed.item } : { error: `${file.name}: the upload stopped` };
+// One file into My files (coach 21 Nov: every new file goes there, by reference), as the My files box does it: for a
+// picture or clip dropped straight on the video (Layout, coach 14 Nov). A file named like one already there is kept
+// as well ("name (2)"): no question to answer mid-drop. In the browser only. key: unused now, kept for the callers.
+export async function addToLibrary(_key: string, file: File): Promise<{ item: LibraryItem } | { error: string }> {
+	const sent = await uploadToMyFiles(file, "keep", ["image", "video"]);
+	if ("error" in sent) return sent;
+	if ("conflict" in sent) return { error: `${file.name}: could not upload` };
+	return { item: itemOfMyFile(sent.file) };
+}
+
+// A My files picture or clip as a project can use it (by reference, MY_REF).
+export function itemOfMyFile(f: MyFile): LibraryItem {
+	return { file: myRefOf(f) ?? "", name: f.name, media: f.kind === "video" ? "video" : "image", size: f.size, at: f.at, mine: true, ...(f.clear && { clear: true }), ...(f.seconds && { seconds: f.seconds }) };
 }
 
 // The Import list, kept in this tab per video (coach 15 Nov: the box stood empty for 3–4 s each time it opened, as if

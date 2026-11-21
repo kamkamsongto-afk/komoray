@@ -4,7 +4,7 @@ import { logoType } from "@/lib/logo";
 import { asOwnFont, cleanFileName, fileId, freeName, MY_FILE_ID, MY_FILE_KINDS, type MyFile, type MyFileKind, myFileCardKey, myFileKey, myFilesPrefix } from "@/lib/my-files";
 import { readKits } from "@/lib/brand-kits";
 import { bannersKey, filesUse, FONTS_LOCKED, myFilesOf, type Pins, projectIdsOf } from "@/lib/my-files-usage";
-import { deleteObject, fetchObject, getJson, listObjects, putIfAbsent, putObject } from "@/lib/r2";
+import { deleteObject, fetchObject, getJson, listObjects, putIfAbsent, putObject, signedUrl } from "@/lib/r2";
 import { uploadBlocked } from "@/lib/storage";
 import { currentUser } from "@/lib/supabase/server";
 
@@ -35,6 +35,11 @@ export async function GET(request: Request) {
 	const params = new URL(request.url).searchParams;
 	const id = params.get("id");
 	if (id !== null) {
+		// link: a short-lived link to it instead of its bytes through here (a clip of up to 150 MB, played with Range).
+		if (params.has("link") && MY_FILE_ID.test(id)) {
+			const location = await signedUrl(myFileKey(user.id, id), "GET", 3 * 3600);
+			return new Response(null, { status: 302, headers: { Location: location, "Cache-Control": "private, max-age=3600" } });
+		}
 		const res = MY_FILE_ID.test(id) ? await fetchObject(myFileKey(user.id, id)) : null;
 		if (!res?.ok) {
 			await res?.body?.cancel();
@@ -61,7 +66,8 @@ async function whereAllUsed(userId: string) {
 const whereUsed = async (userId: string, id: string) => (await whereAllUsed(userId)).get(id) ?? { kits: [], banners: 0, projects: 0 };
 const inUse = (u: { kits: string[]; banners: number; projects: number }) => u.kits.length > 0 || u.banners > 0 || u.projects > 0;
 const UNSURE = "Could not check where it is used. Nothing was deleted: please try again.";
-const MAX_LOGOS = 100; // logos have no plan count; this keeps My files tidy and its reads quick
+// How many of each My files keeps (fonts: the plan, below). Storage is the real limit; these keep the lists quick to read.
+const MAX_COUNT: Partial<Record<MyFileKind, number>> = { logo: 100, image: 300, video: 200 };
 
 export async function PATCH(request: Request) {
 	const { user } = await currentUser();
@@ -152,6 +158,12 @@ function checkFile(kind: MyFileKind, bytes: Uint8Array) {
 		const type = logoType(bytes);
 		return type ? { type } : { error: "Please use a PNG, JPG or WebP picture" };
 	}
+	if (kind === "image") {
+		const gif = String.fromCharCode(...bytes.subarray(0, 6));
+		const type = logoType(bytes) ?? (gif === "GIF87a" || gif === "GIF89a" ? "image/gif" : null);
+		return type ? { type } : { error: "Please use a JPG, PNG, WebP or GIF picture" };
+	}
+	if (kind === "video") return { error: "Clips go up in two steps (step=start, then step=done)" };
 	const info = readFontInfo(bytes);
 	if (!info) return { error: "This isn't a .ttf or .otf font we can use" };
 	const otf = String.fromCharCode(...bytes.subarray(0, 4)) === "OTTO";
@@ -164,6 +176,7 @@ export async function POST(request: Request) {
 	const params = new URL(request.url).searchParams;
 	const kind = kindOf(params.get("kind"));
 	if (!kind) return Response.json({ error: "Unknown kind" }, { status: 400 });
+	if (kind === "video") return clipUpload(request, user.id, user.email, params);
 	const then = params.get("then");
 	const replaceId = params.get("replace");
 	const replacing = replaceId && MY_FILE_ID.test(replaceId) ? await getJson<MyFile>(myFileCardKey(user.id, replaceId)) : null;
@@ -194,7 +207,8 @@ export async function POST(request: Request) {
 	if (limit !== null && holding >= limit) {
 		return Response.json({ error: `You have ${holding} fonts, the most your plan holds (${limit}).${limit < 20 ? " Pro holds 20." : ""} Delete one in My files first.` }, { status: 403 });
 	}
-	if (kind === "logo" && holding >= MAX_LOGOS) return Response.json({ error: `You have ${holding} logos, the most My files holds. Delete some in My files first.` }, { status: 403 });
+	const most = MAX_COUNT[kind];
+	if (most !== undefined && holding >= most) return Response.json({ error: `You have ${holding} ${MY_FILE_KINDS[kind].label}s, the most My files holds. Delete some in My files first.` }, { status: 403 });
 
 	// Another file with this name: the customer picks (never written over). Replace: it takes the old one's name and its
 	// place in the order (openFonts counts the first uploaded), and the old one becomes "name (old)", last in the order.
@@ -210,11 +224,60 @@ export async function POST(request: Request) {
 	if (clash && then !== "keep") return Response.json({ conflict: clash }, { status: 409 });
 	if (clash) name = freeName(name, cards.map((c) => c.name));
 
-	const file: MyFile = { id, kind, name, type, size: bytes.length, at: replacing ? replacing.at : now, ...font };
+	const clear = kind === "image" && params.get("clear") === "1" && type !== "image/jpeg" ? { clear: true } : {};
+	const file: MyFile = { id, kind, name, type, size: bytes.length, at: replacing ? replacing.at : now, ...font, ...clear };
 	await putIfAbsent(myFileKey(user.id, id), bytes, type); // false: the same bytes are there already, which is the same file
 	if (!(await putIfAbsent(cardKey, JSON.stringify(file), "application/json"))) {
 		return Response.json({ file: (await getJson<MyFile>(cardKey)) ?? file, same: true }); // uploaded twice at once
 	}
 	if (replacing) return Response.json({ file, kits: await swap(user.id, replacing, file) });
+	return Response.json({ file });
+}
+
+// A clip (up to 150 MB) is too big to come through here, so it goes straight to R2 (as Import's did), in two steps:
+//   POST ?kind=video&step=start  { id, name, size, seconds } → { uploadUrl } (or { file, same } / 409 { conflict } as above)
+//   (the browser PUTs the file to uploadUrl)
+//   POST ?kind=video&step=done   { id, name, seconds, then? } → { file }: it arrived, at that size, and is an MP4 (its first
+//     bytes), then its card is written.
+// Its id is the SHA-256 the browser worked out (a Worker can't read 150 MB in time): a wrong one only ever touches that
+// person's own files. Still never written over: start refuses an id that already has a card.
+const CLIP_UPLOAD_SECONDS = 1800;
+async function clipUpload(request: Request, userId: string, email: string | undefined, params: URLSearchParams) {
+	const step = params.get("step");
+	const body = (await request.json().catch(() => ({}))) as { id?: unknown; name?: unknown; size?: unknown; seconds?: unknown; then?: unknown };
+	const id = typeof body.id === "string" && MY_FILE_ID.test(body.id) ? body.id : null;
+	if (!id) return Response.json({ error: "Unknown file" }, { status: 400 });
+	const cardKey = myFileCardKey(userId, id);
+	const before = await getJson<MyFile>(cardKey);
+	if (before) return Response.json({ file: before, same: true });
+	const cards = await cardsOf(userId, "video");
+	let name = cleanFileName(body.name, "Clip");
+	const clash = cards.find((c) => c.name.toLowerCase() === name.toLowerCase());
+	if (clash && body.then === "use") return Response.json({ file: clash, same: true });
+	if (clash && body.then !== "keep") return Response.json({ conflict: clash }, { status: 409 });
+	if (clash) name = freeName(name, cards.map((c) => c.name));
+	const { maxBytes } = MY_FILE_KINDS.video;
+	if (cards.length >= (MAX_COUNT.video ?? Infinity)) return Response.json({ error: `You have ${cards.length} clips, the most My files holds. Delete some in My files first.` }, { status: 403 });
+
+	if (step === "start") {
+		const size = Number(body.size);
+		if (!Number.isInteger(size) || size <= 0 || size > maxBytes) return Response.json({ error: `Clips can be up to ${maxBytes / 1_000_000} MB.` }, { status: 400 });
+		const full = await uploadBlocked((await currentUser()).supabase, await accessFor(email), size);
+		if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
+		return Response.json({ uploadUrl: await signedUrl(myFileKey(userId, id), "PUT", CLIP_UPLOAD_SECONDS, "video/mp4", undefined, size) });
+	}
+	if (step !== "done") return Response.json({ error: "Unknown step" }, { status: 400 });
+	const there = (await listObjects(myFileKey(userId, id))).find((o) => o.key === myFileKey(userId, id));
+	if (!there) return Response.json({ error: "The upload didn't arrive. Please try again." }, { status: 409 });
+	// An MP4 says "ftyp" in its first box; anything else is taken out again, never listed.
+	const head = await fetchObject(myFileKey(userId, id), "bytes=0-15");
+	const first = new Uint8Array(await head.arrayBuffer());
+	if (String.fromCharCode(...first.subarray(4, 8)) !== "ftyp" || there.size > maxBytes) {
+		await deleteObject(myFileKey(userId, id));
+		return Response.json({ error: "That isn't an MP4 clip we can use." }, { status: 400 });
+	}
+	const seconds = Number(body.seconds);
+	const file: MyFile = { id, kind: "video", name, type: "video/mp4", size: there.size, at: new Date().toISOString(), ...(Number.isFinite(seconds) && seconds > 0 && { seconds: Math.round(seconds * 100) / 100 }) };
+	if (!(await putIfAbsent(cardKey, JSON.stringify(file), "application/json"))) return Response.json({ file: (await getJson<MyFile>(cardKey)) ?? file, same: true });
 	return Response.json({ file });
 }

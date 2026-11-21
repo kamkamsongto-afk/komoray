@@ -248,7 +248,7 @@ const PANELS: { id: Panel; icon: LucideIcon; name: string }[] = [
 	{ id: "cutout", icon: Layers, name: "Cutout" }, // only for people with Cutout on (/admin)
 	{ id: "frame", icon: Shapes, name: "Frame Me" }, // the speaker in a shape, nothing cut out (coach, 12 Nov)
 	{ id: "layout", icon: Columns2, name: "Layout" }, // the screen split: you and a picture or clip (coach, 14 Nov)
-	{ id: "import", icon: FolderInput, name: "Import" }, // pictures and clips kept in the project (Yoshi, 12 Nov)
+	{ id: "import", icon: FolderInput, name: "My files" }, // pictures and clips: My files (coach 21 Nov; was Import, Yoshi 12 Nov)
 	{ id: "shape", icon: Crop, name: "Shape" },
 	{ id: "brand", icon: Palette, name: "Brand" },
 ];

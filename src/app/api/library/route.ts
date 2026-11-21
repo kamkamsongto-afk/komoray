@@ -3,15 +3,17 @@ import type { Banner } from "@/lib/banners";
 import type { CutoutLayers } from "@/lib/behind";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
-import { cleanMediaName, filesInUse, LIBRARY, LIBRARY_TYPES, type LibraryItem, MEDIA_FILE, PROJECT_FILE } from "@/lib/media-library";
-import { MY_FILE_ID, type MyFile, myFileCardKey, myFileKey } from "@/lib/my-files";
-import { copyObject, deleteObject, getJson, listObjects, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { cleanMediaName, filesInUse, isProjectFile, LIBRARY, LIBRARY_TYPES, type LibraryItem, MEDIA_FILE, PROJECT_FILE } from "@/lib/media-library";
+import { MY_REF, myRefOf } from "@/lib/my-files";
+import { myFilesOf } from "@/lib/my-files-usage";
+import { projectFileKey } from "@/lib/project-files";
+import { deleteObject, getJson, listObjects, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { uploadBlocked } from "@/lib/storage";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // Import: the files a video's project keeps for its banners and Pic/Clip (lib/media-library.ts).
 //   GET ?key=…                 { items }  Import's files and those added before it, newest first
-//   POST { key, fromMyFile: id }       { item }  a copy of one of their My files pictures, listed (Import from My files)
+//   (and every picture and clip in their My files, by reference: file my-<id>.<ext>, mine: true; coach 21 Nov)
 //   GET ?key=…&file=…          a short-lived link to one of them (for the preview)
 //   POST { key, contentType, size }       { uploadUrl, file }  then the browser PUTs the file there
 //   PUT  { key, file, name, clear?, seconds? }  { item }  the upload finished: list it
@@ -33,11 +35,13 @@ export async function GET(request: Request) {
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const file = params.get("file");
 	if (file !== null) {
-		if (!PROJECT_FILE.test(file)) return new Response("Not found", { status: 404 });
+		if (!isProjectFile(file)) return new Response("Not found", { status: 404 });
 		// Kept by this browser for an hour (coach 19 Nov: a clip took a while to show in the preview): every ask made a new
 		// signed link, so the browser could never reuse what it had already loaded of the same file. Private: only this
 		// browser keeps it. The link itself lasts VIEW_SECONDS, well past the hour. A project file never changes (new name each upload).
-		const location = await signedUrl(siblingKey(key, file), "GET", VIEW_SECONDS);
+		// Its own file, or the one in My files it points at (lib/project-files.ts). Neither ever changes.
+		const { user } = await currentUser();
+		const location = await signedUrl(projectFileKey(key, file, user?.id ?? ""), "GET", VIEW_SECONDS);
 		return new Response(null, { status: 302, headers: { Location: location, "Cache-Control": "private, max-age=3600" } });
 	}
 
@@ -60,16 +64,25 @@ export async function GET(request: Request) {
 		items.push({ file, name: names.get(file) || (mediaOf(file) === "video" ? "Clip" : "Picture"), media: mediaOf(file), size: info.size, at: info.lastModified, ...(lengths.get(file) && { seconds: lengths.get(file) }) });
 	}
 	items.sort((a, b) => b.at.localeCompare(a.at));
-	return Response.json({ items: items.map((i) => ({ ...i, used: used.has(i.file) })) });
+	// Then everything in My files a video can show (pictures and clips; coach 21 Nov: one place for every file), by
+	// reference, so every picker (Banner, Pic/Clip, Frame Me, Layout) has them without a copy.
+	const { user } = await currentUser();
+	const mine: LibraryItem[] = user
+		? (await myFilesOf(user.id)).flatMap((c) => {
+				const ref = c.kind !== "font" ? myRefOf(c) : null;
+				if (!ref) return [];
+				return [{ file: ref, name: c.name, media: c.kind === "video" ? ("video" as const) : ("image" as const), size: c.size, at: c.at, mine: true, ...(c.clear && { clear: true }), ...(c.seconds && { seconds: c.seconds }) }];
+			})
+		: [];
+	return Response.json({ items: [...items, ...mine].map((i) => ({ ...i, used: used.has(i.file) })) });
 }
 
 export async function POST(request: Request) {
-	const body = (await request.json().catch(() => ({}))) as { key?: unknown; contentType?: unknown; size?: unknown; fromMyFile?: unknown };
+	const body = (await request.json().catch(() => ({}))) as { key?: unknown; contentType?: unknown; size?: unknown };
 	const key = await ownKey(body.key);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const { supabase, user } = await currentUser();
 	if (!(await canUseStudio(user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
-	if (body.fromMyFile !== undefined) return fromMyFiles(key, user?.id, body.fromMyFile);
 	const type = typeof body.contentType === "string" ? LIBRARY_TYPES[body.contentType] : undefined;
 	if (!type) return Response.json({ error: "Please pick a JPG, PNG, WebP or GIF picture, or an MP4 clip." }, { status: 400 });
 	const max = LIBRARY.maxBytes[type.media];
@@ -83,27 +96,6 @@ export async function POST(request: Request) {
 	const file = `media-${crypto.randomUUID()}.${type.ext}`;
 	const uploadUrl = await signedUrl(siblingKey(key, file), "PUT", UPLOAD_SECONDS, body.contentType as string, undefined, body.size);
 	return Response.json({ uploadUrl, file });
-}
-
-// Import from My files (coach 21 Nov): a copy of one of their My files pictures goes into this project's Import, as if
-// uploaded from the computer. A copy, so deleting or replacing it in My files never changes this project (lib/my-files.ts);
-// a picture is at most 2 MB, so the copy costs little. (Pointing at the one file instead comes with Templates.)
-const MY_FILE_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
-async function fromMyFiles(key: string, userId: string | undefined, id: unknown) {
-	if (!userId || typeof id !== "string" || !MY_FILE_ID.test(id)) return Response.json({ error: "That file is gone" }, { status: 404 });
-	const card = await getJson<MyFile>(myFileCardKey(userId, id));
-	const ext = card ? MY_FILE_EXT[card.type] : undefined;
-	if (!card || card.kind !== "logo" || !ext) return Response.json({ error: "That file is gone" }, { status: 404 });
-	const library = (await getJson<Library>(libraryKey(key))) ?? { items: [] };
-	if (library.items.length >= LIBRARY.maxItems) return Response.json({ error: `A project keeps up to ${LIBRARY.maxItems} files. Delete one you don't use first.` }, { status: 400 });
-	const { supabase, user } = await currentUser();
-	const full = await uploadBlocked(supabase, await accessFor(user?.email), card.size);
-	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
-	const file = `media-${crypto.randomUUID()}.${ext}`;
-	await copyObject(myFileKey(userId, id), siblingKey(key, file));
-	const item: LibraryItem = { file, name: cleanMediaName(card.name) || "Picture", media: "image", size: card.size, at: new Date().toISOString(), ...(ext !== "jpg" && { clear: true }) };
-	await putObject(libraryKey(key), JSON.stringify({ items: [item, ...library.items].slice(0, LIBRARY.maxItems) }), "application/json");
-	return Response.json({ item });
 }
 
 export async function PUT(request: Request) {
@@ -134,7 +126,9 @@ export async function DELETE(request: Request) {
 	const body = (await request.json().catch(() => ({}))) as { key?: unknown; file?: unknown };
 	const key = await ownKey(body.key);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
-	if (typeof body.file !== "string" || !PROJECT_FILE.test(body.file)) return Response.json({ error: "Unknown file" }, { status: 400 });
+	if (typeof body.file !== "string" || !PROJECT_FILE.test(body.file)) {
+		return Response.json({ error: MY_REF.test(String(body.file)) ? "This one is kept in My files: delete it there." : "Unknown file" }, { status: 400 });
+	}
 	// Checked on the saved video: a banner or Pic/Clip still showing it would come out empty.
 	if (filesInUse(await getJson<Edit>(siblingKey(key, "edit.json"))).has(body.file)) {
 		return Response.json({ error: "This file is still on your video. Delete it from Banners, Pic/Clip, Frame Me or Layout first." }, { status: 409 });
