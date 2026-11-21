@@ -11,6 +11,7 @@ import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace
 import { projectFileSrc } from "@/lib/media-library";
 import { logoPictureName, logoPictureUrl } from "@/lib/logo";
 import { myFileUrl } from "@/lib/my-files";
+import { LOGO_MOTION, logoLook } from "@/lib/logo-motion";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -137,6 +138,7 @@ type Props = {
 	children: ReactNode; // the picture: <video> elements or a <canvas>, filling the 9:16 box
 	playing: boolean;
 	outTime: number; // seconds into the final video
+	logoTime?: number; // the logo's own clock (Brand Kit page: a loop so its effect shows), else outTime
 	total: number;
 	line: Line | null; // the subtitle being said now
 	subtitle: SubtitleStyle;
@@ -393,7 +395,7 @@ function LayoutFileHandle({ l, box, place, scale, onChange }: { l: VideoLayout; 
 // the play button and the time bar.
 // A Brand Kit's logo picture. Until it has loaded, a soft "Loading logo" box sits in its place instead of the picture
 // before it (coach, 17 Nov: picking another Brand Kit kept the old channel's logo on for seconds, which looked wrong).
-function LogoPicture({ src, place, opacity }: { src: string; place: CSSProperties; opacity: number }) {
+function LogoPicture({ src, place, opacity, look }: { src: string; place: CSSProperties; opacity: number; look: CSSProperties }) {
 	const [ready, setReady] = useState(false);
 	// No file of its own (lib/logo.ts): said on the video, as Make video stops for it too. Never another picture.
 	const [missing, setMissing] = useState(false);
@@ -409,7 +411,7 @@ function LogoPicture({ src, place, opacity }: { src: string; place: CSSPropertie
 	return (
 		<>
 			{/* eslint-disable-next-line @next/next/no-img-element */}
-			<img src={src} alt="" onLoad={() => setReady(true)} onError={() => setMissing(true)} style={{ ...place, height: "auto", opacity: ready ? opacity : 0 }} />
+			<img src={src} alt="" onLoad={() => setReady(true)} onError={() => setMissing(true)} style={{ ...place, ...look, height: "auto", opacity: ready ? opacity : 0 }} />
 			{!ready && (
 				<div
 					className="animate-pulse"
@@ -426,6 +428,7 @@ export function PlayerFrame({
 	children,
 	playing,
 	outTime,
+	logoTime,
 	total,
 	line: saying,
 	subtitle,
@@ -515,6 +518,10 @@ export function PlayerFrame({
 	}, []);
 
 	useOwnFonts([subtitle.font === "own" ? subtitle.ownFont : undefined, ...banners.map((b) => (b.font === "own" ? b.ownFont : undefined))]);
+	// How the logo comes and goes at this moment of the final video (lib/logo-motion.ts, the same sums as render.py),
+	// grown or shrunk from its own corner.
+	const logoNow = logoLook(logoTime ?? outTime, subtitle.logoEffect, subtitle.logoSpeed, subtitle.logoEvery);
+	const logoOrigin = `${subtitle.logoAt.startsWith("bottom") ? "bottom" : "top"} ${subtitle.logoAt.endsWith("right") ? "right" : "left"}`;
 	const face =
 		subtitle.font === "own" && subtitle.ownFont
 			? { family: ownFamily(subtitle.ownFont), weight: 400 }
@@ -1031,7 +1038,8 @@ export function PlayerFrame({
 								[subtitle.logoAt.endsWith("right") ? "right" : "left"]: LOGO.side,
 								width: subtitle.logoSize,
 							}}
-							opacity={subtitle.logoOpacity}
+							opacity={subtitle.logoOpacity * logoNow.opacity}
+							look={{ transform: `scale(${logoNow.scale})`, transformOrigin: logoOrigin, filter: logoNow.bright !== 1 ? `brightness(${logoNow.bright})` : undefined }}
 						/>
 					) : subtitle.logo && (
 						<div
@@ -1044,9 +1052,14 @@ export function PlayerFrame({
 								fontSize: LOGO.size / textFace(subtitle.logo).em,
 								lineHeight: textFace(subtitle.logo).em,
 								color: "white",
-								WebkitTextStroke: `${LOGO.outline * 2}px black`,
+								// Soft flash: a white outline and glow that settle to black (logo_text_tags in render.py).
+								WebkitTextStroke: `${LOGO.outline * 2}px ${logoNow.glow > 0 ? `rgb(${Math.round(255 * logoNow.glow)},${Math.round(255 * logoNow.glow)},${Math.round(255 * logoNow.glow)})` : "black"}`,
+								textShadow: logoNow.glow > 0 ? `0 0 ${LOGO_MOTION.glow * 2 * logoNow.glow}px white` : undefined,
 								paintOrder: "stroke fill",
 								whiteSpace: "nowrap",
+								opacity: logoNow.opacity,
+								transform: `scale(${logoNow.scale})`,
+								transformOrigin: logoOrigin,
 							}}
 						>
 							{subtitle.logo}

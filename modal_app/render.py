@@ -170,6 +170,100 @@ FONT_FILES = {
 LOGO = {"size": 52, "outline": 4, "side": 40, "top": 40}  # the channel name or logo in a corner (LOGO in PlayerFrame.tsx)
 # Over every banner (layers 3, 5, ... one pair each, banner_events) and subtitle, as the preview draws it last (coach 15 Nov).
 LOGO_LAYER = 100
+# How the logo comes and goes (LOGO_MOTION and logoLook in src/lib/logo-motion.ts; coach 21 Nov): change both sides.
+# effect: still / fade / flash / zoom. speed: seconds each coming and going takes. every: 0 = always on (comes in once at
+# the start), else on for `show` seconds, then gone `every` seconds, again and again.
+LOGO_MOTION = {"show": 5, "zoom_from": 0.6, "flash": 1.5, "glow": 6}
+LOGO_EFFECTS = ("still", "fade", "flash", "zoom")
+
+
+def logo_motion(style: dict) -> tuple[str, float, float]:
+    """The style's logo effect, speed and gap, checked as readStyle does (still, 0.5 s, always on when unknown)."""
+    effect = style.get("logoEffect") if style.get("logoEffect") in LOGO_EFFECTS else "still"
+    speed = min(2.0, max(0.2, float(style.get("logoSpeed") or 0.5)))
+    every = min(60.0, max(0.0, float(round(float(style.get("logoEvery") or 0)))))
+    return effect, speed, every
+
+
+def logo_in(t: float, effect: str, speed: float, every: float) -> float:
+    """How far in the logo is at t seconds of the final video, 0 gone .. 1 in (logoIn): the sums below, in Python."""
+    s = max(0.05, speed)
+    if every <= 0:
+        return 1.0 if effect == "still" else min(1.0, max(0.0, t / s))
+    u = t % (LOGO_MOTION["show"] + every)
+    if u >= LOGO_MOTION["show"]:
+        return 0.0
+    return 1.0 if effect == "still" else max(0.0, min(1.0, u / s, (LOGO_MOTION["show"] - u) / s))
+
+
+def logo_moves(style: dict) -> bool:
+    effect, _, every = logo_motion(style)
+    return effect != "still" or every > 0
+
+
+def logo_picture_filter(index: int, size: int, opacity: float, at: str, style: dict, start: float) -> str:
+    """The logo picture as a filter chain to [lg]. Still and always on: as before (one frame, held). Else the picture is
+    a looped input and geq works out each frame from the time in the whole video (T + start, a part's place in it), as
+    logo_in does: its see-through for every effect, its colours x (1 + flash * (1 - in)) for Soft flash (the preview's
+    CSS brightness), and for Zoom each pixel read from nearer its corner (grown from zoom_from of its size), that corner
+    staying put, as the preview's CSS scale from that corner (PlayerFrame)."""
+    head = f"[{index}:v]scale={size}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}"
+    if not logo_moves(style):
+        return f"{head}[lg]"
+    effect, speed, every = logo_motion(style)
+    show = LOGO_MOTION["show"]
+    tt = f"(T+{start:.4f})"
+    if every <= 0:
+        e = "1" if effect == "still" else f"min(1,{tt}/{speed:.3f})"
+    else:
+        u = f"mod({tt},{show + every:.3f})"
+        e = f"lt({u},{show})" if effect == "still" else f"lt({u},{show})*min(1,min({u}/{speed:.3f},({show}-{u})/{speed:.3f}))"
+    x, y, inside = "X", "Y", "1"
+    if effect == "zoom":
+        k = f"({LOGO_MOTION['zoom_from']}+{1 - LOGO_MOTION['zoom_from']:.2f}*{e})"
+        ax = "W" if str(at).endswith("right") else "0"
+        ay = "H" if str(at).startswith("bottom") else "0"
+        x, y = f"({ax}+(X-{ax})/{k})", f"({ay}+(Y-{ay})/{k})"
+        inside = f"between({x},0,W-1)*between({y},0,H-1)"
+    if effect == "flash":
+        bright = f"(1+{LOGO_MOTION['flash']}*(1-{e}))"
+        colour = lambda c: f"min(255,{c}({x},{y})*{bright})"  # noqa: E731
+    else:
+        colour = lambda c: f"{c}({x},{y})"  # noqa: E731
+    return f"{head},geq=r='{colour('r')}':g='{colour('g')}':b='{colour('b')}':a='alpha({x},{y})*{e}*{inside}'[lg]"
+
+
+def logo_text_events(text: str, total: float, style: dict) -> list[str]:
+    """The channel name's Dialogue lines: one for the whole video when always on, else one per showing, each coming in
+    and going with ASS tags, linear as logo_in: fad (see-through), fscx/fscy from its corner (Zoom), a white outline
+    with a glow that settles to black (Soft flash; the preview's stroke and text-shadow). A showing cut short by the end
+    of the video doesn't go out, as logo_in. text: the font tag's inside and the name (the line's {...} is opened here)."""
+    effect, speed, every = logo_motion(style)
+    show, d = LOGO_MOTION["show"], round(speed * 1000)
+    windows = [(0.0, total, False)] if every <= 0 else []
+    a = 0.0
+    while every > 0 and a < total:
+        b = min(total, a + show)
+        windows.append((a, b, b == a + show))
+        a += show + every
+    lines = []
+    for a, b, goes in windows:
+        dur = round((b - a) * 1000)
+        din = d if effect != "still" else 0
+        dout = d if goes and effect != "still" else 0
+        tags = f"\\fad({din},{dout})" if din or dout else ""
+        if effect == "zoom":
+            small = round(LOGO_MOTION["zoom_from"] * 100)
+            tags += f"\\fscx{small}\\fscy{small}\\t(0,{din},\\fscx100\\fscy100)"
+            if dout:
+                tags += f"\\t({dur - dout},{dur},\\fscx{small}\\fscy{small})"
+        elif effect == "flash":
+            glow = LOGO_MOTION["glow"]
+            tags += f"\\3c&HFFFFFF&\\blur{glow}\\t(0,{din},\\3c&H000000&\\blur0)"
+            if dout:
+                tags += f"\\t({dur - dout},{dur},\\3c&HFFFFFF&\\blur{glow})"
+        lines.append(f"Dialogue: {LOGO_LAYER},{ass_time(a)},{ass_time(b)},Logo,,0,0,0,,{{{tags}{text}")
+    return lines
 
 # The Free plan's watermark (WATERMARK in src/lib/watermark.ts, coach 18 Nov): the white word Komoray at 45% with a thin
 # shadow baked into public/watermark.png (20% once faded), its width
@@ -1181,6 +1275,9 @@ DEFAULT_STYLE = {
     "logoAt": "top-left",  # or top-right, bottom-left, bottom-right
     "logoSize": 180,  # the logo picture's width, px (logoUrl: a link to the picture, sent by the app)
     "logoOpacity": 1,
+    "logoEffect": "still",  # how the logo comes and goes (logo_motion): still / fade / flash / zoom
+    "logoSpeed": 0.5,  # seconds each coming and going takes
+    "logoEvery": 0,  # 0: always on; else seconds it is gone between showings of LOGO_MOTION["show"] seconds
     "zoom": "off",  # Auto zoom: "in" / "out" = one way across the whole video, "smooth" = a slow glide in and out, "cuts" = every other kept piece a little closer
     "motion": "none",  # none | pop (lines pop in) | bounce (and every word bounces as it is said)
     "subtitles": True,  # False: no subtitles on the video (banners and the logo stay)
@@ -1575,7 +1672,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     if logo:
         total = sum(frames for _, _, frames in segments) / FPS
         logo_font = font_tag(logo, own_font, LOGO["size"])
-        events.append(f"Dialogue: {LOGO_LAYER},{ass_time(0)},{ass_time(total)},Logo,,0,0,0,,{{{logo_font}}}{logo}")
+        # Comes and goes as the style says (logo_text_events); still and always on: one line, as before.
+        events.extend(logo_text_events(f"{logo_font}}}{logo}", total, style))
     logo_align = {"top-left": 7, "top-right": 9, "bottom-left": 1, "bottom-right": 3}.get(style.get("logoAt"), 7)
     # Round corners: libass's own box is always square, so the box is drawn under the letters instead.
     # Bounce too: each word is its own subtitle, but the line has one box.
@@ -2087,7 +2185,8 @@ def ffmpeg_command(
         x = f"main_w-overlay_w-{side}" if str(logo["at"]).endswith("right") else str(side)
         y = f"main_h-overlay_h-{edge}" if str(logo["at"]).startswith("bottom") else str(edge)
         opacity = min(1.0, max(0.2, float(logo["opacity"])))
-        parts.append(f"[1:v]scale={int(logo['size'])}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[lg]")
+        # How it comes and goes (logo_picture_filter): told where a part sits in the whole video, as the watermark is.
+        parts.append(logo_picture_filter(1, int(logo["size"]), opacity, str(logo["at"]), logo.get("style") or {}, part[0] / FPS if part else 0.0))
         parts.append(f"[sv][lg]overlay={x}:{y}:format=auto{'[lv]' if watermark else '[outv]'}")
     if watermark:
         # After the subtitles and the logo: over everything, as the preview draws it last. A part's time is back at 0
@@ -2099,6 +2198,10 @@ def ffmpeg_command(
     jump = ["-ss", str(seek)] if seek else []
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *jump, "-i", str(src)]
     if logo:
+        # Looped while it comes and goes, so geq sees every frame's time (logo_picture_filter); else one frame, held.
+        if logo_moves(logo.get("style") or {}):
+            logo_length = (part[1] - part[0] if part else sum(frames for _, _, frames in pieces)) / FPS
+            cmd += ["-loop", "1", "-framerate", str(FPS), "-t", f"{logo_length + 1:.3f}"]
         cmd += ["-i", str(logo["path"])]
     if cutout:
         if cutout.get("matte"):
@@ -2625,7 +2728,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             if style.get("logoUrl"):
                 logo_path = workdir / "logo"
                 urllib.request.urlretrieve(style["logoUrl"], logo_path)
-                logo = {"path": logo_path, "size": style.get("logoSize", 180), "opacity": style.get("logoOpacity", 1), "at": style.get("logoAt", "top-left")}
+                logo = {"path": logo_path, "size": style.get("logoSize", 180), "opacity": style.get("logoOpacity", 1), "at": style.get("logoAt", "top-left"), "style": style}
 
             # The Free plan's watermark: the app sends its picture's link and the video's id (watermark.ts).
             mark = None
