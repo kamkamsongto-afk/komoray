@@ -123,8 +123,11 @@ export const LINE_BREAK = /\s{2,}|\n/;
 // Two spaces typed before the first word: the line breaks before it too. The only way to break between words with a cut
 // between them, as one fix can't cover both sides (coach 20 Nov: "ก็คือ | ไม่อยากจะ" with cut words between).
 export const LEAD_BREAK = /^(?:\s{2,}|\s*\n)/;
-// A fix's text as kept: trimmed, but a leading break stays (as two spaces).
-export const fixText = (text: string) => (LEAD_BREAK.test(text) && text.trim() ? "  " : "") + text.trim();
+// Two spaces typed after the last word: the next line starts after it (coach 22 Nov, VID20261120105025: "before or after
+// the word, two spaces mean a break"). fixedWords gives the word after the fix br.
+export const TRAIL_BREAK = /\S(?:\s{2,}|\s*\n\s*)$/;
+// A fix's text as kept: trimmed, but a leading or a trailing break stays (as two spaces).
+export const fixText = (text: string) => (LEAD_BREAK.test(text) && text.trim() ? "  " : "") + text.trim() + (TRAIL_BREAK.test(text) ? "  " : "");
 function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut?: ThaiCut): W[] {
 	const pieces: string[] = [];
 	const spaced: boolean[] = [];
@@ -151,36 +154,80 @@ function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut
 		}
 		return [{ ...run[0], text: text.trim(), start: run[best[0]].start, end: run[best[1]].end, ...(lead ? { br: true } : {}) }];
 	}
-	const spoken = run.reduce((sum, w) => sum + w.end - w.start, 0);
-	const letters = pieces.reduce((sum, p) => sum + spokenLetters(p), 0);
-	// Which word is being said after `gone` seconds of speech, and when.
-	const at = (gone: number) => {
-		let left = gone;
-		for (const w of run) {
-			if (left < w.end - w.start) return { word: w, time: w.start + left };
-			left -= w.end - w.start;
-		}
-		const last = run[run.length - 1];
-		return { word: last, time: last.end };
-	};
-	// The end of a piece: where its letters run out, or the first real pause on the way there,
-	// since a piece over a pause that gets cut would land in the cut and vanish.
-	const endOf = (from: W, to: { word: W; time: number }) => {
-		for (let k = run.indexOf(from); k < run.indexOf(to.word); k++) if (run[k + 1].start - run[k].end > PAUSE_INSIDE_FIX) return run[k].end;
-		return to.time;
+	// The times of pieces..: shared out by letters over these words' speech.
+	const share = (words: W[], texts: string[]) => {
+		const spoken = words.reduce((sum, w) => sum + w.end - w.start, 0);
+		const letters = texts.reduce((sum, p) => sum + spokenLetters(p), 0);
+		// Which word is being said after `gone` seconds of speech, and when.
+		const at = (gone: number) => {
+			let left = gone;
+			for (const w of words) {
+				if (left < w.end - w.start) return { word: w, time: w.start + left };
+				left -= w.end - w.start;
+			}
+			const last = words[words.length - 1];
+			return { word: last, time: last.end };
+		};
+		// The end of a piece: where its letters run out, or the first real pause on the way there,
+		// since a piece over a pause that gets cut would land in the cut and vanish.
+		const endOf = (from: W, to: { word: W; time: number }) => {
+			for (let k = words.indexOf(from); k < words.indexOf(to.word); k++) if (words[k + 1].start - words[k].end > PAUSE_INSIDE_FIX) return words[k].end;
+			return to.time;
+		};
+		let done = 0;
+		return texts.map((piece) => {
+			const from = at((spoken * done) / letters);
+			done += spokenLetters(piece);
+			return { start: from.time, end: endOf(from.word, at((spoken * done) / letters)) };
+		});
 	};
 	// As many words as were said, none Thai (spelling fixed, or only two spaces typed for a new line): each keeps the time
 	// it was said, so the Highlight look doesn't drift from the voice.
 	const same = pieces.length === run.length && !THAI_LETTER.test(text);
-	let done = 0;
+	const times = same ? run.map((w) => ({ start: w.start, end: w.end })) : alignedTimes(run, pieces, share);
 	return pieces.map((piece, k) => {
-		const from = at((spoken * done) / letters);
-		done += spokenLetters(piece);
 		// glue: cut out of words typed together ("ของโค้ช"), so a subtitle line never breaks before it (coach 16 Nov).
 		const glue = k > 0 && !spaced[k];
-		const time = same ? { start: run[k].start, end: run[k].end } : { start: from.time, end: endOf(from.word, at((spoken * done) / letters)) };
-		return { ...run[0], text: piece, ...time, ...(spaced[k] ? { space: true } : {}), ...(glue ? { glue: true } : {}), ...(broken[k] ? { br: true } : {}) };
+		return { ...run[0], text: piece, ...times[k], ...(spaced[k] ? { space: true } : {}), ...(glue ? { glue: true } : {}), ...(broken[k] ? { br: true } : {}) };
 	});
+}
+
+// Pieces that read exactly as the words said (spaces aside), from the start and from the end, take those words' own
+// times; only what was really retyped in between is shared out by letters (share). Coach 22 Nov, VID20261120105025:
+// "ราคา2,990บาท" retyped over "ราคา 2, 9 9 0 บาท" gave "2,990" 0.1 s by its 5 letters, so a gap before "บาท" broke the line
+// ("ราคา 2,990" / "บาท"). Spoken numbers are long for their letters; the words' own times never are wrong.
+function alignedTimes<W extends Span & { text: string }>(run: W[], pieces: string[], share: (words: W[], texts: string[]) => Span[]): Span[] {
+	const squash = (t: string) => t.replace(/\s+/g, "");
+	const times: (Span | null)[] = pieces.map(() => null);
+	let head = 0; // pieces matched from the start
+	let used = 0; // words they took
+	while (head < pieces.length && used < run.length) {
+		const want = squash(pieces[head]);
+		let got = "";
+		let k = used;
+		while (k < run.length && got.length < want.length) got += squash(run[k++].text);
+		if (got !== want) break;
+		times[head++] = { start: run[used].start, end: run[k - 1].end };
+		used = k;
+	}
+	let tail = pieces.length - 1; // pieces matched from the end
+	let left = run.length - 1;
+	while (tail >= head && left >= used) {
+		const want = squash(pieces[tail]);
+		let got = "";
+		let k = left;
+		while (k >= used && got.length < want.length) got = squash(run[k--].text) + got;
+		if (got !== want) break;
+		times[tail--] = { start: run[k + 1].start, end: run[left].end };
+		left = k;
+	}
+	const middle = pieces.slice(head, tail + 1);
+	if (!middle.length) return times as Span[];
+	const words = run.slice(used, left + 1);
+	// Retyped words with nothing said left for them: the old sharing over the whole run, as before.
+	if (!words.length) return share(run, pieces);
+	share(words, middle).forEach((t, n) => (times[head + n] = t));
+	return times as Span[];
 }
 
 // The words as they should read in subtitles: a fix takes the place of the words it covers.
@@ -190,16 +237,25 @@ function splitFix<W extends Span & { text: string }>(run: W[], text: string, cut
 export function fixedWords<W extends Span & { text: string }>(words: W[], fixes: Fix[] = [], cut?: ThaiCut, deleted: number[] = []): (W & { gone?: true })[] {
 	const byStart = new Map(fixes.map((f) => [f.from, f]));
 	const gone = new Set(deleted);
-	const out: (W & { gone?: true })[] = [];
+	const out: (W & { gone?: true; br?: true })[] = [];
+	// A fix ending in two spaces (TRAIL_BREAK): the next word still shown starts a new subtitle line (coach 22 Nov).
+	let breakNext = false;
+	const push = (w: W & { gone?: true; br?: true }) => {
+		if (breakNext && !w.gone) {
+			breakNext = false;
+			out.push({ ...w, br: true });
+		} else out.push(w);
+	};
 	for (let i = 0; i < words.length; i++) {
 		const fix = byStart.get(i);
 		if (!fix) {
-			out.push(gone.has(i) ? { ...words[i], gone: true } : words[i]);
+			push(gone.has(i) ? { ...words[i], gone: true } : words[i]);
 			continue;
 		}
 		// A fix is gone only when every word under it is.
 		const allGone = Array.from({ length: fix.to - fix.from + 1 }, (_, k) => fix.from + k).every((k) => gone.has(k));
-		out.push(...splitFix(words.slice(fix.from, fix.to + 1), fix.text, cut).map((w) => (allGone ? { ...w, gone: true as const } : w)));
+		for (const w of splitFix(words.slice(fix.from, fix.to + 1), fix.text, cut)) push(allGone ? { ...w, gone: true as const } : w);
+		if (TRAIL_BREAK.test(fix.text)) breakNext = true;
 		i = fix.to;
 	}
 	return out;

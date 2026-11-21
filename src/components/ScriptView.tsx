@@ -4,7 +4,7 @@ import { Columns2, Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pe
 import { type CSSProperties, Fragment, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
 import { fixesNeedThaiCut, useThaiCut } from "@/lib/thai-cut";
-import { allCuts, findInside, type Fix, fixedWords, LEAD_BREAK, LINE_BREAK, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, withNeighbours, type WordFix } from "@/lib/edit";
+import { allCuts, findInside, type Fix, fixedWords, LEAD_BREAK, LINE_BREAK, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, TRAIL_BREAK, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
 import { addToLibrary, filesInUse, type LibraryItem, loadLibrary, projectFileSrc } from "@/lib/media-library";
@@ -171,6 +171,12 @@ const WordSpan = memo(function WordSpan({
 					: item.fixed
 						? item.text.trim()
 						: item.text}
+				{/* Two spaces typed after the last word: the next line starts after it (TRAIL_BREAK, coach 22 Nov). */}
+				{item.fixed && TRAIL_BREAK.test(item.text) && (
+					<span className="mx-0.5 align-super text-[0.65em] font-bold text-blue-600" title="A new subtitle line starts after this (two spaces typed)">
+						↵
+					</span>
+				)}
 			</span>
 		</>
 	);
