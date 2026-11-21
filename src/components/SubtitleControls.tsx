@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import type { MyFile } from "@/lib/my-files";
+import { LOGO_EFFECTS, LOGO_MOTION, type LogoEffect } from "@/lib/logo-motion";
 import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { ClashNote, OwnFontOptions } from "./MyFilePickers";
 import { type Motion, MOTIONS } from "@/lib/motion";
@@ -362,6 +363,57 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 							className="flex-1"
 						/>
 						<span className="w-8 text-right tabular-nums">{Math.round(style.logoOpacity * 100)}%</span>
+					</label>
+				</>
+			)}
+			{(style.logo || style.logoImage) && (
+				<>
+					{/* How the logo comes and goes (lib/logo-motion.ts; coach 21 Nov, in place of Zoom here). */}
+					<div className="flex items-start gap-3 text-sm text-foreground/70">
+						<span className="w-24 shrink-0 pt-1">Logo effect</span>
+						<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Logo effect">
+							{(Object.keys(LOGO_EFFECTS) as LogoEffect[]).map((id) => (
+								<button
+									key={id}
+									type="button"
+									role="radio"
+									aria-checked={style.logoEffect === id}
+									title={LOGO_EFFECTS[id].hint}
+									onClick={() => onChange({ ...style, logoEffect: id })}
+									className={`rounded-md border px-2.5 py-0.5 text-sm ${style.logoEffect === id ? "border-blue-600 bg-blue-600 text-white" : "border-foreground/20 hover:bg-foreground/5"}`}
+								>
+									{LOGO_EFFECTS[id].name}
+								</button>
+							))}
+						</div>
+					</div>
+					{style.logoEffect !== "still" && (
+						<label className="flex items-center gap-3 text-sm text-foreground/70" title="How long it takes to come in and to go">
+							<span className="w-24 shrink-0">Speed</span>
+							<input
+								type="range"
+								min={LIMITS.logoSpeed.min}
+								max={LIMITS.logoSpeed.max}
+								step={LIMITS.logoSpeed.step}
+								value={style.logoSpeed}
+								onChange={(e) => onChange({ ...style, logoSpeed: Number(e.target.value) })}
+								className="flex-1"
+							/>
+							<span className="w-12 text-right tabular-nums">{style.logoSpeed.toFixed(1)} s</span>
+						</label>
+					)}
+					<label className="flex items-center gap-3 text-sm text-foreground/70" title={`Always on, or on for ${LOGO_MOTION.show} s, then gone this long, again and again`}>
+						<span className="w-24 shrink-0">Shows</span>
+						<input
+							type="range"
+							min={LIMITS.logoEvery.min}
+							max={LIMITS.logoEvery.max}
+							step={LIMITS.logoEvery.step}
+							value={style.logoEvery}
+							onChange={(e) => onChange({ ...style, logoEvery: Number(e.target.value) })}
+							className="flex-1"
+						/>
+						<span className="w-32 text-right tabular-nums">{style.logoEvery === 0 ? "Always" : `${LOGO_MOTION.show} s on, ${style.logoEvery} s off`}</span>
 					</label>
 				</>
 			)}

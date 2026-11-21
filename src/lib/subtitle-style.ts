@@ -1,3 +1,4 @@
+import { LOGO_EFFECTS, type LogoEffect } from "./logo-motion";
 // How the subtitles look. Saved in edit.json as "style" and sent to Modal, which reads the same
 // names (DEFAULT_STYLE, FONTS and LOOKS in modal_app/render.py). Sizes are px on the 1080x1920 frame.
 export type Look = "clean" | "box" | "highlight" | "big" | "two";
@@ -41,6 +42,9 @@ export type SubtitleStyle = {
 	logoImage?: { file: string } | { version: number };
 	logoSize: number;
 	logoOpacity: number;
+	logoEffect: LogoEffect; // how the logo comes and goes (lib/logo-motion.ts)
+	logoSpeed: number; // seconds each coming and going takes
+	logoEvery: number; // 0: always on; else seconds it is gone between showings
 	zoom: Zoom;
 	zoomAmount: number; // how close it gets: 1.12 = 12% bigger
 	zoomPeriod: number; // Smooth: seconds to glide in and back out
@@ -90,6 +94,9 @@ export const DEFAULT_STYLE: SubtitleStyle = {
 	logoAt: "top-left",
 	logoSize: 180,
 	logoOpacity: 1,
+	logoEffect: "still",
+	logoSpeed: 0.5,
+	logoEvery: 0,
 	zoom: "in",
 	zoomAmount: 1.12,
 	zoomPeriod: 12,
@@ -123,6 +130,8 @@ export const LIMITS = {
 	position: { min: 0.03, max: 0.85, step: 0.01 }, // 0 = bottom edge, 1 = top edge
 	logoSize: { min: 60, max: 480, step: 10 },
 	logoOpacity: { min: 0.2, max: 1, step: 0.05 },
+	logoSpeed: { min: 0.2, max: 2, step: 0.1 },
+	logoEvery: { min: 0, max: 60, step: 1 },
 	zoomAmount: { min: 1.04, max: 1.3, step: 0.01 },
 	zoomPeriod: { min: 6, max: 24, step: 1 },
 	letterSpacing: { min: 0, max: 30, step: 1 },
@@ -229,6 +238,9 @@ export function readStyle(value: unknown): SubtitleStyle {
 		size: Math.round(pick("size")),
 		logoSize: Math.round(pick("logoSize")),
 		logoOpacity: Math.round(pick("logoOpacity") * 100) / 100,
+		logoEffect: typeof v.logoEffect === "string" && v.logoEffect in LOGO_EFFECTS ? (v.logoEffect as LogoEffect) : DEFAULT_STYLE.logoEffect,
+		logoSpeed: Math.round(pick("logoSpeed") * 10) / 10,
+		logoEvery: Math.round(pick("logoEvery")),
 		...readLogoImage(v.logoImage),
 		outline: Math.round(pick("outline")),
 		position: Math.round(pick("position") * 1000) / 1000,

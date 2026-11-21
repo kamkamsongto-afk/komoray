@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 import { PlayerFrame } from "@/components/PlayerFrame";
 import { SubtitleControls } from "@/components/SubtitleControls";
+import { LOGO_MOTION } from "@/lib/logo-motion";
 import { DEFAULT_STYLE, type SubtitleStyle } from "@/lib/subtitle-style";
 import type { Line } from "@/lib/timeline";
 
@@ -25,6 +26,23 @@ type KitFile = { kits: Kit[]; defaultId: string | null };
 // Brand Kits: subtitle looks (style, font, colour, channel name), one per channel if you like (coach, 13 Nov). New
 // videos start with the starred one, or the one picked when uploading. Each video can still be changed on its own
 // in the editor without touching a Brand Kit.
+// The logo's clock on this still preview, so its effect plays (lib/logo-motion.ts): it comes in, stays, and (when it
+// comes and goes) leaves and is gone a moment, then again. The gap is cut to 3 s here; the video keeps the real one.
+function useLogoClock(style: SubtitleStyle) {
+	const [now, setNow] = useState(0);
+	const on = style.logoEffect !== "still" || style.logoEvery > 0;
+	useEffect(() => {
+		if (!on) return;
+		const began = performance.now();
+		const tick = setInterval(() => setNow((performance.now() - began) / 1000), 66);
+		return () => clearInterval(tick);
+	}, [on, style.logoEffect, style.logoSpeed, style.logoEvery]);
+	if (!on) return undefined;
+	if (style.logoEvery === 0) return now % (style.logoSpeed + 2.5);
+	const t = now % (LOGO_MOTION.show + Math.min(style.logoEvery, 3));
+	return Math.min(t, LOGO_MOTION.show);
+}
+
 export default function BrandPage() {
 	const user = useUser();
 	const [file, setFile] = useState<KitFile | null>(null);
@@ -35,6 +53,7 @@ export default function BrandPage() {
 	const [sample, setSample] = useState<keyof typeof SAMPLES>("thai");
 	const [status, setStatus] = useState<"saving" | "saved" | "failed" | null>(null);
 	const [error, setError] = useState("");
+	const logoTime = useLogoClock(style ?? DEFAULT_STYLE);
 
 	function show(next: KitFile, id: string | null) {
 		const kit = next.kits.find((k) => k.id === id) ?? next.kits.find((k) => k.id === next.defaultId) ?? next.kits[0];
@@ -187,6 +206,7 @@ export default function BrandPage() {
 						<PlayerFrame
 							playing={false}
 							outTime={1 / 3 + 0.01}
+							logoTime={logoTime}
 							total={0}
 							line={sampleLine(SAMPLES[sample])}
 							subtitle={style}
