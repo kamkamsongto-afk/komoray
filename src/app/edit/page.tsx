@@ -195,6 +195,15 @@ export default function EditPage() {
 				if (style) {
 					// The kit's look without its zoom: Auto zoom at upload (just below) says whether this video zooms.
 					style = withVideoZoom(style, DEFAULT_STYLE);
+					// An own font from My files this plan doesn't open for new videos (after a downgrade, coach 21 Nov: kept ones
+					// stay in the videos that have them, never new ones) starts as Kanit here, so the preview and the saved look
+					// agree (api/edit refuses it otherwise: newPinsProblem).
+					const pinned = style.font === "own" ? style.ownFont?.file : undefined;
+					if (pinned) {
+						const fonts = (await (await fetch("/api/files?kind=font")).json().catch(() => ({}))) as { files?: { id: string; at: string }[]; limit?: number | null };
+						const open = [...(fonts.files ?? [])].sort((a, b) => a.at.localeCompare(b.at)).slice(0, fonts.limit ?? Infinity).map((f) => f.id);
+						if (!open.includes(pinned)) style = { ...style, font: DEFAULT_STYLE.font, ownFont: undefined };
+					}
 					// English-only fonts have no Thai letters: a Thai video uses Kanit instead.
 					const thai = data.words.some((w) => /[฀-๿]/.test(w.text));
 					if (thai && !fontMetrics(style).thai) style = { ...style, font: DEFAULT_STYLE.font };

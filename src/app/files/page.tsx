@@ -8,7 +8,7 @@ import { type MyFile, type MyFileKind, myFileUrl } from "@/lib/my-files";
 // My files (coach 21 Nov): the logos and fonts kept once per account (lib/my-files.ts), where each one is used, and the
 // storage they and the videos take. Rename and Replace never change a file's bytes (a new file is made); Delete only
 // when nothing uses it, so no Brand Kit or project loses what it shows.
-type Use = { kits: string[]; projects: number };
+type Use = { kits: string[]; banners: number; projects: number };
 type Storage = { used: number; files: number; storageGb: number | null };
 const GB = 1024 ** 3;
 const size = (bytes: number) => (bytes >= GB ? `${(bytes / GB).toFixed(1)} GB` : bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
@@ -16,12 +16,13 @@ const KINDS: Record<MyFileKind, { title: string; accept: string }> = {
 	logo: { title: "Logos", accept: "image/png,image/jpeg,image/webp" },
 	font: { title: "Fonts", accept: ".ttf,.otf,font/ttf,font/otf" },
 };
-const unused = (u?: Use) => !u || (u.kits.length === 0 && u.projects === 0);
+const unused = (u?: Use) => !u || (u.kits.length === 0 && !u.banners && u.projects === 0);
 const usedText = (u?: Use) => {
 	if (unused(u)) return "Not used";
 	const kits = u!.kits.length ? `Brand Kit${u!.kits.length > 1 ? "s" : ""}: ${u!.kits.join(", ")}` : "";
+	const banners = u!.banners ? `${u!.banners} saved banner${u!.banners > 1 ? "s" : ""}` : "";
 	const projects = u!.projects ? `${u!.projects} project${u!.projects > 1 ? "s" : ""}` : "";
-	return `Used in ${[kits, projects].filter(Boolean).join(" · ")}`;
+	return `Used in ${[kits, banners, projects].filter(Boolean).join(" · ")}`;
 };
 
 // A font's own letters, loaded once under a name of its own (the same file the videos get).

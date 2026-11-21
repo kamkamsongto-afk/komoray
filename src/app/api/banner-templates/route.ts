@@ -1,6 +1,8 @@
 import { readBanners } from "@/lib/banners";
 import { getJson, putObject } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
+import { accessFor } from "@/lib/access";
+import { newPinsProblem, type Pins } from "@/lib/my-files-usage";
 
 // The signed-in user's saved banners, to add to any video in one click. Each is a banner starting at 0
 // (its end is how long it shows). Kept in R2 next to the Brand Kit (outside uploads/, so it stays).
@@ -22,6 +24,10 @@ export async function PUT(request: Request) {
 	// An uploaded banner lives next to one video, so it can't be a template for any video.
 	const templates = readBanners(body.templates)?.filter((t) => t.kind !== "file");
 	if (!templates) return Response.json({ error: "Bad banners" }, { status: 400 });
+	// Own fonts from My files that no saved banner had: there, and open on this plan, or refused out loud.
+	const saved = await getJson<{ templates?: Pins["banners"] }>(templatesKey(user.id));
+	const problem = await newPinsProblem(user.id, (await accessFor(user.email)).perks.fonts, { banners: templates }, [{ banners: saved?.templates ?? [] }]);
+	if (problem) return Response.json({ error: problem }, { status: 409 });
 	await putObject(templatesKey(user.id), JSON.stringify({ templates, updatedAt: new Date().toISOString() }), "application/json");
 	return Response.json({ templates });
 }
