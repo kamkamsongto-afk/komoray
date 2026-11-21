@@ -70,6 +70,9 @@ export function AccountBar({ user }: { user: User }) {
 				<Link href="/brand" className="hover:text-foreground">
 					Brand Kit
 				</Link>
+				<Link href="/files" className="hover:text-foreground">
+					My files
+				</Link>
 				<Link href="/feedback" className="hover:text-foreground">
 					Feedback
 				</Link>

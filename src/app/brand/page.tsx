@@ -202,7 +202,9 @@ export default function BrandPage() {
 				<p className="text-sm text-foreground/60">Loading…</p>
 			) : (
 				<div className="grid gap-6 sm:grid-cols-[minmax(0,260px)_minmax(0,1fr)] sm:items-start">
-					<div className="flex flex-col gap-2">
+					{/* The preview stays in view while the settings beside it scroll (coach 21 Nov: scrolling up and down to see
+					    the logo was hard). On a phone it is one column, so it scrolls with the page. */}
+					<div className="flex flex-col gap-2 sm:sticky sm:top-4">
 						<PlayerFrame
 							playing={false}
 							outTime={1 / 3 + 0.01}

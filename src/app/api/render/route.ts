@@ -106,6 +106,15 @@ export async function POST(request: Request) {
 		if (missing) return Response.json({ error: `Your font "${missing.family}" is missing. Please pick or upload it again in the font list, then press Make video.` }, { status: 409 });
 		fontFiles = Object.fromEntries(found.map((f) => [f.id, f.key!]));
 	}
+	// The one own font from before My files, on a plan that has own fonts: there, or the video is not made (agent review
+	// 21 Nov: it became Kanit without a word). On Free it is Kanit by the plan, as before (below).
+	const olderFont = ownFonts.find((f) => f && !f.file);
+	if (olderFont && access.perks.ownFont) {
+		const { user } = await currentUser();
+		if (!user || !(await exists(fontKeys(user.id).file))) {
+			return Response.json({ error: `Your font "${olderFont.family}" is missing. Please pick or upload it again in the font list, then press Make video.` }, { status: 409 });
+		}
+	}
 
 	// Cutout layers only go in where the speaker is cut out for them: else text behind the speaker lands
 	// in front, and a picture fills the screen with no speaker (Codex review, 7 Nov). Layers saved while

@@ -1,5 +1,5 @@
 // How the logo (picture or channel name) comes and goes (coach 21 Nov, in place of Zoom on the Brand Kit page).
-// The same sums as logo_motion / logo_picture_filter / logo_text_tags in render.py: change one side, change the other.
+// The same sums as logo_motion / logo_picture_filters / logo_text_events in render.py: change one side, change the other.
 // effect: still (just there), fade (fades in and out), flash (a soft flash of light as it comes and goes), zoom (grows
 // in from its corner and shrinks back). speed: seconds each coming and going takes. every: 0 = always on (it comes in
 // once, at the start), else it shows SHOW seconds, then is gone `every` seconds, again and again.

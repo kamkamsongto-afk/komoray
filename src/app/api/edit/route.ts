@@ -4,7 +4,9 @@ import { type FrameMe, readFrames } from "@/lib/frame-me";
 import { readLayouts, type VideoLayout } from "@/lib/layout";
 import { type Cut, findSilences, type Pace, readPace } from "@/lib/silences";
 import type { Word } from "@/lib/transcribe";
-import { ownsVideo } from "@/lib/supabase/server";
+import { currentUser, ownsVideo } from "@/lib/supabase/server";
+import { accessFor } from "@/lib/access";
+import { newPinsProblem, type Pins } from "@/lib/my-files-usage";
 import { type Fix, readFixes, readSpans } from "@/lib/edit";
 import { getJson, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { readStyle } from "@/lib/subtitle-style";
@@ -107,12 +109,19 @@ export async function PUT(request: Request) {
 		if (!checked) return Response.json({ error: "Bad zoom parts" }, { status: 400 });
 		edit.zoomParts = checked;
 	}
-	if (style !== undefined) edit.style = readStyle(style);
-	if (banners !== undefined) {
-		const checked = readBanners(banners);
-		if (!checked) return Response.json({ error: "Bad banners" }, { status: 400 });
-		edit.banners = checked;
+	// Logos and fonts from My files it didn't point at before: there, and open on this plan (lib/my-files-usage.ts), or
+	// the save is refused out loud, never changed into something else (agent review 21 Nov).
+	const nextStyle = style !== undefined ? readStyle(style) : undefined;
+	const nextBanners = banners !== undefined ? readBanners(banners) : undefined;
+	if (banners !== undefined && !nextBanners) return Response.json({ error: "Bad banners" }, { status: 400 });
+	if (nextStyle || nextBanners) {
+		const { user } = await currentUser();
+		const next = { style: nextStyle ?? (edit.style as Pins["style"]), banners: nextBanners ?? edit.banners };
+		const problem = user ? await newPinsProblem(user.id, (await accessFor(user.email)).perks.fonts, next, [{ style: edit.style as Pins["style"], banners: edit.banners }]) : null;
+		if (problem) return Response.json({ error: problem }, { status: 409 });
 	}
+	if (nextStyle) edit.style = nextStyle;
+	if (nextBanners) edit.banners = nextBanners;
 	if (cutout !== undefined) {
 		const checked = readCutout(cutout);
 		if (!checked) return Response.json({ error: "Bad cutout layers" }, { status: 400 });

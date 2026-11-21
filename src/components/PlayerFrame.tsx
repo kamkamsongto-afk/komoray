@@ -1052,7 +1052,7 @@ export function PlayerFrame({
 								fontSize: LOGO.size / textFace(subtitle.logo).em,
 								lineHeight: textFace(subtitle.logo).em,
 								color: "white",
-								// Soft flash: a white outline and glow that settle to black (logo_text_tags in render.py).
+								// Soft flash: a white outline and glow that settle to black (logo_text_events in render.py).
 								WebkitTextStroke: `${LOGO.outline * 2}px ${logoNow.glow > 0 ? `rgb(${Math.round(255 * logoNow.glow)},${Math.round(255 * logoNow.glow)},${Math.round(255 * logoNow.glow)})` : "black"}`,
 								textShadow: logoNow.glow > 0 ? `0 0 ${LOGO_MOTION.glow * 2 * logoNow.glow}px white` : undefined,
 								paintOrder: "stroke fill",

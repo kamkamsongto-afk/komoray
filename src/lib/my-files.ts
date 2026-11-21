@@ -32,6 +32,8 @@ export const myFileCardKey = (userId: string, id: string) => `files/${userId}/${
 export const myFilesPrefix = (userId: string) => `files/${userId}/`;
 // Where the browser reads one (only its owner, signed in). The bytes behind an id never change.
 export const myFileUrl = (id: string) => `/api/files?id=${id}`;
+// A font in My files as a style or banner pins it (OwnFont in lib/font-info.ts). Here, not in use-my-fonts, so the server can call it.
+export const asOwnFont = (f: MyFile) => ({ family: f.family ?? f.name, height: f.height ?? 1.58, version: 0, file: f.id });
 
 export async function fileId(bytes: Uint8Array<ArrayBuffer>) {
 	const digest = await crypto.subtle.digest("SHA-256", bytes);

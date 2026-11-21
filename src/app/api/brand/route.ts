@@ -3,6 +3,7 @@ import { putObject } from "@/lib/r2";
 import { readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
 import { currentUser } from "@/lib/supabase/server";
 import { accessFor } from "@/lib/access";
+import { newPinsProblem } from "@/lib/my-files-usage";
 
 // The signed-in user's Brand Kits: subtitle looks a new video can start with, one per channel (coach, 13 Nov).
 // Kept in R2 at brand/<user id>.json (outside uploads/, so it is not deleted after 14 days). The one starred is what
@@ -46,6 +47,9 @@ export async function PUT(request: Request) {
 	if (!body.style || typeof body.style !== "object") return Response.json({ error: "No style" }, { status: 400 });
 	const style = lookOf(body.style);
 	const { file } = me;
+	// Logos and fonts from My files that none of their kits had: there, and open on this plan, or refused out loud.
+	const problem = await newPinsProblem(me.user.id, (await accessFor(me.user.email)).perks.fonts, { style }, file.kits.map((k) => ({ style: k.style })));
+	if (problem) return Response.json({ error: problem }, { status: 409 });
 	const kit = typeof body.kitId === "string" ? file.kits.find((k) => k.id === body.kitId) : undefined;
 	// A kit asked for by name that is gone (deleted in another tab): say so, never save into a new one unasked.
 	if (body.kitId !== undefined && !kit) return Response.json({ error: "That Brand Kit was deleted. Create a new one instead." }, { status: 404 });
