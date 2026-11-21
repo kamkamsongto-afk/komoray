@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import type { OwnFont } from "./font-info";
-import type { MyFile } from "./my-files";
+import { asOwnFont, type MyFile } from "./my-files";
 
 // The own fonts a person can pick (subtitles and banners; SubtitleControls, BannerControls): those in My files (from
 // 21 Nov), and the one font per account from before, if any. Picking one pins that very file in the style or banner.
 // limit: how many the plan holds (coach 21 Nov: Starter 5, Pro 20, Free none). Fonts kept from a bigger plan stay
 // in the projects that use them; for new picks only the first `limit` uploaded are open (the rest say Upgrade).
-export const asOwnFont = (f: MyFile): OwnFont => ({ family: f.family ?? f.name, height: f.height ?? 1.58, version: 0, file: f.id });
+export { asOwnFont };
 
 export type FontClash = { file: File; conflict: MyFile };
 

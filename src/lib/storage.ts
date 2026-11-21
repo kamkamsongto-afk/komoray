@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type AccessStatus, hashEmail } from "@/lib/access";
 import { planFor } from "@/lib/billing-store";
+import { myFilesBytes } from "@/lib/my-files-usage";
 import { getJson, listObjects, putObject } from "@/lib/r2";
 
 // Storage (coach 18 Nov; the Terms of Service, "Storage"):
@@ -41,10 +42,12 @@ export async function projectBytes(ids: string[]) {
 	return { used: Object.values(perProject).reduce((sum, bytes) => sum + bytes, 0), perProject, gone };
 }
 
-// The signed-in person's projects (the database only returns their own rows).
+// The signed-in person's projects (the database only returns their own rows), and their My files (logos and fonts kept
+// once, lib/my-files.ts; coach 21 Nov: counted in the storage bar too). used: both together; files: My files alone.
 export async function storageOf(supabase: SupabaseClient) {
-	const { data } = await supabase.from("projects").select("id");
-	return projectBytes((data ?? []).map((row: { id: string }) => row.id));
+	const [{ data }, { data: who }] = await Promise.all([supabase.from("projects").select("id"), supabase.auth.getUser()]);
+	const [projects, files] = await Promise.all([projectBytes((data ?? []).map((row: { id: string }) => row.id)), who.user ? myFilesBytes(who.user.id) : Promise.resolve(0)]);
+	return { ...projects, used: projects.used + files, files };
 }
 
 // What to say when adding `adding` bytes would go over their storage, else null. No cap: never.
