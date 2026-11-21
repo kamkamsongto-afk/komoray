@@ -4,12 +4,14 @@ import type { CutoutLayers } from "@/lib/behind";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
 import { cleanMediaName, filesInUse, LIBRARY, LIBRARY_TYPES, type LibraryItem, MEDIA_FILE, PROJECT_FILE } from "@/lib/media-library";
-import { deleteObject, getJson, listObjects, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { MY_FILE_ID, type MyFile, myFileCardKey, myFileKey } from "@/lib/my-files";
+import { copyObject, deleteObject, getJson, listObjects, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { uploadBlocked } from "@/lib/storage";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
 // Import: the files a video's project keeps for its banners and Pic/Clip (lib/media-library.ts).
 //   GET ?key=…                 { items }  Import's files and those added before it, newest first
+//   POST { key, fromMyFile: id }       { item }  a copy of one of their My files pictures, listed (Import from My files)
 //   GET ?key=…&file=…          a short-lived link to one of them (for the preview)
 //   POST { key, contentType, size }       { uploadUrl, file }  then the browser PUTs the file there
 //   PUT  { key, file, name, clear?, seconds? }  { item }  the upload finished: list it
@@ -62,11 +64,12 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-	const body = (await request.json().catch(() => ({}))) as { key?: unknown; contentType?: unknown; size?: unknown };
+	const body = (await request.json().catch(() => ({}))) as { key?: unknown; contentType?: unknown; size?: unknown; fromMyFile?: unknown };
 	const key = await ownKey(body.key);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const { supabase, user } = await currentUser();
 	if (!(await canUseStudio(user?.email))) return Response.json({ error: NO_INVITE }, { status: 403 });
+	if (body.fromMyFile !== undefined) return fromMyFiles(key, user?.id, body.fromMyFile);
 	const type = typeof body.contentType === "string" ? LIBRARY_TYPES[body.contentType] : undefined;
 	if (!type) return Response.json({ error: "Please pick a JPG, PNG, WebP or GIF picture, or an MP4 clip." }, { status: 400 });
 	const max = LIBRARY.maxBytes[type.media];
@@ -80,6 +83,27 @@ export async function POST(request: Request) {
 	const file = `media-${crypto.randomUUID()}.${type.ext}`;
 	const uploadUrl = await signedUrl(siblingKey(key, file), "PUT", UPLOAD_SECONDS, body.contentType as string, undefined, body.size);
 	return Response.json({ uploadUrl, file });
+}
+
+// Import from My files (coach 21 Nov): a copy of one of their My files pictures goes into this project's Import, as if
+// uploaded from the computer. A copy, so deleting or replacing it in My files never changes this project (lib/my-files.ts);
+// a picture is at most 2 MB, so the copy costs little. (Pointing at the one file instead comes with Templates.)
+const MY_FILE_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+async function fromMyFiles(key: string, userId: string | undefined, id: unknown) {
+	if (!userId || typeof id !== "string" || !MY_FILE_ID.test(id)) return Response.json({ error: "That file is gone" }, { status: 404 });
+	const card = await getJson<MyFile>(myFileCardKey(userId, id));
+	const ext = card ? MY_FILE_EXT[card.type] : undefined;
+	if (!card || card.kind !== "logo" || !ext) return Response.json({ error: "That file is gone" }, { status: 404 });
+	const library = (await getJson<Library>(libraryKey(key))) ?? { items: [] };
+	if (library.items.length >= LIBRARY.maxItems) return Response.json({ error: `A project keeps up to ${LIBRARY.maxItems} files. Delete one you don't use first.` }, { status: 400 });
+	const { supabase, user } = await currentUser();
+	const full = await uploadBlocked(supabase, await accessFor(user?.email), card.size);
+	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
+	const file = `media-${crypto.randomUUID()}.${ext}`;
+	await copyObject(myFileKey(userId, id), siblingKey(key, file));
+	const item: LibraryItem = { file, name: cleanMediaName(card.name) || "Picture", media: "image", size: card.size, at: new Date().toISOString(), ...(ext !== "jpg" && { clear: true }) };
+	await putObject(libraryKey(key), JSON.stringify({ items: [item, ...library.items].slice(0, LIBRARY.maxItems) }), "application/json");
+	return Response.json({ item });
 }
 
 export async function PUT(request: Request) {
