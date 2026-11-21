@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SubtitleStyle } from "./subtitle-style";
 import { readKits } from "./brand-kits";
-import { type MyFile, myFilesPrefix, refId } from "./my-files";
+import { type MyFile, myFilesPrefix, myIncomingPrefix, myRefOf, refId } from "./my-files";
 import { getJson, listObjects } from "./r2";
 
 // Where each of a person's My files is used (the My files page, and before a delete or Replace): the Brand Kits by name,
@@ -20,6 +20,13 @@ export type Pins = {
 
 // The My files ids a look, a project or a saved banner points at: its logo picture, its own font, each banner's own
 // font, and every picture or clip shown from My files (MY_REF: a banner's file, Pic/Clip, Frame Me, Layout).
+// The My files reference names (MY_REF) on a project's banners, Pic/Clip, Frame Me and Layout.
+export function refNamesIn(edit: Pins | null): string[] {
+	if (!edit) return [];
+	const names = [...(edit.banners ?? []).map((b) => (b.kind === "file" ? b.file : undefined)), ...(edit.cutout?.inserts ?? []).map((i) => i.file), ...(edit.frames ?? []).map((f) => (f.back === "file" ? f.file : undefined)), ...(edit.layouts ?? []).map((l) => l.file)];
+	return names.filter((n): n is string => !!n && !!refId(n));
+}
+
 export function idsIn(edit: Pins | null): string[] {
 	if (!edit) return [];
 	const ids: string[] = [];
@@ -74,8 +81,9 @@ export async function myFilesOf(userId: string): Promise<MyFile[]> {
 }
 
 // The bytes their My files take (every file under files/<id>/, cards included), for the storage bar and the cap.
+// A clip still on its way up (incoming/) isn't counted: it is moved in once checked, or cleared after a day.
 export async function myFilesBytes(userId: string) {
-	return (await listObjects(myFilesPrefix(userId))).reduce((sum, o) => sum + o.size, 0);
+	return (await listObjects(myFilesPrefix(userId))).filter((o) => !o.key.startsWith(myIncomingPrefix(userId))).reduce((sum, o) => sum + o.size, 0);
 }
 
 // The fonts open for new picks: the first `allowed` uploaded (Starter 5, Pro 20; Free none). Kept ones beyond stay in
@@ -95,9 +103,11 @@ export async function newPinsProblem(userId: string, fontsAllowed: number, next:
 	const cards = await myFilesOf(userId);
 	const byId = new Map(cards.map((c) => [c.id, c]));
 	const open = openFonts(cards, fontsAllowed);
+	const names = new Set(refNamesIn(next));
 	for (const id of fresh) {
 		const card = byId.get(id);
 		if (!card) return PIN_GONE;
+		for (const name of names) if (refId(name) === id && myRefOf(card) !== name) return PIN_GONE;
 		if (card.kind === "font" && !open.has(id)) return fontsAllowed ? `Your plan holds ${fontsAllowed} own fonts. Pick one of those, or upgrade for more.` : FONTS_LOCKED;
 	}
 	return null;

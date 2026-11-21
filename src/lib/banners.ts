@@ -194,8 +194,8 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(!file && (raw.align === "left" || raw.align === "right") && { align: raw.align }),
 			...(!file && Number.isFinite(gap) && gap !== 0 && { lineGap: Math.round(Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, gap))) }),
 			// An uploaded banner always sits where it was put (at first: the middle, near the top).
-			...(file && { file, media: file.endsWith(".mp4") ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),
-			...readClipSound(raw, Boolean(file?.endsWith(".mp4"))),
+			...(file && { file, media: /\.(mp4|mov)$/.test(file) ? ("video" as const) : ("image" as const), x: share(raw.x) ?? BANNER_FILE.x, y: share(raw.y) ?? BANNER_FILE.y }),
+			...readClipSound(raw, Boolean(file && /\.(mp4|mov)$/.test(file))), // .mov: a My files clip (MY_REF)
 			...readFades(raw),
 		});
 	}

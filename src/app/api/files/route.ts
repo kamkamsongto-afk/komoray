@@ -1,10 +1,10 @@
 import { accessFor } from "@/lib/access";
 import { readFontInfo } from "@/lib/font-info";
 import { logoType } from "@/lib/logo";
-import { asOwnFont, cleanFileName, fileId, freeName, MY_FILE_ID, MY_FILE_KINDS, type MyFile, type MyFileKind, myFileCardKey, myFileKey, myFilesPrefix } from "@/lib/my-files";
+import { asOwnFont, cleanFileName, fileId, freeName, MY_FILE_ID, MY_FILE_KINDS, type MyFile, type MyFileKind, myFileCardKey, myFileKey, myFilesPrefix, myIncomingPrefix } from "@/lib/my-files";
 import { readKits } from "@/lib/brand-kits";
 import { bannersKey, filesUse, FONTS_LOCKED, myFilesOf, type Pins, projectIdsOf } from "@/lib/my-files-usage";
-import { deleteObject, fetchObject, getJson, listObjects, putIfAbsent, putObject, signedUrl } from "@/lib/r2";
+import { copyObject, deleteObject, exists, fetchObject, getJson, listObjects, putIfAbsent, putObject, signedUrl } from "@/lib/r2";
 import { uploadBlocked } from "@/lib/storage";
 import { currentUser } from "@/lib/supabase/server";
 
@@ -190,6 +190,9 @@ export async function POST(request: Request) {
 	const checked = checkFile(kind, bytes);
 	if ("error" in checked) return Response.json({ error: checked.error }, { status: 400 });
 	const { type, ...font } = checked;
+	if (replacing && (replacing.type === "image/gif") !== (type === "image/gif")) {
+		return Response.json({ error: replacing.type === "image/gif" ? "Replace a GIF with another GIF." : "Replace a still picture with another still picture (JPG, PNG or WebP)." }, { status: 400 });
+	}
 
 	// This very file already: hand that one back, whatever it was called (nothing new stored, nothing asked).
 	const id = await fileId(bytes);
@@ -235,18 +238,23 @@ export async function POST(request: Request) {
 }
 
 // A clip (up to 150 MB) is too big to come through here, so it goes straight to R2 (as Import's did), in two steps:
-//   POST ?kind=video&step=start  { id, name, size, seconds } → { uploadUrl } (or { file, same } / 409 { conflict } as above)
-//   (the browser PUTs the file to uploadUrl)
-//   POST ?kind=video&step=done   { id, name, seconds, then? } → { file }: it arrived, at that size, and is an MP4 (its first
-//     bytes), then its card is written.
-// Its id is the SHA-256 the browser worked out (a Worker can't read 150 MB in time): a wrong one only ever touches that
-// person's own files. Still never written over: start refuses an id that already has a card.
+//   POST ?kind=video&step=start  { id, name, size, type, seconds } → { uploadUrl, upload } (or { file, same } / 409 { conflict })
+//   (the browser PUTs the file to uploadUrl: a place of its own in incoming/, never a file already in My files)
+//   POST ?kind=video&step=done   { id, name, type, seconds, upload, then? } → { file }: it arrived, at that size, and is an
+//     MP4 or MOV (its first bytes); then it is moved in and its card is written. A clip left in incoming/ (the page closed)
+//     isn't listed or counted, and goes after a day (agent review 22 Nov).
+// Its id comes from the browser (a sample of the file, lib/my-files-upload.ts): a Worker can't read 150 MB in time. A wrong
+// one only ever touches that person's own files; once in, a clip is never written over (it is only moved in when absent).
 const CLIP_UPLOAD_SECONDS = 1800;
+const CLIP_TYPES: Record<string, true> = { "video/mp4": true, "video/quicktime": true };
+const CLIP_HEADS = new Set(["ftyp", "moov", "mdat", "wide", "free", "skip"]); // an MP4 starts with ftyp; an old MOV may not
+const DAY_MS = 24 * 3600 * 1000;
 async function clipUpload(request: Request, userId: string, email: string | undefined, params: URLSearchParams) {
 	const step = params.get("step");
-	const body = (await request.json().catch(() => ({}))) as { id?: unknown; name?: unknown; size?: unknown; seconds?: unknown; then?: unknown };
+	const body = (await request.json().catch(() => ({}))) as { id?: unknown; name?: unknown; size?: unknown; type?: unknown; seconds?: unknown; then?: unknown; upload?: unknown };
 	const id = typeof body.id === "string" && MY_FILE_ID.test(body.id) ? body.id : null;
 	if (!id) return Response.json({ error: "Unknown file" }, { status: 400 });
+	const type = typeof body.type === "string" && CLIP_TYPES[body.type] ? body.type : "video/mp4";
 	const cardKey = myFileCardKey(userId, id);
 	const before = await getJson<MyFile>(cardKey);
 	if (before) return Response.json({ file: before, same: true });
@@ -264,20 +272,29 @@ async function clipUpload(request: Request, userId: string, email: string | unde
 		if (!Number.isInteger(size) || size <= 0 || size > maxBytes) return Response.json({ error: `Clips can be up to ${maxBytes / 1_000_000} MB.` }, { status: 400 });
 		const full = await uploadBlocked((await currentUser()).supabase, await accessFor(email), size);
 		if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
-		return Response.json({ uploadUrl: await signedUrl(myFileKey(userId, id), "PUT", CLIP_UPLOAD_SECONDS, "video/mp4", undefined, size) });
+		// Clips left on the way up more than a day ago go now.
+		const stale = (await listObjects(myIncomingPrefix(userId))).filter((o) => Date.now() - new Date(o.lastModified).getTime() > DAY_MS);
+		await Promise.all(stale.map((o) => deleteObject(o.key)));
+		const upload = crypto.randomUUID();
+		return Response.json({ upload, uploadUrl: await signedUrl(`${myIncomingPrefix(userId)}${id}-${upload}`, "PUT", CLIP_UPLOAD_SECONDS, type, undefined, size) });
 	}
 	if (step !== "done") return Response.json({ error: "Unknown step" }, { status: 400 });
-	const there = (await listObjects(myFileKey(userId, id))).find((o) => o.key === myFileKey(userId, id));
+	const upload = typeof body.upload === "string" && /^[0-9a-f-]{36}$/.test(body.upload) ? body.upload : null;
+	if (!upload) return Response.json({ error: "Unknown upload" }, { status: 400 });
+	const incoming = `${myIncomingPrefix(userId)}${id}-${upload}`;
+	const there = (await listObjects(incoming)).find((o) => o.key === incoming);
 	if (!there) return Response.json({ error: "The upload didn't arrive. Please try again." }, { status: 409 });
-	// An MP4 says "ftyp" in its first box; anything else is taken out again, never listed.
-	const head = await fetchObject(myFileKey(userId, id), "bytes=0-15");
+	const head = await fetchObject(incoming, "bytes=0-15");
 	const first = new Uint8Array(await head.arrayBuffer());
-	if (String.fromCharCode(...first.subarray(4, 8)) !== "ftyp" || there.size > maxBytes) {
-		await deleteObject(myFileKey(userId, id));
-		return Response.json({ error: "That isn't an MP4 clip we can use." }, { status: 400 });
+	if (!CLIP_HEADS.has(String.fromCharCode(...first.subarray(4, 8))) || there.size > maxBytes) {
+		await deleteObject(incoming);
+		return Response.json({ error: "That isn't an MP4 or MOV clip we can use." }, { status: 400 });
 	}
+	// Moved in only when no file has this id yet (the same id is the same clip): never written over.
+	if (!(await exists(myFileKey(userId, id)))) await copyObject(incoming, myFileKey(userId, id));
+	await deleteObject(incoming);
 	const seconds = Number(body.seconds);
-	const file: MyFile = { id, kind: "video", name, type: "video/mp4", size: there.size, at: new Date().toISOString(), ...(Number.isFinite(seconds) && seconds > 0 && { seconds: Math.round(seconds * 100) / 100 }) };
+	const file: MyFile = { id, kind: "video", name, type, size: there.size, at: new Date().toISOString(), ...(Number.isFinite(seconds) && seconds > 0 && { seconds: Math.round(seconds * 100) / 100 }) };
 	if (!(await putIfAbsent(cardKey, JSON.stringify(file), "application/json"))) return Response.json({ file: (await getJson<MyFile>(cardKey)) ?? file, same: true });
 	return Response.json({ file });
 }

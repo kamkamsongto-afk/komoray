@@ -154,7 +154,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		const clipSeconds = kind === "video" ? await clipLength(file) : null;
 		const seeThrough = await hasClearParts(file);
 		// Into My files, shown from there by reference (coach 21 Nov: every new file is kept once, in one place).
-		const sent = await addToLibrary(new URLSearchParams(window.location.search).get("key") ?? "", file);
+		const sent = await addToLibrary(new URLSearchParams(window.location.search).get("key") ?? "", file, (percent) => setUploading(percent)); // the % as it goes up (agent review 22 Nov)
 		const done = "error" in sent ? sent : { file: sent.item.file, kind: sent.item.media };
 		setUploading(null);
 		onUploading?.(false, !("error" in done));

@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useState } from "react";
-import type { MyFile } from "@/lib/my-files";
+import { MY_FILE_KINDS, type MyFile } from "@/lib/my-files";
 import { LOGO_EFFECTS, LOGO_MOTION, type LogoEffect } from "@/lib/logo-motion";
 import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { ClashNote, OwnFontOptions } from "./MyFilePickers";
@@ -67,7 +67,7 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 				.then((res) => (res.ok ? (res.json() as Promise<{ files: MyFile[] }>) : { files: [] }))
 				.then((data) => data.files)
 				.catch(() => [] as MyFile[]);
-		void Promise.all([ask("logo"), ask("image")]).then(([logos, pictures]) => setLogos([...logos, ...pictures.filter((p) => p.type !== "image/gif")]));
+		void Promise.all([ask("logo"), ask("image")]).then(([logos, pictures]) => setLogos([...logos, ...pictures.filter((p) => p.type !== "image/gif" && p.size <= MY_FILE_KINDS.logo.maxBytes)]));
 	}, []);
 	async function uploadLogo(file: File, then?: "use" | "keep") {
 		setLogoBusy(true);

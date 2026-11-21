@@ -110,6 +110,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	// Pictures and clips this project already has (api/library), shown on the Upload tab: so nobody uploads the same file
 	// again because they didn't know about Import (coach, 11 Nov). Loaded again after each upload here.
 	const [kept, setKept] = useState<LibraryItem[]>([]);
+	const KEPT_MINE = 12; // the rest are in the My files box
 	const libraryKey = videoKey ?? (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("key"));
 	const fileBanners = banners.filter((b) => b.kind === "file").length;
 	const canReuse = Boolean(onUseFile); // not the callback itself: it is new on every frame while the video plays
@@ -117,7 +118,11 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		if (tab !== "file" || !libraryKey || !canReuse) return;
 		void fetch(`/api/library?key=${encodeURIComponent(libraryKey)}`)
 			.then(async (res) => (res.ok ? ((await res.json()) as { items?: LibraryItem[] }) : {}))
-			.then((data: { items?: LibraryItem[] }) => setKept(data.items ?? []))
+			.then((data: { items?: LibraryItem[] }) => {
+				const items = data.items ?? [];
+				const mine = items.filter((i) => i.mine).sort((a, b) => b.at.localeCompare(a.at));
+				setKept([...items.filter((i) => !i.mine), ...mine.slice(0, KEPT_MINE)]);
+			})
 			.catch(() => {});
 	}, [tab, libraryKey, canReuse, fileBanners]);
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));

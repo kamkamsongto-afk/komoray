@@ -36,8 +36,8 @@ export const MY_FILE_SECTION: Record<MyFileKind, "video" | "file"> = { video: "v
 // Pic/Clip, Frame Me and Layout take it wherever they take a file of the project's own. It ends in the file's type, so
 // everything that tells a clip from a picture or a GIF by the ending still does. The server reads it from
 // files/<owner>/<id> (lib/project-files.ts); the owner is the project's.
-export const MY_REF = /^my-([0-9a-f]{64})\.(jpg|png|webp|gif|mp4)$/;
-const REF_EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "video/mp4": "mp4" };
+export const MY_REF = /^my-([0-9a-f]{64})\.(jpg|png|webp|gif|mp4|mov)$/;
+const REF_EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "video/mp4": "mp4", "video/quicktime": "mov" };
 export const myRefOf = (f: Pick<MyFile, "id" | "type">) => (REF_EXT[f.type] ? `my-${f.id}.${REF_EXT[f.type]}` : null);
 export const refId = (name: string) => MY_REF.exec(name)?.[1] ?? null;
 export const MAX_FILE_NAME = 60;
@@ -45,6 +45,8 @@ export const MAX_FILE_NAME = 60;
 export const myFileKey = (userId: string, id: string) => `files/${userId}/${id}`;
 export const myFileCardKey = (userId: string, id: string) => `files/${userId}/${id}.json`;
 export const myFilesPrefix = (userId: string) => `files/${userId}/`;
+// A clip on its way up (api/files clipUpload): kept apart until it is checked, then moved in. Never listed or counted.
+export const myIncomingPrefix = (userId: string) => `files/${userId}/incoming/`;
 // Where the browser reads one (only its owner, signed in). The bytes behind an id never change.
 export const myFileUrl = (id: string) => `/api/files?id=${id}`;
 // A clip's: a short-lived link straight to it, so the browser can read it piece by piece (Range).

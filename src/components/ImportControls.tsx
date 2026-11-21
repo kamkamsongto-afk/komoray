@@ -55,7 +55,8 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 		for (const [n, file] of files.entries()) {
 			setUploading(files.length > 1 ? `${n + 1} of ${files.length}` : "");
 			// One file: a name already used is asked about (Use that one / Keep both). Several: both are kept.
-			const sent = await uploadToMyFiles(file, then ?? (files.length > 1 ? "keep" : undefined), ["image", "video"]);
+			const count = files.length > 1 ? `${n + 1} of ${files.length}` : "";
+			const sent = await uploadToMyFiles(file, then ?? (files.length > 1 ? "keep" : undefined), ["image", "video"], (percent) => setUploading(`${count} ${percent}%`.trim()));
 			if ("conflict" in sent) {
 				setClash({ file, conflict: sent.conflict });
 				continue;
@@ -169,7 +170,12 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 				<button onClick={() => fileRef.current?.click()} disabled={uploading !== null} className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-dashed border-foreground/30 px-1.5 py-1.5 text-xs hover:bg-foreground/5 disabled:opacity-40">
 					<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading${uploading ? ` ${uploading}` : ""}…` : "Upload"}
 				</button>
-				<button onClick={() => setPicking((on) => !on)} aria-expanded={picking} className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-dashed px-1.5 py-1.5 text-xs ${picking ? "border-blue-600 bg-blue-600/10" : "border-foreground/30 hover:bg-foreground/5"}`}>
+				<button
+					onClick={() => {
+						if (!picking) void load(true); // anything added on the My files page meanwhile (agent review 22 Nov)
+						setPicking(!picking);
+					}}
+					aria-expanded={picking} className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-dashed px-1.5 py-1.5 text-xs ${picking ? "border-blue-600 bg-blue-600/10" : "border-foreground/30 hover:bg-foreground/5"}`}>
 					<FolderHeart className="h-3.5 w-3.5" aria-hidden /> My files
 				</button>
 			</span>

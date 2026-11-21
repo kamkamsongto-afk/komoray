@@ -102,8 +102,8 @@ export function clipLength(file: File): Promise<number | null> {
 // One file into My files (coach 21 Nov: every new file goes there, by reference), as the My files box does it: for a
 // picture or clip dropped straight on the video (Layout, coach 14 Nov). A file named like one already there is kept
 // as well ("name (2)"): no question to answer mid-drop. In the browser only. key: unused now, kept for the callers.
-export async function addToLibrary(_key: string, file: File): Promise<{ item: LibraryItem } | { error: string }> {
-	const sent = await uploadToMyFiles(file, "keep", ["image", "video"]);
+export async function addToLibrary(_key: string, file: File, onProgress?: (percent: number) => void): Promise<{ item: LibraryItem } | { error: string }> {
+	const sent = await uploadToMyFiles(file, "keep", ["image", "video"], onProgress);
 	if ("error" in sent) return sent;
 	if ("conflict" in sent) return { error: `${file.name}: could not upload` };
 	return { item: itemOfMyFile(sent.file) };
