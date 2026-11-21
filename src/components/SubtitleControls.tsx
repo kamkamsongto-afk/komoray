@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import type { OwnFont } from "@/lib/font-info";
+import type { MyFile } from "@/lib/my-files";
 import { type Motion, MOTIONS } from "@/lib/motion";
 import {
 	COLORS,
@@ -58,17 +59,32 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 			.catch(() => {});
 	}, []);
 
-	// The logo picture (one per account): uploading it turns it on for this look.
+	// The logo picture, kept in My files (lib/my-files.ts): uploaded once, then picked from the list. Uploading turns it
+	// on for this look. The same file again is the one already there; another file with a name already used is asked
+	// about (Use that one / Keep both), never written over.
+	const [logos, setLogos] = useState<MyFile[]>([]);
 	const [logoBusy, setLogoBusy] = useState(false);
 	const [logoError, setLogoError] = useState("");
-	async function uploadLogo(file: File) {
+	const [logoClash, setLogoClash] = useState<{ file: File; conflict: MyFile } | null>(null);
+	useEffect(() => {
+		fetch("/api/files?kind=logo")
+			.then((res) => (res.ok ? (res.json() as Promise<{ files: MyFile[] }>) : { files: [] }))
+			.then((data) => setLogos(data.files))
+			.catch(() => {});
+	}, []);
+	async function uploadLogo(file: File, then?: "use" | "keep") {
 		setLogoBusy(true);
 		setLogoError("");
-		const res = await fetch("/api/logo", { method: "POST", body: file }).catch(() => null);
-		const data = (await res?.json().catch(() => ({}))) as { version?: number; error?: string };
+		setLogoClash(null);
+		const query = new URLSearchParams({ kind: "logo", name: file.name, ...(then && { then }) });
+		const res = await fetch(`/api/files?${query}`, { method: "POST", body: file }).catch(() => null);
+		const data = (await res?.json().catch(() => ({}))) as { file?: MyFile; conflict?: MyFile; error?: string };
 		setLogoBusy(false);
-		if (!res?.ok || !data.version) return setLogoError(data?.error ?? "Could not upload the logo");
-		onChange({ ...style, logoImage: { version: data.version } });
+		if (res?.status === 409 && data.conflict) return setLogoClash({ file, conflict: data.conflict });
+		if (!res?.ok || !data.file) return setLogoError(data?.error ?? "Could not upload the logo");
+		const added = data.file;
+		setLogos((list) => [added, ...list.filter((f) => f.id !== added.id)]);
+		onChange({ ...style, logoImage: { file: added.id } });
 	}
 
 	async function uploadFont(file: File) {
@@ -300,6 +316,21 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 							}}
 						/>
 					</label>
+					{logos.length > 0 && (
+						<select
+							value={style.logoImage && "file" in style.logoImage ? style.logoImage.file : ""}
+							onChange={(e) => e.target.value && onChange({ ...style, logoImage: { file: e.target.value } })}
+							aria-label="Your logos"
+							className="max-w-40 rounded-md border border-foreground/20 bg-background px-1 py-1 text-foreground"
+						>
+							<option value="">{style.logoImage ? "Picked before" : "Your logos…"}</option>
+							{logos.map((f) => (
+								<option key={f.id} value={f.id}>
+									{f.name}
+								</option>
+							))}
+						</select>
+					)}
 					{style.logoImage && (
 						<button onClick={() => onChange({ ...style, logoImage: undefined })} className="rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
 							Don&apos;t show
@@ -307,6 +338,20 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 					)}
 					{!style.logoImage && <span className="text-foreground/50">PNG with a see-through background looks best. Shown instead of the name.</span>}
 					{logoError && <span className="text-red-600">{logoError}</span>}
+					{logoClash && (
+						<span className="flex w-full flex-wrap items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-foreground">
+							A logo named &ldquo;{logoClash.conflict.name}&rdquo; is already in your files.
+							<button onClick={() => void uploadLogo(logoClash.file, "use")} className="rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
+								Use that one
+							</button>
+							<button onClick={() => void uploadLogo(logoClash.file, "keep")} className="rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
+								Keep both
+							</button>
+							<button onClick={() => setLogoClash(null)} className="text-foreground/60 hover:underline">
+								Cancel
+							</button>
+						</span>
+					)}
 				</div>
 			</div>
 			{style.logoImage && (

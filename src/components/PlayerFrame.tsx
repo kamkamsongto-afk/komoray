@@ -9,7 +9,7 @@ import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
 import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
-import { logoUrl } from "@/lib/logo";
+import { logoPictureName, logoPictureUrl } from "@/lib/logo";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -382,7 +382,7 @@ function LayoutFileHandle({ l, box, place, scale, onChange }: { l: VideoLayout; 
 // the play button and the time bar.
 // A Brand Kit's logo picture. Until it has loaded, a soft "Loading logo" box sits in its place instead of the picture
 // before it (coach, 17 Nov: picking another Brand Kit kept the old channel's logo on for seconds, which looked wrong).
-function LogoPicture({ version, place, opacity }: { version: number; place: CSSProperties; opacity: number }) {
+function LogoPicture({ src, place, opacity }: { src: string; place: CSSProperties; opacity: number }) {
 	const [ready, setReady] = useState(false);
 	// No file of its own (lib/logo.ts): said on the video, as Make video stops for it too. Never another picture.
 	const [missing, setMissing] = useState(false);
@@ -398,7 +398,7 @@ function LogoPicture({ version, place, opacity }: { version: number; place: CSSP
 	return (
 		<>
 			{/* eslint-disable-next-line @next/next/no-img-element */}
-			<img src={logoUrl(version)} alt="" onLoad={() => setReady(true)} onError={() => setMissing(true)} style={{ ...place, height: "auto", opacity: ready ? opacity : 0 }} />
+			<img src={src} alt="" onLoad={() => setReady(true)} onError={() => setMissing(true)} style={{ ...place, height: "auto", opacity: ready ? opacity : 0 }} />
 			{!ready && (
 				<div
 					className="animate-pulse"
@@ -1014,8 +1014,8 @@ export function PlayerFrame({
 						// The logo picture, logoSize px wide, in its corner (the overlay in render.py). Keyed by the picture,
 						// so another Brand Kit's logo starts out loading, never showing the last one (LogoPicture).
 						<LogoPicture
-							key={subtitle.logoImage.version}
-							version={subtitle.logoImage.version}
+							key={logoPictureName(subtitle.logoImage)}
+							src={logoPictureUrl(subtitle.logoImage)}
 							place={{
 								position: "absolute",
 								[subtitle.logoAt.startsWith("bottom") ? "bottom" : "top"]: LOGO.top,

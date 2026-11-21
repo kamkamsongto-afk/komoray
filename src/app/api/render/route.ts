@@ -2,7 +2,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, JOB_TOO_OLD_MS, NO_INVITE, renderRunning } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
-import { logoKey, logoVersion } from "@/lib/logo";
+import { logoPictureKey } from "@/lib/logo";
 import type { Faces } from "@/lib/framing";
 import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
 import { cutThaiWords } from "@/lib/newmm";
@@ -72,14 +72,14 @@ export async function POST(request: Request) {
 	const part = rawPart === undefined ? null : readRenderPart(rawPart, totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS);
 	if (rawPart !== undefined && !part) return Response.json({ error: `Pick at least ${PART_RENDER.minSeconds} seconds of the video to make.` }, { status: 400 });
 
-	// The logo picture is that version's own file or the video is not made: never another picture in its place, and
-	// before anything is counted or started (lib/logo.ts, coach 21 Nov: the video came out with the Komoray logo).
-	const logoVersionWanted = readStyle(edit.style).logoImage?.version;
+	// The logo picture is its own file (My files id, or an older upload's version) or the video is not made: never another
+	// picture in its place, and before anything is counted or started (lib/logo.ts, coach 21 Nov: the video came out with
+	// the Komoray logo). The same lookup as the preview's (logoPictureUrl).
+	const logoWanted = readStyle(edit.style).logoImage;
 	let logoFile: string | null = null;
-	if (logoVersionWanted !== undefined) {
+	if (logoWanted) {
 		const { user } = await currentUser();
-		const version = logoVersion(logoVersionWanted);
-		logoFile = user && version ? logoKey(user.id, version) : null;
+		logoFile = user ? logoPictureKey(user.id, logoWanted) : null;
 		if (!logoFile || !(await exists(logoFile))) {
 			return Response.json({ error: "Your logo picture is missing. Please upload it again in Brand → Logo, then press Make video." }, { status: 409 });
 		}

@@ -19,8 +19,8 @@ export const FORMATS: Record<Format, { for: string; width: number; height: numbe
 };
 export const outputSize = (style: { format?: Format }) => FORMATS[style.format ?? "9:16"] ?? FORMATS["9:16"];
 // color: the brand colour (the Highlight look's word). logo: the channel name shown in a corner ("" = none).
-// logoImage: the user's logo picture (lib/logo.ts) shown in that corner instead of the name, logoSize px
-// wide, logoOpacity 0..1.
+// logoImage: the user's logo picture shown in that corner instead of the name, logoSize px wide, logoOpacity 0..1:
+// file = its id in My files (lib/my-files.ts, from 21 Nov), else version = an upload from before (lib/logo.ts).
 export type SubtitleStyle = {
 	size: number;
 	outline: number;
@@ -38,7 +38,7 @@ export type SubtitleStyle = {
 	color: string;
 	logo: string;
 	logoAt: LogoCorner;
-	logoImage?: { version: number };
+	logoImage?: { file: string } | { version: number };
 	logoSize: number;
 	logoOpacity: number;
 	zoom: Zoom;
@@ -199,6 +199,14 @@ export function fontMetrics(style: Pick<SubtitleStyle, "font" | "ownFont">) {
 }
 
 // Anything that isn't a sensible style falls back to the defaults, field by field.
+// The logo picture: a My files id wins (its own field only), else an older upload's version. Anything else: none.
+function readLogoImage(raw: unknown): { logoImage?: SubtitleStyle["logoImage"] } {
+	const o = (raw ?? {}) as { file?: unknown; version?: unknown };
+	if (typeof o.file === "string" && /^[0-9a-f]{64}$/.test(o.file)) return { logoImage: { file: o.file } };
+	if (typeof o.version === "number") return { logoImage: { version: o.version } };
+	return {};
+}
+
 export function readStyle(value: unknown): SubtitleStyle {
 	const v = (value ?? {}) as Partial<Record<keyof SubtitleStyle, unknown>>;
 	const pick = (k: keyof typeof LIMITS) => (typeof v[k] === "number" && Number.isFinite(v[k]) ? clamp(v[k] as number, LIMITS[k]) : DEFAULT_STYLE[k]);
@@ -210,7 +218,7 @@ export function readStyle(value: unknown): SubtitleStyle {
 		size: Math.round(pick("size")),
 		logoSize: Math.round(pick("logoSize")),
 		logoOpacity: Math.round(pick("logoOpacity") * 100) / 100,
-		...(typeof (v.logoImage as { version?: unknown })?.version === "number" && { logoImage: { version: (v.logoImage as { version: number }).version } }),
+		...readLogoImage(v.logoImage),
 		outline: Math.round(pick("outline")),
 		position: Math.round(pick("position") * 1000) / 1000,
 		look: typeof v.look === "string" && v.look in LOOKS ? (v.look as Look) : DEFAULT_STYLE.look,
