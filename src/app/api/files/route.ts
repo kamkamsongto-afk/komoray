@@ -1,3 +1,5 @@
+import { accessFor } from "@/lib/access";
+import { readFontInfo } from "@/lib/font-info";
 import { logoType } from "@/lib/logo";
 import { cleanFileName, fileId, freeName, MY_FILE_ID, MY_FILE_KINDS, type MyFile, type MyFileKind, myFileCardKey, myFileKey, myFilesPrefix } from "@/lib/my-files";
 import { fetchObject, getJson, listObjects, putIfAbsent } from "@/lib/r2";
@@ -5,8 +7,8 @@ import { currentUser } from "@/lib/supabase/server";
 
 // My files (lib/my-files.ts): the signed-in person's own files, used again and again.
 //   GET ?id=…                       the file itself (its bytes never change, so the browser may keep it)
-//   GET ?kind=logo                  { files } of that kind, newest first
-//   POST ?kind=logo&name=…[&then=]  the file as the body → { file, same? }
+//   GET ?kind=logo|font             { files, limit } of that kind, newest first. limit: fonts the plan holds (null: no cap).
+//   POST ?kind=…&name=…[&then=]     the file as the body → { file, same? }
 //     same: this very file was already there (nothing new is stored).
 //     409 { conflict }: another file of this kind has that name. Ask, then send again with
 //     then=use (take that one, nothing stored) or then=keep (store this one as "name (2)").
@@ -33,7 +35,24 @@ export async function GET(request: Request) {
 	}
 	const kind = kindOf(params.get("kind"));
 	if (!kind) return Response.json({ error: "Unknown kind" }, { status: 400 });
-	return Response.json({ files: await cardsOf(user.id, kind) });
+	const limit = kind === "font" ? (await accessFor(user.email)).perks.fonts : null;
+	return Response.json({ files: await cardsOf(user.id, kind), limit });
+}
+
+// Own fonts per plan (coach 21 Nov: Free none, Starter 5, Pro 20). Fonts kept from a bigger plan stay in My files and in
+// the projects that use them; only new uploads and new picks follow the plan (fontsUsable).
+const FONTS_LOCKED = "Your own fonts come with Starter and Pro. Upgrade on the Pricing page.";
+
+// What the bytes are, if they are a file of this kind we can use: its content type, and a font's name and height.
+function checkFile(kind: MyFileKind, bytes: Uint8Array) {
+	if (kind === "logo") {
+		const type = logoType(bytes);
+		return type ? { type } : { error: "Please use a PNG, JPG or WebP picture" };
+	}
+	const info = readFontInfo(bytes);
+	if (!info) return { error: "This isn't a .ttf or .otf font we can use" };
+	const otf = String.fromCharCode(...bytes.subarray(0, 4)) === "OTTO";
+	return { type: otf ? "font/otf" : "font/ttf", family: info.family, height: info.height };
 }
 
 export async function POST(request: Request) {
@@ -44,10 +63,14 @@ export async function POST(request: Request) {
 	if (!kind) return Response.json({ error: "Unknown kind" }, { status: 400 });
 	const then = params.get("then");
 
+	const limit = kind === "font" ? (await accessFor(user.email)).perks.fonts : null;
+	if (limit === 0) return Response.json({ error: FONTS_LOCKED }, { status: 403 });
+	const { maxBytes, label } = MY_FILE_KINDS[kind];
 	const bytes = new Uint8Array(await request.arrayBuffer());
-	if (!bytes.length || bytes.length > MY_FILE_KINDS[kind].maxBytes) return Response.json({ error: "The logo must be 2 MB or smaller" }, { status: 400 });
-	const type = logoType(bytes);
-	if (!type) return Response.json({ error: "Please use a PNG, JPG or WebP picture" }, { status: 400 });
+	if (!bytes.length || bytes.length > maxBytes) return Response.json({ error: `The ${label} must be ${maxBytes / 1024 / 1024} MB or smaller` }, { status: 400 });
+	const checked = checkFile(kind, bytes);
+	if ("error" in checked) return Response.json({ error: checked.error }, { status: 400 });
+	const { type, ...font } = checked;
 
 	// This very file already: hand that one back, whatever it was called (nothing new stored, nothing asked).
 	const id = await fileId(bytes);
@@ -57,13 +80,16 @@ export async function POST(request: Request) {
 
 	// Another file with this name: the customer picks (never written over).
 	const cards = await cardsOf(user.id, kind);
-	let name = cleanFileName(params.get("name"), "Logo");
+	let name = cleanFileName(params.get("name"), "family" in font && font.family ? font.family : "Logo");
 	const clash = cards.find((c) => c.name.toLowerCase() === name.toLowerCase());
 	if (clash && then === "use") return Response.json({ file: clash, same: true });
 	if (clash && then !== "keep") return Response.json({ conflict: clash }, { status: 409 });
 	if (clash) name = freeName(name, cards.map((c) => c.name));
+	if (limit !== null && cards.length >= limit) {
+		return Response.json({ error: `You have ${cards.length} fonts, the most your plan holds (${limit}).${limit < 20 ? " Pro holds 20." : ""}` }, { status: 403 });
+	}
 
-	const file: MyFile = { id, kind, name, type, size: bytes.length, at: new Date().toISOString() };
+	const file: MyFile = { id, kind, name, type, size: bytes.length, at: new Date().toISOString(), ...font };
 	await putIfAbsent(myFileKey(user.id, id), bytes, type); // false: the same bytes are there already, which is the same file
 	if (!(await putIfAbsent(cardKey, JSON.stringify(file), "application/json"))) {
 		return Response.json({ file: (await getJson<MyFile>(cardKey)) ?? file, same: true }); // uploaded twice at once

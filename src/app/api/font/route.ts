@@ -1,49 +1,21 @@
-import { fontKeys, type OwnFont, readFontInfo } from "@/lib/font-info";
-import { deleteObject, fetchObject, getJson, putObject } from "@/lib/r2";
+import { fontKeys, type OwnFont } from "@/lib/font-info";
+import { fetchObject, getJson } from "@/lib/r2";
 import { currentUser } from "@/lib/supabase/server";
-import { accessFor } from "@/lib/access";
 
-// The signed-in user's own subtitle font (one per account; a new upload replaces it).
-// Kept in R2 at fonts/<user id>/font (the file) and font.json (its name and height).
+// The one own font per account from before My files (21 Nov), at fonts/<user id>/font and font.json. Read only now:
+// new fonts go to My files (api/files), each its own file, so this one is never written over again.
 //   GET              { font: { family, height, version } | null }
-//   GET ?file=1      the font file itself, for the preview
-//   POST (the file)  check it, save it → { font }
-//   DELETE           remove it
-const MAX_BYTES = 5 * 1024 * 1024;
-
+//   GET ?file=1      the font file itself, for the preview of projects that still use it
 export async function GET(request: Request) {
 	const { user } = await currentUser();
 	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
 	const keys = fontKeys(user.id);
 	if (new URL(request.url).searchParams.has("file")) {
 		const res = await fetchObject(keys.file);
-		if (!res.ok) return new Response("Not found", { status: 404 });
-		// The address changes with every upload (?v=), so the browser may keep it.
-		return new Response(res.body, { headers: { "Content-Type": "font/ttf", "Cache-Control": "private, max-age=31536000, immutable" } });
+		if (!res.ok) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+		// Never kept by the browser: the final video reads this same file as it is now (api/render), so the preview must too
+		// (21 Nov: a copy kept from an older upload under the same address showed one font while the video got another).
+		return new Response(res.body, { headers: { "Content-Type": "font/ttf", "Cache-Control": "no-store" } });
 	}
 	return Response.json({ font: await getJson<OwnFont>(keys.info) });
-}
-
-export async function POST(request: Request) {
-	const { user } = await currentUser();
-	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
-	// A locked feature (the own font is a paid plan's: Starter and Pro, coach 18 Nov). One already uploaded stays, but isn't used in videos (api/render).
-	if (!(await accessFor(user.email)).perks.ownFont) return Response.json({ error: "Your own font comes with Starter and Pro. Upgrade on the Pricing page." }, { status: 403 });
-	const bytes = new Uint8Array(await request.arrayBuffer());
-	if (!bytes.length || bytes.length > MAX_BYTES) return Response.json({ error: "The font must be 5 MB or smaller" }, { status: 400 });
-	const info = readFontInfo(bytes);
-	if (!info) return Response.json({ error: "This isn't a .ttf or .otf font we can use" }, { status: 400 });
-	const keys = fontKeys(user.id);
-	const font: OwnFont = { ...info, version: Date.now() };
-	await putObject(keys.file, bytes, "font/ttf");
-	await putObject(keys.info, JSON.stringify(font), "application/json");
-	return Response.json({ font });
-}
-
-export async function DELETE() {
-	const { user } = await currentUser();
-	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
-	const keys = fontKeys(user.id);
-	await Promise.all([deleteObject(keys.file), deleteObject(keys.info)]);
-	return Response.json({ ok: true });
 }

@@ -10,6 +10,7 @@ import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shap
 import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import { logoPictureName, logoPictureUrl } from "@/lib/logo";
+import { myFileUrl } from "@/lib/my-files";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
@@ -79,23 +80,33 @@ const FONT_FACES: Record<FontId, { family: string; weight: number }> = {
 	archivo: { family: archivo.style.fontFamily, weight: 400 },
 	titan: { family: titan.style.fontFamily, weight: 400 },
 };
-// The user's own font: loaded once per upload (version) from /api/font, under its own name.
-const ownFamily = (version: number) => `komoray-own-${version}`;
-const ownLoaded = new Set<number>();
-function useOwnFont(font: OwnFont | undefined) {
+// The user's own fonts, each loaded once under a name of its own: one from My files by its id (the very font this project
+// was given, lib/my-files.ts), one from before by its upload (version, /api/font, which always sends the account's one
+// font as the final video gets it). Every own font in use is loaded, so two banners with two fonts both show.
+const ownName = (font: OwnFont) => (font.file ? `komoray-own-${font.file.slice(0, 16)}` : `komoray-own-${font.version}`);
+const ownSource = (font: OwnFont) => (font.file ? myFileUrl(font.file) : `/api/font?file=1&v=${font.version}`);
+const ownFamily = (font: OwnFont) => `"${ownName(font)}", ${kanit.style.fontFamily}`;
+const ownLoaded = new Set<string>();
+function useOwnFonts(fonts: (OwnFont | undefined)[]) {
 	const [, setReady] = useState(0);
+	const wanted = fonts.filter((f): f is OwnFont => !!f);
+	const names = [...new Set(wanted.map(ownName))].join(" ");
 	useEffect(() => {
-		if (!font || ownLoaded.has(font.version) || typeof FontFace === "undefined") return;
-		ownLoaded.add(font.version);
-		const face = new FontFace(ownFamily(font.version), `url(/api/font?file=1&v=${font.version})`);
-		face
-			.load()
-			.then((loaded) => {
-				document.fonts.add(loaded);
-				setReady((n) => n + 1);
-			})
-			.catch(() => ownLoaded.delete(font.version));
-	}, [font]);
+		if (typeof FontFace === "undefined") return;
+		for (const font of wanted) {
+			const name = ownName(font);
+			if (ownLoaded.has(name)) continue;
+			ownLoaded.add(name);
+			new FontFace(name, `url(${ownSource(font)})`)
+				.load()
+				.then((loaded) => {
+					document.fonts.add(loaded);
+					setReady((n) => n + 1);
+				})
+				.catch(() => ownLoaded.delete(name));
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- names says which fonts these are
+	}, [names]);
 }
 
 const SIDE_MARGIN = 80;
@@ -503,10 +514,10 @@ export function PlayerFrame({
 		return () => observer.disconnect();
 	}, []);
 
-	useOwnFont(subtitle.font === "own" ? subtitle.ownFont : undefined);
+	useOwnFonts([subtitle.font === "own" ? subtitle.ownFont : undefined, ...banners.map((b) => (b.font === "own" ? b.ownFont : undefined))]);
 	const face =
 		subtitle.font === "own" && subtitle.ownFont
-			? { family: `"${ownFamily(subtitle.ownFont.version)}", ${kanit.style.fontFamily}`, weight: 400 }
+			? { family: ownFamily(subtitle.ownFont), weight: 400 }
 			: (FONT_FACES[subtitle.font as FontId] ?? FONT_FACES.kanit);
 	// Letters as big as the final video draws them (see FONTS[].height), rows as far apart.
 	const ownEm = fontMetrics(subtitle).height;
@@ -517,11 +528,9 @@ export function PlayerFrame({
 			: { ...face, em: ownEm };
 	// A banner with its own font (banner_events in render.py): Russian-style letters still use the font that has them,
 	// except in the user's own font. Its own font that isn't there falls back to Kanit, on both sides.
-	const bannerOwn = banners.find((b) => b.font === "own" && b.ownFont)?.ownFont;
-	useOwnFont(bannerOwn);
 	const bannerFace = (b: Banner, value: string) => {
 		if (!b.font) return textFace(value);
-		if (b.font === "own") return b.ownFont ? { family: `"${ownFamily(b.ownFont.version)}", ${kanit.style.fontFamily}`, weight: 400, em: b.ownFont.height } : { ...FONT_FACES.kanit, em: FONTS.kanit.height };
+		if (b.font === "own") return b.ownFont ? { family: ownFamily(b.ownFont), weight: 400, em: b.ownFont.height } : { ...FONT_FACES.kanit, em: FONTS.kanit.height };
 		if (hasCyrillic(value)) return { family: fira.style.fontFamily, weight: 500, em: CYRILLIC_FONT.height };
 		return { ...(FONT_FACES[b.font] ?? FONT_FACES.kanit), em: (FONTS[b.font] ?? FONTS.kanit).height };
 	};

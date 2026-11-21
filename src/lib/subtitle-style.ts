@@ -187,7 +187,8 @@ export function readFont(font: unknown, own: unknown): Pick<SubtitleStyle, "font
 	if (typeof font === "string" && font in FONTS) return { font: font as FontId };
 	const o = (own ?? {}) as Partial<OwnFont>;
 	if (font === "own" && typeof o.family === "string" && o.family.trim() && Number(o.height) > 0.5 && Number(o.height) < 4) {
-		return { font: "own", ownFont: { family: o.family.replace(/[\\{},\n\r]/g, "").trim().slice(0, 60), height: Number(o.height), version: Number(o.version) || 0 } };
+		const file = typeof o.file === "string" && /^[0-9a-f]{64}$/.test(o.file) ? { file: o.file } : {};
+		return { font: "own", ownFont: { family: o.family.replace(/[\\{},\n\r]/g, "").trim().slice(0, 60), height: Number(o.height), version: Number(o.version) || 0, ...file } };
 	}
 	return { font: DEFAULT_STYLE.font };
 }

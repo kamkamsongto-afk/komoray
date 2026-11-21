@@ -8,7 +8,7 @@
 // - A file that can't be found is missing: never another file in its place (api/render stops, the preview says so).
 // In R2, per file: files/<user id>/<id> (the bytes) and files/<user id>/<id>.json (its card, below). No shared list
 // file, so two uploads at once can't overwrite each other's entry.
-export type MyFileKind = "logo";
+export type MyFileKind = "logo" | "font";
 export type MyFile = {
 	id: string; // SHA-256 of the bytes, 64 hex
 	kind: MyFileKind;
@@ -16,10 +16,15 @@ export type MyFile = {
 	type: string; // its content type
 	size: number; // bytes
 	at: string; // when it was first uploaded
+	family?: string; // a font: the name it is asked for by (lib/font-info.ts)
+	height?: number; // a font: its full height in ems (FONTS[].height in subtitle-style.ts)
 };
 
 export const MY_FILE_ID = /^[0-9a-f]{64}$/;
-export const MY_FILE_KINDS: Record<MyFileKind, { maxBytes: number }> = { logo: { maxBytes: 2 * 1024 * 1024 } };
+export const MY_FILE_KINDS: Record<MyFileKind, { maxBytes: number; label: string }> = {
+	logo: { maxBytes: 2 * 1024 * 1024, label: "logo" },
+	font: { maxBytes: 5 * 1024 * 1024, label: "font" },
+};
 export const MAX_FILE_NAME = 60;
 
 export const myFileKey = (userId: string, id: string) => `files/${userId}/${id}`;

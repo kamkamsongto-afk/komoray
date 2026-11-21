@@ -286,14 +286,30 @@ def font_tag(text: str, own_font: bool, size: float) -> str:
 _shapers: dict = {}
 
 
+def own_font_path(style: dict, own: dict | None) -> str | None:
+    """The file of one own font: its My files copy, by the id the style or banner pinned (ownFont.file, fontUrls; coach
+    21 Nov), else the account's one font from before My files (fontUrl). None: not here (Kanit, as the preview falls back)."""
+    file = (own or {}).get("file")
+    if file:
+        return (style.get("_ownFontPaths") or {}).get(file)
+    return style.get("_ownFontPath")
+
+
+def own_font_family(style: dict, own: dict | None) -> str:
+    """The name libass asks for: a My files font's own family (read from the file at upload), else ownFamily."""
+    if (own or {}).get("file"):
+        return str(own.get("family") or "")
+    return str(style.get("ownFamily") or "")
+
+
 def text_width(text: str, style: dict, size: float, spacing: int = 0, cyrillic: bool = False) -> float:
     """How wide libass draws this text, px, to draw a box around it: libass makes a font's full height the
     font size, and Thai needs real shaping to know its width. cyrillic: part of a line drawn in the Russian
     font (font_tag picks one font for a whole line)."""
     import uharfbuzz as hb
 
-    if style.get("font") == "own" and style.get("_ownFontPath"):
-        path, height = style["_ownFontPath"], float((style.get("ownFont") or {}).get("height") or 1.58)
+    if style.get("font") == "own" and own_font_path(style, style.get("ownFont")):
+        path, height = own_font_path(style, style.get("ownFont")), float((style.get("ownFont") or {}).get("height") or 1.58)
     elif style.get("font") != "own" and (cyrillic or re.search("[Ѐ-ԯ]", text)):
         path, height = FONT_FOLDER + "FiraSans-Medium.ttf", 1.58  # asked for smaller, drawn as big as Kanit's (CYRILLIC_SCALE)
     else:
@@ -454,8 +470,9 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         # Its own font: measured and named per banner. "own" without the file here falls back to Kanit, as the
         # preview does when the font can't load (its family list ends in Kanit).
         picked, row_style, row_own, name = b.get("font"), style, own_font, ""
-        if picked == "own" and style.get("_ownFontPath") and style.get("ownFamily"):
-            row_style, row_own, name = {**style, "font": "own", "ownFont": b.get("ownFont") or style.get("ownFont")}, True, str(style["ownFamily"])
+        own = b.get("ownFont") or style.get("ownFont")
+        if picked == "own" and own_font_path(style, own) and own_font_family(style, own):
+            row_style, row_own, name = {**style, "font": "own", "ownFont": own}, True, own_font_family(style, own)
         elif picked == "own" or picked in FONTS:
             key = picked if picked in FONTS else "kanit"
             row_style, row_own, name = {**style, "font": key}, False, FONTS[key]
@@ -1514,7 +1531,7 @@ def ass_time(t: float) -> str:
 def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict, banners: list[dict] | None = None) -> str:
     thai = any(is_thai(w["text"]) for w in words)
     # "own": the user's uploaded font, put in the fonts folder next to the subtitles (render()).
-    font = str(style.get("ownFamily") or FONTS["kanit"]) if style["font"] == "own" else FONTS.get(style["font"], FONTS["kanit"])
+    font = (own_font_family(style, style.get("ownFont")) or FONTS["kanit"]) if style["font"] == "own" else FONTS.get(style["font"], FONTS["kanit"])
     look = style.get("look", "clean")
     motion = style.get("motion", "none")
     size = int(style["size"])
@@ -2537,6 +2554,15 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 urllib.request.urlretrieve(style["fontUrl"], workdir / "fonts" / "own.ttf")
                 fonts_dir = "fonts"
                 style["_ownFontPath"] = str(workdir / "fonts" / "own.ttf")
+            # Own fonts from My files: each its own file, named by its id (own_font_path), so two fonts never share one.
+            for file, url in (style.get("fontUrls") or {}).items():
+                if not re.fullmatch(r"[0-9a-f]{64}", str(file)):
+                    continue
+                (workdir / "fonts").mkdir(exist_ok=True)
+                path = workdir / "fonts" / f"{file}.ttf"
+                urllib.request.urlretrieve(url, path)
+                style.setdefault("_ownFontPaths", {})[file] = str(path)
+                fonts_dir = "fonts"
             subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners")), encoding="utf-8")
 
             # Cutout layers (behind.ts): sent by the app with links to the matte and each picture or clip.

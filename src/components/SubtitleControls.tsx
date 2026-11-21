@@ -1,8 +1,9 @@
 "use client";
 
 import { type ReactNode, useEffect, useState } from "react";
-import type { OwnFont } from "@/lib/font-info";
 import type { MyFile } from "@/lib/my-files";
+import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
+import { ClashNote, OwnFontOptions } from "./MyFilePickers";
 import { type Motion, MOTIONS } from "@/lib/motion";
 import {
 	COLORS,
@@ -48,16 +49,8 @@ const ZOOM_CHOICES: { id: Zoom; name: string; hint: string }[] = [
 // editor (for one video) and on the Brand Kit page (for every new video).
 export function SubtitleControls({ style, onChange, thai, footer, top, section, bodyHidden }: Props) {
 	const on = (part: ControlSection) => !bodyHidden && (!section || section === part);
-	// The user's own uploaded font (one per account), if any.
-	const [own, setOwn] = useState<OwnFont | null>(null);
-	const [uploading, setUploading] = useState(false);
-	const [fontError, setFontError] = useState("");
-	useEffect(() => {
-		fetch("/api/font")
-			.then((res) => (res.ok ? (res.json() as Promise<{ font: OwnFont | null }>) : { font: null }))
-			.then((data) => setOwn(data.font))
-			.catch(() => {});
-	}, []);
+	// Own fonts: My files and the one from before (lib/use-my-fonts.ts). A pick pins that very file in the style.
+	const myFonts = useMyFonts();
 
 	// The logo picture, kept in My files (lib/my-files.ts): uploaded once, then picked from the list. Uploading turns it
 	// on for this look. The same file again is the one already there; another file with a name already used is asked
@@ -87,15 +80,16 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 		onChange({ ...style, logoImage: { file: added.id } });
 	}
 
-	async function uploadFont(file: File) {
-		setUploading(true);
-		setFontError("");
-		const res = await fetch("/api/font", { method: "POST", body: file }).catch(() => null);
-		const data = (await res?.json().catch(() => ({}))) as { font?: OwnFont; error?: string };
-		setUploading(false);
-		if (!res?.ok || !data.font) return setFontError(data?.error ?? "Could not upload the font");
-		setOwn(data.font);
-		onChange({ ...style, font: "own", ownFont: data.font });
+	async function uploadFont(file: File, then?: "use" | "keep") {
+		const font = await myFonts.upload(file, then);
+		if (font) onChange({ ...style, font: "own", ownFont: font });
+	}
+	function pickFont(value: string) {
+		const mine = value.startsWith("own:") ? myFonts.fonts.find((f) => f.id === value.slice(4)) : undefined;
+		if (mine) return onChange({ ...style, font: "own", ownFont: asOwnFont(mine) });
+		if (value === "own" && myFonts.older) return onChange({ ...style, font: "own", ownFont: myFonts.older });
+		if (value === ownValue(style.ownFont)) return; // the font this look already has
+		onChange({ ...style, font: value as FontId, ownFont: undefined });
 	}
 
 	const colours = (label: string, key: "color" | "textColor" | "outlineColor" | "boxColor", list: string[], hint?: string) => (
@@ -228,13 +222,11 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 			<label className="flex items-center gap-3 text-sm text-foreground/70">
 				<span className="w-24 shrink-0">Font</span>
 				<select
-					value={style.font}
-					onChange={(e) =>
-						onChange(e.target.value === "own" && own ? { ...style, font: "own", ownFont: own } : { ...style, font: e.target.value as FontId, ownFont: undefined })
-					}
+					value={style.font === "own" ? ownValue(style.ownFont) : style.font}
+					onChange={(e) => pickFont(e.target.value)}
 					className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
 				>
-					{(own || style.font === "own") && <option value="own">Your font: {(own ?? style.ownFont)?.family}</option>}
+					<OwnFontOptions current={style.font === "own" ? style.ownFont : undefined} myFonts={myFonts} />
 					{(Object.keys(FONTS) as FontId[])
 						.filter((id) => FONTS[id].thai || !thai || id === style.font)
 						.map((id) => (
@@ -247,13 +239,13 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 			</label>
 			<div className="flex items-center gap-3 text-xs text-foreground/60">
 				<span className="w-24 shrink-0" />
-				<label className={`cursor-pointer underline hover:text-foreground ${uploading ? "opacity-50" : ""}`}>
-					{uploading ? "Uploading…" : own ? "Upload a different font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
+				<label className={`cursor-pointer underline hover:text-foreground ${myFonts.busy ? "opacity-50" : ""}`}>
+					{myFonts.busy ? "Uploading…" : myFonts.fonts.length || myFonts.older ? "Upload another font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
 					<input
 						type="file"
 						accept=".ttf,.otf,font/ttf,font/otf"
 						className="hidden"
-						disabled={uploading}
+						disabled={myFonts.busy}
 						onChange={(e) => {
 							const file = e.target.files?.[0];
 							if (file) void uploadFont(file);
@@ -261,7 +253,8 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 						}}
 					/>
 				</label>
-				{fontError && <span className="text-red-600">{fontError}</span>}
+				{myFonts.error && <span className="text-red-600">{myFonts.error}</span>}
+				{myFonts.clash && <ClashNote clash={myFonts.clash} what="font" onUse={() => void uploadFont(myFonts.clash!.file, "use")} onKeep={() => void uploadFont(myFonts.clash!.file, "keep")} onCancel={myFonts.dismiss} />}
 			</div>
 			{slider("Text size", "size")}
 			{style.look !== "box" && slider("Outline", "outline")}
@@ -338,20 +331,7 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 					)}
 					{!style.logoImage && <span className="text-foreground/50">PNG with a see-through background looks best. Shown instead of the name.</span>}
 					{logoError && <span className="text-red-600">{logoError}</span>}
-					{logoClash && (
-						<span className="flex w-full flex-wrap items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-foreground">
-							A logo named &ldquo;{logoClash.conflict.name}&rdquo; is already in your files.
-							<button onClick={() => void uploadLogo(logoClash.file, "use")} className="rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
-								Use that one
-							</button>
-							<button onClick={() => void uploadLogo(logoClash.file, "keep")} className="rounded-md border border-foreground/20 px-2 py-0.5 hover:bg-foreground/5">
-								Keep both
-							</button>
-							<button onClick={() => setLogoClash(null)} className="text-foreground/60 hover:underline">
-								Cancel
-							</button>
-						</span>
-					)}
+					{logoClash && <ClashNote clash={logoClash} what="logo" onUse={() => void uploadLogo(logoClash.file, "use")} onKeep={() => void uploadLogo(logoClash.file, "keep")} onCancel={() => setLogoClash(null)} />}
 				</div>
 			</div>
 			{style.logoImage && (

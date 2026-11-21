@@ -2,8 +2,9 @@
 // video's subtitle renderer looks it up by) and its full height in ems (see FONTS[].height in
 // subtitle-style.ts). Null if it isn't a font we can use (font collections are not supported).
 export type FontInfo = { family: string; height: number };
-// A user's uploaded font (one per account); version changes with every upload.
-export type OwnFont = FontInfo & { version: number };
+// A user's uploaded font as a style or banner keeps it. file: its id in My files (lib/my-files.ts, from 21 Nov), the very
+// font this project was given. Without file: the one font per account from before, by its upload (version).
+export type OwnFont = FontInfo & { version: number; file?: string };
 export const fontKeys = (userId: string) => ({ file: `fonts/${userId}/font`, info: `fonts/${userId}/font.json` });
 
 export function readFontInfo(bytes: Uint8Array): FontInfo | null {
