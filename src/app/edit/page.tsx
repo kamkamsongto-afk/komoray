@@ -24,7 +24,7 @@ import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpan
 import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
 import { TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
-import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle } from "@/lib/subtitle-style";
+import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle, withVideoZoom } from "@/lib/subtitle-style";
 import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
 import { watermarkSeed } from "@/lib/watermark";
@@ -193,6 +193,8 @@ export default function EditPage() {
 				// The Brand Kit picked when uploading, else the starred one.
 				let style = brand.kits?.find((k) => k.id === data.options?.kit)?.style ?? brand.style ?? null;
 				if (style) {
+					// The kit's look without its zoom: Auto zoom at upload (just below) says whether this video zooms.
+					style = withVideoZoom(style, DEFAULT_STYLE);
 					// English-only fonts have no Thai letters: a Thai video uses Kanit instead.
 					const thai = data.words.some((w) => /[฀-๿]/.test(w.text));
 					if (thai && !fontMetrics(style).thai) style = { ...style, font: DEFAULT_STYLE.font };
