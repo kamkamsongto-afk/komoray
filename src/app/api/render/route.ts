@@ -72,6 +72,19 @@ export async function POST(request: Request) {
 	const part = rawPart === undefined ? null : readRenderPart(rawPart, totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS);
 	if (rawPart !== undefined && !part) return Response.json({ error: `Pick at least ${PART_RENDER.minSeconds} seconds of the video to make.` }, { status: 400 });
 
+	// The logo picture is that version's own file or the video is not made: never another picture in its place, and
+	// before anything is counted or started (lib/logo.ts, coach 21 Nov: the video came out with the Komoray logo).
+	const logoVersionWanted = readStyle(edit.style).logoImage?.version;
+	let logoFile: string | null = null;
+	if (logoVersionWanted !== undefined) {
+		const { user } = await currentUser();
+		const version = logoVersion(logoVersionWanted);
+		logoFile = user && version ? logoKey(user.id, version) : null;
+		if (!logoFile || !(await exists(logoFile))) {
+			return Response.json({ error: "Your logo picture is missing. Please upload it again in Brand → Logo, then press Make video." }, { status: 409 });
+		}
+	}
+
 	// Cutout layers only go in where the speaker is cut out for them: else text behind the speaker lands
 	// in front, and a picture fills the screen with no speaker (Codex review, 7 Nov). Layers saved while
 	// Cutout was on for this person are left out once it is turned off on /admin.
@@ -138,16 +151,8 @@ export async function POST(request: Request) {
 	const frameNames = [...new Set([...(edit.frames ?? []).flatMap((f) => (f.back === "file" && f.file ? [f.file] : [])), ...(edit.layouts ?? []).flatMap((l) => (l.file ? [l.file] : []))])];
 	const frameFiles = Object.fromEntries(await Promise.all(frameNames.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
 
-	// The logo picture: Modal gets a short-lived link to it (no picture saved → the channel name instead).
-	if (style.logoImage) {
-		const { user } = await currentUser();
-		// This Brand Kit's own picture, else the one from before logos had versions (lib/logo.ts).
-		const version = logoVersion((style.logoImage as { version?: unknown }).version);
-		const own = user && version ? logoKey(user.id, version) : null;
-		const old = user ? logoKey(user.id) : null;
-		const picture = own && (await exists(own)) ? own : old && (await exists(old)) ? old : null; // each looked up once (review 17 Nov)
-		if (picture) style.logoUrl = await signedUrl(picture, "GET", LINK_SECONDS);
-	}
+	// The logo picture: Modal gets a short-lived link to the very file checked above (no picture → the channel name).
+	if (logoFile) style.logoUrl = await signedUrl(logoFile, "GET", LINK_SECONDS);
 
 	// The Free plan's watermark (lib/watermark.ts, watermark_filters in render.py): our own picture's link, and the video's
 	// id that picks its corners the same way the preview does.
