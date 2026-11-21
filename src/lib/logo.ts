@@ -1,3 +1,5 @@
+import { MY_FILE_ID, myFileKey, myFileUrl } from "./my-files";
+
 // The user's logo pictures, shown in a corner of every video whose style has logoImage { version }. Each upload is
 // its own file, named by its version, so each Brand Kit (one per channel) keeps its own logo (coach, 17 Nov: there
 // was one picture per account, so a new logo for one channel changed every channel's). Kept next to the own font.
@@ -12,7 +14,6 @@ export const logoKey = (userId: string, version: number) => `fonts/${userId}/log
 // coach's logo while the video got Komoray's. Keep it; take it out and those old copies come back.
 export const logoUrl = (version: number) => `/api/logo?v=${version}&own=1`;
 export const logoVersion = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined);
-export const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 // PNG, JPEG or WebP by the first bytes of the file (what the final video's FFmpeg reads), else null.
 export function logoType(bytes: Uint8Array): string | null {
@@ -22,3 +23,15 @@ export function logoType(bytes: Uint8Array): string | null {
 	if (starts(0x52, 0x49, 0x46, 0x46) && String.fromCharCode(...bytes.subarray(8, 12)) === "WEBP") return "image/webp";
 	return null;
 }
+
+// A style's logo picture, wherever it is: in My files (by id, lib/my-files.ts) or an older upload (by version). The
+// preview and api/render both go through these two, so they can only ever read the same file.
+type LogoImage = { file: string } | { version: number };
+export const logoPictureUrl = (img: LogoImage) => ("file" in img ? myFileUrl(img.file) : logoUrl(img.version));
+export function logoPictureKey(userId: string, img: LogoImage) {
+	if ("file" in img) return MY_FILE_ID.test(img.file) ? myFileKey(userId, img.file) : null;
+	const version = logoVersion(img.version);
+	return version ? logoKey(userId, version) : null;
+}
+// Which picture it is, for React keys (another Brand Kit's logo starts out loading: LogoPicture).
+export const logoPictureName = (img: LogoImage) => ("file" in img ? img.file : String(img.version));

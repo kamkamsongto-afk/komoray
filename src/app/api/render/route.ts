@@ -2,7 +2,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor, JOB_TOO_OLD_MS, NO_INVITE, renderRunning } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { fontKeys, type OwnFont } from "@/lib/font-info";
-import { logoKey, logoVersion } from "@/lib/logo";
+import { logoPictureKey } from "@/lib/logo";
+import { MY_FILE_ID, myFileKey } from "@/lib/my-files";
 import type { Faces } from "@/lib/framing";
 import { allCuts, type EditCut, type Fix, fixedWords, type HandEdits } from "@/lib/edit";
 import { cutThaiWords } from "@/lib/newmm";
@@ -72,17 +73,38 @@ export async function POST(request: Request) {
 	const part = rawPart === undefined ? null : readRenderPart(rawPart, totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS);
 	if (rawPart !== undefined && !part) return Response.json({ error: `Pick at least ${PART_RENDER.minSeconds} seconds of the video to make.` }, { status: 400 });
 
-	// The logo picture is that version's own file or the video is not made: never another picture in its place, and
-	// before anything is counted or started (lib/logo.ts, coach 21 Nov: the video came out with the Komoray logo).
-	const logoVersionWanted = readStyle(edit.style).logoImage?.version;
+	// The logo picture is its own file (My files id, or an older upload's version) or the video is not made: never another
+	// picture in its place, and before anything is counted or started (lib/logo.ts, coach 21 Nov: the video came out with
+	// the Komoray logo). The same lookup as the preview's (logoPictureUrl).
+	const logoWanted = readStyle(edit.style).logoImage;
 	let logoFile: string | null = null;
-	if (logoVersionWanted !== undefined) {
+	if (logoWanted) {
 		const { user } = await currentUser();
-		const version = logoVersion(logoVersionWanted);
-		logoFile = user && version ? logoKey(user.id, version) : null;
+		logoFile = user ? logoPictureKey(user.id, logoWanted) : null;
 		if (!logoFile || !(await exists(logoFile))) {
 			return Response.json({ error: "Your logo picture is missing. Please upload it again in Brand → Logo, then press Make video." }, { status: 409 });
 		}
+	}
+
+	// Own fonts from My files (lib/my-files.ts): each the very file this project was given (ownFont.file), for the
+	// subtitles and each banner. Kept in the projects that use them whatever the plan is now (coach 21 Nov: after a
+	// downgrade they work in the projects that already have them; only new picks follow the plan). Missing = not made,
+	// never another font in its place, as for the logo.
+	const subtitleStyle = readStyle(edit.style);
+	const ownFonts = [subtitleStyle.font === "own" ? subtitleStyle.ownFont : undefined, ...(edit.banners ?? []).map((b) => (b.font === "own" ? b.ownFont : undefined))];
+	const pinnedFonts = new Map(ownFonts.flatMap((f) => (f?.file && MY_FILE_ID.test(f.file) ? [[f.file, f.family] as const] : [])));
+	let fontFiles: Record<string, string> = {};
+	if (pinnedFonts.size) {
+		const { user } = await currentUser();
+		const found = await Promise.all(
+			[...pinnedFonts].map(async ([id, family]) => {
+				const key = user ? myFileKey(user.id, id) : null;
+				return { id, family, key, there: !!key && (await exists(key)) };
+			}),
+		);
+		const missing = found.find((f) => !f.there);
+		if (missing) return Response.json({ error: `Your font "${missing.family}" is missing. Please pick or upload it again in the font list, then press Make video.` }, { status: 409 });
+		fontFiles = Object.fromEntries(found.map((f) => [f.id, f.key!]));
 	}
 
 	// Cutout layers only go in where the speaker is cut out for them: else text behind the speaker lands
@@ -109,8 +131,9 @@ export async function POST(request: Request) {
 	// Nothing changed since the last video (or this part): hand that one back, at no cost and at once (coach 16 Nov:
 	// pressing Make video over and over cost us every time). Everything that changes the picture is in here:
 	// every edit, the part, whether Cutout is on and how far the speaker is cut out, the own font, render.py's rev.
-	// The own font is a paid plan's (lib/plans.ts): on Free the video is made in Kanit, as when no font is uploaded.
-	const ownFont = access.perks.ownFont && (readStyle(edit.style).font === "own" || edit.banners?.some((b) => b.font === "own"));
+	// The one own font from before My files is a paid plan's (lib/plans.ts): on Free the video is made in Kanit, as when no
+	// font is uploaded. Fonts from My files are named by their content in the edit itself (pinnedFonts above).
+	const ownFont = access.perks.ownFont && ownFonts.some((f) => f && !f.file);
 	const fingerprint = await fingerprintOf({
 		RENDER_REV,
 		edit,
@@ -139,8 +162,12 @@ export async function POST(request: Request) {
 		const keys = user ? fontKeys(user.id) : null;
 		const own = keys ? await getJson<OwnFont>(keys.info) : null;
 		if (keys && own) Object.assign(style, { fontUrl: await signedUrl(keys.file, "GET", LINK_SECONDS), ownFamily: own.family });
-		else if (style.font === "own") style.font = "kanit";
-	} else if (style.font === "own") style.font = "kanit";
+		else if (style.font === "own" && !subtitleStyle.ownFont?.file) style.font = "kanit";
+	} else if (style.font === "own" && !subtitleStyle.ownFont?.file) style.font = "kanit";
+	// My files fonts: a short-lived link to each, by its id (render.py names each file by it: own_font_path).
+	if (pinnedFonts.size) {
+		style.fontUrls = Object.fromEntries(await Promise.all(Object.entries(fontFiles).map(async ([id, file]) => [id, await signedUrl(file, "GET", LINK_SECONDS)])));
+	}
 
 	// Uploaded banners (kind "file"): Modal gets a short-lived link to each one's file.
 	const bannerNames = [...new Set((edit.banners ?? []).flatMap((b) => (b.kind === "file" && b.file ? [b.file] : [])))];

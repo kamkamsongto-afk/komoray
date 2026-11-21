@@ -22,6 +22,7 @@ export type PlanRules = {
 	translate: boolean;
 	cutout: boolean; // Fast and Balanced (the admin can still turn it on for one person: lib/features.ts)
 	ownFont: boolean;
+	fonts: number; // own fonts kept in My files (coach 21 Nov: Starter 5, Pro 20; Free none)
 	brandKits: number;
 	watermark: boolean; // not made yet (render.py + the preview): kept here so it lands in one place
 };
@@ -29,20 +30,20 @@ export type PlanRules = {
 // The beta keeps what it has today, so nothing changes on komoray.com before launch.
 // Except translating: hidden for everyone for now (coach, 18 Nov: a separate .srt to upload by hand costs us AI money per
 // language and isn't a wow). The code stays (api/translate, lib/translate.ts) for when it builds translated subtitles in.
-const BETA: PlanRules = { monthly: null, firstMonth: null, perVideo: MINUTES_PER_VIDEO, maxGb: MAX_FILE_GB, storageGb: null, renders: { perDay: 60, perWindow: 200 }, showRenderLimit: false, extraMinutes: false, translate: false, cutout: false, ownFont: true, brandKits: 20, watermark: false }; // 20: MAX_KITS in lib/brand-kits.ts (which reads R2, so not imported here)
+const BETA: PlanRules = { monthly: null, firstMonth: null, perVideo: MINUTES_PER_VIDEO, maxGb: MAX_FILE_GB, storageGb: null, renders: { perDay: 60, perWindow: 200 }, showRenderLimit: false, extraMinutes: false, translate: false, cutout: false, ownFont: true, fonts: 20, brandKits: 20, watermark: false }; // fonts 20: as Pro. 20 kits: MAX_KITS in lib/brand-kits.ts (which reads R2, so not imported here)
 
 export const PLAN_RULES: Record<PlanName, PlanRules> = {
 	beta: BETA,
 	// Free: 35 minutes the first month, then 10 a month for good. Files up to 15 minutes and 1 GB. Make video 3 a day, 30 a month (16 Nov).
 	// Storage (coach 18 Nov): Free 5 GB, Starter 200 GB, Pro 800 GB.
-	free: { monthly: 10, firstMonth: 35, perVideo: 15, maxGb: 1, storageGb: 5, renders: { perDay: 3, perWindow: 30 }, showRenderLimit: true, extraMinutes: false, translate: false, cutout: false, ownFont: false, brandKits: 0, watermark: true },
+	free: { monthly: 10, firstMonth: 35, perVideo: 15, maxGb: 1, storageGb: 5, renders: { perDay: 3, perWindow: 30 }, showRenderLimit: true, extraMinutes: false, translate: false, cutout: false, ownFont: false, fonts: 0, brandKits: 0, watermark: true },
 	// Paid files: the doc says 5 GB, but Deepgram refuses over 2 GB (lib/limits.ts) until the sound is sent on its own.
 	// Longest video for paid plans isn't decided yet (doc 13.): the beta's 20 minutes until it is.
 	// Extra minutes not sold for now (coach, 18 Nov: reads like a credit top-up); packs already bought still count.
 	// 10 and 20 hours (coach, 18 Nov: was 300 and 600; with no translation cost, full use still pays on every price).
 	// Starter has the own font too (coach 18 Nov): Starter and Pro differ only in how much (minutes, storage, Brand Kits).
-	starter: { ...BETA, monthly: 600, storageGb: 200, extraMinutes: false, cutout: true, ownFont: true, brandKits: 1 },
-	pro: { ...BETA, monthly: 1200, storageGb: 800, extraMinutes: false, cutout: true, ownFont: true, brandKits: 5 },
+	starter: { ...BETA, monthly: 600, storageGb: 200, extraMinutes: false, cutout: true, ownFont: true, fonts: 5, brandKits: 1 },
+	pro: { ...BETA, monthly: 1200, storageGb: 800, extraMinutes: false, cutout: true, ownFont: true, fonts: 20, brandKits: 5 },
 };
 
 export const PLAN_LABEL: Record<PlanName, string> = { beta: "Beta", free: "Free", starter: "Starter", pro: "Pro" };

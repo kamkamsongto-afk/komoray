@@ -3,7 +3,8 @@
 import { AlignCenter, AlignLeft, AlignRight, ChevronDown, ChevronRight, Copy, ImagePlus, Megaphone, Plus, Star, Tag, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
-import type { OwnFont } from "@/lib/font-info";
+import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
+import { ClashNote, OwnFontOptions } from "./MyFilePickers";
 import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
@@ -68,25 +69,20 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	// The banner waiting for "yes, delete it" (coach, 11 Nov: the × is small and easy to hit).
 	const [removing, setRemoving] = useState<Banner | null>(null);
 
-	// The account's own font (one per account, as for the subtitles), and uploading one from here.
-	const [own, setOwn] = useState<OwnFont | null>(null);
-	const [fontNote, setFontNote] = useState("");
-	const [fontBusy, setFontBusy] = useState(false);
-	useEffect(() => {
-		void fetch("/api/font")
-			.then(async (res) => (res.ok ? ((await res.json()) as { font?: OwnFont | null }) : {}))
-			.then((data: { font?: OwnFont | null }) => setOwn(data.font ?? null))
-			.catch(() => {});
-	}, []);
-	async function uploadFont(b: Banner, file: File) {
-		setFontNote("");
-		setFontBusy(true);
-		const res = await fetch("/api/font", { method: "POST", body: file }).catch(() => null);
-		const data = (await res?.json().catch(() => null)) as { font?: OwnFont; error?: string } | null;
-		setFontBusy(false);
-		if (!res?.ok || !data?.font) return setFontNote(data?.error ?? "Could not upload the font");
-		setOwn(data.font);
-		update(b.id, { font: "own", ownFont: data.font });
+	// Own fonts, as for the subtitles (lib/use-my-fonts.ts): a pick pins that very file in the banner.
+	const myFonts = useMyFonts();
+	const [clashFor, setClashFor] = useState<string | null>(null); // the banner whose upload is waiting on the question
+	async function uploadFont(b: Banner, file: File, then?: "use" | "keep") {
+		setClashFor(b.id);
+		const font = await myFonts.upload(file, then);
+		if (font) update(b.id, { font: "own", ownFont: font });
+	}
+	function pickFont(b: Banner, value: string) {
+		const mine = value.startsWith("own:") ? myFonts.fonts.find((f) => f.id === value.slice(4)) : undefined;
+		if (!value) update(b.id, { font: undefined, ownFont: undefined });
+		else if (mine) update(b.id, { font: "own", ownFont: asOwnFont(mine) });
+		else if (value === "own" && myFonts.older) update(b.id, { font: "own", ownFont: myFonts.older });
+		else if (value !== ownValue(b.ownFont)) update(b.id, { font: value as FontId, ownFont: undefined });
 	}
 
 	// A banner of your own: a picture, GIF or clip, uploaded next to the video.
@@ -450,18 +446,13 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					<div className="flex items-center gap-2 text-xs text-foreground/70">
 						<span className="w-16 shrink-0">Font</span>
 						<select
-							value={b.font ?? ""}
-							onChange={(e) => {
-								const value = e.target.value;
-								if (!value) update(b.id, { font: undefined, ownFont: undefined });
-								else if (value === "own" && own) update(b.id, { font: "own", ownFont: own });
-								else update(b.id, { font: value as FontId, ownFont: undefined });
-							}}
+							value={b.font === "own" ? ownValue(b.ownFont) : (b.font ?? "")}
+							onChange={(e) => pickFont(b, e.target.value)}
 							aria-label="Banner font"
 							className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-1 py-0.5"
 						>
 							<option value="">Same as the subtitles</option>
-							{(own || b.font === "own") && <option value="own">Your font: {(own ?? b.ownFont)?.family}</option>}
+							<OwnFontOptions current={b.font === "own" ? b.ownFont : undefined} myFonts={myFonts} />
 							{(Object.keys(FONTS) as FontId[]).map((id) => (
 								<option key={id} value={id}>
 									{FONTS[id].name}
@@ -471,13 +462,13 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						</select>
 					</div>
 					<div className="flex flex-wrap items-center gap-2 pl-[4.5rem] text-xs text-foreground/60">
-						<label className={`cursor-pointer underline hover:text-foreground ${fontBusy ? "opacity-50" : ""}`}>
-							{fontBusy ? "Uploading…" : own ? "Upload a different font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
+						<label className={`cursor-pointer underline hover:text-foreground ${myFonts.busy ? "opacity-50" : ""}`}>
+							{myFonts.busy ? "Uploading…" : myFonts.fonts.length || myFonts.older ? "Upload another font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
 							<input
 								type="file"
 								accept=".ttf,.otf,font/ttf,font/otf"
 								className="hidden"
-								disabled={fontBusy}
+								disabled={myFonts.busy}
 								onChange={(e) => {
 									const file = e.target.files?.[0];
 									e.target.value = "";
@@ -485,7 +476,10 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 								}}
 							/>
 						</label>
-						{fontNote && <span className="text-red-500">{fontNote}</span>}
+						{clashFor === b.id && myFonts.error && <span className="text-red-500">{myFonts.error}</span>}
+						{clashFor === b.id && myFonts.clash && (
+							<ClashNote clash={myFonts.clash} what="font" onUse={() => void uploadFont(b, myFonts.clash!.file, "use")} onKeep={() => void uploadFont(b, myFonts.clash!.file, "keep")} onCancel={myFonts.dismiss} />
+						)}
 					</div>
 					<label className="flex items-center gap-2 text-xs text-foreground/70">
 						<span className="w-16 shrink-0">Background</span>

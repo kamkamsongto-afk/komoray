@@ -27,7 +27,7 @@ export const NO_INVITE = "Komoray is invite-only for now. Your invite will come 
 // plan: whose rules (lib/plans.ts). used / limit / left: this month's minutes on a plan (all of the beta's on the beta),
 // left also counting Extra minutes. monthly and extra: the two parts, for the minutes bar ("212 of 300 · resets Dec 14").
 // perks: what the plan unlocks; features: what the admin turned on for this person, with Cutout also on for paid plans.
-export type Perks = { translate: boolean; ownFont: boolean; brandKits: number; watermark: boolean; extraMinutes: boolean };
+export type Perks = { translate: boolean; ownFont: boolean; fonts: number; brandKits: number; watermark: boolean; extraMinutes: boolean };
 export type AccessStatus = {
 	allowed: boolean;
 	unlimited: boolean;
@@ -65,7 +65,7 @@ async function minutesUsed(email: string) {
 	return (await usageOf(email)).reduce((sum, item) => sum + item.minutes, 0);
 }
 
-const perksOf = (rules: PlanRules): Perks => ({ translate: rules.translate, ownFont: rules.ownFont, brandKits: rules.brandKits, watermark: rules.watermark, extraMinutes: rules.extraMinutes });
+const perksOf = (rules: PlanRules): Perks => ({ translate: rules.translate, ownFont: rules.ownFont, fonts: rules.fonts, brandKits: rules.brandKits, watermark: rules.watermark, extraMinutes: rules.extraMinutes });
 const rendersOf = (rules: PlanRules) => ({ ...rules.renders, show: rules.showRenderLimit });
 
 // When Free began for this person: their first visit once plans are live (beta users on launch day, doc 4.), kept so it
