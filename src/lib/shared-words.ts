@@ -1,7 +1,7 @@
 import { hmac } from "./callback";
 import { cutThaiWords, isThaiWord } from "./newmm";
 import { getJson, putObject } from "./r2";
-import { realThaiWords } from "./word-check";
+import { realThaiWords, thaiWords } from "./word-check";
 import { type WordUse, wordUse } from "./word-rules";
 
 // Komoray's shared word list: speech-to-text mistakes that several creators fixed the same way. Only creators who
@@ -65,7 +65,7 @@ function distance(a: string, b: string) {
 // สวน → ส่วน) stays in the creator's My words. The team still adds any pair by hand on the Word Hub tab.
 export function hubLang(heard: string, fixed: string): Lang | null {
 	const lang = shareable(heard, fixed);
-	return lang && wordUse(heard, fixed, { realWords: realThaiWords, shared: true }) === "always" ? lang : null;
+	return lang && wordUse(heard, fixed, { ...thaiWords, shared: true }) === "always" ? lang : null;
 }
 
 // Did this creator tick "Help make Komoray more accurate"? (their settings, api/prefs)
@@ -144,7 +144,7 @@ export const listFor = (lang: Lang, language?: string): WordList => (lang === "t
 // own fixes come in without the dictionary check, and "Always" goes on every creator's video (13 Nov).
 export function effectiveUse(p: { heard: string; fixed: string; use?: WordUse; reviewed?: boolean }): WordUse {
 	if (p.use) return p.use;
-	const rule = wordUse(p.heard, p.fixed, { realWords: realThaiWords, shared: true });
+	const rule = wordUse(p.heard, p.fixed, { ...thaiWords, shared: true });
 	if (rule === "always" && !p.reviewed && THAI.test(p.fixed) && !realThaiWords(p.fixed.replace(/\s+/g, ""))) return "ai";
 	return rule;
 }

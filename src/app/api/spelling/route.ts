@@ -5,7 +5,7 @@ import type { Fix } from "@/lib/edit";
 import { deleteObject, getJson, putIfAbsent, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { sharedFixes } from "@/lib/shared-words";
 import { askForSpelling, placeAlways } from "@/lib/spelling";
-import { realThaiWords } from "@/lib/word-check";
+import { thaiWords } from "@/lib/word-check";
 import { wordUse } from "@/lib/word-rules";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
 		const { data } = await supabase.from("word_fixes").select("heard, fixed").order("uses", { ascending: false }).limit(HINT_WORDS);
 		// Their pairs that are real words either way (สวน → ส่วน) weren't put on by the page (lib/word-rules.ts): the AI
 		// puts them where the sentence fits, first in its list of mistakes to look for. Pairs that are off aren't shown.
-		const mine = (data ?? []).map((w) => ({ ...w, use: wordUse(w.heard, w.fixed, { realWords: realThaiWords }) }));
+		const mine = (data ?? []).map((w) => ({ ...w, use: wordUse(w.heard, w.fixed, { ...thaiWords }) }));
 		const theirs = mine.filter((w) => w.use === "ai").map(({ heard, fixed }) => ({ heard, fixed, voters: 0 }));
 		// Komoray's list for the video's language (pairs that are "off" are left out there).
 		const shared = await sharedFixes(edit.words.some((w) => /[฀-๿]/.test(w.text)), edit.language);
