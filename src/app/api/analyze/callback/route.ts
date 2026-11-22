@@ -11,6 +11,7 @@ import {
 	WORD_SECONDS_PER_LETTER,
 } from "@/lib/silences";
 import { isLanguage } from "@/lib/languages";
+import { mergeThaiNumbers } from "@/lib/thai-numbers";
 import { mergeThaiWords } from "@/lib/thai-words";
 import { readTranscript } from "@/lib/transcribe";
 import { readOptions } from "@/lib/upload-options";
@@ -30,7 +31,8 @@ export async function POST(request: Request) {
 		// Trimmed words feed both the cuts and the subtitle timing in edit.json.
 		// Deepgram's Thai comes in pieces of words; the script works on whole words. Silences are found between whole
 		// words, so a word is never cut through (a piece "่วน" after a pause is still part of "ส่วน", lib/thai-words.ts).
-		const words = mergeThaiWords(trimStretchedWords(transcript.words));
+		// Numbers said in words ("สามสิบ") become digits (lib/thai-numbers.ts), after the pieces are whole words.
+		const words = mergeThaiNumbers(mergeThaiWords(trimStretchedWords(transcript.words)));
 		// What the creator asked for when uploading (none on videos from before): the editor uses it once.
 		const asked = await getJson<{ options?: unknown; language?: unknown }>(siblingKey(key, "analyze.json")).catch(() => null);
 		const options = readOptions(asked?.options);
