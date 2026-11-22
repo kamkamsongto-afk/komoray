@@ -222,7 +222,8 @@ function joinThai(words: { text: string; start: number; end: number; space?: boo
 			const a = charKind(out[out.length - 1]);
 			const b = charKind(w.text[0]);
 			const ending = (THAI_ENDINGS.has(prev.text) && !THAI_ENDINGS.has(w.text)) || prev.text.endsWith("ๆ");
-			if (w.space || (a && b && a !== b) || ending || w.start - prev.end >= THAI_PAUSE * FPS) space = " ";
+			// a number said with pauses ("9" "9" "0") stays one number: 990, 2,990 (not typed apart by the user)
+			if (w.space || (!(/\d[,.]?$/.test(prev.text) && /^\d/.test(w.text)) && ((a && b && a !== b) || ending || w.start - prev.end >= THAI_PAUSE * FPS))) space = " ";
 		}
 		out += space + w.text;
 		return space + w.text;
@@ -254,6 +255,9 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 
 	type Placed = (typeof placed)[number];
 	const lettersOf = (run: Placed[]) => run.reduce((sum, w) => sum + thaiLetters(w.text), 0);
+	// Deepgram gives 990 as "9" "9" "0" (and 2,990 as "2," "9" "9" "0"): a line never breaks inside a number (coach 22 Nov:
+	// "99" on one line, "0" on the next). Same as inside_number in group_lines (render.py).
+	const insideNumber = (last: Placed, first: Placed) => /\d[,.]?$/.test(last.text) && /^\d/.test(first.text);
 	const fits = (run: Placed[]) =>
 		run.length <= perLine && run[run.length - 1].end - run[0].start <= maxFrames && (!thai || lettersOf(run) <= maxLetters);
 	// A full Thai line: break where it reads best (see THAI_NO_START), carrying the rest to the next
@@ -266,7 +270,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 			const first = all[k];
 			const last = all[k - 1];
 			// glue: typed onto the word before it, with no space ("ของ|โค้ช" from a fix): a line never starts there.
-			if (first.glue || THAI_NO_START.has(first.text) || THAI_ENDINGS.has(first.text) || first.text.startsWith("ๆ")) continue;
+			if (insideNumber(last, first) || first.glue || THAI_NO_START.has(first.text) || THAI_ENDINGS.has(first.text) || first.text.startsWith("ๆ")) continue;
 			if (k < run.length && (lettersOf(run.slice(0, k)) < Math.max(3, maxLetters * 0.4) || !fits(all.slice(k)))) continue;
 			const score = first.start - last.end + (THAI_STARTS.has(first.text) ? START_BONUS : 0) + (THAI_ENDINGS.has(last.text) ? START_BONUS : 0) + 0.3 * k;
 			if (score >= bestScore) [best, bestScore] = [k, score];
@@ -283,6 +287,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		for (let k = Math.ceil(run.length / 2); k <= run.length; k++) {
 			if (k < run.length && !fits(all.slice(k))) continue;
 			const [last, first] = [all[k - 1], all[k]];
+			if (insideNumber(last, first)) continue;
 			const end = EN_PUNCT.test(last.text);
 			const score = first.start - last.end + (end ? START_BONUS : 0) - (!end && EN_NO_END.has(enWord(last.text)) ? EN_NO_END_COST : 0) + 0.3 * k;
 			if (score >= bestScore) [best, bestScore] = [k, score];

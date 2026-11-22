@@ -1495,6 +1495,9 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
     def fits(run: list[dict]) -> bool:
         return len(run) <= per_line and run[-1]["end"] - run[0]["start"] <= max_frames and (not thai or letters_of(run) <= max_letters)
 
+    # Deepgram gives 990 as "9" "9" "0": a line never breaks inside a number (coach 22 Nov, inside_number = insideNumber in timeline.ts).
+    inside_number = lambda last, first: bool(re.search(r"\d[,.]?$", last["text"]) and re.match(r"\d", first["text"]))
+
     def best_break(run: list[dict], nxt: dict) -> int:
         # A full Thai line: k = how many words stay, the rest is carried to the next line if it fits.
         every = run + [nxt]
@@ -1502,7 +1505,7 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
         for k in range(1, len(run) + 1):
             first, last = every[k], every[k - 1]
             # glue: typed onto the word before it ("ของ|โค้ช" from a fix): a line never starts there (bestBreak in timeline.ts).
-            if first.get("glue") or first["text"] in THAI_NO_START or first["text"] in THAI_ENDINGS or first["text"].startswith("ๆ"):
+            if inside_number(last, first) or first.get("glue") or first["text"] in THAI_NO_START or first["text"] in THAI_ENDINGS or first["text"].startswith("ๆ"):
                 continue
             if k < len(run) and (letters_of(run[:k]) < max(3, max_letters * 0.4) or not fits(every[k:])):
                 continue
@@ -1519,6 +1522,8 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
             if k < len(run) and not fits(every[k:]):
                 continue
             last, first = every[k - 1], every[k]
+            if inside_number(last, first):
+                continue
             end = bool(EN_PUNCT.search(last["text"]))
             score = first["start"] - last["end"] + (START_BONUS if end else 0) - (EN_NO_END_COST if not end and en_word(last["text"]) in EN_NO_END else 0) + 0.3 * k
             if score >= best_score:
@@ -1562,7 +1567,9 @@ def join_thai(words: list[dict]) -> list[str]:
             prev = words[i - 1]
             a, b = char_kind(out[-1]), char_kind(t[0])
             ending = (prev["text"] in THAI_ENDINGS and t not in THAI_ENDINGS) or prev["text"].endswith("ๆ")
-            if w.get("space") or (a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE * FPS:
+            # a number said with pauses ("9" "9" "0") stays one number: 990, 2,990 (joinThai in timeline.ts)
+            in_number = bool(re.search(r"\d[,.]?$", prev["text"]) and re.match(r"\d", t))
+            if w.get("space") or (not in_number and ((a and b and a != b) or ending or w["start"] - prev["end"] >= THAI_PAUSE * FPS)):
                 space = " "
         out += space + t
         parts.append(space + t)
