@@ -10,7 +10,7 @@ type Word = { text: string; start: number; end: number };
 const THAI = /[฀-๿]/;
 const RUN_GAP = 0.3; // pieces further apart than this (seconds) are never one word
 const THAI_MARK_FIRST = /^[ัำ-ฺ็-๎]/; // a vowel or tone mark that can't begin a word
-const NUMBER_START = /^\d[,.]?$/; // one digit (or one with a comma or point after it): the start of a number said digit by digit
+const NUMBER_START = /^(?:\d[,.]?|19|20)$/; // one digit (or one with a comma or point after it): the start of a number said digit by digit
 const NUMBER_GAP = 1; // seconds: digits said further apart than this are not one number
 
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
@@ -44,8 +44,15 @@ export function thaiWordGroups(words: Word[]): number[][] {
 		// said within NUMBER_GAP. Thai only until other languages are measured (a count "1 2 3" in English must stay three words).
 		// lib/timeline.ts insideNumber is the line-break twin.
 		if (thai && NUMBER_START.test(words[i].text)) {
-			const grouped = (a: string, b: string) => (a.endsWith(",") ? /^\d{3}$|^\d$/.test(b) : /^\d$/.test(b));
-			while (j + 1 < words.length && grouped(words[j].text, words[j + 1].text) && words[j + 1].start - words[j].end <= NUMBER_GAP) j++;
+			// Pieces: a single digit, three digits after a comma, a piece that begins with 0 ("4" "00", "1" "000"), and a year said
+			// as two pairs ("19" "78" after ปี: Deepgram's Thai does this, FLEURS 22 Nov). Never two whole numbers ("10" "20").
+			const year = (k: number) => /^(19|20)$/.test(words[k].text) && /^\d\d$/.test(words[k + 1].text) && /^(ปี|ค\.ศ\.|พ\.ศ\.)$/.test(words[i - 1]?.text ?? "");
+			const grouped = (k: number) => {
+				const [a, b] = [words[k].text, words[k + 1].text];
+				if (/^\d$/.test(a) || a.endsWith(",")) return a.endsWith(",") ? /^\d{3}[,.]?$|^\d$/.test(b) : /^\d[,.]?$|^0\d*[,.]?$/.test(b);
+				return k === i && year(k);
+			};
+			while (j + 1 < words.length && grouped(j) && words[j + 1].start - words[j].end <= NUMBER_GAP) j++;
 			if (j > i) {
 				groups.push(Array.from({ length: j - i + 1 }, (_, k) => i + k));
 				i = j + 1;
