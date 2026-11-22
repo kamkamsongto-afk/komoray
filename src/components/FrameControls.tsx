@@ -228,8 +228,8 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 							<span className="text-xs font-medium text-foreground/80">You inside the frame</span>
 							{row("Zoom", range(f.zoom, FRAME.zoom.min, FRAME.zoom.max, 0.01, percent(f.zoom), (zoom) => update(f.id, { zoom })))}
 							{/* meX / meY: the point of you in the frame's middle. Sliding right moves you right, so it goes down. */}
-							{row("Left / right", range(1 - f.meX, 0, 1, 0.005, percent(1 - f.meX), (v) => update(f.id, { meX: Math.round((1 - v) * 1000) / 1000 })))}
-							{row("Up / down", range(1 - f.meY, 0, 1, 0.005, percent(1 - f.meY), (v) => update(f.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
+							{row("Left / right", range(1 - f.meX, 1 - FRAME.meRange.max, 1 - FRAME.meRange.min, 0.005, percent(1 - f.meX), (v) => update(f.id, { meX: Math.round((1 - v) * 1000) / 1000 })))}
+							{row("Up / down", range(1 - f.meY, 1 - FRAME.meRange.max, 1 - FRAME.meRange.min, 0.005, percent(1 - f.meY), (v) => update(f.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
 							<button onClick={() => update(f.id, { meX: FRAME.me.x, meY: FRAME.me.y, zoom: f.size })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
 								Center me
 							</button>

@@ -60,6 +60,10 @@ export const FRAME = {
 	seconds: 3,
 	fade: 0.25, // seconds it takes to fade in, and out (coach, 12 Nov). FRAME_FADE in render.py
 	me: { x: 0.5, y: 0.4 }, // where a face sits in the framed video (FACE_HEIGHT in framing.ts)
+	// meX / meY may go past the picture's own edge (coach 22 Nov): shot from head to waist, the speaker can sit low in the
+	// shape with the background showing under the waist, so the shape works as a crop. Where the picture doesn't reach, the
+	// background shows (frame_filters in render.py has no limit of its own).
+	meRange: { min: -0.5, max: 1.5 },
 };
 
 export const BORDER_COLORS = ["#FFFFFF", "#000000", "#FFE600", "#FF3B30", "#FF2D95", "#34C759", "#0A84FF"];
@@ -194,8 +198,8 @@ export function readFrames(value: unknown): FrameMe[] | null {
 			y: round(num(f.y, FRAME.move.min, FRAME.move.max, 0.42)),
 			size: round(num(f.size, FRAME.size.min, FRAME.size.max, FRAME.size.start)),
 			zoom: round(num(f.zoom, FRAME.zoom.min, FRAME.zoom.max, FRAME.zoom.start)),
-			meX: round(num(f.meX, 0, 1, FRAME.me.x)),
-			meY: round(num(f.meY, 0, 1, FRAME.me.y)),
+			meX: round(num(f.meX, FRAME.meRange.min, FRAME.meRange.max, FRAME.me.x)),
+			meY: round(num(f.meY, FRAME.meRange.min, FRAME.meRange.max, FRAME.me.y)),
 			border: Math.round(num(f.border, 0, FRAME.border.max, 0)),
 			borderColor: colour(f.borderColor, "#FFFFFF"),
 			back,
