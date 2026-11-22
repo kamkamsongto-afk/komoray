@@ -1470,6 +1470,11 @@ def thai_letters(text: str) -> int:
 
 # Where a Thai line may break: never before a word that belongs to the one before it ("ชุด|นี้"),
 # best at a pause or before a word that starts a phrase. Same as THAI_NO_START / THAI_STARTS in timeline.ts.
+# Words that lean on what follows, so a line should not end on them (same as THAI_NO_END in timeline.ts, coach 22 Nov).
+THAI_NO_END = {"ที่", "ที่จะ", "ซึ่ง", "จะ", "ของ", "กับ", "จาก", "ใน", "การ", "ความ", "ไม่", "และ", "หรือ", "แต่", "เพราะ", "ถ้า", "ข้อ", "ทุก", "หลาย", "บาง", "ทั้ง", "แค่", "เพียง", "ประมาณ"}
+THAI_NUMBER_WORDS = {"ศูนย์", "หนึ่ง", "เอ็ด", "สอง", "ยี่", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน", "ล้าน"}
+NO_END_PENALTY = 24  # frames: a break there costs as much as a pause this long
+OPEN_PAUSE = 10  # frames: after a pause this long the speaker did stop, so the break is fine
 THAI_NO_START = {"นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"}
 THAI_STARTS = {"แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"}
 START_BONUS = 8  # frames: a phrase start or a polite ending is worth a pause this long
@@ -1509,7 +1514,9 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
                 continue
             if k < len(run) and (letters_of(run[:k]) < max(3, max_letters * 0.4) or not fits(every[k:])):
                 continue
-            score = first["start"] - last["end"] + (START_BONUS if first["text"] in THAI_STARTS else 0) + (START_BONUS if last["text"] in THAI_ENDINGS else 0) + 0.3 * k
+            # A word that leans on the next one, or a number apart from its unit, is a poor place to end a line unless the speaker paused there.
+            leans = (last["text"] in THAI_NO_END or last["text"] in THAI_NUMBER_WORDS or bool(re.search(r"\d[,.]?$", last["text"]))) and first["text"] not in THAI_STARTS and first["start"] - last["end"] < OPEN_PAUSE
+            score = first["start"] - last["end"] + (START_BONUS if first["text"] in THAI_STARTS else 0) + (START_BONUS if last["text"] in THAI_ENDINGS else 0) - (NO_END_PENALTY if leans else 0) + 0.3 * k
             if score >= best_score:
                 best, best_score = k, score
         return best
