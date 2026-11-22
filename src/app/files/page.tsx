@@ -1,10 +1,10 @@
 "use client";
 
-import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 import { MY_FILE_SECTION, type MyFile, type MyFileKind, myClipUrl, myFileUrl } from "@/lib/my-files";
-import { MY_FILES_ACCEPT, uploadToMyFiles } from "@/lib/my-files-upload";
+import { kindForUpload, MY_FILES_ACCEPT, uploadToMyFiles } from "@/lib/my-files-upload";
 import { ClashNote } from "@/components/MyFilePickers";
 
 // My files (coach 21 Nov): the logos and fonts kept once per account (lib/my-files.ts), where each one is used, and the
@@ -27,6 +27,10 @@ const SECTIONS = [
 	{ id: "video", title: "Video" },
 	{ id: "audio", title: "Audio" },
 ] as const;
+// One file on its way up (coach 22 Nov: while it uploads people did not know what was running, where it would land, or
+// whether their click worked, and pressed Upload again).
+type Sending = { key: string; name: string; bytes: number; where: "Video" | "File"; percent: number | null; state: "waiting" | "uploading" | "saving" | "done" | "choose" | "error"; text: string };
+const sendingKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 const unused = (u?: Use) => !u || (u.kits.length === 0 && !u.banners && u.projects === 0);
 const usedText = (u?: Use) => {
 	if (unused(u)) return "Not used";
@@ -65,6 +69,9 @@ export default function FilesPage() {
 	const [busy, setBusy] = useState<string | null>(null); // the file being renamed, replaced or deleted
 	const [note, setNote] = useState("");
 	const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+	const [sending, setSending] = useState<Sending[]>([]);
+	const [fresh, setFresh] = useState<Set<string>>(new Set()); // files uploaded just now: marked "New" in their list
+	const change = (key: string, patch: Partial<Sending>) => setSending((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
 	const load = () => {
 		void fetch("/api/files?all=1")
@@ -85,18 +92,38 @@ export default function FilesPage() {
 	}, [user]);
 
 	// + Upload: each file into its own part (lib/my-files-upload.ts). One file named like one already there asks first.
+	// Every file shows its own line while it goes up: waiting, how far, saving, and where it was saved.
 	async function uploadAll(picked: File[], then?: "use" | "keep") {
+		if (busy === "upload") return; // a second click while files are going up does nothing
 		setBusy("upload");
 		setNote("");
 		setClash(null);
+		setFresh(new Set());
+		const seen = new Set<string>();
+		const files = picked.filter((f) => !seen.has(sendingKey(f)) && seen.add(sendingKey(f))); // the same file picked twice goes once
+		setSending(files.map((f) => ({ key: sendingKey(f), name: f.name, bytes: f.size, where: kindForUpload(f) === "video" ? "Video" : "File", percent: null, state: "waiting", text: "Waiting" })));
 		const failed: string[] = [];
-		for (const file of picked) {
-			const sent = await uploadToMyFiles(file, then ?? (picked.length > 1 ? "keep" : undefined));
-			if ("conflict" in sent) setClash({ file, conflict: sent.conflict });
-			else if ("error" in sent) failed.push(sent.error);
-			else setTab(MY_FILE_SECTION[sent.file.kind]);
+		const added = new Set<string>();
+		let landed: (typeof SECTIONS)[number]["id"] | null = null;
+		for (const file of files) {
+			const key = sendingKey(file);
+			change(key, { state: "uploading", percent: kindForUpload(file) === "video" ? 0 : null, text: "Uploading…" });
+			const sent = await uploadToMyFiles(file, then ?? (files.length > 1 ? "keep" : undefined), undefined, (percent) => change(key, percent >= 100 ? { percent, state: "saving", text: "Saving…" } : { percent, text: `Uploading ${percent}%` }));
+			if ("conflict" in sent) {
+				setClash({ file, conflict: sent.conflict });
+				change(key, { state: "choose", percent: null, text: "A file with this name is already there: choose below" });
+			} else if ("error" in sent) {
+				failed.push(sent.error);
+				change(key, { state: "error", percent: null, text: sent.error.replace(`${file.name}: `, "") });
+			} else {
+				landed = MY_FILE_SECTION[sent.file.kind];
+				added.add(sent.file.id);
+				change(key, { state: "done", percent: 100, text: sent.same ? `Already in My files, so it was not uploaded again (${landed === "video" ? "Video" : "File"})` : `Saved in ${landed === "video" ? "Video" : "File"}` });
+			}
 		}
 		setBusy(null);
+		if (landed) setTab(landed);
+		setFresh(added);
 		if (failed.length) setNote(failed.join(" · "));
 		load();
 	}
@@ -196,7 +223,7 @@ export default function FilesPage() {
 				</div>
 				{/* One + Upload for everything: each file goes into its part by itself (coach 21 Nov). */}
 				<button onClick={() => pickRef.current?.click()} disabled={!!busy} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-					<Plus size={14} /> {busy === "upload" ? "Uploading…" : "Upload"}
+					<Plus size={14} /> {busy === "upload" ? `Uploading ${sending.filter((r) => r.state === "done").length + 1 > sending.length ? sending.length : sending.filter((r) => r.state === "done").length + 1} of ${sending.length}…` : "Upload"}
 				</button>
 				<input
 					ref={pickRef}
@@ -216,6 +243,38 @@ export default function FilesPage() {
 				</label>
 			</div>
 
+			{sending.length > 0 && (
+				<section className="flex flex-col gap-2 rounded-lg border border-foreground/15 p-3 text-sm" aria-live="polite">
+					<div className="flex items-center justify-between">
+						<span className="font-medium">{busy === "upload" ? "Uploading to My files" : "Upload finished"}</span>
+						{busy !== "upload" && (
+							<button onClick={() => setSending([])} className="flex items-center gap-1 text-xs text-foreground/60 hover:text-foreground">
+								<X size={12} /> Close
+							</button>
+						)}
+					</div>
+					<ul className="flex flex-col gap-2">
+						{sending.map((r) => (
+							<li key={r.key} className="flex flex-col gap-1">
+								<div className="flex items-baseline justify-between gap-3">
+									<span className="truncate" title={r.name}>
+										{r.name} <span className="text-xs text-foreground/50">{size(r.bytes)} → {r.where}</span>
+									</span>
+									<span className={`shrink-0 text-xs ${r.state === "error" ? "text-red-600" : r.state === "done" ? "text-green-600" : "text-foreground/60"}`}>
+										{r.state === "done" && <Check size={12} className="mr-1 inline" />}
+										{r.text}
+									</span>
+								</div>
+								{(r.state === "uploading" || r.state === "saving") && (
+									<div className="h-1.5 overflow-hidden rounded-full bg-foreground/10" role="progressbar" aria-label={`Uploading ${r.name}`} aria-valuenow={r.percent ?? undefined}>
+										<div className={`h-full bg-blue-600 ${r.percent === null || r.state === "saving" ? "w-full animate-pulse" : ""}`} style={r.percent !== null && r.state !== "saving" ? { width: `${r.percent}%` } : undefined} />
+									</div>
+								)}
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
 			{note && <p className="rounded-md border border-foreground/15 bg-foreground/5 px-3 py-2 text-sm">{note}</p>}
 			{clash && <ClashNote clash={clash} what="file" onUse={() => void uploadAll([clash.file], "use")} onKeep={() => void uploadAll([clash.file], "keep")} onCancel={() => setClash(null)} />}
 
@@ -228,7 +287,7 @@ export default function FilesPage() {
 			) : (
 				<ul className="grid gap-3 sm:grid-cols-2">
 					{shown.map((f) => (
-						<li key={f.id} className={`flex flex-col gap-2 rounded-lg border border-foreground/15 p-3 ${busy === f.id ? "opacity-50" : ""}`}>
+						<li key={f.id} className={`flex flex-col gap-2 rounded-lg border p-3 ${fresh.has(f.id) ? "border-blue-600" : "border-foreground/15"} ${busy === f.id ? "opacity-50" : ""}`}>
 							<div className="flex h-20 items-center justify-center overflow-hidden rounded-md bg-[repeating-conic-gradient(rgba(127,127,127,0.18)_0%_25%,transparent_0%_50%)] bg-[length:16px_16px]">
 								{f.kind === "font" ? (
 									<FontSample file={f} />
@@ -255,7 +314,7 @@ export default function FilesPage() {
 								</form>
 							) : (
 								<p className="truncate font-medium" title={f.name}>
-									{f.name}
+									{f.name} {fresh.has(f.id) && <span className="ml-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium text-white">New</span>}
 								</p>
 							)}
 							<p className="text-xs text-foreground/60">
