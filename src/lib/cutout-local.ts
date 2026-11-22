@@ -224,13 +224,28 @@ function runsOf(frames: Frame[], windows: Window[]) {
 	return runs;
 }
 
-export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows: Window[], onProgress: (part: number) => void, signal: AbortSignal): Promise<Blob> {
+// Where the time goes (ms, whole run), for the flight recorder (?debug=1): coach 22 Nov asked to measure before changing how it runs.
+export type MatteTimes = { setup: number; modelLoad: number; read: number; decodeWait: number; model: number; encode: number; breathe: number; frames: number; modelFrames: number; total: number; size: string };
+
+export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows: Window[], onProgress: (part: number) => void, signal: AbortSignal, onTimes?: (times: MatteTimes) => void): Promise<Blob> {
+	const t0 = performance.now();
+	const time = { read: 0, decodeWait: 0, model: 0, encode: 0, breathe: 0, modelFrames: 0 };
+	const timed = async <T,>(key: keyof typeof time, work: () => Promise<T>) => {
+		const at = performance.now();
+		try {
+			return await work();
+		} finally {
+			time[key] += performance.now() - at;
+		}
+	};
 	const source = new RangeSource(videoUrl);
 	const track = await readVideoTrack(source);
 	const { frames } = track;
 	const settings = SETTINGS[tier];
 	const { w, h } = matteSize(track.width, track.height, settings.side);
+	const t1 = performance.now();
 	const model = await (tier === "fast" ? fastModel : balancedModel)(track.width, track.height, w, h);
+	const t2 = performance.now();
 	let failure: Error | null = null;
 	const fail = (error: Error) => {
 		failure = error;
@@ -250,7 +265,7 @@ export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows:
 	try {
 		let written = 0;
 		for (const [first, past] of runs) {
-			for (; written < first; written++) await encoder.add(null); // black outside the windows
+			for (; written < first; written++) await timed("encode", () => encoder.add(null)); // black outside the windows
 			check();
 			let start = first;
 			while (start > 0 && !frames[start].key) start--;
@@ -271,39 +286,45 @@ export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows:
 						frame.close();
 						between = at;
 					} else {
-						const matte: Uint8Array = await model.run(frame);
+						const matte: Uint8Array = await timed("model", () => model.run(frame));
+							time.modelFrames++;
 						frame.close();
 						if (between >= 0 && previous) {
 							const middle = new Uint8Array(matte.length);
 							for (let i = 0; i < matte.length; i++) middle[i] = (matte[i] + previous[i]) / 2;
-							await encoder.add(middle);
+							await timed("encode", () => encoder.add(middle));
 							between = -1;
 						}
-						await encoder.add(matte);
+						await timed("encode", () => encoder.add(matte));
 						previous = matte;
 					}
 					done++;
 					onProgress(done / total);
-					await breathe();
+					await timed("breathe", breathe);
 				}
 			};
 
 			for (let i = start; i < past; i++) {
 				const frame = frames[i];
-				const data = await source.read(frame.offset, frame.size);
+				const data = await timed("read", () => source.read(frame.offset, frame.size));
 				check();
 				decoder.decode(new EncodedVideoChunk({ type: frame.key ? "key" : "delta", timestamp: Math.round(frame.time * 1e6), data }));
-				while (decoder.decodeQueueSize > 4) await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
+				await timed("decodeWait", async () => {
+						while (decoder.decodeQueueSize > 4) await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
+					});
 				await take();
 			}
-			await decoder.flush();
+			await timed("decodeWait", () => decoder.flush());
 			await take();
-			if (between >= 0) await encoder.add(previous); // the run ended on a frame with nothing after it
+			if (between >= 0) await timed("encode", () => encoder.add(previous)); // the run ended on a frame with nothing after it
 			written = past;
 		}
-		for (; written < frames.length; written++) await encoder.add(null);
+		for (; written < frames.length; written++) await timed("encode", () => encoder.add(null));
 		check();
-		return await encoder.finish();
+		const blob = await timed("encode", () => encoder.finish());
+			const ms = (n: number) => Math.round(n);
+			onTimes?.({ setup: ms(t1 - t0), modelLoad: ms(t2 - t1), read: ms(time.read), decodeWait: ms(time.decodeWait), model: ms(time.model), encode: ms(time.encode), breathe: ms(time.breathe), frames: done, modelFrames: time.modelFrames, total: ms(performance.now() - t0), size: `${track.width}x${track.height} -> ${w}x${h}` });
+			return blob;
 	} finally {
 		decoded.forEach((frame) => frame.close());
 		if (decoder.state !== "closed") decoder.close();
