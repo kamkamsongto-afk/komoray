@@ -252,10 +252,11 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
 							<span className="text-xs font-medium text-foreground/80">You in your part</span>
 							{/* meX / meY: the point of you in your part's middle. Sliding right moves you right, so it goes down. */}
-							{l.kind === "side"
-								? row("Left / right", range(1 - l.meX, 0, 1, 0.005, percent(1 - l.meX), (v) => update(l.id, { meX: Math.round((1 - v) * 1000) / 1000 })))
-								: row("Up / down", range(1 - l.meY, 0, 1, 0.005, percent(1 - l.meY), (v) => update(l.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
-							<button onClick={() => update(l.id, { meX: LAYOUT.me.x, meY: LAYOUT.me.y })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+							{/* Zoom: you bigger or smaller; what you then don't cover shows a blurred, dimmed copy of yourself. Setting it frees you to move both ways and past your own edge. */}
+{row("Zoom", range(l.meZoom ?? 1, LAYOUT.meZoom.min, LAYOUT.meZoom.max, 0.01, percent(l.meZoom ?? 1), (meZoom) => update(l.id, { meZoom })))}
+{(l.meZoom !== undefined || l.kind === "side") && row("Left / right", range(1 - l.meX, l.meZoom !== undefined ? 1 - LAYOUT.meRange.max : 0, l.meZoom !== undefined ? 1 - LAYOUT.meRange.min : 1, 0.005, percent(1 - l.meX), (v) => update(l.id, { meX: Math.round((1 - v) * 1000) / 1000 })))}
+{(l.meZoom !== undefined || l.kind !== "side") && row("Up / down", range(1 - l.meY, l.meZoom !== undefined ? 1 - LAYOUT.meRange.max : 0, l.meZoom !== undefined ? 1 - LAYOUT.meRange.min : 1, 0.005, percent(1 - l.meY), (v) => update(l.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
+<button onClick={() => update(l.id, { meX: LAYOUT.me.x, meY: LAYOUT.me.y, ...(l.meZoom !== undefined && { meZoom: LAYOUT.meZoom.start }) })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
 								Center me
 							</button>
 						</div>

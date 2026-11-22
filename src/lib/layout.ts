@@ -3,9 +3,11 @@
 // PlayerFrame in the preview and by layout_filters in modal_app/render.py for the final video, with the same boxes
 // (layoutBoxes = layout_boxes) and the same moves (layoutProgress = layout_ease_expr, layoutFlash = LAYOUT_FLASH).
 //
-// The speaker's picture is never made smaller or bigger: it fills the whole width (top / bottom) or the whole height
-// (side by side) already, so it is only moved, until the point picked (meX, meY: the face, at first) sits in the middle
-// of its part, as far as the picture still covers the part. Moving only, the final video stays as sharp as before.
+// A layout saved before 22 Nov (no meZoom): the speaker's picture is never made smaller or bigger: it fills the whole
+// width (top / bottom) or the whole height (side by side) already, so it is only moved, until the point picked (meX, meY:
+// the face, at first) sits in the middle of its part, as far as the picture still covers the part. Moving only, the final
+// video stays as sharp as before. With a meZoom (every new layout): the picture is that size, the point in the middle of
+// the part with nothing holding it there, and a blurred, dimmed copy of the picture fills what it doesn't cover.
 
 import { readClipSound } from "./clip-sound";
 import { MY_REF } from "./my-files";
@@ -26,6 +28,10 @@ export type VideoLayout = {
 	split: number;
 	meX: number;
 	meY: number;
+	// You in your part (coach 22 Nov): how big you are, 1 = as big as the video, and meX / meY may then go past your own
+	// edge. Where you don't reach, a blurred, dimmed copy of the picture fills the part (LAYOUT.fill). Left out = a layout
+	// saved before: moved only, held to cover the part, as it always was. Same as meZoom in layout_boxes (render.py).
+	meZoom?: number;
 	color: string;
 	enter: LayoutEnter;
 	file?: string;
@@ -56,6 +62,9 @@ export const LAYOUT = {
 	maxItems: 10,
 	seconds: 5,
 	fileZoom: { min: 1, max: 3 },
+	meZoom: { min: 0.4, max: 2.5, start: 1 },
+	meRange: { min: -0.5, max: 1.5 }, // meX / meY once meZoom is set: may go past the picture's edge
+	fill: { blur: 30, dim: 0.3 }, // the blurred copy under you, as Frame Me's Blur. LAYOUT_FILL in render.py
 	motionZoom: { start: 0.2, min: 0.05, max: 0.6 }, // the same as Cutout's Zoom speed (INSERT.zoom in behind.ts)
 };
 
@@ -79,6 +88,7 @@ export const NEW_LAYOUT = (start: number, end: number, kind: LayoutKind = "stack
 	split: LAYOUT.split.start,
 	meX: LAYOUT.me.x,
 	meY: LAYOUT.me.y,
+	meZoom: LAYOUT.meZoom.start,
 	color: "#000000",
 	enter: "slide",
 });
@@ -128,7 +138,7 @@ type Box = { x: number; y: number; w: number; h: number };
 
 // On a W x H video, px: the speaker's part, the other part, and where the speaker's whole picture goes once split
 // (its top left corner; it keeps its size). Same as layout_boxes in render.py.
-export function layoutBoxes(l: VideoLayout, W: number, H: number): { me: Box; other: Box; picture: { x: number; y: number } } {
+export function layoutBoxes(l: VideoLayout, W: number, H: number): { me: Box; other: Box; picture: { x: number; y: number }; zoom: number; free: boolean } {
 	const stack = l.kind === "stack";
 	// Even px, so both parts are whole for the final video's colour samples (2 x 2 px each). js_round(...) * 2 in render.py.
 	const mine = 2 * Math.round((l.split * (stack ? H : W)) / 2);
@@ -136,17 +146,23 @@ export function layoutBoxes(l: VideoLayout, W: number, H: number): { me: Box; ot
 	const other: Box = stack ? { x: 0, y: l.meFirst ? mine : 0, w: W, h: H - mine } : { x: l.meFirst ? mine : 0, y: 0, w: W - mine, h: H };
 	// The picked point in the middle of the speaker's part, as far as the picture still covers all of it.
 	const along = (middle: number, point: number, from: number, size: number, whole: number) => Math.min(from, Math.max(from + size - whole, middle - point));
-	const picture = { x: along(me.x + me.w / 2, l.meX * W, me.x, me.w, W), y: along(me.y + me.h / 2, l.meY * H, me.y, me.h, H) };
-	return { me, other, picture };
+	// meZoom set: you at that size, the point in the middle with nothing holding you to the part (the blurred copy fills what you don't cover).
+	const free = l.meZoom !== undefined;
+	const zoom = free ? (l.meZoom as number) : 1;
+	const picture = free
+		? { x: me.x + me.w / 2 - zoom * l.meX * W, y: me.y + me.h / 2 - zoom * l.meY * H }
+		: { x: along(me.x + me.w / 2, l.meX * W, me.x, me.w, W), y: along(me.y + me.h / 2, l.meY * H, me.y, me.h, H) };
+	return { me, other, picture, zoom, free };
 }
 
 // Where everything is at progress p (layoutProgress): the speaker's picture moved p of the way, the other part slid in
 // from its own edge of the screen. Same as the overlay x / y expressions in layout_filters (render.py).
 export function layoutPose(l: VideoLayout, p: number, W: number, H: number) {
-	const { me, other, picture } = layoutBoxes(l, W, H);
+	const { me, other, picture, zoom, free } = layoutBoxes(l, W, H);
 	const away = 1 - p;
 	const slid = l.kind === "stack" ? { x: other.x, y: other.y + (l.meFirst ? 1 : -1) * away * other.h } : { x: other.x + (l.meFirst ? 1 : -1) * away * other.w, y: other.y };
-	return { me, other: { ...other, ...slid }, picture: { x: p * picture.x, y: p * picture.y } };
+	// scale: you grow (or shrink) with the same eased amount, from the top left corner (layout_filters does it with perspective).
+	return { me, other: { ...other, ...slid }, picture: { x: p * picture.x, y: p * picture.y }, scale: 1 + (zoom - 1) * p, free };
 }
 
 // Where the picture or clip goes inside its part (w x h px), from its width / height (ratio): left, top, width, height
@@ -198,8 +214,10 @@ export function readLayouts(value: unknown): VideoLayout[] | null {
 			kind: l.kind === "side" ? "side" : "stack",
 			meFirst: l.meFirst !== false,
 			split: round(num(l.split, LAYOUT.split.min, LAYOUT.split.max, LAYOUT.split.start)),
-			meX: round(num(l.meX, 0, 1, LAYOUT.me.x)),
-			meY: round(num(l.meY, 0, 1, LAYOUT.me.y)),
+			// Past 0..1 only counts with meZoom; without it layoutBoxes holds the picture over the part anyway.
+			meX: round(num(l.meX, LAYOUT.meRange.min, LAYOUT.meRange.max, LAYOUT.me.x)),
+			meY: round(num(l.meY, LAYOUT.meRange.min, LAYOUT.meRange.max, LAYOUT.me.y)),
+			...(l.meZoom !== undefined && { meZoom: round(num(l.meZoom, LAYOUT.meZoom.min, LAYOUT.meZoom.max, LAYOUT.meZoom.start), 100) }),
 			color: typeof l.color === "string" && HEX.test(l.color) ? l.color.toUpperCase() : "#000000",
 			enter: LAYOUT_ENTERS.some((e) => e.id === l.enter) ? (l.enter as LayoutEnter) : "slide",
 			...(file && { file, media: clip ? ("video" as const) : ("image" as const) }),
