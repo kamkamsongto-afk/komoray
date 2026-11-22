@@ -17,7 +17,7 @@ import {
 	type WordRow,
 } from "@/lib/shared-words";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
-import { realThaiWords } from "@/lib/word-check";
+import { thaiWords } from "@/lib/word-check";
 import { type WordUse, wordUse } from "@/lib/word-rules";
 
 // Komoray's word lists (lib/shared-words.ts), for the admin page's Words tab. One list per language ("th", a language
@@ -47,7 +47,7 @@ export async function GET() {
 		Promise.all((["th", "latin"] as const).map(readVoted)),
 		Promise.all((["th", "latin"] as const).map(readBlocked)),
 	]);
-	const rule = (heard: string, fixed: string) => wordUse(heard, fixed, { realWords: realThaiWords, shared: true });
+	const rule = (heard: string, fixed: string) => wordUse(heard, fixed, { ...thaiWords, shared: true });
 	const lists: Record<string, WordRow[]> = {};
 	LISTS.forEach((list, k) => {
 		const team: WordRow[] = curated[k].map((p) => ({ heard: p.heard, fixed: p.fixed, at: p.at, uses: p.uses ?? 1, source: "team", rule: rule(p.heard, p.fixed), set: p.use, use: effectiveUse(p), reviewed: Boolean(p.reviewed) }));

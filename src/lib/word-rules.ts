@@ -178,7 +178,31 @@ function wordFix(pieces: string[], typed: string): { kind: FixKind; pairs: Pair[
 
 // How a learned pair may be used. realWords: does the dictionary know every part of this Thai text (server only).
 // shared: Komoray's list, used on everyone's videos, where only the AI decides unless the team said otherwise.
-export function wordUse(heard: string, fixed: string, options: { realWords?: (thai: string) => boolean; shared?: boolean } = {}): WordUse {
+// A Thai heard side that is no ONE word of the dictionary, yet reads as real because its parts are ("เมื่อวน" = เมื่อ + วน,
+// meant เมื่อวาน; "ทะเละ" = ทะเล + ะ, meant ทะเลาะ), and sits a letter or two from a fixed side made of real words, is a
+// misspelling that is never right as heard: "always" (coach 22 Nov: known mistakes kept coming back for every user because
+// only a heard side with NO real part counted). Heard of fewer than 3 letters stays with the AI ("ถา" is inside many words).
+function oneWordSlip(heard: string, fixed: string, options: { realWords?: (thai: string) => boolean; oneWord?: (thai: string) => boolean }) {
+	if (!options.oneWord || !options.realWords) return false;
+	const h = heard.replace(/\s+/g, "");
+	const f = fixed.replace(/\s+/g, "");
+	if (!/^[\u0E00-\u0E7F]+$/.test(h) || !/^[\u0E00-\u0E7F]+$/.test(f) || h.includes("ๆ") || f.includes("ๆ")) return false;
+	const letters = (t: string) => [...t.replace(/ํา/g, "ำ")].filter((c) => !/[ัิ-ฺ็-๎]/.test(c)).length;
+	if (letters(h) < MIN_HEARD || options.oneWord(h) || !options.realWords(f)) return false;
+	return editDistance(h, f) <= Math.max(1, Math.floor(letters(f) * 0.3));
+}
+
+function editDistance(a: string, b: string) {
+	let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+	for (let i = 1; i <= a.length; i++) {
+		const next = [i];
+		for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+		row = next;
+	}
+	return row[b.length];
+}
+
+export function wordUse(heard: string, fixed: string, options: { realWords?: (thai: string) => boolean; oneWord?: (thai: string) => boolean; shared?: boolean } = {}): WordUse {
 	const thai = THAI.test(heard + fixed);
 	const { kind } = learnFromFix(thai ? [heard.replace(/\s+/g, "")] : [heard], fixed);
 	if (kind !== "spelling") return "off";
@@ -188,7 +212,8 @@ export function wordUse(heard: string, fixed: string, options: { realWords?: (th
 	// creator's own words in front of it (Codex review 13 Nov).
 	if (!thai) return !options.shared && /\p{L}\p{Lu}|[0-9]/u.test(fixed) && heard.replace(/[^\p{L}0-9]/gu, "").length >= 3 ? "always" : "ai";
 	if (!options.realWords) return "ai";
-	return options.realWords(heard.replace(/\s+/g, "")) ? "ai" : "always";
+	if (!options.realWords(heard.replace(/\s+/g, ""))) return "always";
+	return oneWordSlip(heard, fixed, options) ? "always" : "ai";
 }
 
 // What the edit box says about a fix before it is saved.

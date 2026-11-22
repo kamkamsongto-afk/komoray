@@ -6,3 +6,6 @@ export function realThaiWords(text: string) {
 	const parts = cutThaiWords(text);
 	return parts.length > 0 && parts.every((w) => isThaiWord(w));
 }
+
+// What wordUse (lib/word-rules.ts) asks the dictionary: is every part real (realWords), is it one word of its own (oneWord).
+export const thaiWords = { realWords: realThaiWords, oneWord: isThaiWord };
