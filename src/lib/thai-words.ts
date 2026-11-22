@@ -10,6 +10,8 @@ type Word = { text: string; start: number; end: number };
 const THAI = /[฀-๿]/;
 const RUN_GAP = 0.3; // pieces further apart than this (seconds) are never one word
 const THAI_MARK_FIRST = /^[ัำ-ฺ็-๎]/; // a vowel or tone mark that can't begin a word
+const NUMBER_START = /^\d[,.]?$/; // one digit (or one with a comma or point after it): the start of a number said digit by digit
+const NUMBER_GAP = 1; // seconds: digits said further apart than this are not one number
 
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
 
@@ -35,6 +37,20 @@ export function thaiWordGroups(words: Word[]): number[][] {
 			groups.push(Array.from({ length: j - i + 1 }, (_, k) => i + k));
 			i = j + 1;
 			continue;
+		}
+		// A number said digit by digit comes in pieces too: "9" "9" "0" for 990, "2," "9" "9" "0" for 2,990 (VID20261120105025,
+		// 22 Nov). One word, so the script, subtitles and word-by-word looks never break inside it. Joined only when the next
+		// piece is a single digit (or, after a comma, a group of three), never two whole numbers ("10" "20"), and when
+		// said within NUMBER_GAP. Thai only until other languages are measured (a count "1 2 3" in English must stay three words).
+		// lib/timeline.ts insideNumber is the line-break twin.
+		if (thai && NUMBER_START.test(words[i].text)) {
+			const grouped = (a: string, b: string) => (a.endsWith(",") ? /^\d{3}$|^\d$/.test(b) : /^\d$/.test(b));
+			while (j + 1 < words.length && grouped(words[j].text, words[j + 1].text) && words[j + 1].start - words[j].end <= NUMBER_GAP) j++;
+			if (j > i) {
+				groups.push(Array.from({ length: j - i + 1 }, (_, k) => i + k));
+				i = j + 1;
+				continue;
+			}
 		}
 		if (THAI.test(words[i].text)) {
 			// A piece that starts with a vowel or tone mark ("ส" "่วน") belongs to the one before it, however long the gap:
