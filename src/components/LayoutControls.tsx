@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowLeftRight, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LIMITS } from "@/lib/subtitle-style";
 import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
@@ -11,8 +11,7 @@ import { PIC_MOTION } from "@/lib/behind";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { ConfirmDelete } from "./ConfirmDelete";
-import { LayerTools } from "./LayerTools";
-import { mainButton, PLAIN_BUTTON, ToolGroup } from "./ToolGroup";
+import { MAIN_BUTTON, mainStyle, PICKED, PLAIN_BUTTON, TONES, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
@@ -58,6 +57,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 		setFocused(focus);
 		setOpen(focus);
 	}
+	const [tab, setTab] = useState<"you" | "other">("you"); // under Layout: You, or the Other part (coach 22 Nov)
 	const [picking, setPicking] = useState<string | null>(null); // the layout whose pictures are open to change (Other part)
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
@@ -91,12 +91,6 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 	const pick = (l: VideoLayout) => {
 		setOpen(l.id);
 		onReveal?.(l.id, l.start);
-	};
-	const moveHere = (l: VideoLayout) => {
-		const seconds = l.end - l.start;
-		const start = round(Math.max(0, Math.min(now(), total - seconds)));
-		update(l.id, { start, end: round(Math.min(total, start + seconds)) });
-		onReveal?.(l.id, start);
 	};
 	// A copy right after it, opened (coach, 14 Nov: the same in every box).
 	const duplicate = (l: VideoLayout) => {
@@ -210,18 +204,33 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									title="Name on the timeline"
 									className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium placeholder:text-foreground placeholder:opacity-100 hover:border-foreground/20 focus:border-foreground/30 focus:outline-none"
 								/>
-								<button onClick={() => duplicate(l)} disabled={layouts.length >= LAYOUT.maxItems} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+								{(() => {
+										const place = layerPlace(layouts, l.id);
+										return (
+											<>
+												<span className="shrink-0 text-[11px] text-foreground/60" title="Its layer among the things showing with it">
+													{place ? `${place.at}/${place.of}` : "1/1"}
+												</span>
+												<button onClick={() => onChange(moveLayer(layouts, l.id, true))} disabled={!place || place.at === place.of} title={place ? "Bring it in front of the one over it" : "Nothing else shows at the same time"} aria-label="Bring forward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+													<ArrowUp className="h-3.5 w-3.5" aria-hidden />
+												</button>
+												<button onClick={() => onChange(moveLayer(layouts, l.id, false))} disabled={!place || place.at === 1} title={place ? "Send it behind the one under it" : "Nothing else shows at the same time"} aria-label="Send backward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+													<ArrowDown className="h-3.5 w-3.5" aria-hidden />
+												</button>
+											</>
+										);
+									})()}
+									<button onClick={() => duplicate(l)} disabled={layouts.length >= LAYOUT.maxItems} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
 									<Copy className="h-3.5 w-3.5" aria-hidden />
 								</button>
 								{trash(l)}
 							</div>
 						</div>
-						<LayerTools onMoveHere={() => moveHere(l)} onUp={() => onChange(moveLayer(layouts, l.id, true))} onDown={() => onChange(moveLayer(layouts, l.id, false))} place={layerPlace(layouts, l.id)} />
-						<ToolGroup tone="blue" title="When">
+						<ToolGroup tone={1} title="When">
 							{row(ON_TIMELINE, <TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />)}
 						</ToolGroup>
 
-						<ToolGroup tone="violet" title="Layout">
+						<ToolGroup tone={2} title="Layout">
 							{/* With the playhead moved off this layout, a kind is a new layout there, as in Frame Me (coach, 17 Nov:
 							    picking one with another layout's box open turned that one into it, so it was gone from where it was). */}
 							<div title="With the video moved off this layout, a kind adds a new layout there">
@@ -232,12 +241,33 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								})}
 							</div>
 							{row("Your part", range(l.split, LAYOUT.split.min, LAYOUT.split.max, 0.01, percent(l.split), (split) => update(l.id, { split })))}
-							<button onClick={() => update(l.id, { meFirst: !l.meFirst })} className={`self-start ${mainButton("violet")}`}>
+							<button onClick={() => update(l.id, { meFirst: !l.meFirst })} className={`self-start ${MAIN_BUTTON}`} style={mainStyle(2)}>
 								<ArrowLeftRight className="h-3.5 w-3.5" aria-hidden /> Swap sides
 							</button>
 						</ToolGroup>
 
-						<ToolGroup tone="green" title="You" aside={<span className="text-[11px] text-foreground/60">Pause, then drag yourself</span>}>
+						<ToolGroup
+							tone={3}
+							header={
+								<div role="tablist" aria-label="You or the other part" className="flex gap-1">
+									{(["you", "other"] as const).map((id) => (
+										<button
+											key={id}
+											role="tab"
+											aria-selected={tab === id}
+											onClick={() => setTab(id)}
+											className={`flex-1 rounded-md px-2 py-1 text-lg leading-tight font-semibold ${tab === id ? "text-foreground" : "text-foreground/55 hover:text-foreground/80"}`}
+											style={tab === id ? { background: `${TONES[3]}55`, boxShadow: `inset 0 0 0 1px ${TONES[3]}` } : undefined}
+										>
+											{id === "you" ? "You" : "Other part"}
+										</button>
+									))}
+								</div>
+							}
+						>
+							{tab === "you" && (
+								<>
+									<span className="text-[11px] text-foreground/60">Pause, then drag yourself on the video</span>
 							{/* meX / meY: the point of you in your part's middle. Sliding right moves you right, so it goes down. */}
 							{/* Zoom: you bigger or smaller; what you then don't cover shows a blurred, dimmed copy of yourself. Setting it frees you to move both ways and past your own edge. */}
 							{row("Zoom", range(l.meZoom ?? 1, LAYOUT.meZoom.min, LAYOUT.meZoom.max, 0.01, percent(l.meZoom ?? 1), (meZoom) => update(l.id, { meZoom })))}
@@ -246,9 +276,10 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							<button onClick={() => update(l.id, { meX: LAYOUT.me.x, meY: LAYOUT.me.y, ...(l.meZoom !== undefined && { meZoom: LAYOUT.meZoom.start }) })} className={`self-start ${PLAIN_BUTTON}`}>
 								Center me
 							</button>
-						</ToolGroup>
-
-						<ToolGroup tone="amber" title="Other part">
+						</>
+							)}
+							{tab === "other" && (
+								<>
 							{/* Picked: one row (its picture, its name, Change); the pictures to pick from open only on Change (coach 22 Nov: it was crowded). */}
 							<>
 										{l.file && (
@@ -262,7 +293,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 													)}
 												</span>
 												<span className="min-w-0 flex-1 truncate text-xs">{current?.name ?? (l.media === "video" ? "Clip" : "Picture")}</span>
-												<button onClick={() => setPicking(picking === l.id ? null : l.id)} aria-expanded={picking === l.id} className={mainButton("amber")}>
+												<button onClick={() => setPicking(picking === l.id ? null : l.id)} aria-expanded={picking === l.id} className={MAIN_BUTTON} style={mainStyle(3)}>
 													{picking === l.id ? "Done" : "Change"}
 												</button>
 											</div>
@@ -284,7 +315,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 														}}
 														title={item.name}
 														aria-pressed={l.file === item.file}
-														className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${l.file === item.file ? "border-amber-500" : "border-transparent hover:border-foreground/30"}`}
+														className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${l.file === item.file ? "border-[#4D8DBA]" : "border-transparent hover:border-foreground/30"}`}
 													>
 														{item.media === "video" ? (
 															<>
@@ -305,7 +336,8 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 													<button
 														onClick={() => upload(l.id)}
 														title="A picture or clip from your computer. It goes into My files too."
-														className={l.file ? PLAIN_BUTTON : mainButton("amber")}
+														className={l.file ? PLAIN_BUTTON : MAIN_BUTTON}
+ style={l.file ? undefined : mainStyle(3)}
 													>
 														<Upload className="h-3 w-3 shrink-0" aria-hidden />
 														Upload
@@ -325,7 +357,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							{!l.file && (
 								<div className="flex flex-wrap items-center gap-1">
 									{LAYOUT_COLORS.map((c) => (
-										<button key={c} onClick={() => update(l.id, { color: c })} aria-label={`Color ${c}`} className={`h-5 w-5 rounded-full border-2 ${l.color === c ? "border-amber-500" : "border-foreground/20"}`} style={{ background: c }} />
+										<button key={c} onClick={() => update(l.id, { color: c })} aria-label={`Color ${c}`} className={`h-5 w-5 rounded-full border-2 ${l.color === c ? "border-[#4D8DBA]" : "border-foreground/20"}`} style={{ background: c }} />
 									))}
 									<input type="color" value={l.color} onChange={(e) => update(l.id, { color: e.target.value.toUpperCase() })} aria-label="Any color" className="h-5 w-7 cursor-pointer rounded border border-foreground/20 bg-transparent" />
 								</div>
@@ -340,7 +372,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 										"Movement",
 										<span className="flex gap-1 text-xs">
 											{PIC_MOTION.map(([id, name]) => (
-												<button key={id} onClick={() => update(l.id, { fileMotion: id === "still" ? undefined : id })} className={`rounded border px-1.5 py-0.5 ${(l.fileMotion ?? "still") === id ? "border-amber-500 bg-amber-500/15" : "border-foreground/20"}`}>
+												<button key={id} onClick={() => update(l.id, { fileMotion: id === "still" ? undefined : id })} className={`rounded border px-1.5 py-0.5 ${(l.fileMotion ?? "still") === id ? "border-[#4D8DBA] bg-[#4D8DBA]/20" : "border-foreground/20"}`}>
 													{name}
 												</button>
 											))}
@@ -364,9 +396,11 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								</div>
 							)}
 							{l.file && l.media === "video" && <ClipTrim id={l.id} file={l.file} start={l.start} end={l.end} clipFrom={l.clipFrom} total={total} onChange={(patch) => update(l.id, patch)} />}
+								</>
+							)}
 						</ToolGroup>
 
-						<ToolGroup tone="rose" title="Transition">
+						<ToolGroup tone={1} title="Transition">
 							<div role="radiogroup" aria-label="Transition" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
 								{LAYOUT_ENTERS.map((e) => (
 									<button
@@ -375,7 +409,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 										aria-checked={l.enter === e.id}
 										onClick={() => update(l.id, { enter: e.id })}
 										title={`${e.note}, at the start and the end`}
-										className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap ${l.enter === e.id ? "bg-rose-500/15 font-medium ring-1 ring-inset ring-rose-500" : "text-foreground/70 hover:text-foreground"}`}
+										className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap ${l.enter === e.id ? PICKED : "text-foreground/70 hover:text-foreground"}`}
 									>
 										{e.name}
 									</button>
@@ -389,7 +423,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							const own = subtitles.at(l);
 							const seam = l.meFirst ? 1 - l.split : l.split; // the line between the two parts, from the bottom
 							return (
-								<ToolGroup tone="sky" title="Subtitles here">
+								<ToolGroup tone={2} title="Subtitles here">
 									{row("Height", range(own ?? subtitles.normal, LIMITS.position.min, LIMITS.position.max, 0.01, own === null ? "As the rest" : percent(own), (v) => subtitles.set(l, Math.round(v * 1000) / 1000)))}
 									<div className="flex flex-wrap gap-1" title="Only while this layout shows. Or pause on it and drag the subtitles. If you move the layout later, set this again.">
 										{l.kind === "stack" && (

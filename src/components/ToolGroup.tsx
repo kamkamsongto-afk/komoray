@@ -1,32 +1,29 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
-// A group of settings in a tool box (coach 22 Nov: the menus got long): a tinted card with a small coloured dot and a short
-// title. Next to each other the groups take different tones, so where one ends and the next begins is clear at a glance.
-// The tints are see-through, so they sit on both themes. `main` marks the button people press most in the group.
-export type Tone = "blue" | "violet" | "green" | "amber" | "rose" | "sky";
+// A group of settings in a tool box (coach 22 Nov: the menus got long): a tinted card with a small dot and a short title.
+// Three blues, from pale to deep (coach's own picks), taken in turn down the box, so where one group ends and the next
+// begins is clear at a glance and nothing reads as an error (red was tried and dropped). The tints are see-through, so
+// they sit on both themes. `mainButton` marks the button people press most in a group.
+export type Tone = 1 | 2 | 3;
 
-const TONES: Record<Tone, { box: string; dot: string; main: string }> = {
-	blue: { box: "border-blue-500/30 bg-blue-500/[0.07]", dot: "bg-blue-500", main: "border-blue-500/60 bg-blue-500/15 font-medium hover:bg-blue-500/25" },
-	violet: { box: "border-violet-500/30 bg-violet-500/[0.07]", dot: "bg-violet-500", main: "border-violet-500/60 bg-violet-500/15 font-medium hover:bg-violet-500/25" },
-	green: { box: "border-emerald-500/30 bg-emerald-500/[0.07]", dot: "bg-emerald-500", main: "border-emerald-500/60 bg-emerald-500/15 font-medium hover:bg-emerald-500/25" },
-	amber: { box: "border-amber-500/35 bg-amber-500/[0.08]", dot: "bg-amber-500", main: "border-amber-500/60 bg-amber-500/15 font-medium hover:bg-amber-500/25" },
-	rose: { box: "border-rose-500/30 bg-rose-500/[0.07]", dot: "bg-rose-500", main: "border-rose-500/60 bg-rose-500/15 font-medium hover:bg-rose-500/25" },
-	sky: { box: "border-sky-500/30 bg-sky-500/[0.07]", dot: "bg-sky-500", main: "border-sky-500/60 bg-sky-500/15 font-medium hover:bg-sky-500/25" },
-};
+export const TONES: Record<Tone, string> = { 1: "#BFDDF0", 2: "#97D7FF", 3: "#4D8DBA" };
 
 // The look of a button that is not the main one of its group, and of the main one.
 export const PLAIN_BUTTON = "inline-flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5";
-export const mainButton = (tone: Tone) => `inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs ${TONES[tone].main}`;
+export const MAIN_BUTTON = "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium hover:brightness-95";
+export const mainStyle = (tone: Tone): CSSProperties => ({ background: `${TONES[tone]}55`, borderColor: TONES[tone] });
+// A choice that is picked (a segment, a transition): the deep blue as a ring over a light fill.
+export const PICKED = "bg-[#4D8DBA]/20 font-medium ring-1 ring-inset ring-[#4D8DBA]";
 
-export function ToolGroup({ tone, title, aside, children }: { tone: Tone; title: string; aside?: ReactNode; children: ReactNode }) {
-	const t = TONES[tone];
+export function ToolGroup({ tone, title, header, children }: { tone: Tone; title?: string; header?: ReactNode; children: ReactNode }) {
 	return (
-		<section className={`flex flex-col gap-1.5 rounded-lg border p-2 ${t.box}`}>
-			<h3 className="flex items-center gap-1.5 text-xs font-semibold text-foreground/85">
-				<span className={`h-2 w-2 shrink-0 rounded-full ${t.dot}`} aria-hidden />
-				{title}
-				{aside && <span className="ml-auto font-normal">{aside}</span>}
-			</h3>
+		<section className="flex flex-col gap-1.5 rounded-lg border p-2" style={{ background: `${TONES[tone]}33`, borderColor: `${TONES[tone]}99` }}>
+			{header ?? (
+				<h3 className="flex items-center gap-2 text-lg leading-tight font-semibold text-foreground/90">
+					<span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: TONES[tone] }} aria-hidden />
+					{title}
+				</h3>
+			)}
 			{children}
 		</section>
 	);
