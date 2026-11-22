@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Fix, WordFix } from "./edit";
 import type { SharedPair } from "./shared-words";
+import { checkBurst, checkFix, type GuardReason, type GuardWords } from "./spelling-guard";
 
 // The only file that asks Claude to fix speech-to-text spelling. It reads the whole script, a part at a time, and
 // only gives fixes: the AI studio puts them on once, underlined in green, and Undo takes them all off.
@@ -98,7 +99,10 @@ export function placeFix(words: Word[], line: number[] | undefined, answer: Answ
 	return null;
 }
 
-export async function askForSpelling(words: Word[], from: number, apiKey: string, hints: WordFix[], common: SharedPair[] = []) {
+// A fix the guard didn't let on, kept with why (api/spelling saves them, so the guard can be tuned on real clips).
+export type Rejected = Fix & { heard: string; why: GuardReason };
+
+export async function askForSpelling(words: Word[], from: number, apiKey: string, hints: WordFix[], common: SharedPair[] = [], guard: GuardWords = {}) {
 	const lines = chunkLines(words, from);
 	const transcript = lines.map((line, n) => `${n}: ${line.map((i) => words[i].text).join(" ")}`).join("\n");
 	const known = [...new Set(hints.map((h) => h.fixed.trim()).filter(Boolean))].slice(0, MAX_HINTS);
@@ -131,13 +135,29 @@ export async function askForSpelling(words: Word[], from: number, apiKey: string
 	if (response.stop_reason !== "end_turn") throw new Error(`Spelling stopped early (${response.stop_reason})`);
 	const text = response.content.find((block) => block.type === "text")?.text ?? "";
 	const answers = (JSON.parse(text) as { fixes: Answer[] }).fixes;
-	const fixes: Fix[] = [];
+	// The guard (lib/spelling-guard.ts) judges what a fix really changes: the words it is put on, against its text.
+	// The creator's words and the shared list's are real words to it, so their names are never "made up".
+	const knownWords = new Set<string>();
+	for (const fixed of [...known, ...common.map((p) => p.fixed)]) {
+		knownWords.add(fixed.trim());
+		for (const part of guard.cut?.(fixed.replace(/[^฀-๿]+/g, " ").trim()) ?? []) knownWords.add(part);
+	}
+	const sense: GuardWords = { ...guard, known: knownWords };
+	const placed: (Fix & { heard: string; fixed: string })[] = [];
+	const rejected: Rejected[] = [];
 	for (const answer of answers) {
 		const fix = placeFix(words, lines[answer.line], answer);
-		if (fix && !fixes.some((f) => f.from <= fix.to && fix.from <= f.to)) fixes.push(fix);
+		if (!fix || placed.some((f) => f.from <= fix.to && fix.from <= f.to)) continue;
+		const heard = words.slice(fix.from, fix.to + 1).map((w) => w.text).join(" ");
+		const why = checkFix(heard, fix.text, sense);
+		if (why) rejected.push({ ...fix, heard, why });
+		else placed.push({ ...fix, heard, fixed: fix.text });
 	}
+	const burst = checkBurst(placed, lines.flat().length, sense);
+	for (const f of burst.dropped) rejected.push({ from: f.from, to: f.to, text: f.text, heard: f.heard, why: "too-many" });
+	const fixes: Fix[] = burst.kept.map(({ from, to, text }) => ({ from, to, text }));
 	const read = lines[lines.length - 1];
-	return { fixes: fixes.sort((a, b) => a.from - b.from), next: read ? read[read.length - 1] + 1 : words.length };
+	return { fixes: fixes.sort((a, b) => a.from - b.from), rejected, next: read ? read[read.length - 1] + 1 : words.length };
 }
 
 // Komoray's "always" pairs (lib/shared-words.ts) put on by themselves where one to MAX_RUN whole words, starting

@@ -4,7 +4,8 @@ import { scriptFingerprint } from "@/lib/bad-takes";
 import type { Fix } from "@/lib/edit";
 import { deleteObject, getJson, putIfAbsent, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import { sharedFixes } from "@/lib/shared-words";
-import { askForSpelling, placeAlways } from "@/lib/spelling";
+import { cutThaiWords, isThaiWord } from "@/lib/newmm";
+import { askForSpelling, placeAlways, type Rejected } from "@/lib/spelling";
 import { thaiWords } from "@/lib/word-check";
 import { wordUse } from "@/lib/word-rules";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
@@ -13,7 +14,9 @@ import { currentUser, ownsVideo } from "@/lib/supabase/server";
 //   spelling.json                          how far we read and the fixes found, for one exact script
 //   spelling-lock-<script>-<done>.json     someone is reading this part now: a second tab waits instead of paying again
 // POST { key }  reads the next part, answers { fixes, remaining, busy? }. The page calls until remaining is 0.
-type Saved = { script: string; done: number; fixes: Fix[] };
+//   (spelling.json also keeps `rejected`: the AI's fixes the guard didn't let on, with why: lib/spelling-guard.ts)
+type Saved = { script: string; done: number; fixes: Fix[]; rejected?: Rejected[] };
+const MAX_REJECTED = 300;
 
 const LOCK_MS = 120_000; // longer than a request can last: after this, whoever held it has died
 const HINT_WORDS = 150;
@@ -52,14 +55,16 @@ export async function POST(request: Request) {
 		// Komoray's list for the video's language (pairs that are "off" are left out there).
 		const shared = await sharedFixes(edit.words.some((w) => /[฀-๿]/.test(w.text)), edit.language);
 		const common = [...theirs, ...shared];
-		const found = await askForSpelling(edit.words, state.done, apiKey, mine.filter((w) => w.use !== "off"), common);
+		const found = await askForSpelling(edit.words, state.done, apiKey, mine.filter((w) => w.use !== "off"), common, { isThaiWord, cut: cutThaiWords });
+		if (found.rejected.length) console.log("Spelling guard kept off:", JSON.stringify(found.rejected.map(({ heard, text, why }) => ({ heard, text, why }))));
 		// Its "always" pairs (no real word as heard: ผูหญิง) go on by themselves where whole words read so, before the AI's.
 		const sure = placeAlways(edit.words, state.done, found.next, shared.filter((p) => p.use === "always"));
 		// None may overlap another, nor a fix of an earlier part (a run of the last part may have gone past its end).
 		const overlaps = (f: Fix, list: Fix[]) => list.some((g) => g.from <= f.to && f.from <= g.to);
 		const ours = sure.filter((f) => !overlaps(f, state.fixes));
 		const fixes = [...ours, ...found.fixes.filter((f) => !overlaps(f, ours) && !overlaps(f, state.fixes))].sort((a, b) => a.from - b.from);
-		const next: Saved = { script, done: Math.max(state.done + 1, Math.min(count, found.next)), fixes: [...state.fixes, ...fixes] };
+		const rejected = [...(state.rejected ?? []), ...found.rejected].slice(0, MAX_REJECTED);
+		const next: Saved = { script, done: Math.max(state.done + 1, Math.min(count, found.next)), fixes: [...state.fixes, ...fixes], rejected };
 		await putObject(siblingKey(key, "spelling.json"), JSON.stringify(next), "application/json");
 		return Response.json({ fixes: next.fixes, remaining: count - next.done });
 	} catch (error) {
