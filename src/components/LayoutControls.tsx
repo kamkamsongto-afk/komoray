@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload, User } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LIMITS } from "@/lib/subtitle-style";
 import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
@@ -11,7 +11,7 @@ import { PIC_MOTION } from "@/lib/behind";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { ConfirmDelete } from "./ConfirmDelete";
-import { MAIN_BUTTON, mainStyle, PICKED, PLAIN_BUTTON, TONES, ToolGroup } from "./ToolGroup";
+import { MAIN_BUTTON, mainStyle, PICKED, PLAIN_BUTTON, TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
@@ -246,24 +246,14 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							</button>
 						</ToolGroup>
 
-						<ToolGroup
+						<TabGroup
 							tone={3}
-							header={
-								<div role="tablist" aria-label="You or the other part" className="flex gap-1">
-									{(["you", "other"] as const).map((id) => (
-										<button
-											key={id}
-											role="tab"
-											aria-selected={tab === id}
-											onClick={() => setTab(id)}
-											className={`flex-1 rounded-md px-2 py-1 text-lg leading-tight font-semibold ${tab === id ? "text-foreground" : "text-foreground/55 hover:text-foreground/80"}`}
-											style={tab === id ? { background: `${TONES[3]}55`, boxShadow: `inset 0 0 0 1px ${TONES[3]}` } : undefined}
-										>
-											{id === "you" ? "You" : "Other part"}
-										</button>
-									))}
-								</div>
-							}
+							value={tab}
+							onChange={setTab}
+							tabs={[
+								{ id: "you", label: "You", icon: <User className="h-5 w-5" aria-hidden /> },
+								{ id: "other", label: "Other part", icon: <ImageIcon className="h-5 w-5" aria-hidden /> },
+							]}
 						>
 							{tab === "you" && (
 								<>
@@ -398,7 +388,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							{l.file && l.media === "video" && <ClipTrim id={l.id} file={l.file} start={l.start} end={l.end} clipFrom={l.clipFrom} total={total} onChange={(patch) => update(l.id, patch)} />}
 								</>
 							)}
-						</ToolGroup>
+						</TabGroup>
 
 						<ToolGroup tone={1} title="Transition">
 							<div role="radiogroup" aria-label="Transition" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">

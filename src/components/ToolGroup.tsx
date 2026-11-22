@@ -28,3 +28,41 @@ export function ToolGroup({ tone, title, header, children }: { tone: Tone; title
 		</section>
 	);
 }
+
+// Folder tabs over one card (coach 22 Nov): the picked tab rises out of the card's top line, outlined, the others sit in
+// grey on the line, and the whole card changes with the tab, so it is plain which part is open. Solid under the tint
+// (var(--background)), so the picked tab hides the line below it.
+export function TabGroup<T extends string>({ tone, tabs, value, onChange, children }: { tone: Tone; tabs: { id: T; label: string; icon: ReactNode }[]; value: T; onChange: (id: T) => void; children: ReactNode }) {
+	const line = TONES[tone];
+	const solid: CSSProperties = { backgroundImage: `linear-gradient(${line}33, ${line}33)`, backgroundColor: "var(--background)" };
+	const at = tabs.findIndex((t) => t.id === value);
+	return (
+		<div className="flex flex-col">
+			<div role="tablist" className="flex items-end">
+				{tabs.map((t) => {
+					const on = t.id === value;
+					return (
+						<button
+							key={t.id}
+							role="tab"
+							aria-selected={on}
+							onClick={() => onChange(t.id)}
+							className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-t-lg border border-b-0 px-3 py-1.5 text-lg leading-tight font-semibold ${on ? "-mb-px" : "border-transparent text-foreground/55 hover:text-foreground/80"}`}
+							style={on ? { ...solid, borderColor: line, color: line } : undefined}
+						>
+							{t.icon}
+							{t.label}
+						</button>
+					);
+				})}
+			</div>
+			<section
+				role="tabpanel"
+				className="flex flex-col gap-1.5 rounded-lg border p-2"
+				style={{ ...solid, borderColor: line, borderTopLeftRadius: at === 0 ? 0 : undefined, borderTopRightRadius: at === tabs.length - 1 ? 0 : undefined }}
+			>
+				{children}
+			</section>
+		</div>
+	);
+}
