@@ -23,6 +23,13 @@ const LINE_LIMITS = {
 // ("ชุด|นี้", "ได้|ไหม", a polite ending), and breaks best at a pause or before a word that starts a
 // new phrase ("แต่", "ถ้า"). Same as THAI_NO_START / THAI_STARTS in render.py.
 const THAI_NO_START = new Set(["นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"]);
+// Words that lean on what follows, so a line should not end on them: "ที่|คุณเคยใช้", "จะ|ได้ยิน", "ไม่|ชอบ" (coach 22 Nov: "สามชั่วโมงสี่|ชั่วโมง"
+// split a number from its unit, and 26 of 1,229 lines in 7 real clips ended on ที่). Not ได้, ให้, ว่า, คุณ, เขา: they end lines as often as they lean.
+// Same as THAI_NO_END in render.py.
+const THAI_NO_END = new Set(["ที่", "ที่จะ", "ซึ่ง", "จะ", "ของ", "กับ", "จาก", "ใน", "การ", "ความ", "ไม่", "และ", "หรือ", "แต่", "เพราะ", "ถ้า", "ข้อ", "ทุก", "หลาย", "บาง", "ทั้ง", "แค่", "เพียง", "ประมาณ"]);
+const THAI_NUMBER_WORDS = new Set(["ศูนย์", "หนึ่ง", "เอ็ด", "สอง", "ยี่", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน", "ล้าน"]);
+const NO_END_PENALTY = 24; // frames: a break there costs as much as a pause this long (0.8 s)
+const OPEN_PAUSE = 10; // frames: after a pause this long the speaker did stop, so the break is fine
 const THAI_STARTS = new Set(["แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"]);
 const START_BONUS = 8; // frames: a phrase start or a polite ending is worth a pause this long
 // Where an English line may break (coach 20 Nov: "With Komoray, I" left the I at the end): never after a word that
@@ -272,7 +279,9 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 			// glue: typed onto the word before it, with no space ("ของ|โค้ช" from a fix): a line never starts there.
 			if (insideNumber(last, first) || first.glue || THAI_NO_START.has(first.text) || THAI_ENDINGS.has(first.text) || first.text.startsWith("ๆ")) continue;
 			if (k < run.length && (lettersOf(run.slice(0, k)) < Math.max(3, maxLetters * 0.4) || !fits(all.slice(k)))) continue;
-			const score = first.start - last.end + (THAI_STARTS.has(first.text) ? START_BONUS : 0) + (THAI_ENDINGS.has(last.text) ? START_BONUS : 0) + 0.3 * k;
+			// A word that leans on the next one, or a number apart from its unit, is a poor place to end a line unless the speaker paused there.
+			const leans = (THAI_NO_END.has(last.text) || THAI_NUMBER_WORDS.has(last.text) || /\d[,.]?$/.test(last.text)) && !THAI_STARTS.has(first.text) && first.start - last.end < OPEN_PAUSE;
+			const score = first.start - last.end + (THAI_STARTS.has(first.text) ? START_BONUS : 0) + (THAI_ENDINGS.has(last.text) ? START_BONUS : 0) - (leans ? NO_END_PENALTY : 0) + 0.3 * k;
 			if (score >= bestScore) [best, bestScore] = [k, score];
 		}
 		return best;
