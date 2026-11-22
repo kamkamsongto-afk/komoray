@@ -8,6 +8,7 @@
 // of its part, as far as the picture still covers the part. Moving only, the final video stays as sharp as before.
 
 import { readClipSound } from "./clip-sound";
+import { MY_REF } from "./my-files";
 
 export type LayoutKind = "stack" | "side"; // stack: top / bottom. side: left / right
 export type LayoutEnter = "slide" | "flash" | "cut";
@@ -188,7 +189,7 @@ export function readLayouts(value: unknown): VideoLayout[] | null {
 		const start = Number(l?.start);
 		const end = Number(l?.end);
 		if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
-		const file = typeof l.file === "string" && LAYOUT_FILE.test(l.file) ? l.file : undefined;
+		const file = typeof l.file === "string" && (LAYOUT_FILE.test(l.file) || MY_REF.test(l.file)) ? l.file : undefined; // or from My files (MY_REF)
 		const clip = Boolean(file && /\.(mp4|mov)$/.test(file));
 		layouts.push({
 			id: String(l.id ?? "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || crypto.randomUUID(),

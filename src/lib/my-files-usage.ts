@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SubtitleStyle } from "./subtitle-style";
 import { readKits } from "./brand-kits";
-import { type MyFile, myFilesPrefix } from "./my-files";
+import { type MyFile, myFilesPrefix, myIncomingPrefix, myRefOf, refId } from "./my-files";
 import { getJson, listObjects } from "./r2";
 
 // Where each of a person's My files is used (the My files page, and before a delete or Replace): the Brand Kits by name,
@@ -10,16 +10,40 @@ import { getJson, listObjects } from "./r2";
 // clean-up, docs/bugs.md): every read must work or this throws, so nothing is deleted on a failed read. Server only.
 export type FileUse = { kits: string[]; banners: number; projects: number };
 
-export type Pins = { style?: Partial<SubtitleStyle> | null; banners?: { font?: string; ownFont?: { file?: string } }[] | null };
+export type Pins = {
+	style?: Partial<SubtitleStyle> | null;
+	banners?: { font?: string; ownFont?: { file?: string }; kind?: string; file?: string }[] | null;
+	cutout?: { inserts?: { file: string }[] } | null;
+	frames?: { back?: string; file?: string }[] | null;
+	layouts?: { file?: string }[] | null;
+};
 
-// The My files ids a look, a project or a saved banner points at: its logo picture, its own font, each banner's own font.
+// The My files ids a look, a project or a saved banner points at: its logo picture, its own font, each banner's own
+// font, and every picture or clip shown from My files (MY_REF: a banner's file, Pic/Clip, Frame Me, Layout).
+// The My files reference names (MY_REF) on a project's banners, Pic/Clip, Frame Me and Layout.
+export function refNamesIn(edit: Pins | null): string[] {
+	if (!edit) return [];
+	const names = [...(edit.banners ?? []).map((b) => (b.kind === "file" ? b.file : undefined)), ...(edit.cutout?.inserts ?? []).map((i) => i.file), ...(edit.frames ?? []).map((f) => (f.back === "file" ? f.file : undefined)), ...(edit.layouts ?? []).map((l) => l.file)];
+	return names.filter((n): n is string => !!n && !!refId(n));
+}
+
 export function idsIn(edit: Pins | null): string[] {
 	if (!edit) return [];
 	const ids: string[] = [];
+	const ref = (name?: string) => {
+		const id = name ? refId(name) : null;
+		if (id) ids.push(id);
+	};
 	const logo = edit.style?.logoImage;
 	if (logo && "file" in logo) ids.push(logo.file);
 	if (edit.style?.font === "own" && edit.style.ownFont?.file) ids.push(edit.style.ownFont.file);
-	for (const b of edit.banners ?? []) if (b.font === "own" && b.ownFont?.file) ids.push(b.ownFont.file);
+	for (const b of edit.banners ?? []) {
+		if (b.font === "own" && b.ownFont?.file) ids.push(b.ownFont.file);
+		if (b.kind === "file") ref(b.file);
+	}
+	for (const i of edit.cutout?.inserts ?? []) ref(i.file);
+	for (const f of edit.frames ?? []) if (f.back === "file") ref(f.file);
+	for (const l of edit.layouts ?? []) ref(l.file);
 	return ids;
 }
 
@@ -57,8 +81,9 @@ export async function myFilesOf(userId: string): Promise<MyFile[]> {
 }
 
 // The bytes their My files take (every file under files/<id>/, cards included), for the storage bar and the cap.
+// A clip still on its way up (incoming/) isn't counted: it is moved in once checked, or cleared after a day.
 export async function myFilesBytes(userId: string) {
-	return (await listObjects(myFilesPrefix(userId))).reduce((sum, o) => sum + o.size, 0);
+	return (await listObjects(myFilesPrefix(userId))).filter((o) => !o.key.startsWith(myIncomingPrefix(userId))).reduce((sum, o) => sum + o.size, 0);
 }
 
 // The fonts open for new picks: the first `allowed` uploaded (Starter 5, Pro 20; Free none). Kept ones beyond stay in
@@ -66,7 +91,7 @@ export async function myFilesBytes(userId: string) {
 export const openFonts = (cards: MyFile[], allowed: number) => new Set(cards.filter((c) => c.kind === "font").sort((a, b) => a.at.localeCompare(b.at)).slice(0, allowed).map((c) => c.id));
 
 export const FONTS_LOCKED = "Your own fonts come with Starter and Pro. Upgrade on the Pricing page.";
-export const PIN_GONE = "A logo or font you picked is no longer in My files (replaced or deleted). Reload the page and pick it again.";
+export const PIN_GONE = "A file you picked is no longer in My files (replaced or deleted). Reload the page and pick it again.";
 
 // Before saving a look, a project's banners or saved banners: what is wrong with the My files ids it points at that it
 // didn't point at before (`before`, everything it had), else null. A file that is gone, or a font the plan doesn't open,
@@ -78,9 +103,11 @@ export async function newPinsProblem(userId: string, fontsAllowed: number, next:
 	const cards = await myFilesOf(userId);
 	const byId = new Map(cards.map((c) => [c.id, c]));
 	const open = openFonts(cards, fontsAllowed);
+	const names = new Set(refNamesIn(next));
 	for (const id of fresh) {
 		const card = byId.get(id);
 		if (!card) return PIN_GONE;
+		for (const name of names) if (refId(name) === id && myRefOf(card) !== name) return PIN_GONE;
 		if (card.kind === "font" && !open.has(id)) return fontsAllowed ? `Your plan holds ${fontsAllowed} own fonts. Pick one of those, or upgrade for more.` : FONTS_LOCKED;
 	}
 	return null;

@@ -347,11 +347,11 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 											importFor.current = l.id;
 											fileRef.current?.click();
 										}}
-										title="A picture or clip from your computer. It goes into Import too."
+										title="A picture or clip from your computer. It goes into My files too."
 										className="inline-flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5"
 									>
 										<Upload className="h-3 w-3 shrink-0" aria-hidden />
-										Import file
+										Upload
 									</button>
 								)}
 								{l.file && (

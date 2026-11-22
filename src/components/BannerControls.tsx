@@ -11,7 +11,7 @@ import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
 import { LayerTools } from "./LayerTools";
-import { clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { addToLibrary, clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { layerPlace, moveLayer, sameBannerPass } from "@/lib/layers";
 
@@ -85,7 +85,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		else if (value !== ownValue(b.ownFont)) update(b.id, { font: value as FontId, ownFont: undefined });
 	}
 
-	// A banner of your own: a picture, GIF or clip, uploaded next to the video.
+	// A banner of your own: a picture, GIF or clip, uploaded into My files and shown from there (coach 21 Nov).
 	const fileRef = useRef<HTMLInputElement>(null);
 	const [uploading, setUploading] = useState(false);
 	const [fileNote, setFileNote] = useState("");
@@ -96,19 +96,10 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		if (!key) return setFileNote("Open a video first.");
 		setUploading(true);
 		const clip = file.type.startsWith("video/") ? await clipLength(file) : null;
-		const res = await fetch("/api/banner-file", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ key, contentType: file.type, size: file.size }),
-		}).catch(() => null);
-		const data = (await res?.json().catch(() => ({}))) as { uploadUrl?: string; file?: string; media?: "image" | "video"; error?: string } | undefined;
-		if (!res?.ok || !data?.uploadUrl || !data.file || !data.media) {
-			setUploading(false);
-			return setFileNote(data?.error ?? "Could not upload. Please try again.");
-		}
-		const put = await fetch(data.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file }).catch(() => null);
+		const sent = await addToLibrary(key, file);
 		setUploading(false);
-		if (!put?.ok) return setFileNote("The upload stopped. Please try again.");
+		if ("error" in sent) return setFileNote(sent.error);
+		const data = { file: sent.item.file, media: sent.item.media };
 		keepBannerFile(data.file, URL.createObjectURL(file));
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		// A clip shows for as long as it plays; a picture for a few seconds, as a word banner.
@@ -119,6 +110,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	// Pictures and clips this project already has (api/library), shown on the Upload tab: so nobody uploads the same file
 	// again because they didn't know about Import (coach, 11 Nov). Loaded again after each upload here.
 	const [kept, setKept] = useState<LibraryItem[]>([]);
+	const KEPT_MINE = 12; // the rest are in the My files box
 	const libraryKey = videoKey ?? (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("key"));
 	const fileBanners = banners.filter((b) => b.kind === "file").length;
 	const canReuse = Boolean(onUseFile); // not the callback itself: it is new on every frame while the video plays
@@ -126,7 +118,11 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		if (tab !== "file" || !libraryKey || !canReuse) return;
 		void fetch(`/api/library?key=${encodeURIComponent(libraryKey)}`)
 			.then(async (res) => (res.ok ? ((await res.json()) as { items?: LibraryItem[] }) : {}))
-			.then((data: { items?: LibraryItem[] }) => setKept(data.items ?? []))
+			.then((data: { items?: LibraryItem[] }) => {
+				const items = data.items ?? [];
+				const mine = items.filter((i) => i.mine).sort((a, b) => b.at.localeCompare(a.at));
+				setKept([...items.filter((i) => !i.mine), ...mine.slice(0, KEPT_MINE)]);
+			})
 			.catch(() => {});
 	}, [tab, libraryKey, canReuse, fileBanners]);
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
@@ -237,7 +233,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					{fileNote && <p className="text-xs text-red-500">{fileNote}</p>}
 					{onUseFile && kept.length > 0 && (
 						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<p className="text-xs text-foreground/70">Uploaded before: click one to use it again, no need to upload it twice. All of them are in Import.</p>
+							<p className="text-xs text-foreground/70">Uploaded before: click one to use it again, no need to upload it twice. All of them are in My files.</p>
 							<div className="flex gap-1.5 overflow-x-auto pb-1">
 								{kept.map((item) => (
 									<button

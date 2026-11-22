@@ -5,6 +5,7 @@ import { cleanWindows, CUTOUT_ON, CUTOUT_RUNS_PER_VIDEO, CUTOUT_TIERS, CUTOUT_TO
 import { mediaUrl } from "@/lib/proxy";
 import { copyObject, deleteObject, exists, getJson, putIfAbsent, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
+import { projectFileKey } from "@/lib/project-files";
 
 // Cut the speaker out of the background for some windows of a video (lib/cutout.ts).
 //   POST { key, windows: [[start, end], ...], tier }   only people with Cutout on, see /admin
@@ -57,7 +58,7 @@ export async function GET(request: Request) {
 		used: !access.unlimited && user?.email ? await bestSecondsUsed(user.email) : 0,
 	};
 	const names = [...new Set((edit?.cutout?.inserts ?? []).map((i) => i.file))];
-	const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(siblingKey(key, name), "GET", LINK_SECONDS)])));
+	const files = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await signedUrl(projectFileKey(key, name, user?.id ?? ""), "GET", LINK_SECONDS)])));
 	if (now.status !== "done") return Response.json({ ...now, files, best, saved });
 	const env = getCloudflareContext().env as unknown as CutoutEnv;
 	return Response.json({ ...now, files, best, saved, previewUrl: await mediaUrl(key, "proxy-cutout.mp4", env.RENDER_TOKEN, PREVIEW_LINK_SECONDS) });

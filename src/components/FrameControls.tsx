@@ -255,7 +255,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 											else if (files[0]) pickFile(f, files[0]);
 										}}
 										disabled={id === "file" && !f.file && !files.length}
-										title={id === "file" && !f.file && !files.length ? "Add a picture or clip in Import first" : undefined}
+										title={id === "file" && !f.file && !files.length ? "Add a picture or clip in My files first" : undefined}
 										className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap disabled:opacity-40 ${f.back === id ? "bg-blue-400/15 font-medium ring-1 ring-inset ring-blue-400" : "text-foreground/70 hover:text-foreground"}`}
 									>
 										{name}
@@ -296,7 +296,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 							{f.back === "file" && f.media === "video" && f.file && <ClipTrim id={f.id} file={f.file} start={f.start} end={f.end} clipFrom={f.clipFrom} total={total} onChange={(patch) => update(f.id, patch)} />}
 							{(f.back === "file" || !files.length) && (
 								<p className="flex items-center gap-1 text-xs text-foreground/60">
-									<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Add your pictures and clips in Import, then pick one here.{library === null && " Loading…"}
+									<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Add your pictures and clips in My files, then pick one here.{library === null && " Loading…"}
 								</p>
 							)}
 						</div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useState } from "react";
-import type { MyFile } from "@/lib/my-files";
+import { MY_FILE_KINDS, type MyFile } from "@/lib/my-files";
 import { LOGO_EFFECTS, LOGO_MOTION, type LogoEffect } from "@/lib/logo-motion";
 import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { ClashNote, OwnFontOptions } from "./MyFilePickers";
@@ -61,10 +61,13 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 	const [logoError, setLogoError] = useState("");
 	const [logoClash, setLogoClash] = useState<{ file: File; conflict: MyFile } | null>(null);
 	useEffect(() => {
-		fetch("/api/files?kind=logo")
-			.then((res) => (res.ok ? (res.json() as Promise<{ files: MyFile[] }>) : { files: [] }))
-			.then((data) => setLogos(data.files))
-			.catch(() => {});
+		// Logos, and the other pictures in My files (from the AI studio's + Upload) except GIFs, which a logo can't be.
+		const ask = (kind: string) =>
+			fetch(`/api/files?kind=${kind}`)
+				.then((res) => (res.ok ? (res.json() as Promise<{ files: MyFile[] }>) : { files: [] }))
+				.then((data) => data.files)
+				.catch(() => [] as MyFile[]);
+		void Promise.all([ask("logo"), ask("image")]).then(([logos, pictures]) => setLogos([...logos, ...pictures.filter((p) => p.type !== "image/gif" && p.size <= MY_FILE_KINDS.logo.maxBytes)]));
 	}, []);
 	async function uploadLogo(file: File, then?: "use" | "keep") {
 		setLogoBusy(true);

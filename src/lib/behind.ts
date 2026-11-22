@@ -8,6 +8,7 @@ import { FPS, type Segment } from "./timeline";
 import type { Window } from "./cutout";
 import { readClipSound } from "./clip-sound";
 import { type Fades, fadeLevel, fadesOn, readFades } from "./fades";
+import { MY_REF } from "./my-files";
 
 // How a text arrives. run*: slides across the screen all the time it shows (a news ticker).
 export type BehindFx = "fade" | "burst" | "drop" | "pulse" | "runLeft" | "runRight";
@@ -277,7 +278,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 	for (const i of (Array.isArray(raw.inserts) ? raw.inserts : []).slice(0, BEHIND.maxItems) as Record<string, unknown>[]) {
 		const start = Number(i?.start);
 		const end = Number(i?.end);
-		if (typeof i?.file !== "string" || !INSERT_FILE.test(i.file) || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
+		if (typeof i?.file !== "string" || !(INSERT_FILE.test(i.file) || MY_REF.test(i.file)) || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
 		inserts.push({
 			id: id(i.id),
 			kind: /\.(mp4|mov)$/.test(i.file) ? "video" : "image",

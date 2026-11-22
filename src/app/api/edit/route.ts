@@ -114,10 +114,15 @@ export async function PUT(request: Request) {
 	const nextStyle = style !== undefined ? readStyle(style) : undefined;
 	const nextBanners = banners !== undefined ? readBanners(banners) : undefined;
 	if (banners !== undefined && !nextBanners) return Response.json({ error: "Bad banners" }, { status: 400 });
-	if (nextStyle || nextBanners) {
+	// Pictures and clips from My files on Pic/Clip, Frame Me and Layout too (MY_REF): there, or refused out loud.
+	const nextCutout = cutout !== undefined ? readCutout(cutout) : undefined;
+	const nextFrames = frames !== undefined ? readFrames(frames) : undefined;
+	const nextLayouts = layouts !== undefined ? readLayouts(layouts) : undefined;
+	if (nextStyle || nextBanners || nextCutout || nextFrames || nextLayouts) {
 		const { user } = await currentUser();
-		const next = { style: nextStyle ?? (edit.style as Pins["style"]), banners: nextBanners ?? edit.banners };
-		const problem = user ? await newPinsProblem(user.id, (await accessFor(user.email)).perks.fonts, next, [{ style: edit.style as Pins["style"], banners: edit.banners }]) : null;
+		const before: Pins = { style: edit.style as Pins["style"], banners: edit.banners, cutout: edit.cutout, frames: edit.frames, layouts: edit.layouts };
+		const next: Pins = { style: nextStyle ?? before.style, banners: nextBanners ?? before.banners, cutout: nextCutout ?? before.cutout, frames: nextFrames ?? before.frames, layouts: nextLayouts ?? before.layouts };
+		const problem = user ? await newPinsProblem(user.id, (await accessFor(user.email)).perks.fonts, next, [before]) : null;
 		if (problem) return Response.json({ error: problem }, { status: 409 });
 	}
 	if (nextStyle) edit.style = nextStyle;

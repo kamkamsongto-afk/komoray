@@ -15,7 +15,7 @@ import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 import { ViewSwitch, useListView } from "./ViewSwitch";
-import { clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { addToLibrary, clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 
 type Props = {
@@ -153,7 +153,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		// A clip shows for as long as it plays (within what may be cut out); a picture for a few seconds.
 		const clipSeconds = kind === "video" ? await clipLength(file) : null;
 		const seeThrough = await hasClearParts(file);
-		const done = await cutout.upload(file, (percent) => setUploading(percent));
+		// Into My files, shown from there by reference (coach 21 Nov: every new file is kept once, in one place).
+		const sent = await addToLibrary(new URLSearchParams(window.location.search).get("key") ?? "", file, (percent) => setUploading(percent)); // the % as it goes up (agent review 22 Nov)
+		const done = "error" in sent ? sent : { file: sent.item.file, kind: sent.item.media };
 		setUploading(null);
 		onUploading?.(false, !("error" in done));
 		if ("error" in done) return setNotice(done.error);
@@ -418,10 +420,10 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							onClick={openLibrary}
 							disabled={!onPickImported || layers.inserts.length >= BEHIND.maxItems}
 							aria-pressed={picView === "import"}
-							title="Use a picture or clip already in Import"
+							title="Use a picture or clip already in My files"
 							className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "import" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
 						>
-							<FolderInput className="h-3.5 w-3.5" aria-hidden /> From Import
+							<FolderInput className="h-3.5 w-3.5" aria-hidden /> From My files
 						</button>
 						<button
 							onClick={() => setPicView("timeline")}
@@ -454,12 +456,12 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						</button>
 					)}
 					{picView === "timeline" && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
-					{picView === "timeline" && !layers.inserts.length && <p className="text-xs text-foreground/60">Nothing on the timeline yet. Add a picture or clip, or pick one from Import.</p>}
+					{picView === "timeline" && !layers.inserts.length && <p className="text-xs text-foreground/60">Nothing on the timeline yet. Add a picture or clip, or pick one from My files.</p>}
 					{picView === "import" && onPickImported && (
 						library === null ? (
 							<p className="text-xs text-foreground/60">Loading…</p>
 						) : library.length === 0 ? (
-							<p className="text-xs text-foreground/60">Nothing in Import yet. Add files in the Import box, then pick them here.</p>
+							<p className="text-xs text-foreground/60">Nothing in My files yet. + Upload pictures or clips in the My files box, then pick them here.</p>
 						) : (
 							<div className="grid grid-cols-4 gap-1">
 								{library.map((item) => (
