@@ -19,7 +19,7 @@ export function ToolGroup({ tone, title, header, children }: { tone: Tone; title
 	return (
 		<section className="flex flex-col gap-1.5 rounded-lg border p-2" style={{ background: `${TONES[tone]}33`, borderColor: `${TONES[tone]}99` }}>
 			{header ?? (
-				<h3 className="flex items-center gap-2 text-lg leading-tight font-semibold text-foreground/90">
+				<h3 className="flex items-center gap-2 text-[15px] leading-tight font-semibold text-foreground/90">
 					<span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: TONES[tone] }} aria-hidden />
 					{title}
 				</h3>
@@ -47,7 +47,7 @@ export function TabGroup<T extends string>({ tone, tabs, value, onChange, childr
 							role="tab"
 							aria-selected={on}
 							onClick={() => onChange(t.id)}
-							className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-t-lg border border-b-0 px-3 py-1.5 text-lg leading-tight font-semibold ${on ? "-mb-px" : "border-transparent text-foreground/55 hover:text-foreground/80"}`}
+							className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-t-lg border border-b-0 px-3 py-1.5 text-[15px] leading-tight font-semibold ${on ? "-mb-px" : "border-transparent text-foreground/55 hover:text-foreground/80"}`}
 							style={on ? { ...solid, borderColor: line, color: line } : undefined}
 						>
 							{t.icon}
