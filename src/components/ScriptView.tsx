@@ -1175,11 +1175,10 @@ if (!panel) return;
 		measure();
 		const watch = new ResizeObserver(measure);
 		if (timelineRef.current) watch.observe(timelineRef.current);
-		window.addEventListener("scroll", measure, { passive: true });
+		// (No scroll listener: scrolling the page moved the sticky timeline and made the box grow and shrink.)
 		window.addEventListener("resize", measure);
 		return () => {
 			watch.disconnect();
-			window.removeEventListener("scroll", measure);
 			window.removeEventListener("resize", measure);
 };
 }, [panel]);
