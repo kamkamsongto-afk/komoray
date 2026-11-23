@@ -3,7 +3,7 @@
 import { Pause, Play, RotateCw } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useContext, useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerPad, bannerRows, bannerStrokeShadow } from "@/lib/banners";
+import { BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerPad, bannerRows, bannerStrokeShadow } from "@/lib/banners";
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, speakerTransform } from "@/lib/behind";
 import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
