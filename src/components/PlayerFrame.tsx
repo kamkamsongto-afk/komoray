@@ -3,7 +3,7 @@
 import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useContext, useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
+import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, speakerTransform } from "@/lib/behind";
 import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
@@ -958,8 +958,9 @@ export function PlayerFrame({
 						const move = bannerMotion(b, outTime);
 						const opacity = move.opacity;
 						if (!opacity) return null;
-						const size = b.scale ?? 1;
-						const padY = (BANNER.padding / 2) * size;
+						// Smaller by itself when its rows would not fit the screen (bannerFit); Size works on top of that. Same as banner_fit in render.py.
+const size = (b.scale ?? 1) * bannerFit(b, H);
+const padY = (BANNER.padding / 2) * size;
 						const rows = bannerRows(b);
 						// One box around all its rows (coach, 11 Nov: two lines were two boxes), as banner_events draws it: rows
 						// row-size tall, lineGap apart, inside the padding; never shorter than its tallest row. It arrives as one
@@ -1016,7 +1017,9 @@ export function PlayerFrame({
 														fontFamily: rowFace.family,
 														fontWeight: rowFace.weight,
 														fontSize: (row.size / rowFace.em) * size,
-														lineHeight: `${row.size * size}px`,
+lineHeight: `${row.size * size}px`,
+// A line round the letters, outside them like the ASS outline: drawn under the fill, twice as wide so half of it shows.
+...(b.stroke ? { WebkitTextStroke: `${2 * b.stroke * size}px ${b.strokeColor ?? "#000000"}`, paintOrder: "stroke fill" } : {}),
 													}}
 												>
 													{row.text}
