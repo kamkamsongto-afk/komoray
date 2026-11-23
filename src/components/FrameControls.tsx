@@ -216,10 +216,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 								{trash(f)}
 							</div>
 						</div>
-						<ToolGroup tone={1} title="When">
-							{row(ON_TIMELINE, <TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />)}
-							<FadeSwitches item={f} onChange={(patch) => update(f.id, patch)} />
-						</ToolGroup>
+						
 
 						<ToolGroup tone={2} title="Shape">
 							{/* With the playhead moved off this frame, a shape is a new frame there (coach, 17 Nov: a circle at 3:00
@@ -361,6 +358,11 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 							{row("Width", range(f.border, 0, FRAME.border.max, 1, `${f.border}px`, (border) => update(f.id, { border })))}
 							{f.border > 0 && row("Color", swatches(BORDER_COLORS, f.borderColor, (borderColor) => update(f.id, { borderColor }), "Border color"))}
 						</ToolGroup>
+						<ToolGroup tone={1} title="When">
+							{row(ON_TIMELINE, <TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />)}
+							<FadeSwitches item={f} onChange={(patch) => update(f.id, patch)} />
+						</ToolGroup>
+
 					</div>
 				))}
 
