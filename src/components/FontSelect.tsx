@@ -5,14 +5,14 @@ import { useEffect, useRef, useState } from "react";
 import type { OwnFont } from "@/lib/font-info";
 import { FONTS, type FontId } from "@/lib/subtitle-style";
 import { ownValue, type useMyFonts } from "@/lib/use-my-fonts";
-import { ConfirmDelete } from "./ConfirmDelete";
+import { Confirm } from "./ConfirmDelete";
 
 // The font list of a banner as a drop-down that can also delete your own fonts (coach 23 Nov: a plan holds a few, and a full list
 // needs room made): a bin at the right of each "Your font" row, a question before it goes, and the answer if it is still in use.
 // A plain <select> can't hold a button, so this is its own list. value: "" (the subtitles' font), a built-in id, "own" or "own:<id>".
 export function FontSelect({ value, current, myFonts, onPick }: { value: string; current?: OwnFont; myFonts: ReturnType<typeof useMyFonts>; onPick: (value: string) => void }) {
 	const [open, setOpen] = useState(false);
-	const [asking, setAsking] = useState<{ id: string; name: string } | null>(null);
+	const [asking, setAsking] = useState<{ id: string; name: string; use: string | null } | null>(null);
 	const [problem, setProblem] = useState("");
 	const box = useRef<HTMLDivElement>(null);
 	// Clicking anywhere else closes it.
@@ -27,7 +27,9 @@ export function FontSelect({ value, current, myFonts, onPick }: { value: string;
 	const rows: Row[] = [{ value: "", label: "Same as the subtitles" }];
 	const listed = new Set(myFonts.fonts.map((f) => `own:${f.id}`));
 	const olderListed = myFonts.older && myFonts.limit !== 0;
-	if (current && !listed.has(ownValue(current)) && !(ownValue(current) === "own" && olderListed)) rows.push({ value: ownValue(current), label: `Your font: ${current.family}` });
+	// A font of My files that is not in the list was deleted: it is the standard font now (coach 23 Nov), and the row says so.
+	if (current?.file && !listed.has(ownValue(current))) rows.push({ value: ownValue(current), label: "Standard font (your font was deleted)" });
+	if (current && !current.file && !listed.has(ownValue(current)) && !(ownValue(current) === "own" && olderListed)) rows.push({ value: ownValue(current), label: `Your font: ${current.family}` });
 	if (olderListed) rows.push({ value: "own", label: `Your font: ${myFonts.older!.family}` });
 	for (const f of myFonts.fonts) rows.push({ value: `own:${f.id}`, label: `Your font: ${f.name}${myFonts.usable(f) ? "" : " (Upgrade to use)"}`, disabled: !myFonts.usable(f), id: f.id });
 	for (const id of Object.keys(FONTS) as FontId[]) rows.push({ value: id, label: `${FONTS[id].name}${FONTS[id].thai ? " (Thai)" : ""}` });
@@ -55,9 +57,11 @@ export function FontSelect({ value, current, myFonts, onPick }: { value: string;
 							</button>
 							{r.id && (
 								<button
-									onClick={() => {
+									onClick={async () => {
 										setProblem("");
-										setAsking({ id: r.id as string, name: r.label.replace(/^Your font: /, "") });
+										const id = r.id as string;
+										// Where it is used, to say so in red before it goes.
+										setAsking({ id, name: r.label.replace(/^Your font: /, ""), use: await myFonts.usage(id) });
 									}}
 									aria-label={`Delete ${r.label}`}
 									title="Delete this font from your files"
@@ -72,8 +76,12 @@ export function FontSelect({ value, current, myFonts, onPick }: { value: string;
 			)}
 			{problem && <p className="mt-1 text-[11px] text-red-500">{problem}</p>}
 			{asking && (
-				<ConfirmDelete
-					name={`the font "${asking.name}"`}
+				<Confirm
+					title={`Delete the font "${asking.name}"?`}
+					body="It is deleted from your files. This can't be undone."
+					warning={asking.use ? `It is used by ${asking.use}. They will all use the standard font instead.` : undefined}
+					action="Delete"
+					danger
 					onCancel={() => setAsking(null)}
 					onConfirm={async () => {
 						const target = asking;

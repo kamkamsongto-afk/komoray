@@ -1,8 +1,8 @@
 "use client";
 
-import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, Star, Trash2, Type, Upload, X } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, RefreshCw, Star, Trash2, Type, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerFileSrc, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
+import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerFileSrc, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { ClashNote } from "./MyFilePickers";
 import { FontSelect } from "./FontSelect";
@@ -160,7 +160,23 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	}
 	function saveAsTemplate(b: Banner) {
 		const seconds = round(Math.max(0.5, b.end - b.start));
-		saveTemplates([...templates, { ...b, id: crypto.randomUUID(), start: 0, end: seconds }].slice(-BANNER.maxBanners));
+		const id = crypto.randomUUID();
+		saveTemplates([...templates, { ...b, id, templateId: undefined, start: 0, end: seconds }].slice(-BANNER.maxBanners));
+		update(b.id, { templateId: id }); // so Update My banner knows which one it is
+	}
+	// The banner's looks that My banners keeps; if they differ from the saved one, Update My banner shows (coach 23 Nov).
+	const looksOf = (b: Banner) =>
+		JSON.stringify([b.text, b.sub, b.color, b.ink, b.radius, b.opacity, b.anim, b.font, b.ownFont?.file, b.lineGap, b.noBox, b.align, b.scale, b.stroke, b.strokeColor, b.padding, b.rotate, b.fadeIn, b.fadeOut]);
+	const master = (b: Banner) => (b.templateId ? templates.find((t) => t.id === b.templateId) : undefined);
+	const changedFromMaster = (b: Banner) => {
+		const m = master(b);
+		return Boolean(m) && looksOf(m as Banner) !== looksOf(b);
+	};
+	// Only the saved copy changes; banners already put on the timeline from it stay as they are.
+	function updateMaster(b: Banner) {
+		const m = master(b);
+		if (!m) return;
+		saveTemplates(templates.map((t) => (t.id === m.id ? { ...b, id: m.id, templateId: undefined, start: 0, end: round(Math.max(0.5, b.end - b.start)) } : t)));
 	}
 	// A copy of a banner, with every setting, right after it ends (or where the video is now if there's no
 	// room after it), to change only its words (coach, 11 Nov).
@@ -171,7 +187,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	}
 	function addTemplate(t: Banner) {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
-		addBanner({ ...t, id: crypto.randomUUID(), start, end: round(Math.min(total, start + t.end)) });
+		addBanner({ ...t, id: crypto.randomUUID(), templateId: t.id, start, end: round(Math.min(total, start + t.end)) });
 	}
 
 	function add(kind: Exclude<BannerKind, "file">) {
@@ -205,7 +221,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		</label>
 	);
 
-	const inTemplates = (b: Banner) => templates.some((t) => t.text === cleanBannerText(b.text, BANNER.maxLines) && t.sub === b.sub);
+	const inTemplates = (b: Banner) => Boolean(master(b)) || templates.some((t) => t.text === cleanBannerText(b.text, BANNER.maxLines) && t.sub === b.sub);
 
 	const chooseUpload = (target: string | "new") => {
 		uploadFor.current = target === "new" ? null : target;
@@ -350,6 +366,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					</select>
 				</div>
 				<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
+				{range(b, "Rotate", b.rotate ?? 0, BANNER_ROTATE.min, BANNER_ROTATE.max, 1, `${Math.round(b.rotate ?? 0)}°`, (n) => update(b.id, { rotate: n || undefined }))}
 			</ToolGroup>
 
 			<ToolGroup tone={3} title="Font">
@@ -358,7 +375,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						<FontSelect value={b.font === "own" ? ownValue(b.ownFont) : (b.font ?? "")} current={b.font === "own" ? b.ownFont : undefined} myFonts={myFonts} onPick={(value) => pickFont(b, value)} />
 					</div>
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<label className={`inline-flex cursor-pointer items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap hover:brightness-95 ${myFonts.busy ? "opacity-50" : ""}`} style={mainStyle(3)}>
+						<label className={`inline-flex cursor-pointer items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap hover:brightness-110 ${myFonts.busy ? "opacity-50" : ""}`} style={{ background: "#1F5F9F", borderColor: "#1F5F9F", color: "#FFFFFF" }}>
 							<Upload className="h-3 w-3 shrink-0" aria-hidden />
 							{myFonts.busy ? "Uploading…" : "Upload your font"}
 							<input
@@ -421,6 +438,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					<span>{b.noBox ? "Off: letters only" : "On"}</span>
 				</label>
 				{!b.noBox && swatches(b, "Box colour", "color", b.color ?? brand)}
+				{!b.noBox && range(b, "Padding", b.padding ?? BANNER.padding, BANNER_PADDING.min, BANNER_PADDING.max, 1, String(b.padding ?? BANNER.padding), (n) => update(b.id, { padding: n === BANNER.padding ? undefined : n }))}
 				{!b.noBox && range(b, "Corners", b.radius ?? 0, BANNER_RADIUS.min, BANNER_RADIUS.max, 2, String(b.radius ?? 0), (n) => update(b.id, { radius: n }))}
 				{!b.noBox && range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
 			</ToolGroup>
@@ -459,6 +477,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 			<ToolGroup tone={3} title="Size">
 				{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 				{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
+				{range(b, "Rotate", b.rotate ?? 0, BANNER_ROTATE.min, BANNER_ROTATE.max, 1, `${Math.round(b.rotate ?? 0)}°`, (n) => update(b.id, { rotate: n || undefined }))}
 			</ToolGroup>
 		</div>
 	);
@@ -546,6 +565,11 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 				{shown.map((b) => (
 					<div key={b.id} className={`flex flex-col gap-2 rounded-md bg-foreground/5 p-1.5 text-sm ${open === b.id ? "ring-1 ring-blue-400" : ""}`}>
 						{bannerHeader(b)}
+						{b.kind !== "file" && changedFromMaster(b) && (
+							<button onClick={() => updateMaster(b)} title="Save these changes to My banners. Banners already on the timeline stay as they are." className="inline-flex items-center justify-center gap-1.5 rounded-md border border-amber-500/60 bg-amber-500/15 px-2 py-1 text-xs font-medium hover:bg-amber-500/25">
+								<RefreshCw className="h-3.5 w-3.5 shrink-0" aria-hidden /> Update My banner
+							</button>
+						)}
 						{open === b.id && (b.kind === "file" ? fileCards(b) : textCards(b))}
 					</div>
 				))}

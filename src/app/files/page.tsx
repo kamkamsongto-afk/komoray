@@ -6,6 +6,7 @@ import { AccountBar, SignInCard, useUser } from "@/components/Account";
 import { MY_FILE_SECTION, type MyFile, type MyFileKind, myClipUrl, myFileUrl } from "@/lib/my-files";
 import { kindForUpload, MY_FILES_ACCEPT, uploadToMyFiles } from "@/lib/my-files-upload";
 import { ClashNote } from "@/components/MyFilePickers";
+import { Confirm } from "@/components/ConfirmDelete";
 
 // My files (coach 21 Nov): the logos and fonts kept once per account (lib/my-files.ts), where each one is used, and the
 // storage they and the videos take. Rename and Replace never change a file's bytes (a new file is made); Delete only
@@ -155,11 +156,18 @@ export default function FilesPage() {
 		load();
 	}
 
-	async function remove(file: MyFile) {
+	// A font that is used asks in red first and may still be deleted (coach 23 Nov): what used it shows the standard font from then on.
+	// Anything else that is used can't be deleted, as before.
+	const [asking, setAsking] = useState<MyFile | null>(null);
+	function remove(file: MyFile) {
+		if (file.kind === "font" && !unused(use[file.id])) return setAsking(file);
 		if (!window.confirm(`Delete "${file.name}"? This can't be undone.`)) return;
+		void doRemove(file);
+	}
+	async function doRemove(file: MyFile) {
 		setBusy(file.id);
 		setNote("");
-		const res = await fetch(`/api/files?id=${file.id}`, { method: "DELETE" }).catch(() => null);
+		const res = await fetch(`/api/files?id=${file.id}${file.kind === "font" ? "&force=1" : ""}`, { method: "DELETE" }).catch(() => null);
 		const data = (await res?.json().catch(() => ({}))) as { error?: string; use?: Use };
 		setBusy(null);
 		if (res?.status === 409) {
@@ -341,9 +349,9 @@ export default function FilesPage() {
 									</label>
 								)}
 								<button
-									onClick={() => void remove(f)}
-									disabled={!!busy || !unused(use[f.id])}
-									title={unused(use[f.id]) ? "Delete this file" : "Still used: take it out of those first"}
+									onClick={() => remove(f)}
+									disabled={!!busy || (!unused(use[f.id]) && f.kind !== "font")}
+									title={unused(use[f.id]) ? "Delete this file" : f.kind === "font" ? "Delete this font: everything that uses it shows the standard font" : "Still used: take it out of those first"}
 									className="flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-1 text-red-600 hover:bg-red-600/10 disabled:cursor-not-allowed disabled:opacity-40"
 								>
 									<Trash2 size={12} /> Delete
@@ -352,6 +360,21 @@ export default function FilesPage() {
 						</li>
 					))}
 				</ul>
+			)}
+			{asking && (
+				<Confirm
+					title={`Delete the font "${asking.name}"?`}
+					body="It is deleted from your files. This can't be undone."
+					warning={`${usedText(use[asking.id])}. They will all use the standard font instead.`}
+					action="Delete"
+					danger
+					onCancel={() => setAsking(null)}
+					onConfirm={() => {
+						const file = asking;
+						setAsking(null);
+						void doRemove(file);
+					}}
+				/>
 			)}
 		</main>
 	);
