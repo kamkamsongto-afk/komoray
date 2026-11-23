@@ -38,6 +38,9 @@ export type Banner = {
 	lineGap?: number;
 	noBox?: boolean; // letters only, no background (coach, 11 Nov). Added 11 Nov
 	align?: "left" | "right"; // its rows inside the box; left out: centred (coach 15 Nov). Same in banner_events
+	name?: string; // what it is called here and on the timeline; without it, its words (coach 23 Nov). Added 23 Nov
+	stroke?: number; // a line round its letters, px at normal size (coach 23 Nov); strokeColor: its colour, without it black. Same in banner_events
+	strokeColor?: string;
 	// kind "file": banner-<id>.<ext> next to the video. text is then only its name (the Timeline shows it).
 	// Always placed by x / y; scale 1 = BANNER_FILE.width of the video's width.
 	file?: string;
@@ -84,7 +87,7 @@ export function bannerMotion(b: Banner, t: number) {
 
 export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub: string }> = {
 	price: { name: "Price", text: "$29", sub: "Today only" },
-	cta: { name: "Call to action", text: "Link in bio", sub: "" },
+	cta: { name: "Text", text: "Your text", sub: "" }, // was Call to action: any words (coach 23 Nov)
 	follow: { name: "Follow", text: "Follow for more", sub: "" },
 	file: { name: "Upload", text: "My banner", sub: "" },
 };
@@ -92,7 +95,9 @@ export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub:
 // Sizes in px of the final video; where each place starts, as a share of its height, for each video
 // shape, clear of the subtitles' usual place (bottom is under the subtitles on
 // 9:16, over them on the wider shapes). Same as BANNER and BANNER_TOP in render.py.
-export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxLines: 3, maxBanners: 20 };
+export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxLines: 20, maxBanners: 20 }; // 20 lines (coach 23 Nov: a title that rolls up, a list)
+export const BANNER_STROKE = { min: 0, max: 20 }; // px of a line round the letters, at normal size
+export const BANNER_FIT = 0.9; // a banner taller than this share of the video is made smaller to fit, same as BANNER_FIT in render.py
 export const BANNER_LINE_GAP = { min: -60, max: 80 }; // -60: rows can touch (coach, 11 Nov)
 // An uploaded banner: how wide it is at size 100%, share of the video's width; where it starts; biggest files.
 // Same as BANNER_FILE in render.py.
@@ -132,6 +137,18 @@ export const cleanBannerText = (text: string, lines = 1) =>
 // The rows a word banner draws, all on one box: its lines, then the small line. size: px at normal size.
 // Same rows as banner_events in render.py. Rows are row size tall, lineGap apart, inside the box's padding; the box is
 // never shorter than its tallest row (PlayerFrame, banner_events).
+// How much smaller its words are drawn so all of them fit on the screen: 20 lines at the normal size would be taller than a wide video
+// (coach 23 Nov: made smaller by itself, and the creator may still make it any size with Size). 1 = no change. The box's height
+// at normal size: its rows, the lines' gaps and the padding. Same as banner_fit in render.py.
+export function bannerFit(b: Pick<Banner, "text" | "sub" | "lineGap" | "kind">, videoHeight: number) {
+	if (b.kind === "file") return 1;
+	const rows = bannerRows(b);
+	if (!rows.length) return 1;
+	const gap = Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, b.lineGap ?? 0));
+	const inside = Math.max(rows.reduce((sum, row) => sum + row.size, 0) + gap * (rows.length - 1), Math.max(...rows.map((row) => row.size)));
+	const tall = inside + BANNER.padding; // padding is half above and half below, so one full padding in all
+	return Math.min(1, (videoHeight * BANNER_FIT) / tall);
+}
 export const bannerRows = (b: Pick<Banner, "text" | "sub">) => [
 	...cleanBannerText(b.text, BANNER.maxLines).split("\n").filter(Boolean).map((text) => ({ text, size: BANNER.size })),
 	...(cleanBannerText(b.sub) ? [{ text: cleanBannerText(b.sub), size: BANNER.subSize }] : []),
@@ -191,6 +208,9 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(typeof raw.anim === "string" && raw.anim in BANNER_ANIMS && raw.anim !== "fade" && { anim: raw.anim as BannerAnim }),
 			...(font && { font: font.font, ...(font.ownFont && { ownFont: font.ownFont }) }),
 			...(!file && raw.noBox === true && { noBox: true }),
+			...(typeof raw.name === "string" && cleanBannerText(raw.name) && { name: cleanBannerText(raw.name).slice(0, 40) }),
+			...(!file && typeof raw.stroke === "number" && raw.stroke > 0 && { stroke: Math.round(Math.min(BANNER_STROKE.max, raw.stroke) * 10) / 10 }),
+			...(!file && typeof raw.strokeColor === "string" && HEX.test(raw.strokeColor) && { strokeColor: raw.strokeColor.toUpperCase() }),
 			...(!file && (raw.align === "left" || raw.align === "right") && { align: raw.align }),
 			...(!file && Number.isFinite(gap) && gap !== 0 && { lineGap: Math.round(Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, gap))) }),
 			// An uploaded banner always sits where it was put (at first: the middle, near the top).

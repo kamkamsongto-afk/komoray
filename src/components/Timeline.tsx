@@ -299,7 +299,7 @@ export function Timeline({
 			...(clip && clip.file && { clip: { file: clip.file, from: clip.clipFrom ?? 0 } }),
 		});
 		const lists: [LaneGroup, LaneItem[]][] = [
-			["banner", banners.map((b) => ({ ...item("banner", b.id, b.text.replace(/\n/g, " "), b.start, b.end, b.kind === "file" && b.media === "video" && b), ...(b.kind === "file" && b.media && { media: b.media }) }))],
+			["banner", banners.map((b) => ({ ...item("banner", b.id, (b.name || b.text).replace(/\n/g, " "), b.start, b.end, b.kind === "file" && b.media === "video" && b), ...(b.kind === "file" && b.media && { media: b.media }) }))],
 			["cutout", [...cutoutLayers.texts.map((t) => item("text", t.id, t.text, t.start, t.end)), ...cutoutLayers.inserts.map((i) => item("insert", i.id, insertName(i), i.start, i.end, i.kind === "video" && i))]],
 			["frame", frames.map((f) => item("frame", f.id, frameName(f), f.start, f.end, f.back === "file" && f.media === "video" && f))],
 			["layout", layouts.map((l) => item("layout", l.id, layoutName(l), l.start, l.end, l.media === "video" && l))],
