@@ -160,6 +160,24 @@ export const bannerRows = (b: Pick<Banner, "text" | "sub">) => [
 	...(cleanBannerText(b.sub) ? [{ text: cleanBannerText(b.sub), size: BANNER.subSize }] : []),
 ];
 
+// A line round the letters with round corners, as the final video's outline has (ASS joins the outline round; -webkit-text-stroke
+// would be mitred, sharp and spiky: coach 24 Nov). Drawn as the letters copied all round at the stroke's width, in a few rings so
+// thin strokes of the letters are filled too. width: px of the video.
+export function bannerStrokeShadow(width: number, color: string) {
+	if (width <= 0) return undefined;
+	const rings = Math.min(6, Math.max(1, Math.ceil(width / 6)));
+	const shadows: string[] = [];
+	for (let k = 1; k <= rings; k++) {
+		const r = (width * k) / rings;
+		const n = Math.max(12, Math.min(36, Math.ceil(r * 2.4)));
+		for (let i = 0; i < n; i++) {
+			const a = (2 * Math.PI * i) / n;
+			shadows.push(`${(r * Math.cos(a)).toFixed(2)}px ${(r * Math.sin(a)).toFixed(2)}px 0 ${color}`);
+		}
+	}
+	return shadows.join(",");
+}
+
 // Dark letters on a light brand colour, white letters on a dark one.
 export function bannerInk(color: string) {
 	const n = parseInt(color.slice(1), 16);

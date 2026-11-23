@@ -1942,7 +1942,9 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             # Bold stays off: the weight comes from the font name (e.g. "Kanit Medium").
             f"0,0,0,0,100,100,{int(style.get('letterSpacing') or 0)},0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
             f"Style: Banner,{font},{BANNER['size']},{ass_colour(banner_ink(brand))[:-1]},&H00FFFFFF,{ass_colour(brand)[:-1]},&H00000000,"
-            f"0,0,0,0,100,100,0,0,3,{BANNER['padding']},0,8,80,80,0,1",
+            # BorderStyle 1, not 3: with 3 the stroke of a banner's letters (\bord, \3c) becomes an opaque box round each row, not a line
+            # (tried on Modal 24 Nov). Every banner event sets its own \bord (0 or its stroke), so the style's Outline is 0.
+            f"0,0,0,0,100,100,0,0,1,0,0,8,80,80,0,1",
             f"Style: Logo,{font},{LOGO['size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
             f"0,0,0,0,100,100,0,0,1,{LOGO['outline']},0,{logo_align},{LOGO['side']},{LOGO['side']},{LOGO['top']},1",
             "",
