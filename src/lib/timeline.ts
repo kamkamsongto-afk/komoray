@@ -22,7 +22,7 @@ const LINE_LIMITS = {
 // Where a Thai line may break. A line never starts with a word that belongs to the one before it
 // ("ชุด|นี้", "ได้|ไหม", a polite ending), and breaks best at a pause or before a word that starts a
 // new phrase ("แต่", "ถ้า"). Same as THAI_NO_START / THAI_STARTS in render.py.
-const THAI_NO_START = new Set(["นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"]);
+const THAI_NO_START = new Set(["นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก", "บาท"]);
 // Words that lean on what follows, so a line should not end on them: "ที่|คุณเคยใช้", "จะ|ได้ยิน", "ไม่|ชอบ" (coach 22 Nov: "สามชั่วโมงสี่|ชั่วโมง"
 // split a number from its unit, and 26 of 1,229 lines in 7 real clips ended on ที่). Not ได้, ให้, ว่า, คุณ, เขา: they end lines as often as they lean.
 // Same as THAI_NO_END in render.py.
