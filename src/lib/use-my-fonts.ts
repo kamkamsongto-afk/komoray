@@ -59,7 +59,22 @@ export function useMyFonts() {
 		return asOwnFont(added);
 	}
 
-	return { fonts, older, limit, usable, busy, error, clash, upload, dismiss: () => setClash(null) };
+	// Delete one from My files (the same call as the My files page). null = gone; else why not (a font still in use is never deleted).
+	async function remove(id: string): Promise<string | null> {
+		const res = await fetch(`/api/files?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => null);
+		const data = (await res?.json().catch(() => ({}))) as { error?: string; use?: { kits?: string[]; banners?: number; projects?: number } };
+		if (res?.ok) {
+			setFonts((list) => list.filter((f) => f.id !== id));
+			return null;
+		}
+		if (res?.status === 409 && data.use) {
+			const parts = [data.use.kits?.length ? `${data.use.kits.length} Brand Kit${data.use.kits.length > 1 ? "s" : ""}` : "", data.use.banners ? `${data.use.banners} saved banner${data.use.banners > 1 ? "s" : ""}` : "", data.use.projects ? `${data.use.projects} project${data.use.projects > 1 ? "s" : ""}` : ""].filter(Boolean);
+			return `It is still used by ${parts.join(", ") || "something"}. Take it out of those first.`;
+		}
+		return data?.error ?? "Could not delete the font";
+	}
+
+	return { fonts, older, limit, usable, busy, error, clash, upload, remove, dismiss: () => setClash(null) };
 }
 
 // The value of an own font in a <select>: "own:<id>" for My files, "own" for the font from before.

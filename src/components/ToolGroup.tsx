@@ -7,6 +7,9 @@ import type { CSSProperties, ReactNode } from "react";
 export type Tone = 1 | 2 | 3;
 
 export const TONES: Record<Tone, string> = { 1: "#BFDDF0", 2: "#97D7FF", 3: "#4D8DBA" };
+// The dot before a title: stronger blues of the same three (coach 23 Nov: the pale ones sank on the light theme), with a thin ring
+// that shows on the dark theme too.
+const DOTS: Record<Tone, string> = { 1: "#3FA7E1", 2: "#2B83D1", 3: "#1F5F9F" };
 
 // The look of a button that is not the main one of its group, and of the main one.
 export const PLAIN_BUTTON = "inline-flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5";
@@ -20,7 +23,7 @@ export function ToolGroup({ tone, title, header, children }: { tone: Tone; title
 		<section className="flex flex-col gap-1.5 rounded-lg border p-2" style={{ background: `${TONES[tone]}33`, borderColor: `${TONES[tone]}99` }}>
 			{header ?? (
 				<h3 className="flex items-center gap-2 text-[15px] leading-tight font-semibold text-foreground/90">
-					<span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: TONES[tone] }} aria-hidden />
+					<span className="h-3 w-3 shrink-0 rounded-full ring-1 ring-foreground/30" style={{ background: DOTS[tone] }} aria-hidden />
 					{title}
 				</h3>
 			)}

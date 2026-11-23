@@ -4,8 +4,9 @@ import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, Ch
 import { useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerFileSrc, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
-import { ClashNote, OwnFontOptions } from "./MyFilePickers";
-import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-style";
+import { ClashNote } from "./MyFilePickers";
+import { FontSelect } from "./FontSelect";
+import { EDGE_COLORS, type FontId, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
@@ -332,7 +333,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					title={`Press Enter for a new line (up to ${BANNER.maxLines})`}
 					className="w-full resize-y rounded-md border border-foreground/20 bg-background px-2 py-1 text-sm"
 				/>
-				<span className="text-[11px] text-foreground/55">Enter: a new line, up to {BANNER.maxLines}. Long text is made smaller to fit the screen; Size changes it.</span>
+				<span className="text-[11px] text-foreground/55">Enter a new line, up to {BANNER.maxLines} lines</span>
 				{b.kind === "price" && (
 					<input value={b.sub} maxLength={BANNER.maxText} onChange={(e) => update(b.id, { sub: e.target.value })} placeholder="Small line under it (optional)" aria-label="Small line" className="rounded-md border border-foreground/20 bg-background px-2 py-0.5 text-sm" />
 				)}
@@ -352,49 +353,39 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 			</ToolGroup>
 
 			<ToolGroup tone={3} title="Font">
-				<select
-					value={b.font === "own" ? ownValue(b.ownFont) : (b.font ?? "")}
-					onChange={(e) => pickFont(b, e.target.value)}
-					aria-label="Banner font"
-					className="min-w-0 rounded-md border border-foreground/20 bg-background px-1 py-0.5 text-xs"
-				>
-					<option value="">Same as the subtitles</option>
-					<OwnFontOptions current={b.font === "own" ? b.ownFont : undefined} myFonts={myFonts} />
-					{(Object.keys(FONTS) as FontId[]).map((id) => (
-						<option key={id} value={id}>
-							{FONTS[id].name}
-							{FONTS[id].thai ? " (Thai)" : ""}
-						</option>
-					))}
-				</select>
-				<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/60">
-					<label className={`cursor-pointer underline hover:text-foreground ${myFonts.busy ? "opacity-50" : ""}`}>
-						{myFonts.busy ? "Uploading…" : "Upload your font (.ttf, .otf)"}
-						<input
-							type="file"
-							accept=".ttf,.otf,font/ttf,font/otf"
-							className="hidden"
-							disabled={myFonts.busy}
-							onChange={(e) => {
-								const file = e.target.files?.[0];
-								e.target.value = "";
-								if (file) void uploadFont(b, file);
-							}}
-						/>
-					</label>
-					{clashFor === b.id && myFonts.error && <span className="text-red-500">{myFonts.error}</span>}
-					{clashFor === b.id && myFonts.clash && (
-						<ClashNote clash={myFonts.clash} what="font" onUse={() => void uploadFont(b, myFonts.clash!.file, "use")} onKeep={() => void uploadFont(b, myFonts.clash!.file, "keep")} onCancel={myFonts.dismiss} />
-					)}
+				<div className="flex items-start gap-2">
+					<div className="w-3/5 min-w-0">
+						<FontSelect value={b.font === "own" ? ownValue(b.ownFont) : (b.font ?? "")} current={b.font === "own" ? b.ownFont : undefined} myFonts={myFonts} onPick={(value) => pickFont(b, value)} />
+					</div>
+					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+						<label className={`inline-flex cursor-pointer items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap hover:brightness-95 ${myFonts.busy ? "opacity-50" : ""}`} style={mainStyle(3)}>
+							<Upload className="h-3 w-3 shrink-0" aria-hidden />
+							{myFonts.busy ? "Uploading…" : "Upload your font"}
+							<input
+								type="file"
+								accept=".ttf,.otf,font/ttf,font/otf"
+								className="hidden"
+								disabled={myFonts.busy}
+								onChange={(e) => {
+									const file = e.target.files?.[0];
+									e.target.value = "";
+									if (file) void uploadFont(b, file);
+								}}
+							/>
+						</label>
+						<span className="text-center text-[10px] text-foreground/55">Supported formats: .ttf, .otf</span>
+					</div>
 				</div>
+				{clashFor === b.id && myFonts.error && <span className="text-xs text-red-500">{myFonts.error}</span>}
+				{clashFor === b.id && myFonts.clash && (
+					<ClashNote clash={myFonts.clash} what="font" onUse={() => void uploadFont(b, myFonts.clash!.file, "use")} onKeep={() => void uploadFont(b, myFonts.clash!.file, "keep")} onCancel={myFonts.dismiss} />
+				)}
 			</ToolGroup>
 
 			<ToolGroup tone={1} title="Letters">
 				{swatches(b, "Text", "ink", b.ink ?? bannerInk(b.color ?? brand))}
 				{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 				{range(b, "Line gap", b.lineGap ?? 0, BANNER_LINE_GAP.min, BANNER_LINE_GAP.max, 2, String(b.lineGap ?? 0), (n) => update(b.id, { lineGap: n }))}
-				{range(b, "Stroke", b.stroke ?? 0, BANNER_STROKE.min, BANNER_STROKE.max, 0.5, b.stroke ? `${b.stroke}px` : "Off", (n) => update(b.id, { stroke: n > 0 ? n : undefined }))}
-				{b.stroke ? swatches(b, "Stroke colour", "strokeColor", b.strokeColor ?? "#000000") : null}
 				<div className="flex items-center gap-2 text-xs text-foreground/70">
 					<span className="w-16 shrink-0">Align</span>
 					{(
@@ -418,7 +409,12 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 				</div>
 			</ToolGroup>
 
-			<ToolGroup tone={2} title="Box">
+			<ToolGroup tone={2} title="Stroke">
+				{range(b, "Stroke", b.stroke ?? 0, BANNER_STROKE.min, BANNER_STROKE.max, 0.5, b.stroke ? `${b.stroke}px` : "Off", (n) => update(b.id, { stroke: n > 0 ? n : undefined }))}
+				{b.stroke ? swatches(b, "Colour", "strokeColor", b.strokeColor ?? "#000000") : <span className="text-[11px] text-foreground/55">The line round the letters is always round at the corners.</span>}
+			</ToolGroup>
+
+			<ToolGroup tone={3} title="Box">
 				<label className="flex items-center gap-2 text-xs text-foreground/70">
 					<span className="w-16 shrink-0">Background</span>
 					<input type="checkbox" checked={!b.noBox} onChange={(e) => update(b.id, { noBox: e.target.checked ? undefined : true })} className="accent-blue-600" />
@@ -501,7 +497,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 								<p className="flex items-center gap-1 text-xs font-medium">
 									<Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" aria-hidden />
 									My banners
-									<span className="font-normal text-foreground/60">· made by you, for any video. Click one to add it.</span>
+									<span className="font-normal text-foreground/60">· add your favorite banner</span>
 								</p>
 								<div className="flex flex-wrap items-center gap-1.5 text-sm">
 									{templates.map((t) =>
@@ -554,7 +550,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					</div>
 				))}
 				{shown.length > 0 && (
-					<p className="text-[11px] text-foreground/55">Drag a banner along the timeline to change when it shows, or its right end to change how long. Pause the video on a banner to drag it anywhere.{tab === "text" && " Emoji can't be shown in banners."}</p>
+					<p className="text-[11px] text-foreground/55">Move banner on timeline to set start time; pause video over banner to move its position.{tab === "text" && " No emojis allowed."}</p>
 				)}
 			</TabGroup>
 			{removing && (
