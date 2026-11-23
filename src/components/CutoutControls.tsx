@@ -14,6 +14,7 @@ import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
 import { newClipSound } from "@/lib/clip-sound";
 import { LayerTools } from "./LayerTools";
+import { ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 import { addToLibrary, clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
@@ -177,12 +178,6 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const pick = (item: { id: string; start: number }) => {
 		setOpen(item.id);
 		onReveal?.(item.id, item.start);
-	};
-	const moveHere = <T extends { id: string; start: number; end: number }>(item: T, set: (id: string, patch: Partial<T>) => void) => {
-		const seconds = item.end - item.start;
-		const start = round(Math.max(0, Math.min(now(), total - seconds)));
-		set(item.id, { start, end: round(Math.min(total, start + seconds)) } as Partial<T>);
-		onReveal?.(item.id, start);
 	};
 	const openText = layers.texts.find((t) => t.id === open && tab === "text");
 	const openInsert = layers.inserts.find((i) => i.id === open && tab === "inserts");
@@ -516,13 +511,12 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						pick(copy);
 					} : undefined)}
 					<LayerTools
-						onMoveHere={() => moveHere(t, updateText)}
 						onUp={() => setTexts(moveLayer(layers.texts, t.id, true))}
 						onDown={() => setTexts(moveLayer(layers.texts, t.id, false))}
 						place={layerPlace(layers.texts, t.id)}
 					/>
 					{notCutYet}
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+						<ToolGroup tone={1} title="Text">
 							{row("Words", <textarea rows={BEHIND.maxLines} value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value.split("\n").slice(0, BEHIND.maxLines).join("\n") })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} className="min-w-0 flex-1 resize-none rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							{row(
 								"Effect",
@@ -566,13 +560,12 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}
 							{row("Height", range(Math.round((1 - t.y) * 100), 3, 97, 1, `${Math.round((1 - t.y) * 100)}%`, (up) => updateText(t.id, { y: Math.round((1 - up / 100) * 1000) / 1000 })))}
 							{times(t, (patch) => updateText(t.id, patch))}
-						</div>
+						</ToolGroup>
 						{/* Everything but you, while this text shows (BehindText dim / blur). */}
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">Background</span>
+						<ToolGroup tone={2} title="Background">
 							{row("Darken", range(t.dim ?? 0, 0, BACKDROP.dim.max, 0.05, `${Math.round((t.dim ?? 0) * 100)}%`, (dim) => updateText(t.id, { dim: dim || undefined })))}
 							{row("Blur", range(t.blur ?? 0, 0, BACKDROP.blur.max, 1, `${t.blur ?? 0}px`, (blur) => updateText(t.id, { blur: blur || undefined })))}
-						</div>
+						</ToolGroup>
 				</div>
 			))}
 
@@ -629,16 +622,15 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								pick(copy);
 							} : undefined)}
 							<LayerTools
-								onMoveHere={() => moveHere(i, updateInsert)}
 								onUp={() => setInserts(moveLayer(layers.inserts, i.id, true))}
 								onDown={() => setInserts(moveLayer(layers.inserts, i.id, false))}
 								place={layerPlace(layers.inserts, i.id)}
 							/>
 							{notCutYet}
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+						<ToolGroup tone={3} title="Name">
 							{row("Name", <input value={i.name ?? ""} maxLength={BEHIND.maxName} placeholder={i.kind === "video" ? "Clip" : "Picture"} onChange={(e) => updateInsert(i.id, { name: e.target.value })} onBlur={(e) => updateInsert(i.id, { name: cleanInsertName(e.target.value) || undefined })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							<FadeSwitches item={i} onChange={(patch) => updateInsert(i.id, patch)} />
-						</div>
+						</ToolGroup>
 						{/* You, in a box that folds away (coach, 12 Nov): most of the time only the picture is changed. */}
 						<div className="rounded-lg border border-foreground/15">
 							<button onClick={() => setSpeakerOpen(!speakerOpen)} aria-expanded={speakerOpen} className="flex w-full items-center gap-1 px-2 py-1.5 text-left text-xs font-medium text-foreground/80 hover:bg-foreground/5">
@@ -663,8 +655,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								</div>
 							)}
 						</div>
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">{i.kind === "video" ? "The clip" : "The picture"}</span>
+						<ToolGroup tone={1} title={i.kind === "video" ? "The clip" : "The picture"}>
 							{i.kind === "image" && (
 								<BgMotionControl
 									motion={i.picMotion === "still" ? undefined : i.picMotion}
@@ -683,7 +674,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								{i.kind === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={i} onChange={(patch) => updateInsert(i.id, patch)} /></div>}
 								{i.kind === "video" && <ClipTrim id={i.id} file={i.file} start={i.start} end={i.end} clipFrom={i.clipFrom} total={total} onChange={(patch) => updateInsert(i.id, patch)} />}
 							{times(i, (patch) => updateInsert(i.id, patch))}
-						</div>
+						</ToolGroup>
 						</div>
 					))}
 

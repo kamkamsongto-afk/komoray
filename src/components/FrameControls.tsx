@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ChevronRight, Copy, Film, Image as ImageIcon, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameName, FRAME_SHAPES, type FrameShape, NEW_FRAME, shapePolygon } from "@/lib/frame-me";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
@@ -11,7 +11,7 @@ import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
 import { ConfirmDelete } from "./ConfirmDelete";
-import { LayerTools } from "./LayerTools";
+import { MAIN_BUTTON, mainStyle, PICKED, PLAIN_BUTTON, TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
@@ -84,12 +84,6 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 		setOpen(f.id);
 		onReveal?.(f.id, f.start);
 	};
-	const moveHere = (f: FrameMe) => {
-		const seconds = f.end - f.start;
-		const start = round(Math.max(0, Math.min(now(), total - seconds)));
-		update(f.id, { start, end: round(Math.min(total, start + seconds)) });
-		onReveal?.(f.id, start);
-	};
 	// A copy right after it, opened (coach, 14 Nov: the same in every box).
 	const duplicate = (f: FrameMe) => {
 		const copy = duplicateOf(f, total);
@@ -144,6 +138,8 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 	);
 
 	const openFrame = frames.find((f) => f.id === open);
+	const [tab, setTab] = useState<"you" | "back">("you"); // under Shape: You, or the Background (coach 22 Nov)
+	const [picking, setPicking] = useState<string | null>(null); // the frame whose pictures are open to change
 	const files = (library ?? []).filter((i) => i.media === "image" || /\.mp4$/.test(i.file));
 
 	return (
@@ -196,121 +192,171 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 									title="Name on the timeline"
 									className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium placeholder:text-foreground placeholder:opacity-100 hover:border-foreground/20 focus:border-foreground/30 focus:outline-none"
 								/>
+								{(() => {
+									const place = layerPlace(frames, f.id);
+									return (
+										<>
+											<span className="shrink-0 text-[11px] text-foreground/60" title="Its layer among the things showing with it">
+												{place ? `${place.at}/${place.of}` : "1/1"}
+											</span>
+											<button onClick={() => onChange(moveLayer(frames, f.id, true))} disabled={!place || place.at === place.of} title={place ? "Bring it in front of the one over it" : "Nothing else shows at the same time"} aria-label="Bring forward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+												<ArrowUp className="h-3.5 w-3.5" aria-hidden />
+											</button>
+											<button onClick={() => onChange(moveLayer(frames, f.id, false))} disabled={!place || place.at === 1} title={place ? "Send it behind the one under it" : "Nothing else shows at the same time"} aria-label="Send backward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+												<ArrowDown className="h-3.5 w-3.5" aria-hidden />
+											</button>
+										</>
+									);
+								})()}
 								<button onClick={() => duplicate(f)} disabled={frames.length >= FRAME.maxItems} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
 									<Copy className="h-3.5 w-3.5" aria-hidden />
 								</button>
 								{trash(f)}
 							</div>
 						</div>
-						<LayerTools onMoveHere={() => moveHere(f)} onUp={() => onChange(moveLayer(frames, f.id, true))} onDown={() => onChange(moveLayer(frames, f.id, false))} place={layerPlace(frames, f.id)} />
-						<p className="text-xs text-foreground/60">Pause the video to drag the frame, its corner, or the dot in its middle that moves you inside it.</p>
+						<ToolGroup tone={1} title="When">
+							{row(ON_TIMELINE, <TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />)}
+							<FadeSwitches item={f} onChange={(patch) => update(f.id, patch)} />
+						</ToolGroup>
 
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">Shape</span>
+						<ToolGroup tone={2} title="Shape">
 							{/* With the playhead moved off this frame, a shape is a new frame there (coach, 17 Nov: a circle at 3:00
 							    open, the playhead at 4:00, Heart picked: the circle turned into the heart, so the circle was gone). */}
-							{shapes(f.shape, (shape) => {
-								const at = now();
-								if ((at < f.start || at > f.end) && frames.length < FRAME.maxItems) add(shape);
-								else update(f.id, { shape });
-							})}
-							<p className="text-[11px] text-foreground/50">Changes this frame. With the video moved off it, a shape adds a new frame there.</p>
-							{row(
-								ON_TIMELINE,
-								<TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />,
-							)}
-							<FadeSwitches item={f} onChange={(patch) => update(f.id, patch)} />
+							<div title="With the video moved off this frame, a shape adds a new frame there">
+								{shapes(f.shape, (shape) => {
+									const at = now();
+									if ((at < f.start || at > f.end) && frames.length < FRAME.maxItems) add(shape);
+									else update(f.id, { shape });
+								})}
+							</div>
+							<span className="text-[11px] text-foreground/60">Pause, then drag the frame or its corner</span>
 							{row("Size", range(f.size, FRAME.size.min, FRAME.size.max, 0.01, percent(f.size), (size) => update(f.id, { size })))}
 							{row("Left / right", range(f.x, FRAME.move.min, FRAME.move.max, 0.005, percent(f.x), (x) => update(f.id, { x })))}
 							{row("Up / down", range(f.y, FRAME.move.min, FRAME.move.max, 0.005, percent(f.y), (y) => update(f.id, { y })))}
-						</div>
+						</ToolGroup>
 
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">You inside the frame</span>
-							{row("Zoom", range(f.zoom, FRAME.zoom.min, FRAME.zoom.max, 0.01, percent(f.zoom), (zoom) => update(f.id, { zoom })))}
-							{/* meX / meY: the point of you in the frame's middle. Sliding right moves you right, so it goes down. */}
-							{row("Left / right", range(1 - f.meX, 0, 1, 0.005, percent(1 - f.meX), (v) => update(f.id, { meX: Math.round((1 - v) * 1000) / 1000 })))}
-							{row("Up / down", range(1 - f.meY, 0, 1, 0.005, percent(1 - f.meY), (v) => update(f.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
-							<button onClick={() => update(f.id, { meX: FRAME.me.x, meY: FRAME.me.y, zoom: f.size })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
-								Center me
-							</button>
-						</div>
-
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">Border</span>
-							{row("Width", range(f.border, 0, FRAME.border.max, 1, `${f.border}px`, (border) => update(f.id, { border })))}
-							{f.border > 0 && row("Color", swatches(BORDER_COLORS, f.borderColor, (borderColor) => update(f.id, { borderColor }), "Border color"))}
-						</div>
-
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">Background</span>
-							<div role="radiogroup" aria-label="Background" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
-								{BACKS.map(([id, name]) => (
-									<button
-										key={id}
-										role="radio"
-										aria-checked={f.back === id}
-										onClick={() => {
-											// A picture or clip: the one it had, else the project's newest.
-											if (id !== "file" || f.file) update(f.id, { back: id });
-											else if (files[0]) pickFile(f, files[0]);
-										}}
-										disabled={id === "file" && !f.file && !files.length}
-										title={id === "file" && !f.file && !files.length ? "Add a picture or clip in My files first" : undefined}
-										className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap disabled:opacity-40 ${f.back === id ? "bg-blue-400/15 font-medium ring-1 ring-inset ring-blue-400" : "text-foreground/70 hover:text-foreground"}`}
-									>
-										{name}
-									</button>
-								))}
-							</div>
-							{f.back === "blur" && (
+						<TabGroup
+							tone={3}
+							value={tab}
+							onChange={setTab}
+							tabs={[
+								{ id: "you", label: "You", icon: <User className="h-5 w-5" aria-hidden /> },
+								{ id: "back", label: "Background", icon: <ImageIcon className="h-5 w-5" aria-hidden /> },
+							]}
+						>
+							{tab === "you" && (
 								<>
-									{row("Blur", range(f.blur, 0, FRAME.blur.max, 1, `${f.blur}px`, (blur) => update(f.id, { blur })))}
-									{row("Darken", range(f.dim, 0, FRAME.dim.max, 0.05, percent(f.dim), (dim) => update(f.id, { dim })))}
+									<span className="text-[11px] text-foreground/60">Pause, then drag the dot in the middle of the frame</span>
+									{row("Zoom", range(f.zoom, FRAME.zoom.min, FRAME.zoom.max, 0.01, percent(f.zoom), (zoom) => update(f.id, { zoom })))}
+									{/* meX / meY: the point of you in the frame's middle. Sliding right moves you right, so it goes down. */}
+									{row("Left / right", range(1 - f.meX, 0, 1, 0.005, percent(1 - f.meX), (v) => update(f.id, { meX: Math.round((1 - v) * 1000) / 1000 })))}
+									{row("Up / down", range(1 - f.meY, 0, 1, 0.005, percent(1 - f.meY), (v) => update(f.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
+									<button onClick={() => update(f.id, { meX: FRAME.me.x, meY: FRAME.me.y, zoom: f.size })} className={`self-start ${PLAIN_BUTTON}`}>
+										Center me
+									</button>
 								</>
 							)}
-							{f.back === "color" && row("Color", swatches(BACK_COLORS, f.backColor, (backColor) => update(f.id, { backColor }), "Background color"))}
-							{f.back === "file" && (
-								<div className="grid grid-cols-4 gap-1">
-									{files.map((item) => (
-										<button
-											key={item.file}
-											onClick={() => pickFile(f, item)}
-											title={item.name}
-											aria-pressed={f.file === item.file}
-											className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${f.file === item.file ? "border-blue-600" : "border-transparent hover:border-foreground/30"}`}
-										>
-											{item.media === "video" ? (
-												<>
-													<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-													<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
-												</>
-											) : (
-												// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-												<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
-											)}
-										</button>
-									))}
-								</div>
+							{tab === "back" && (
+								<>
+									<div role="radiogroup" aria-label="Background" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
+										{BACKS.map(([id, name]) => (
+											<button
+												key={id}
+												role="radio"
+												aria-checked={f.back === id}
+												onClick={() => {
+													// A picture or clip: the one it had, else the project's newest.
+													if (id !== "file" || f.file) update(f.id, { back: id });
+													else if (files[0]) pickFile(f, files[0]);
+												}}
+												disabled={id === "file" && !f.file && !files.length}
+												title={id === "file" && !f.file && !files.length ? "Add a picture or clip in My files first" : undefined}
+												className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap disabled:opacity-40 ${f.back === id ? PICKED : "text-foreground/70 hover:text-foreground"}`}
+											>
+												{name}
+											</button>
+										))}
+									</div>
+									{f.back === "blur" && (
+										<>
+											{row("Blur", range(f.blur, 0, FRAME.blur.max, 1, `${f.blur}px`, (blur) => update(f.id, { blur })))}
+											{row("Darken", range(f.dim, 0, FRAME.dim.max, 0.05, percent(f.dim), (dim) => update(f.id, { dim })))}
+										</>
+									)}
+									{f.back === "color" && row("Color", swatches(BACK_COLORS, f.backColor, (backColor) => update(f.id, { backColor }), "Background color"))}
+									{f.back === "file" && f.file && (
+										// Picked: one row (its picture, its name, Change); the pictures to pick from open only on Change (coach 22 Nov).
+										<div className="flex items-center gap-2">
+											<span className="relative h-10 w-[22px] shrink-0 overflow-hidden rounded border border-foreground/20 bg-black">
+												{f.media === "video" ? (
+													<video src={projectFileSrc(f.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+												) : (
+													// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+													<img src={projectFileSrc(f.file)} alt="" className="h-full w-full object-cover" />
+												)}
+											</span>
+											<span className="min-w-0 flex-1 truncate text-xs">{files.find((i) => i.file === f.file)?.name ?? (f.media === "video" ? "Clip" : "Picture")}</span>
+											<button onClick={() => setPicking(picking === f.id ? null : f.id)} aria-expanded={picking === f.id} className={MAIN_BUTTON} style={mainStyle(3)}>
+												{picking === f.id ? "Done" : "Change"}
+											</button>
+										</div>
+									)}
+									{f.back === "file" && (!f.file || picking === f.id) && (
+										<div className="grid grid-cols-4 gap-1">
+											{files.map((item) => (
+												<button
+													key={item.file}
+													onClick={() => {
+														pickFile(f, item);
+														setPicking(null);
+													}}
+													title={item.name}
+													aria-pressed={f.file === item.file}
+													className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${f.file === item.file ? "border-[#4D8DBA]" : "border-transparent hover:border-foreground/30"}`}
+												>
+													{item.media === "video" ? (
+														<>
+															<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+															<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
+														</>
+													) : (
+														// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+														<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
+													)}
+												</button>
+											))}
+										</div>
+									)}
+									{f.back === "file" && f.file && (
+										<BgMotionControl
+											motion={f.backMotion}
+											amount={f.backAmount}
+											speed={f.backSpeed}
+											onMotion={(backMotion) => update(f.id, { backMotion })}
+											onAmount={(backAmount) => update(f.id, { backAmount })}
+											onSpeed={(backSpeed) => update(f.id, { backSpeed })}
+										/>
+									)}
+									{f.back === "file" && f.media === "video" && (
+										<div className="flex items-center gap-2 text-xs text-foreground/70">
+											<span className="w-16 shrink-0">Sound</span>
+											<ClipSound sound={f} onChange={(patch) => update(f.id, patch)} />
+										</div>
+									)}
+									{f.back === "file" && f.media === "video" && f.file && <ClipTrim id={f.id} file={f.file} start={f.start} end={f.end} clipFrom={f.clipFrom} total={total} onChange={(patch) => update(f.id, patch)} />}
+									{(f.back === "file" || !files.length) && (
+										<span className="flex items-center gap-1 text-[11px] text-foreground/55" title="Add your pictures and clips in My files, then pick one here">
+											<ImageIcon className="h-3 w-3 shrink-0" aria-hidden /> Pictures and clips: My files{library === null && " · Loading…"}
+										</span>
+									)}
+								</>
 							)}
-							{f.back === "file" && f.file && (
-								<BgMotionControl
-									motion={f.backMotion}
-									amount={f.backAmount}
-									speed={f.backSpeed}
-									onMotion={(backMotion) => update(f.id, { backMotion })}
-									onAmount={(backAmount) => update(f.id, { backAmount })}
-									onSpeed={(backSpeed) => update(f.id, { backSpeed })}
-								/>
-							)}
-							{f.back === "file" && f.media === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={f} onChange={(patch) => update(f.id, patch)} /></div>}
-							{f.back === "file" && f.media === "video" && f.file && <ClipTrim id={f.id} file={f.file} start={f.start} end={f.end} clipFrom={f.clipFrom} total={total} onChange={(patch) => update(f.id, patch)} />}
-							{(f.back === "file" || !files.length) && (
-								<p className="flex items-center gap-1 text-xs text-foreground/60">
-									<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Add your pictures and clips in My files, then pick one here.{library === null && " Loading…"}
-								</p>
-							)}
-						</div>
+						</TabGroup>
+
+						<ToolGroup tone={1} title="Border">
+							{row("Width", range(f.border, 0, FRAME.border.max, 1, `${f.border}px`, (border) => update(f.id, { border })))}
+							{f.border > 0 && row("Color", swatches(BORDER_COLORS, f.borderColor, (borderColor) => update(f.id, { borderColor }), "Border color"))}
+						</ToolGroup>
 					</div>
 				))}
 
