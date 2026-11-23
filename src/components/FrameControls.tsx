@@ -6,6 +6,7 @@ import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameN
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
+import { startMotion } from "@/lib/bg-motion";
 import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
@@ -92,8 +93,9 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 	};
 	const remove = (f: FrameMe) => setRemoving({ name: frameName(f), remove: () => onChange(frames.filter((x) => x.id !== f.id)) });
 
-	const row = (label: React.ReactNode, control: React.ReactNode) => (
-		<label className="flex items-center gap-2 text-xs text-foreground/70">
+	const row = (label: React.ReactNode, control: React.ReactNode, middle?: () => void) => (
+		// Double-click the name: back to the middle (coach 23 Nov).
+		<label onDoubleClick={middle} title={middle ? "Double-click the name: back to the middle" : undefined} className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
 			{control}
 		</label>
@@ -231,8 +233,8 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 							</div>
 							<span className="text-[11px] text-foreground/60">Pause, then drag the frame or its corner</span>
 							{row("Size", range(f.size, FRAME.size.min, FRAME.size.max, 0.01, percent(f.size), (size) => update(f.id, { size })))}
-							{row("Left / right", range(f.x, FRAME.move.min, FRAME.move.max, 0.005, percent(f.x), (x) => update(f.id, { x })))}
-							{row("Up / down", range(f.y, FRAME.move.min, FRAME.move.max, 0.005, percent(f.y), (y) => update(f.id, { y })))}
+							{row("Left / right", range(f.x, FRAME.move.min, FRAME.move.max, 0.005, percent(f.x), (x) => update(f.id, { x })), () => update(f.id, { x: 0.5 }))}
+							{row("Up / down", range(f.y, FRAME.move.min, FRAME.move.max, 0.005, percent(f.y), (y) => update(f.id, { y })), () => update(f.id, { y: 0.42 }))}
 						</ToolGroup>
 
 						<TabGroup
@@ -249,8 +251,8 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 									<span className="text-[11px] text-foreground/60">Pause, then drag the dot in the middle of the frame</span>
 									{row("Zoom", range(f.zoom, FRAME.zoom.min, FRAME.zoom.max, 0.01, percent(f.zoom), (zoom) => update(f.id, { zoom })))}
 									{/* meX / meY: the point of you in the frame's middle. Sliding right moves you right, so it goes down. */}
-									{row("Left / right", range(1 - f.meX, 1 - FRAME.meRange.max, 1 - FRAME.meRange.min, 0.005, percent(1 - f.meX), (v) => update(f.id, { meX: Math.round((1 - v) * 1000) / 1000 })))}
-									{row("Up / down", range(1 - f.meY, 1 - FRAME.meRange.max, 1 - FRAME.meRange.min, 0.005, percent(1 - f.meY), (v) => update(f.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
+									{row("Left / right", range(1 - f.meX, 1 - FRAME.meRange.max, 1 - FRAME.meRange.min, 0.005, percent(1 - f.meX), (v) => update(f.id, { meX: Math.round((1 - v) * 1000) / 1000 })), () => update(f.id, { meX: FRAME.me.x }))}
+									{row("Up / down", range(1 - f.meY, 1 - FRAME.meRange.max, 1 - FRAME.meRange.min, 0.005, percent(1 - f.meY), (v) => update(f.id, { meY: Math.round((1 - v) * 1000) / 1000 })), () => update(f.id, { meY: FRAME.me.y }))}
 									<button onClick={() => update(f.id, { meX: FRAME.me.x, meY: FRAME.me.y, zoom: f.size })} className={`self-start ${PLAIN_BUTTON}`}>
 										Center me
 									</button>
@@ -284,6 +286,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 										</>
 									)}
 									{f.back === "color" && row("Color", swatches(BACK_COLORS, f.backColor, (backColor) => update(f.id, { backColor }), "Background color"))}
+									<div className="relative flex flex-col gap-1.5">
 									{f.back === "file" && f.file && (
 										// Picked: one row (its picture, its name, Change); the pictures to pick from open only on Change (coach 22 Nov).
 										<div className="flex items-center gap-2">
@@ -302,7 +305,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 										</div>
 									)}
 									{f.back === "file" && (!f.file || picking === f.id) && (
-										<div className="grid grid-cols-4 gap-1">
+										<div className={f.file ? "absolute left-0 right-0 top-full z-40 mt-1 grid max-h-72 grid-cols-4 gap-1 overflow-y-auto rounded-lg border border-foreground/20 bg-background p-2 shadow-xl" : "grid grid-cols-4 gap-1"}>
 											{files.map((item) => (
 												<button
 													key={item.file}
@@ -327,12 +330,13 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 											))}
 										</div>
 									)}
+									</div>
 									{f.back === "file" && f.file && (
 										<BgMotionControl
 											motion={f.backMotion}
 											amount={f.backAmount}
 											speed={f.backSpeed}
-											onMotion={(backMotion) => update(f.id, { backMotion })}
+											onMotion={(backMotion) => update(f.id, { backMotion, backSpeed: startMotion(backMotion, f.backSpeed) })}
 											onAmount={(backAmount) => update(f.id, { backAmount })}
 											onSpeed={(backSpeed) => update(f.id, { backSpeed })}
 										/>

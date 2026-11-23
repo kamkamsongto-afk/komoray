@@ -8,6 +8,7 @@ import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-sty
 import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
 import { Confirm, ConfirmDelete } from "./ConfirmDelete";
+import { startMotion } from "@/lib/bg-motion";
 import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
@@ -661,7 +662,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									motion={i.picMotion === "still" ? undefined : i.picMotion}
 									amount={i.picZoom}
 									speed={i.picSpeed}
-									onMotion={(m) => updateInsert(i.id, { picMotion: m ?? "still" })}
+									onMotion={(m) => updateInsert(i.id, { picMotion: m ?? "still", picSpeed: startMotion(m, i.picSpeed) })}
 									onAmount={(picZoom) => updateInsert(i.id, { picZoom })}
 									onSpeed={(picSpeed) => updateInsert(i.id, { picSpeed })}
 								/>

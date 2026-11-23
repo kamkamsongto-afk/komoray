@@ -1,6 +1,6 @@
 "use client";
 
-import { BG_MOTION, BG_MOTIONS, type BgMotion } from "@/lib/bg-motion";
+import { BG_MOTION, BG_MOTIONS, BG_SPEED_LEGACY, type BgMotion } from "@/lib/bg-motion";
 
 // One control for a background picture or clip that moves while it shows (coach 23 Nov): pick one way (Still, Zoom in / out,
 // Pan left / right, Tilt up / down), then Amount and Speed on sliders. Used by Layout, Frame Me and Cutout, so they all look
@@ -17,7 +17,7 @@ type Props = {
 
 export function BgMotionControl({ motion, amount, speed, onMotion, onAmount, onSpeed, tone = "#4D8DBA" }: Props) {
 	const a = amount ?? BG_MOTION.amount.start;
-	const s = speed ?? BG_MOTION.speed.start;
+	const s = speed ?? BG_SPEED_LEGACY;
 	const slider = (label: string, value: number, min: number, max: number, step: number, show: string, set: (n: number) => void) => (
 		<label className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
