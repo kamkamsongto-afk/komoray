@@ -60,12 +60,6 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		onChange([...banners, banner]);
 		onReveal?.(banner.id, banner.start);
 	};
-	function moveHere(b: Banner) {
-		const seconds = b.end - b.start;
-		const start = round(Math.max(0, Math.min(now(), total - seconds)));
-		update(b.id, { start, end: round(Math.min(total, start + seconds)) });
-		onReveal?.(b.id, start);
-	}
 	// The banner waiting for "yes, delete it" (coach, 11 Nov: the × is small and easy to hit).
 	const [removing, setRemoving] = useState<Banner | null>(null);
 
@@ -376,7 +370,6 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					</div>
 					{open === b.id && (
 						<LayerTools
-							onMoveHere={() => moveHere(b)}
 							onUp={() => onChange(moveLayer(banners, b.id, true, sameBannerPass))}
 							onDown={() => onChange(moveLayer(banners, b.id, false, sameBannerPass))}
 							place={layerPlace(banners, b.id, sameBannerPass)}
