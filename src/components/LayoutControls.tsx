@@ -7,7 +7,7 @@ import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type L
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { knownLibrary, LIBRARY_ACCEPT, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
-import { PIC_MOTION } from "@/lib/behind";
+import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { ConfirmDelete } from "./ConfirmDelete";
@@ -357,18 +357,14 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								// so sliding right moves it right and the number goes down. Drag it on the video too.
 								<>
 									{row("Size", range(l.fileZoom ?? 1, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 0.01, percent(l.fileZoom ?? 1), (fileZoom) => update(l.id, { fileZoom })))}
-									{/* Zoom in / Zoom out while it shows (coach 20 Nov, as Cutout's Movement): layoutFileZoom in lib/layout.ts. */}
-									{row(
-										"Movement",
-										<span className="flex gap-1 text-xs">
-											{PIC_MOTION.map(([id, name]) => (
-												<button key={id} onClick={() => update(l.id, { fileMotion: id === "still" ? undefined : id })} className={`rounded border px-1.5 py-0.5 ${(l.fileMotion ?? "still") === id ? "border-[#4D8DBA] bg-[#4D8DBA]/20" : "border-foreground/20"}`}>
-													{name}
-												</button>
-											))}
-										</span>,
-									)}
-									{l.fileMotion && row("Speed", range(l.fileMotionZoom ?? LAYOUT.motionZoom.start, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, 0.05, percent(l.fileMotionZoom ?? LAYOUT.motionZoom.start), (fileMotionZoom) => update(l.id, { fileMotionZoom })))}
+									<BgMotionControl
+										motion={l.fileMotion}
+										amount={l.fileMotionZoom}
+										speed={l.fileMotionSpeed}
+										onMotion={(fileMotion) => update(l.id, { fileMotion })}
+										onAmount={(fileMotionZoom) => update(l.id, { fileMotionZoom })}
+										onSpeed={(fileMotionSpeed) => update(l.id, { fileMotionSpeed })}
+									/>
 									{row("Left / right", range(1 - (l.fileX ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileX ?? 0.5)), (v) => update(l.id, { fileX: Math.round((1 - v) * 1000) / 1000 })))}
 									{row("Up / down", range(1 - (l.fileY ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileY ?? 0.5)), (v) => update(l.id, { fileY: Math.round((1 - v) * 1000) / 1000 })))}
 									<span className="text-[11px] text-foreground/55" title="It always fills its part, so it moves only where it is bigger than the part: make it bigger to move it both ways.">

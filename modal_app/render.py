@@ -814,31 +814,48 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
     )
 
 
-def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
-    """ffmpeg: a picture growing or shrinking around the screen's middle while it shows. Same as pictureZoom in behind.ts.
-    Scale and crop only move in whole pixels, which shakes a slow zoom, so `perspective` does it (smooth_filter)."""
-    motion = ins.get("picMotion")
-    if ins.get("kind") == "video" or motion not in ("in", "out"):
+BG_AMOUNT = (0.05, 1.0)  # BG_MOTION.amount in src/lib/bg-motion.ts
+BG_SPEED = (0.5, 3.0)  # BG_MOTION.speed
+BG_MOTIONS = ("in", "out", "panLeft", "panRight", "tiltUp", "tiltDown")
+
+
+def bg_motion_filter(motion: str | None, amount: float, speed: float, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a picture or clip that zooms in or out, pans left / right or tilts up / down while it shows, over `size` (coach 23 Nov).
+    Same maths as bgWindow in src/lib/bg-motion.ts: the picture is looked at through a window of 1/s of it, s = 1 + amount (a pan or
+    tilt: all the time; zoom: growing or shrinking), slid by the share p of what is left over (p = time shown x speed, at most 1).
+    Scale and crop only move in whole pixels, which shakes a slow move, so `perspective` places the window (smooth_filter). The
+    window's corners are the picture's own points that land on the output's corners. Returns "" for no motion."""
+    if motion not in BG_MOTIONS:
         return ""
     W, H = size
-    p = f"clip((in-1)/{seconds * FPS:.3f},0,1)"
-    amount = float(ins.get("picZoom", INSERT_ZOOM))
-    z = f"(1+{amount:.3f}*{p})" if motion == "in" else f"(1+{amount:.3f}*(1-{p}))"
-    x, y = f"({W}/2*(1-1/{z}))", f"({H}/2*(1-1/{z}))"
+    a = min(BG_AMOUNT[1], max(BG_AMOUNT[0], float(amount)))
+    speed = min(BG_SPEED[1], max(BG_SPEED[0], float(speed)))
+    p = f"clip((in-1)/{seconds * FPS:.3f}*{speed:.3f},0,1)"
+    s = f"(1+{a:.3f}*{p})" if motion == "in" else f"(1+{a:.3f}*(1-{p}))" if motion == "out" else f"{1 + a:.4f}"
+    room = f"(1-1/{s})"
+    fx = p if motion == "panRight" else f"(1-{p})" if motion == "panLeft" else "0.5"
+    fy = p if motion == "tiltDown" else f"(1-{p})" if motion == "tiltUp" else "0.5"
+    x, y = f"({W}*{room}*{fx})", f"({H}*{room}*{fy})"
+    w, h = f"({W}/{s})", f"({H}/{s})"
     return (
-        f"format=yuva420p,perspective=x0='{x}':y0='{y}':x1='{W}-{x}':y1='{y}':x2='{x}':y2='{H}-{y}':x3='{W}-{x}':y3='{H}-{y}'"
+        f"format=yuva420p,perspective=x0='{x}':y0='{y}':x1='{x}+{w}':y1='{y}':x2='{x}':y2='{y}+{h}':x3='{x}+{w}':y3='{y}+{h}'"
         ":interpolation=linear:eval=frame,"
     )
 
 
-def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
-    """ffmpeg: a Layout's picture or clip growing (fileMotion "in") or shrinking ("out") around its part's middle while
-    the layout shows, on top of its Size (coach 20 Nov). Same as layoutFileZoom in layout.ts; done as picture_zoom does it."""
-    motion = l.get("fileMotion")
-    if not l.get("file") or motion not in ("in", "out"):
+def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a Cutout picture's zoom, pan or tilt while it shows, over the whole screen (pictures only). Same as pictureWindow in behind.ts."""
+    if ins.get("kind") == "video":
         return ""
-    amount = min(0.6, max(0.05, float(l.get("fileMotionZoom") or INSERT_ZOOM)))  # LAYOUT.motionZoom in layout.ts
-    return picture_zoom({"picMotion": motion, "picZoom": amount}, seconds, size)
+    return bg_motion_filter(ins.get("picMotion"), ins.get("picZoom") or INSERT_ZOOM, ins.get("picSpeed") or 1.0, seconds, size)
+
+
+def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a Layout's picture or clip zooming, panning or tilting over its part while the layout shows (coach 20 and 23 Nov).
+    Same as layoutFileWindow in layout.ts."""
+    if not l.get("file"):
+        return ""
+    return bg_motion_filter(l.get("fileMotion"), l.get("fileMotionZoom") or INSERT_ZOOM, l.get("fileMotionSpeed") or 1.0, seconds, size)
 
 
 def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: dict, inputs: dict) -> str:
@@ -1051,7 +1068,7 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
             parts.append(
                 f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
-                f"format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
+                f"{bg_motion_filter(f.get('backMotion'), f.get('backAmount') or INSERT_ZOOM, f.get('backSpeed') or 1.0, d, size)}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
             )
             parts.append(f"[fmb{j}]drawbox=c=black:t=fill[fbk{j}]")
             parts.append(f"[fbk{j}][fbf{j}]overlay=eof_action=repeat[fbg{j}]")

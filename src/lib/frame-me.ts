@@ -6,6 +6,7 @@
 import { readClipSound } from "./clip-sound";
 import { type Fades, fadeLevel, readFades } from "./fades";
 import { MY_REF } from "./my-files";
+import { BG_MOTION, type BgMotion, bgWindow, isBgMotion } from "./bg-motion";
 
 export type FrameShape = "circle" | "oval" | "square" | "rounded" | "triangle" | "star" | "heart";
 export type FrameBack = "blur" | "color" | "file";
@@ -46,6 +47,10 @@ export type FrameMe = {
 	volume?: number; // a clip background's own sound (lib/clip-sound.ts)
 	muted?: boolean;
 	clipFrom?: number; // a clip background: the second of it that plays first (Trim, lib/clip-sound.ts). Added 19 Nov
+	// back "file": the picture or clip zooms, pans or tilts slowly while the frame shows (lib/bg-motion.ts). Amount, Speed. Added 23 Nov
+	backMotion?: BgMotion;
+	backAmount?: number;
+	backSpeed?: number;
 	name?: string;
 } & Fades; // Fade in / Fade out switches (lib/fades.ts). Added 20 Nov
 
@@ -93,6 +98,9 @@ export function frameShown(f: FrameMe, t: number) {
 	const fade = Math.min(FRAME.fade, (f.end - f.start) / 2);
 	return fadeLevel(f, t, fade);
 }
+
+// The window the background picture or clip is looked through at final-video second t. Same as frame_filters in render.py.
+export const frameBackWindow = (f: FrameMe, t: number) => (f.back === "file" && f.file && f.backMotion ? bgWindow(f.backMotion, f.backAmount, f.backSpeed, t, f.start, f.end) : bgWindow(undefined, undefined, undefined, t, f.start, f.end));
 
 export const frameAt = (frames: FrameMe[] | undefined, t: number) => frames?.findLast((f) => t >= f.start && t < f.end);
 
@@ -204,6 +212,7 @@ export function readFrames(value: unknown): FrameMe[] | null {
 			blur: Math.round(num(f.blur, 0, FRAME.blur.max, FRAME.blur.start)),
 			...(file && { file, media: /\.(mp4|mov)$/.test(file) ? ("video" as const) : ("image" as const) }),
 			...readClipSound(f, Boolean(file && /\.(mp4|mov)$/.test(file))),
+			...(file && isBgMotion(f.backMotion) && { backMotion: f.backMotion, backAmount: round(num(f.backAmount, BG_MOTION.amount.min, BG_MOTION.amount.max, BG_MOTION.amount.start), 100), ...(f.backSpeed !== undefined && { backSpeed: round(num(f.backSpeed, BG_MOTION.speed.min, BG_MOTION.speed.max, BG_MOTION.speed.start), 100) }) }),
 			...readFades(f),
 			...(typeof f.name === "string" && f.name.trim() && { name: f.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});

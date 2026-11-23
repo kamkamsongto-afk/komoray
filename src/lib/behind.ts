@@ -4,6 +4,7 @@
 // is worked out frame by frame with the same formulas on both sides (behindMotion = behind_motion).
 // The speaker is cut out by modal_app/cutout.py only for the windows these layers cover (cutoutWindows).
 import { FONTS, type FontId } from "./subtitle-style";
+import { BG_MOTION, BG_MOTIONS, type BgMotion, bgWindow, isBgMotion } from "./bg-motion";
 import { FPS, type Segment } from "./timeline";
 import type { Window } from "./cutout";
 import { readClipSound } from "./clip-sound";
@@ -21,8 +22,8 @@ export const BEHIND_FX: Record<BehindFx, string> = {
 	runRight: "Run left to right",
 };
 export type BehindSpeed = "slow" | "normal" | "fast";
-export type PicMotion = "still" | "in" | "out";
-export const PIC_MOTION: [PicMotion, string][] = [["still", "Still"], ["in", "Zoom in"], ["out", "Zoom out"]];
+export type PicMotion = "still" | BgMotion;
+export const PIC_MOTION: [PicMotion, string][] = BG_MOTIONS; // zoom, pan and tilt: lib/bg-motion.ts
 // Running text: px per second. The other kinds: how long their arrival takes, 1 = normal.
 export const RUN_SPEED: Record<BehindSpeed, number> = { slow: 150, normal: 300, fast: 600 };
 export const ARRIVE_TIME: Record<BehindSpeed, number> = { slow: 1.6, normal: 1, fast: 0.6 };
@@ -79,8 +80,9 @@ export type Insert = {
 	// Added 11 Nov, read with ??. seeThrough: the picture has clear parts, so the normal video shows through them. Only the
 	// real speaker can be there (nothing else was filmed), so the speaker stays where they are, in front of it or (hidden) behind it.
 	seeThrough?: boolean;
-	picMotion?: PicMotion; // pictures only: grows or shrinks slowly while it shows
-	picZoom?: number; // how much bigger it gets in the time it shows: more is a faster zoom. Older videos have none = INSERT.zoom.start
+	picMotion?: PicMotion; // pictures only: zooms, pans or tilts slowly while it shows (lib/bg-motion.ts)
+	picZoom?: number; // Amount: how much bigger it gets (a pan or tilt is blown up by it). Older videos have none = INSERT.zoom.start
+	picSpeed?: number; // Speed (BG_MOTION.speed): 1 = takes all the time it shows. Added 23 Nov, none = 1
 	volume?: number; // clips only: how loud its own sound is, none = silent (lib/clip-sound.ts). Added 12 Nov
 	muted?: boolean; // clips only: Mute ticked (keeps volume for when it is untied)
 	clipFrom?: number; // clips only: the second of the clip it plays from (Trim, lib/clip-sound.ts). Added 19 Nov
@@ -94,7 +96,7 @@ export const BEHIND = { size: { min: 80, max: 1600, start: 420 }, stroke: { max:
 // 0 since 10 Nov: Yoshi saw the fade eat the shoulders (VID20261028143211 at 0:23) and wants a sharp cut, with a
 // slider for anyone who likes it soft. The price of 0: if the camera cut a shoulder off at the frame's side, it
 // ends in a straight line (7 Nov test). Same as INSERT_EDGE_FADE in render.py.
-export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0, soft: { max: 0.3 }, zoom: { start: 0.2, min: 0.05, max: 0.6 }, maxBytes: { image: 10_000_000, video: 150_000_000 } };
+export const INSERT = { scale: { min: 0.25, max: 1.5, start: 0.5 }, lift: { max: 0.5 }, picture: { scale: { min: 0.25, max: 2.5 }, move: 0.6, rotate: 180 }, fade: 0.25, edgeFade: 0, soft: { max: 0.3 }, zoom: BG_MOTION.amount, maxBytes: { image: 10_000_000, video: 150_000_000 } };
 // Running text: the words, again and again, so the screen stays full for as long as it runs. Counted the
 // same way here and in render.py (run_repeats), so both draw the same string.
 export const RUN_GAP = "   •   ";
@@ -179,12 +181,11 @@ export function picturePlace(i: Insert, ratio: number, frame: number) {
 		transform: `translate(-50%, -50%) rotate(${i.picRotate ?? 0}deg) scale(${i.picScale ?? 1})`,
 	};
 }
-// How much bigger the picture is at second t. Grows around the screen's middle, on top of Size, Left / right and Rotate.
-// Same as picture_zoom in render.py.
-export function pictureZoom(i: Insert, t: number) {
-	if (i.kind === "video" || !i.picMotion || i.picMotion === "still") return 1;
-	const p = Math.min(1, Math.max(0, (t - i.start) / (i.end - i.start)));
-	return 1 + (i.picZoom ?? INSERT.zoom.start) * (i.picMotion === "in" ? p : 1 - p);
+// The window the picture is looked through at second t (zoom, pan, tilt), over the whole screen, on top of Size, Left / right and
+// Rotate. Same as picture_zoom in render.py.
+export function pictureWindow(i: Insert, t: number) {
+	if (i.kind === "video" || !i.picMotion || i.picMotion === "still") return bgWindow(undefined, undefined, undefined, t, i.start, i.end);
+	return bgWindow(i.picMotion, i.picZoom, i.picSpeed, t, i.start, i.end);
 }
 export const insertName = (i: Insert) => i.name || (i.kind === "video" ? "Clip" : "Picture");
 export const cleanInsertName = (name: unknown) => String(name ?? "").replace(/[\n\r\t]/g, " ").trim().slice(0, BEHIND.maxName);
@@ -296,8 +297,9 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			picY: round(num(i.picY, -INSERT.picture.move, INSERT.picture.move, 0), 1000),
 			picRotate: Math.round(num(i.picRotate, -INSERT.picture.rotate, INSERT.picture.rotate, 0)),
 			seeThrough: i.seeThrough === true && !/\.(mp4|mov)$/.test(i.file),
-			picMotion: i.picMotion === "in" || i.picMotion === "out" ? i.picMotion : "still",
+			picMotion: isBgMotion(i.picMotion) ? i.picMotion : "still",
 			picZoom: round(num(i.picZoom, INSERT.zoom.min, INSERT.zoom.max, INSERT.zoom.start)),
+			...(i.picSpeed !== undefined && { picSpeed: round(num(i.picSpeed, BG_MOTION.speed.min, BG_MOTION.speed.max, BG_MOTION.speed.start), 100) }),
 			...readClipSound(i, /\.(mp4|mov)$/.test(i.file)),
 			...readFades(i),
 		});

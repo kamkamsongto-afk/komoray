@@ -4,10 +4,11 @@ import { Pause, Play } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useContext, useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
-import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
+import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, speakerTransform } from "@/lib/behind";
+import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
-import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
-import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
+import { type FrameMe, FRAME, frameAt, frameBackWindow, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
+import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileWindow, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import { logoPictureName, logoPictureUrl } from "@/lib/logo";
 import { myFileUrl } from "@/lib/my-files";
@@ -669,7 +670,7 @@ export function PlayerFrame({
 					const fill: CSSProperties = moved && ratio ? { position: "absolute", maxWidth: "none", objectFit: "fill", ...picturePlace(i, ratio, W / H) } : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 					return (
 						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
-							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
+							<div className="absolute inset-0" style={bgStyle(pictureWindow(i, outTime))}>
 								{i.kind === "video" ? (
 									<InsertClip src={src} at={Math.max(0, outTime - i.start)} from={i.clipFrom} playing={playing && outTime >= i.start} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
 								) : (
@@ -743,13 +744,16 @@ export function PlayerFrame({
 		return (
 			<div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ background: f.back === "color" ? f.backColor : "#000" }}>
 				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} ratio={W / H} />}
-				{src &&
-					(f.media === "video" ? (
-						<InsertClip src={src} at={outTime - f.start} from={f.clipFrom} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
-					) : (
-						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-						<img src={src} alt="" style={fill} />
-					))}
+				{src && (
+<div className="absolute inset-0" style={bgStyle(frameBackWindow(f, outTime))}>
+{f.media === "video" ? (
+<InsertClip src={src} at={outTime - f.start} from={f.clipFrom} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
+) : (
+// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+<img src={src} alt="" style={fill} />
+)}
+</div>
+)}
 			</div>
 		);
 	}
@@ -799,8 +803,8 @@ export function PlayerFrame({
 			: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 		return (
 			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
-				{/* Zoom in / Zoom out around the part's middle (layoutFileZoom), as layout_file_zoom in render.py. */}
-				<div className="absolute inset-0" style={{ transform: `scale(${layoutFileZoom(l, outTime)})` }}>
+				{/* Zoom, pan or tilt (layoutFileWindow, lib/bg-motion.ts), as layout_file_zoom in render.py. */}
+<div className="absolute inset-0" style={bgStyle(layoutFileWindow(l, outTime))}>
 					{src &&
 						(l.media === "video" ? (
 							<InsertClip src={src} at={outTime - l.start} from={l.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(l)} length={l.end - l.start} />

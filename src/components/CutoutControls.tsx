@@ -2,12 +2,13 @@
 
 import { ArrowLeft, ChevronDown, ChevronRight, Copy, Droplets, Film, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { BACKDROP, PIC_MOTION, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
+import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
 import { Confirm, ConfirmDelete } from "./ConfirmDelete";
+import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
@@ -664,18 +665,16 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						</div>
 						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
 							<span className="text-xs font-medium text-foreground/80">{i.kind === "video" ? "The clip" : "The picture"}</span>
-							{i.kind === "image" &&
-								row(
-									"Movement",
-									<span className="flex gap-1">
-										{PIC_MOTION.map(([id, name]) => (
-											<button key={id} onClick={() => updateInsert(i.id, { picMotion: id })} className={`rounded border px-1.5 py-0.5 ${(i.picMotion ?? "still") === id ? "border-blue-600 bg-blue-600/10" : "border-foreground/20"}`}>
-												{name}
-											</button>
-										))}
-									</span>,
-								)}
-							{i.kind === "image" && (i.picMotion === "in" || i.picMotion === "out") && row("Zoom speed", range(i.picZoom ?? INSERT.zoom.start, INSERT.zoom.min, INSERT.zoom.max, 0.05, `${Math.round((i.picZoom ?? INSERT.zoom.start) * 100)}%`, (picZoom) => updateInsert(i.id, { picZoom })))}
+							{i.kind === "image" && (
+								<BgMotionControl
+									motion={i.picMotion === "still" ? undefined : i.picMotion}
+									amount={i.picZoom}
+									speed={i.picSpeed}
+									onMotion={(m) => updateInsert(i.id, { picMotion: m ?? "still" })}
+									onAmount={(picZoom) => updateInsert(i.id, { picZoom })}
+									onSpeed={(picSpeed) => updateInsert(i.id, { picSpeed })}
+								/>
+							)}
 							{row("Size", range(i.picScale ?? 1, INSERT.picture.scale.min, INSERT.picture.scale.max, 0.05, `${Math.round((i.picScale ?? 1) * 100)}%`, (picScale) => updateInsert(i.id, { picScale })))}
 							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
 							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}

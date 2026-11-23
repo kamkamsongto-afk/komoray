@@ -6,6 +6,7 @@ import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameN
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
+import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
@@ -291,6 +292,16 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 										</button>
 									))}
 								</div>
+							)}
+							{f.back === "file" && f.file && (
+								<BgMotionControl
+									motion={f.backMotion}
+									amount={f.backAmount}
+									speed={f.backSpeed}
+									onMotion={(backMotion) => update(f.id, { backMotion })}
+									onAmount={(backAmount) => update(f.id, { backAmount })}
+									onSpeed={(backSpeed) => update(f.id, { backSpeed })}
+								/>
 							)}
 							{f.back === "file" && f.media === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={f} onChange={(patch) => update(f.id, patch)} /></div>}
 							{f.back === "file" && f.media === "video" && f.file && <ClipTrim id={f.id} file={f.file} start={f.start} end={f.end} clipFrom={f.clipFrom} total={total} onChange={(patch) => update(f.id, patch)} />}
