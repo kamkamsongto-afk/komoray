@@ -1497,7 +1497,7 @@ It takes a little while. You can keep editing meanwhile, and the whole video you
 										{textOf(t.from, t.to)}
 									</span>
 									{kept ? (
-										<span className="shrink-0 text-xs font-medium text-emerald-700 dark:text-emerald-400">Keeping</span>
+										<span className="shrink-0 text-xs font-medium text-(--ok)">Keeping</span>
 									) : (
 										<button
 											onClick={() => onPickTake(group, k)}
