@@ -1121,21 +1121,42 @@ export function ScriptView({
 const [panelMove, setPanelMove] = useState({ x: 0, y: 0 });
 // Folded to its title only (coach 23 Nov): the settings stay, the box is just its name bar, and it can still be dragged.
 	const [folded, setFolded] = useState(false);
+// Dragging the box from anywhere on it that is not a control (coach 23 Nov: "grab it anywhere"). The box moves by setting
+// its own CSS variables while the pointer moves, not by re-rendering the whole page (that made it stiff); the place is saved
+// when the pointer lets go. The room above the timeline is measured from the box's own place, so it doesn't change with a move.
+const panelMoveNow = useRef({ x: 0, y: 0 });
+useEffect(() => {
+	panelMoveNow.current = panelMove;
+}, [panelMove]);
+const DRAG_SKIP = "button, input, textarea, select, label, a, [role=slider], [contenteditable], [role=tab], [role=radio]";
 function startPanelMove(e: ReactPointerEvent<HTMLElement>) {
-if (!window.matchMedia("(min-width: 1024px)").matches || (e.target as HTMLElement).closest("button")) return;
-e.preventDefault();
+if (!window.matchMedia("(min-width: 1024px)").matches || e.button !== 0) return;
+if ((e.target as HTMLElement).closest(DRAG_SKIP)) return;
 const box = panelRef.current;
 if (!box) return;
+e.preventDefault();
 const at = box.getBoundingClientRect();
-const from = { x: e.clientX, y: e.clientY, move: panelMove };
+const from = { x: e.clientX, y: e.clientY, move: { ...panelMoveNow.current } };
+let last = { ...from.move };
 // Never out of reach: a strip of its title stays on the screen.
-const dx = (ev: PointerEvent) => Math.min(window.innerWidth - 80 - at.left, Math.max(60 - at.right, ev.clientX - from.x));
-const dy = (ev: PointerEvent) => Math.min(window.innerHeight - 40 - at.top, Math.max(-at.top, ev.clientY - from.y));
-const move = (ev: PointerEvent) => setPanelMove({ x: Math.round(from.move.x + dx(ev)), y: Math.round(from.move.y + dy(ev)) });
+const place = (ev: PointerEvent) => {
+const x = Math.round(from.move.x + Math.min(window.innerWidth - 80 - at.left, Math.max(60 - at.right, ev.clientX - from.x)));
+const y = Math.round(from.move.y + Math.min(window.innerHeight - 40 - at.top, Math.max(-at.top, ev.clientY - from.y)));
+last = { x, y };
+box.style.setProperty("--move-x", `${x}px`);
+box.style.setProperty("--move-y", `${y}px`);
+};
+let frame = 0;
+const move = (ev: PointerEvent) => {
+cancelAnimationFrame(frame);
+frame = requestAnimationFrame(() => place(ev));
+};
 const stop = () => {
+cancelAnimationFrame(frame);
 window.removeEventListener("pointermove", move);
 window.removeEventListener("pointerup", stop);
 window.removeEventListener("pointercancel", stop);
+setPanelMove(last);
 };
 window.addEventListener("pointermove", move);
 window.addEventListener("pointerup", stop);
@@ -1148,7 +1169,8 @@ if (!panel) return;
 			const box = panelRef.current;
 			const line = timelineRef.current;
 			if (!box || !line) return;
-			setPanelRoom(Math.max(160, Math.round(line.getBoundingClientRect().top - box.getBoundingClientRect().top - 12)));
+			// The box's place without its drag: the room doesn't change when it is moved (that made it jump in size).
+			setPanelRoom(Math.max(160, Math.round(line.getBoundingClientRect().top - (box.getBoundingClientRect().top - panelMoveNow.current.y) - 12)));
 		};
 		measure();
 		const watch = new ResizeObserver(measure);
@@ -1160,7 +1182,7 @@ if (!panel) return;
 			window.removeEventListener("scroll", measure);
 			window.removeEventListener("resize", measure);
 };
-}, [panel, panelMove]);
+}, [panel]);
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -1306,15 +1328,15 @@ if (!panel) return;
 						<RowFit.Provider value={fitRow}>
 						<div
 							ref={panelRef}
-							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] lg:translate-x-[var(--move-x)] lg:translate-y-[var(--move-y)] ${panelHeight ? "" : "lg:max-h-[var(--panel-room,calc(100vh-26rem))]"}`}
+							onPointerDown={startPanelMove}
+							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:cursor-grab lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] lg:translate-x-[var(--move-x)] lg:translate-y-[var(--move-y)] ${panelHeight ? "" : "lg:max-h-[var(--panel-room,calc(100vh-26rem))]"}`}
 							style={{ ...(panelHeight && { "--panel-h": `${panelHeight}px` }), ...(panelRoom && { "--panel-room": `${panelRoom}px` }), "--move-x": `${panelMove.x}px`, "--move-y": `${panelMove.y}px` } as CSSProperties}
 						>
 						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${folded ? "[&>*:not(:first-child)]:hidden" : panelHeight ? "lg:h-[min(var(--panel-h),calc(100vh-2rem))]" : "lg:flex-1"}`}>
 							<div
-onPointerDown={startPanelMove}
 onDoubleClick={() => setPanelMove({ x: 0, y: 0 })}
-title="Drag to move this box (double-click: back to its place)"
-className="flex items-center justify-between px-3 pt-2 text-sm font-medium select-none lg:cursor-grab lg:touch-none lg:active:cursor-grabbing"
+title="Drag the box by any empty part of it (double-click the name: back to its place)"
+className="flex items-center justify-between px-3 pt-2 text-sm font-medium select-none lg:cursor-grab lg:active:cursor-grabbing"
 >
 <span className="flex items-center gap-1.5">
 <GripHorizontal className="hidden h-4 w-4 text-foreground/40 lg:block" aria-hidden />
