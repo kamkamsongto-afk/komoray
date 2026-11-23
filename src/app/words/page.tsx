@@ -10,8 +10,8 @@ type Word = { heard: string; fixed: string; uses: number; updated_at: string; us
 // Names from the coach, 14 Nov (were Every video / Where it fits). Which kind a fix is comes from the dictionary when it
 // is saved (wordUse): heard isn't a real word -> always; it is one (สวน) -> ai. Our AI only comes in on the next video.
 const USE_LABEL = {
-	always: { text: "All my videos", tone: "bg-green-600/10 text-green-700 dark:text-green-400", tip: "Can't be right as heard (or it's a name of yours), so it's fixed everywhere in your new videos." },
-	ai: { text: "Word context", tone: "bg-amber-500/15 text-amber-700 dark:text-amber-400", tip: "Sounds like another real word (like สวน and ส่วน), so our AI reads the sentence first and fixes it only where it fits." },
+	always: { text: "All my videos", tone: "bg-green-600/10 text-(--ok)", tip: "Can't be right as heard (or it's a name of yours), so it's fixed everywhere in your new videos." },
+	ai: { text: "Word context", tone: "bg-amber-500/15 text-(--warn)", tip: "Sounds like another real word (like สวน and ส่วน), so our AI reads the sentence first and fixes it only where it fits." },
 	off: { text: "Not used", tone: "bg-foreground/10 text-foreground/60", tip: "An old fix that added words or only changed spacing. That belongs to one video, so it isn't used again." },
 };
 const HELP_HIDDEN = "komoray.wordsHelpHidden"; // the short explanation above the list was closed, in this browser

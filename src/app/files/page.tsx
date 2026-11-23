@@ -320,7 +320,7 @@ export default function FilesPage() {
 							<p className="text-xs text-foreground/60">
 								{f.kind === "font" ? `Font · ${f.family ?? ""}` : f.kind === "video" && f.seconds ? `Clip · ${Math.round(f.seconds)}s` : KINDS[f.kind].label} · {size(f.size)} · {new Date(f.at).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
 							</p>
-							<p className={`text-xs ${unused(use[f.id]) ? "text-foreground/50" : "text-green-700 dark:text-green-400"}`}>{usedText(use[f.id])}</p>
+							<p className={`text-xs ${unused(use[f.id]) ? "text-foreground/50" : "text-(--ok)"}`}>{usedText(use[f.id])}</p>
 							<div className="flex flex-wrap gap-2 text-xs">
 								<button onClick={() => setRenaming({ id: f.id, name: f.name })} disabled={!!busy} className="flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-1 hover:bg-foreground/5">
 									<Pencil size={12} /> Rename

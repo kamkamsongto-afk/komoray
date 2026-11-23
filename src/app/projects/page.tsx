@@ -222,7 +222,7 @@ function StorageBar({ storage }: { storage: Storage }) {
 				<div className="h-1.5 overflow-hidden rounded-full bg-foreground/10" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share * 100)} aria-label="Storage used">
 					<div className={`h-full rounded-full ${share >= 0.9 ? "bg-amber-500" : "bg-blue-600"}`} style={{ width: `${Math.max(share * 100, storage.used ? 1 : 0)}%` }} />
 				</div>
-				{share >= 1 && <p className="text-xs text-amber-700 dark:text-amber-400">Your storage is full. Delete videos to upload new ones.</p>}
+				{share >= 1 && <p className="text-xs text-(--warn)">Your storage is full. Delete videos to upload new ones.</p>}
 			</div>
 		</div>
 	);
