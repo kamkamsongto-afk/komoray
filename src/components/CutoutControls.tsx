@@ -633,7 +633,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							<button onClick={() => setSpeakerOpen(!speakerOpen)} aria-expanded={speakerOpen} className="flex w-full items-center gap-1 px-2 py-1.5 text-left text-xs font-medium text-foreground/80 hover:bg-foreground/5">
 								{speakerOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />}
 								<User className="h-3.5 w-3.5 shrink-0 text-foreground/50" aria-hidden />
-								Speaker
+								You
 								<span className="ml-auto font-normal text-foreground/50">
 									{i.seeThrough ? (i.hidden ? "Behind it" : "In front") : i.hidden ? "Hidden" : `${Math.round(i.speakerScale * 100)}%`}
 								</span>
@@ -645,8 +645,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										{i.seeThrough ? "Put it in front of me" : "Hide me"}
 									</label>
 									{!i.hidden && !i.seeThrough && row("Your size", range(i.speakerScale, INSERT.scale.min, INSERT.scale.max, 0.05, `${Math.round(i.speakerScale * 100)}%`, (speakerScale) => updateInsert(i.id, { speakerScale })))}
-									{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, 0, 1, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
-									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, 0, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
+									{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, INSERT.stand.min, INSERT.stand.max, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
+									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, INSERT.lift.min, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
 									{!i.hidden && !i.seeThrough && row("Soft edges", range(i.soft ?? INSERT.edgeFade, 0, INSERT.soft.max, 0.01, `${Math.round((i.soft ?? INSERT.edgeFade) * 100)}%`, (soft) => updateInsert(i.id, { soft })))}
 									{!i.hidden && !i.seeThrough && <span className="text-xs text-foreground/60">Or pause the video and drag yourself on it.</span>}
 								</div>

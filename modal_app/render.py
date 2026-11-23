@@ -814,8 +814,8 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
     )
 
 
-BG_AMOUNT = (0.05, 1.0)  # BG_MOTION.amount in src/lib/bg-motion.ts
-BG_SPEED = (0.5, 3.0)  # BG_MOTION.speed
+BG_AMOUNT = (-1.0, 1.2)  # BG_MOTION.amount in src/lib/bg-motion.ts (negative zoom in / out: the other way)
+BG_SPEED = (0.5, 20.0)  # BG_MOTION.speed
 BG_MOTIONS = ("in", "out", "panLeft", "panRight", "tiltUp", "tiltDown")
 
 
@@ -831,7 +831,8 @@ def bg_motion_filter(motion: str | None, amount: float, speed: float, seconds: f
     a = min(BG_AMOUNT[1], max(BG_AMOUNT[0], float(amount)))
     speed = min(BG_SPEED[1], max(BG_SPEED[0], float(speed)))
     p = f"clip((in-1)/{seconds * FPS:.3f}*{speed:.3f},0,1)"
-    s = f"(1+{a:.3f}*{p})" if motion == "in" else f"(1+{a:.3f}*(1-{p}))" if motion == "out" else f"{1 + a:.4f}"
+    grow = f"{a:.3f}*{p}" if motion == "in" else f"{a:.3f}*(1-{p})" if motion == "out" else f"{max(a, 0.05):.3f}"
+    s = f"max(0.1,1+{grow})"
     room = f"(1-1/{s})"
     fx = p if motion == "panRight" else f"(1-{p})" if motion == "panLeft" else "0.5"
     fy = p if motion == "tiltDown" else f"(1-{p})" if motion == "tiltUp" else "0.5"
@@ -1568,6 +1569,10 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
             score = first["start"] - last["end"] + (START_BONUS if first["text"] in THAI_STARTS else 0) + (START_BONUS if last["text"] in THAI_ENDINGS else 0) - (NO_END_PENALTY if leans else 0) + 0.3 * k
             if score >= best_score:
                 best, best_score = k, score
+        # No break was good enough, and the next word must not start the line ("บาท", "ค่ะ"): it goes with the word before it
+        # instead (timeline.ts bestBreak, coach 23 Nov).
+        if best_score == -math.inf and len(run) > 1 and (nxt["text"] in THAI_NO_START or nxt["text"] in THAI_ENDINGS or nxt.get("glue") or inside_number(run[-1], nxt)):
+            return len(run) - 1
         return best
 
     def english_break(run: list[dict], nxt: dict) -> int:

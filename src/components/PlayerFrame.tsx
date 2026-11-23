@@ -709,7 +709,7 @@ export function PlayerFrame({
 							} else {
 								const speakerX = d.speakerX + (e.clientX - d.x) / box.clientWidth;
 								const speakerLift = d.lift - (e.clientY - d.y) / box.clientHeight;
-								onInsert(insert.id, { speakerX: Math.round(Math.min(1, Math.max(0, speakerX)) * 1000) / 1000, speakerLift: Math.round(Math.min(INSERT.lift.max, Math.max(0, speakerLift)) * 1000) / 1000 });
+								onInsert(insert.id, { speakerX: Math.round(Math.min(INSERT.stand.max, Math.max(INSERT.stand.min, speakerX)) * 1000) / 1000, speakerLift: Math.round(Math.min(INSERT.lift.max, Math.max(INSERT.lift.min, speakerLift)) * 1000) / 1000 });
 							}
 						}}
 						onPointerUp={() => (speakerDrag.current = null)}
