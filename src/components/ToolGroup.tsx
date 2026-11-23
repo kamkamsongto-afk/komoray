@@ -22,8 +22,8 @@ export function ToolGroup({ tone, title, header, children }: { tone: Tone; title
 	return (
 		<section className="flex flex-col gap-1.5 rounded-lg border p-2" style={{ background: `${TONES[tone]}33`, borderColor: `${TONES[tone]}99` }}>
 			{header ?? (
-				<h3 className="flex items-center gap-2 text-[15px] leading-tight font-semibold text-foreground/90">
-					<span className="h-3 w-3 shrink-0 rounded-full ring-1 ring-foreground/30" style={{ background: DOTS[tone] }} aria-hidden />
+				<h3 className="flex items-center gap-2 text-sm leading-tight font-semibold text-foreground/90">
+					<span className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-foreground/30" style={{ background: DOTS[tone] }} aria-hidden />
 					{title}
 				</h3>
 			)}

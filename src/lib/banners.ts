@@ -39,6 +39,9 @@ export type Banner = {
 	noBox?: boolean; // letters only, no background (coach, 11 Nov). Added 11 Nov
 	align?: "left" | "right"; // its rows inside the box; left out: centred (coach 15 Nov). Same in banner_events
 	name?: string; // what it is called here and on the timeline; without it, its words (coach 23 Nov). Added 23 Nov
+	rotate?: number; // degrees, clockwise, -180..180, any kind (coach 23 Nov). Same in banner_events (rz) and banner_file_filters (rotate)
+	padding?: number; // space between its box and its letters, px at normal size; without it BANNER.padding (coach 23 Nov)
+	templateId?: string; // the My banners entry it came from or was saved as, for "Update My banner" (coach 23 Nov)
 	stroke?: number; // a line round its letters, px at normal size (coach 23 Nov); strokeColor: its colour, without it black. Same in banner_events
 	strokeColor?: string;
 	// kind "file": banner-<id>.<ext> next to the video. text is then only its name (the Timeline shows it).
@@ -96,6 +99,9 @@ export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub:
 // shape, clear of the subtitles' usual place (bottom is under the subtitles on
 // 9:16, over them on the wider shapes). Same as BANNER and BANNER_TOP in render.py.
 export const BANNER = { size: 72, subSize: 44, padding: 28, fade: 0.25, seconds: 3, maxText: 40, maxLines: 20, maxBanners: 20 }; // 20 lines (coach 23 Nov: a title that rolls up, a list)
+export const BANNER_ROTATE = { min: -180, max: 180 };
+export const BANNER_PADDING = { min: 0, max: 60 };
+export const bannerPad = (b: Pick<Banner, "padding">) => b.padding ?? BANNER.padding;
 export const BANNER_STROKE = { min: 0, max: 20 }; // px of a line round the letters, at normal size
 export const BANNER_FIT = 0.9; // a banner taller than this share of the video is made smaller to fit, same as BANNER_FIT in render.py
 export const BANNER_LINE_GAP = { min: -60, max: 80 }; // -60: rows can touch (coach, 11 Nov)
@@ -140,13 +146,13 @@ export const cleanBannerText = (text: string, lines = 1) =>
 // How much smaller its words are drawn so all of them fit on the screen: 20 lines at the normal size would be taller than a wide video
 // (coach 23 Nov: made smaller by itself, and the creator may still make it any size with Size). 1 = no change. The box's height
 // at normal size: its rows, the lines' gaps and the padding. Same as banner_fit in render.py.
-export function bannerFit(b: Pick<Banner, "text" | "sub" | "lineGap" | "kind">, videoHeight: number) {
+export function bannerFit(b: Pick<Banner, "text" | "sub" | "lineGap" | "kind" | "padding">, videoHeight: number) {
 	if (b.kind === "file") return 1;
 	const rows = bannerRows(b);
 	if (!rows.length) return 1;
 	const gap = Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, b.lineGap ?? 0));
 	const inside = Math.max(rows.reduce((sum, row) => sum + row.size, 0) + gap * (rows.length - 1), Math.max(...rows.map((row) => row.size)));
-	const tall = inside + BANNER.padding; // padding is half above and half below, so one full padding in all
+	const tall = inside + bannerPad(b); // padding is half above and half below, so one full padding in all
 	return Math.min(1, (videoHeight * BANNER_FIT) / tall);
 }
 export const bannerRows = (b: Pick<Banner, "text" | "sub">) => [
@@ -208,6 +214,9 @@ export function readBanners(value: unknown): Banner[] | null {
 			...(typeof raw.anim === "string" && raw.anim in BANNER_ANIMS && raw.anim !== "fade" && { anim: raw.anim as BannerAnim }),
 			...(font && { font: font.font, ...(font.ownFont && { ownFont: font.ownFont }) }),
 			...(!file && raw.noBox === true && { noBox: true }),
+			...(typeof raw.rotate === "number" && Number.isFinite(raw.rotate) && Math.abs(raw.rotate) >= 0.1 && { rotate: Math.round(Math.min(BANNER_ROTATE.max, Math.max(BANNER_ROTATE.min, raw.rotate)) * 10) / 10 }),
+			...(!file && typeof raw.padding === "number" && Number.isFinite(raw.padding) && raw.padding !== BANNER.padding && { padding: Math.round(Math.min(BANNER_PADDING.max, Math.max(BANNER_PADDING.min, raw.padding))) }),
+			...(typeof raw.templateId === "string" && raw.templateId && { templateId: raw.templateId.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) }),
 			...(typeof raw.name === "string" && cleanBannerText(raw.name) && { name: cleanBannerText(raw.name).slice(0, 40) }),
 			...(!file && typeof raw.stroke === "number" && raw.stroke > 0 && { stroke: Math.round(Math.min(BANNER_STROKE.max, raw.stroke) * 10) / 10 }),
 			...(!file && typeof raw.strokeColor === "string" && HEX.test(raw.strokeColor) && { strokeColor: raw.strokeColor.toUpperCase() }),
