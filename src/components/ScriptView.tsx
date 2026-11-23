@@ -1,6 +1,6 @@
 "use client";
 
-import { Columns2, Crop, Film, FolderInput, GripHorizontal, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { ChevronDown, ChevronUp, Columns2, Crop, Film, FolderInput, GripHorizontal, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, Fragment, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
 import { fixesNeedThaiCut, useThaiCut } from "@/lib/thai-cut";
@@ -1119,6 +1119,8 @@ export function ScriptView({
 	// Where the box was dragged to by its title (coach 22 Nov: with many settings it sat over the timeline), as how far from its
 // own place, px. On big screens only; the title's double-click brings it back. Kept while the video is open.
 const [panelMove, setPanelMove] = useState({ x: 0, y: 0 });
+// Folded to its title only (coach 23 Nov): the settings stay, the box is just its name bar, and it can still be dragged.
+	const [folded, setFolded] = useState(false);
 function startPanelMove(e: ReactPointerEvent<HTMLElement>) {
 if (!window.matchMedia("(min-width: 1024px)").matches || (e.target as HTMLElement).closest("button")) return;
 e.preventDefault();
@@ -1307,7 +1309,7 @@ if (!panel) return;
 							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] lg:translate-x-[var(--move-x)] lg:translate-y-[var(--move-y)] ${panelHeight ? "" : "lg:max-h-[var(--panel-room,calc(100vh-26rem))]"}`}
 							style={{ ...(panelHeight && { "--panel-h": `${panelHeight}px` }), ...(panelRoom && { "--panel-room": `${panelRoom}px` }), "--move-x": `${panelMove.x}px`, "--move-y": `${panelMove.y}px` } as CSSProperties}
 						>
-						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${panelHeight ? "lg:h-[min(var(--panel-h),calc(100vh-2rem))]" : "lg:flex-1"}`}>
+						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${folded ? "[&>*:not(:first-child)]:hidden" : panelHeight ? "lg:h-[min(var(--panel-h),calc(100vh-2rem))]" : "lg:flex-1"}`}>
 							<div
 onPointerDown={startPanelMove}
 onDoubleClick={() => setPanelMove({ x: 0, y: 0 })}
@@ -1318,6 +1320,9 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 <GripHorizontal className="hidden h-4 w-4 text-foreground/40 lg:block" aria-hidden />
 {PANELS.find((p) => p.id === panel)?.name}
 </span>
+								<button onClick={() => setFolded((f) => !f)} aria-expanded={!folded} aria-label={folded ? "Open this box" : "Fold this box to its name"} title={folded ? "Open" : "Fold to the name"} className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
+									{folded ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronUp className="h-4 w-4" aria-hidden />}
+								</button>
 								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close (Esc, or click outside)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
 									<X className="h-4 w-4" aria-hidden />
 								</button>
@@ -1576,6 +1581,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							role="separator"
 							aria-orientation="horizontal"
 							aria-label="Drag to make the settings taller or shorter"
+							style={folded ? { display: "none" } : undefined}
 							title="Drag to make this box taller or shorter (double-click: back to normal)"
 							onPointerDown={startPanelResize}
 							onDoubleClick={() => resizePanel(null)}
