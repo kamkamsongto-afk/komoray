@@ -425,7 +425,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 							aria-label="Where on the video"
 							className="rounded-md border border-foreground/20 bg-background px-1 py-0.5"
 						>
-							<option value="dragged">{dragged[b.id] ? "Where you dragged it" : "Anywhere (drag it on the video)"}</option>
+							<option value="dragged">{dragged[b.id] ? "Position" : "Anywhere (drag it on the video)"}</option>
 							<option value="top">Top</option>
 							<option value="middle">Middle</option>
 							<option value="bottom">Bottom</option>
@@ -452,7 +452,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 					</div>
 					<div className="flex flex-wrap items-center gap-2 pl-[4.5rem] text-xs text-foreground/60">
 						<label className={`cursor-pointer underline hover:text-foreground ${myFonts.busy ? "opacity-50" : ""}`}>
-							{myFonts.busy ? "Uploading…" : myFonts.fonts.length || myFonts.older ? "Upload another font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
+							{myFonts.busy ? "Uploading…" : myFonts.fonts.length || myFonts.older ? "Upload your font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
 							<input
 								type="file"
 								accept=".ttf,.otf,font/ttf,font/otf"

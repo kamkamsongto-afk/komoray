@@ -207,7 +207,7 @@ export default function PricingPage() {
 								<span className="text-sm text-foreground/60"> / month{yearly && price ? `, $${price * 12} a year` : ""}</span>
 							</p>
 							{/* What paying yearly saves, in dollars (coach, 18 Nov: people should see how much they keep). */}
-							{yearly && price > 0 && <p className="-mt-2 text-sm font-medium text-(--ok)">Save ${(plan.month - plan.year) * 12} a year</p>}
+							{yearly && price > 0 && <p className="-mt-2 text-sm font-semibold text-(--ok)">Save ${(plan.month - plan.year) * 12} a year</p>}
 							<p className="text-sm font-medium">{plan.minutes}</p>
 							<ul className="flex flex-col gap-1 text-sm text-foreground/75">
 								{plan.points.map((p) => (
