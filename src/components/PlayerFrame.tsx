@@ -1019,7 +1019,7 @@ const padY = (BANNER.padding / 2) * size;
 														fontSize: (row.size / rowFace.em) * size,
 lineHeight: `${row.size * size}px`,
 // A line round the letters, outside them like the ASS outline: drawn under the fill, twice as wide so half of it shows.
-...(b.stroke ? { WebkitTextStroke: `${2 * b.stroke * size}px ${b.strokeColor ?? "#000000"}`, paintOrder: "stroke fill" } : {}),
+...(b.stroke ? { WebkitTextStroke: `${2 * b.stroke * size}px ${b.strokeColor ?? "#000000"}`, paintOrder: "stroke fill", strokeLinejoin: "round" } : {}),
 													}}
 												>
 													{row.text}
