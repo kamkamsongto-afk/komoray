@@ -1,6 +1,6 @@
 "use client";
 
-import { Columns2, Crop, Film, FolderInput, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
+import { Columns2, Crop, Film, FolderInput, GripHorizontal, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, Fragment, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
 import { fixesNeedThaiCut, useThaiCut } from "@/lib/thai-cut";
@@ -1116,9 +1116,32 @@ export function ScriptView({
 	// grabbed while changing them). Measured again when the page scrolls, the window or the timeline changes size.
 	// Once dragged taller by its corner it may go over the timeline (coach 19 Nov: some boxes need more room); a
 	// double-click on the corner brings it back above the timeline.
-	const [panelRoom, setPanelRoom] = useState<number | null>(null);
-	useEffect(() => {
-		if (!panel) return;
+	// Where the box was dragged to by its title (coach 22 Nov: with many settings it sat over the timeline), as how far from its
+// own place, px. On big screens only; the title's double-click brings it back. Kept while the video is open.
+const [panelMove, setPanelMove] = useState({ x: 0, y: 0 });
+function startPanelMove(e: ReactPointerEvent<HTMLElement>) {
+if (!window.matchMedia("(min-width: 1024px)").matches || (e.target as HTMLElement).closest("button")) return;
+e.preventDefault();
+const box = panelRef.current;
+if (!box) return;
+const at = box.getBoundingClientRect();
+const from = { x: e.clientX, y: e.clientY, move: panelMove };
+// Never out of reach: a strip of its title stays on the screen.
+const dx = (ev: PointerEvent) => Math.min(window.innerWidth - 80 - at.left, Math.max(60 - at.right, ev.clientX - from.x));
+const dy = (ev: PointerEvent) => Math.min(window.innerHeight - 40 - at.top, Math.max(-at.top, ev.clientY - from.y));
+const move = (ev: PointerEvent) => setPanelMove({ x: Math.round(from.move.x + dx(ev)), y: Math.round(from.move.y + dy(ev)) });
+const stop = () => {
+window.removeEventListener("pointermove", move);
+window.removeEventListener("pointerup", stop);
+window.removeEventListener("pointercancel", stop);
+};
+window.addEventListener("pointermove", move);
+window.addEventListener("pointerup", stop);
+window.addEventListener("pointercancel", stop);
+}
+const [panelRoom, setPanelRoom] = useState<number | null>(null);
+useEffect(() => {
+if (!panel) return;
 		const measure = () => {
 			const box = panelRef.current;
 			const line = timelineRef.current;
@@ -1134,8 +1157,8 @@ export function ScriptView({
 			watch.disconnect();
 			window.removeEventListener("scroll", measure);
 			window.removeEventListener("resize", measure);
-		};
-	}, [panel]);
+};
+}, [panel, panelMove]);
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -1281,12 +1304,20 @@ export function ScriptView({
 						<RowFit.Provider value={fitRow}>
 						<div
 							ref={panelRef}
-							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] ${panelHeight ? "" : "lg:max-h-[var(--panel-room,calc(100vh-26rem))]"}`}
-							style={{ ...(panelHeight && { "--panel-h": `${panelHeight}px` }), ...(panelRoom && { "--panel-room": `${panelRoom}px` }) } as CSSProperties}
+							className={`relative flex flex-col surface-inverse rounded-lg border border-foreground/15 shadow-xl lg:absolute lg:top-0 lg:right-full lg:z-30 lg:mr-3 lg:w-[26rem] lg:translate-x-[var(--move-x)] lg:translate-y-[var(--move-y)] ${panelHeight ? "" : "lg:max-h-[var(--panel-room,calc(100vh-26rem))]"}`}
+							style={{ ...(panelHeight && { "--panel-h": `${panelHeight}px` }), ...(panelRoom && { "--panel-room": `${panelRoom}px` }), "--move-x": `${panelMove.x}px`, "--move-y": `${panelMove.y}px` } as CSSProperties}
 						>
 						<div className={`flex min-h-0 flex-col gap-2 lg:overflow-y-auto ${panelHeight ? "lg:h-[min(var(--panel-h),calc(100vh-2rem))]" : "lg:flex-1"}`}>
-							<div className="flex items-center justify-between px-3 pt-2 text-sm font-medium">
-								{PANELS.find((p) => p.id === panel)?.name}
+							<div
+onPointerDown={startPanelMove}
+onDoubleClick={() => setPanelMove({ x: 0, y: 0 })}
+title="Drag to move this box (double-click: back to its place)"
+className="flex items-center justify-between px-3 pt-2 text-sm font-medium select-none lg:cursor-grab lg:touch-none lg:active:cursor-grabbing"
+>
+<span className="flex items-center gap-1.5">
+<GripHorizontal className="hidden h-4 w-4 text-foreground/40 lg:block" aria-hidden />
+{PANELS.find((p) => p.id === panel)?.name}
+</span>
 								<button onClick={() => setPanel(null)} aria-label="Close settings" title="Close (Esc, or click outside)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground">
 									<X className="h-4 w-4" aria-hidden />
 								</button>

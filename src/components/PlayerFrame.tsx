@@ -7,7 +7,7 @@ import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileS
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
 import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
-import { LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
+import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import { logoPictureName, logoPictureUrl } from "@/lib/logo";
 import { myFileUrl } from "@/lib/my-files";
@@ -334,9 +334,10 @@ function FrameEdge({ f, W, H, scale, box, onChange }: { f: FrameMe; W: number; H
 function LayoutHandle({ l, box, W, H, scale, onChange }: { l: VideoLayout; box: { x: number; y: number; w: number; h: number }; W: number; H: number; scale: number; onChange: (id: string, patch: Partial<VideoLayout>) => void }) {
 	const drag = useRef<{ x: number; y: number; meX: number; meY: number } | null>(null);
 	const moved = useRef(false); // a drag that ends on it must not also press play
-	return (
-		<div
-			title="Drag to move yourself inside your part"
+const free = l.meZoom !== undefined; // You at a size of your own: both ways, past your own edge, as big as you are
+return (
+<div
+title="Drag to move yourself inside your part"
 			onClick={(e) => moved.current && e.stopPropagation()}
 			onPointerDown={(e) => {
 				e.stopPropagation();
@@ -349,12 +350,14 @@ function LayoutHandle({ l, box, W, H, scale, onChange }: { l: VideoLayout; box: 
 				if (!d) return;
 				moved.current = true;
 				// Dragging right brings a point further left into the middle of the part.
-				const clamp = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
-				if (l.kind === "side") onChange(l.id, { meX: clamp(d.meX - (e.clientX - d.x) / (W * scale)) });
+				const [lo, hi] = free ? [LAYOUT.meRange.min, LAYOUT.meRange.max] : [0, 1];
+const clamp = (n: number) => Math.round(Math.min(hi, Math.max(lo, n)) * 1000) / 1000;
+if (free) onChange(l.id, { meX: clamp(d.meX - (e.clientX - d.x) / (W * scale * (l.meZoom as number))), meY: clamp(d.meY - (e.clientY - d.y) / (H * scale * (l.meZoom as number))) });
+else if (l.kind === "side") onChange(l.id, { meX: clamp(d.meX - (e.clientX - d.x) / (W * scale)) });
 				else onChange(l.id, { meY: clamp(d.meY - (e.clientY - d.y) / (H * scale)) });
 			}}
 			onPointerUp={() => (drag.current = null)}
-			className={`absolute outline-2 -outline-offset-2 outline-blue-400 outline-dashed ${l.kind === "side" ? "cursor-ew-resize" : "cursor-ns-resize"}`}
+			className={`absolute outline-2 -outline-offset-2 outline-blue-400 outline-dashed ${free ? "cursor-move" : l.kind === "side" ? "cursor-ew-resize" : "cursor-ns-resize"}`}
 			style={{ left: box.x * scale, top: box.y * scale, width: box.w * scale, height: box.h * scale, touchAction: "none" }}
 		/>
 	);
@@ -826,8 +829,10 @@ export function PlayerFrame({
 					{/* Always the same elements, with or without a frame: a new canvas would lose the picture the engine draws on. */}
 					<div className="absolute inset-0" style={framed ? frameMask(framed) : undefined}>
 						<div className="absolute inset-0" style={framed ? framePlace(framed) : undefined}>
-							{/* Layout moves the speaker (and the Cutout layers with them) into their part: always this element, moved or not. */}
-							<div className="absolute inset-0" style={pose ? { transform: `translate(${pose.picture.x * scale}px, ${pose.picture.y * scale}px)` } : undefined}>
+{/* Layout with You at a size of its own (meZoom): what you don't cover shows a blurred, dimmed copy of the picture, as layout_filters. */}
+{pose?.free && <BlurBack source={pictureRef} blur={LAYOUT.fill.blur * scale} dim={LAYOUT.fill.dim} ratio={W / H} />}
+{/* Layout moves the speaker (and the Cutout layers with them) into their part: always this element, moved or not. */}
+<div className="absolute inset-0" style={pose ? { transform: `translate(${pose.picture.x * scale}px, ${pose.picture.y * scale}px)${pose.free ? ` scale(${pose.scale})` : ""}`, transformOrigin: pose.free ? "0 0" : undefined } : undefined}>
 								<div
 									ref={pictureRef}
 									className="absolute inset-0"

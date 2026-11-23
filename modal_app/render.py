@@ -1090,11 +1090,13 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
 LAYOUT_SLIDE = 0.5  # seconds the other part takes to slide in, and out (LAYOUT.slide in layout.ts)
 LAYOUT_FLASH = 0.15  # seconds the white flash takes to come up, and to go, at each edge (LAYOUT.flash in layout.ts)
 LAYOUT_JOIN = 0.05  # seconds: a layout starting this close after another ends joins it, no slide between (LAYOUT.join)
+LAYOUT_FILL = {"blur": 30, "dim": 0.3}  # the blurred, dimmed copy of the picture under a Layout speaker with a meZoom (LAYOUT.fill)
+LAYOUT_ME_ZOOM = (0.4, 2.5)  # LAYOUT.meZoom in layout.ts
 
 
 def layout_boxes(l: dict, size: tuple[int, int]) -> dict:
     """The speaker's part, the other part (left, top, width, height px) and where the speaker's whole picture goes once
-    split (its top left corner; it keeps its size, so it stays as sharp). Same as layoutBoxes in layout.ts."""
+    split (its top left corner, and its zoom: 1 unless the layout has a meZoom). Same as layoutBoxes in layout.ts."""
     W, H = size
     stack = l.get("kind") != "side"
     first = l.get("meFirst") is not False
@@ -1109,11 +1111,20 @@ def layout_boxes(l: dict, size: tuple[int, int]) -> dict:
     def along(middle: float, point: float, start: float, length: float, whole: float) -> float:
         return min(start, max(start + length - whole, middle - point))
 
-    picture = (
-        along(me[0] + me[2] / 2, float(l.get("meX", 0.5)) * W, me[0], me[2], W),
-        along(me[1] + me[3] / 2, float(l.get("meY", 0.4)) * H, me[1], me[3], H),
-    )
-    return {"me": me, "other": other, "picture": picture}
+    free = l.get("meZoom") is not None
+    zoom = min(LAYOUT_ME_ZOOM[1], max(LAYOUT_ME_ZOOM[0], float(l["meZoom"]))) if free else 1.0
+    if free:
+        # meZoom set: the point in the middle at that size, nothing holds the picture over the part (the blurred copy fills the rest).
+        picture = (
+            me[0] + me[2] / 2 - zoom * float(l.get("meX", 0.5)) * W,
+            me[1] + me[3] / 2 - zoom * float(l.get("meY", 0.4)) * H,
+        )
+    else:
+        picture = (
+            along(me[0] + me[2] / 2, float(l.get("meX", 0.5)) * W, me[0], me[2], W),
+            along(me[1] + me[3] / 2, float(l.get("meY", 0.4)) * H, me[1], me[3], H),
+        )
+    return {"me": me, "other": other, "picture": picture, "zoom": zoom, "free": free}
 
 
 def layout_joins(l: dict, layouts: list[dict]) -> tuple[bool, bool]:
@@ -1128,10 +1139,11 @@ def layout_joins(l: dict, layouts: list[dict]) -> tuple[bool, bool]:
     )
 
 
-def layout_ease_expr(l: dict, layouts: list[dict]) -> str:
+def layout_ease_expr(l: dict, layouts: list[dict], t: str = "t") -> str:
     """How far it is split at the frame's time t, as an FFmpeg expression: 0 = all speaker, 1 = split. Only Slide moves,
     eased in and out, and not at an edge another layout covers (layout_joins); one shorter than its slides slides over
-    its time shared between them. layouts: all of them, l among them. Same as layoutProgress."""
+    its time shared between them. layouts: all of them, l among them. t: the expression for the time (`perspective` has
+    no t, only a frame count). Same as layoutProgress."""
     if l.get("enter", "slide") != "slide":
         return "1"
     a, b = float(l["start"]), float(l["end"])
@@ -1140,7 +1152,7 @@ def layout_ease_expr(l: dict, layouts: list[dict]) -> str:
     if not slides:
         return "1"
     d = min(LAYOUT_SLIDE, (b - a) / slides)
-    sides = ([] if join_start else [f"(t-{a:.3f})/{d:.4f}"]) + ([] if join_end else [f"({b:.3f}-t)/{d:.4f}"])
+    sides = ([] if join_start else [f"({t}-{a:.3f})/{d:.4f}"]) + ([] if join_end else [f"({b:.3f}-{t})/{d:.4f}"])
     u = f"clip({sides[0] if len(sides) == 1 else f'min({sides[0]},{sides[1]})'},0,1)"
     return f"if(lt({u},0.5),4*pow({u},3),1-pow(2-2*{u},3)/2)"
 
@@ -1164,9 +1176,29 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
         stack, first = l.get("kind") != "side", l.get("meFirst") is not False
         e = layout_ease_expr(l, every or layouts)  # every: the whole video's layouts, which layout_joins needs
         parts.append(f"[lys{j}]trim=start={a:.3f}:end={b:.3f},split=3[lyk{j}][lyp{j}][lyc{j}]")
-        parts.append(f"[lyk{j}]drawbox=c=black:t=fill[lyb{j}]")
-        # The speaker's picture moved e of the way (layoutPose: picture * p).
-        parts.append(f"[lyb{j}][lyp{j}]overlay=x='{px:.1f}*({e})':y='{py:.1f}*({e})'[lyv{j}]")
+        if boxes["free"]:
+            # You at a size of your own (meZoom): a blurred, dimmed copy of the picture fills what you don't cover, as Frame Me's
+            # Blur (blurred small and blown up again: the same look for a fraction of the work). Then you, moved and grown by
+            # the same eased amount (layoutPose: picture * p, 1 + (zoom - 1) * p), by `perspective` as picture_zoom does it (scale
+            # moves in whole pixels, which shakes, and per frame it crashed FFmpeg). On a canvas 2 px bigger with a clear edge, so
+            # what you don't cover is clear. The source's point for each corner of the output: (corner - origin) / size.
+            blur, dim = LAYOUT_FILL["blur"], LAYOUT_FILL["dim"]
+            parts.append(f"[lyk{j}]scale=trunc(iw/8)*2:trunc(ih/8)*2,gblur=sigma={blur / 4:g},scale={W}:{H}:flags=bilinear,drawbox=c=black@{dim:.2f}:t=fill[lyb{j}]")
+            u = layout_ease_expr(l, every or layouts, t=f"({a:.3f}+(in-1)/{FPS})")
+            s = f"(1+{boxes['zoom'] - 1:.4f}*({u}))"
+            qx, qy = f"({px:.2f}*({u}))", f"({py:.2f}*({u}))"  # not ox / oy: those are the other part's
+            x0, x1 = f"((-2-{qx})/{s}+2)", f"(({W}+2-{qx})/{s}+2)"
+            y0, y1 = f"((-2-{qy})/{s}+2)", f"(({H}+2-{qy})/{s}+2)"
+            parts.append(
+                f"[lyp{j}]format=rgba,pad=iw+4:ih+4:2:2:color=black@0,format=yuva420p,"
+                f"perspective=x0='{x0}':y0='{y0}':x1='{x1}':y1='{y0}':x2='{x0}':y2='{y1}':x3='{x1}':y3='{y1}':interpolation=linear:eval=frame,"
+                f"crop={W}:{H}:2:2[lyq{j}]"
+            )
+            parts.append(f"[lyb{j}][lyq{j}]overlay=0:0:format=auto[lyv{j}]")
+        else:
+            parts.append(f"[lyk{j}]drawbox=c=black:t=fill[lyb{j}]")
+            # The speaker's picture moved e of the way (layoutPose: picture * p).
+            parts.append(f"[lyb{j}][lyp{j}]overlay=x='{px:.1f}*({e})':y='{py:.1f}*({e})'[lyv{j}]")
         if inputs[j] is not None:
             # Fills its part (cover), as the preview's object-fit: cover. A clip or GIF that ends early stays on its last frame.
             moving = l.get("media") == "video" or str(l.get("file", "")).endswith(".gif")

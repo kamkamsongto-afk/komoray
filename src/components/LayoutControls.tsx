@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowLeftRight, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload, User } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LIMITS } from "@/lib/subtitle-style";
 import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
@@ -11,7 +11,7 @@ import { PIC_MOTION } from "@/lib/behind";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { ConfirmDelete } from "./ConfirmDelete";
-import { LayerTools } from "./LayerTools";
+import { MAIN_BUTTON, mainStyle, PICKED, PLAIN_BUTTON, TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
@@ -57,6 +57,8 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 		setFocused(focus);
 		setOpen(focus);
 	}
+	const [tab, setTab] = useState<"you" | "other">("you"); // under Layout: You, or the Other part (coach 22 Nov)
+	const [picking, setPicking] = useState<string | null>(null); // the layout whose pictures are open to change (Other part)
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
 	// The project's pictures and clips (Import), for the other part. Asked for once the box opens.
@@ -89,12 +91,6 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 	const pick = (l: VideoLayout) => {
 		setOpen(l.id);
 		onReveal?.(l.id, l.start);
-	};
-	const moveHere = (l: VideoLayout) => {
-		const seconds = l.end - l.start;
-		const start = round(Math.max(0, Math.min(now(), total - seconds)));
-		update(l.id, { start, end: round(Math.min(total, start + seconds)) });
-		onReveal?.(l.id, start);
 	};
 	// A copy right after it, opened (coach, 14 Nov: the same in every box).
 	const duplicate = (l: VideoLayout) => {
@@ -139,6 +135,10 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 		</div>
 	);
 
+	const upload = (id: string) => {
+		importFor.current = id;
+		fileRef.current?.click();
+	};
 	const openLayout = layouts.find((l) => l.id === open);
 
 	return (
@@ -182,7 +182,10 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 			)}
 
 			{openLayout &&
-				[openLayout].map((l) => (
+				[openLayout].map((l) => {
+					const current = l.file ? files.find((i) => i.file === l.file) : undefined;
+					const choosing = !l.file || picking === l.id;
+					return (
 					<div key={l.id} className="flex flex-col gap-2">
 						<div className="flex flex-col gap-1">
 							<button onClick={() => setOpen(null)} className="inline-flex items-center gap-1 self-start rounded-md px-1 py-0.5 text-xs text-foreground/70 hover:bg-foreground/5 hover:text-foreground">
@@ -201,172 +204,180 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									title="Name on the timeline"
 									className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium placeholder:text-foreground placeholder:opacity-100 hover:border-foreground/20 focus:border-foreground/30 focus:outline-none"
 								/>
-								<button onClick={() => duplicate(l)} disabled={layouts.length >= LAYOUT.maxItems} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+								{(() => {
+										const place = layerPlace(layouts, l.id);
+										return (
+											<>
+												<span className="shrink-0 text-[11px] text-foreground/60" title="Its layer among the things showing with it">
+													{place ? `${place.at}/${place.of}` : "1/1"}
+												</span>
+												<button onClick={() => onChange(moveLayer(layouts, l.id, true))} disabled={!place || place.at === place.of} title={place ? "Bring it in front of the one over it" : "Nothing else shows at the same time"} aria-label="Bring forward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+													<ArrowUp className="h-3.5 w-3.5" aria-hidden />
+												</button>
+												<button onClick={() => onChange(moveLayer(layouts, l.id, false))} disabled={!place || place.at === 1} title={place ? "Send it behind the one under it" : "Nothing else shows at the same time"} aria-label="Send backward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+													<ArrowDown className="h-3.5 w-3.5" aria-hidden />
+												</button>
+											</>
+										);
+									})()}
+									<button onClick={() => duplicate(l)} disabled={layouts.length >= LAYOUT.maxItems} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
 									<Copy className="h-3.5 w-3.5" aria-hidden />
 								</button>
 								{trash(l)}
 							</div>
 						</div>
-						<LayerTools onMoveHere={() => moveHere(l)} onUp={() => onChange(moveLayer(layouts, l.id, true))} onDown={() => onChange(moveLayer(layouts, l.id, false))} place={layerPlace(layouts, l.id)} />
-						<p className="text-xs text-foreground/60">Pause the video to drag yourself inside your part.</p>
+						<ToolGroup tone={1} title="When">
+							{row(ON_TIMELINE, <TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />)}
+						</ToolGroup>
 
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">Layout</span>
+						<ToolGroup tone={2} title="Layout">
 							{/* With the playhead moved off this layout, a kind is a new layout there, as in Frame Me (coach, 17 Nov:
 							    picking one with another layout's box open turned that one into it, so it was gone from where it was). */}
-							{kinds(l.kind, (kind) => {
-								const at = now();
-								if ((at < l.start || at > l.end) && layouts.length < LAYOUT.maxItems) add(kind);
-								else update(l.id, { kind });
-							})}
-							<p className="text-[11px] text-foreground/50">Changes this layout. With the video moved off it, a layout adds a new one there.</p>
-							<button onClick={() => update(l.id, { meFirst: !l.meFirst })} className="inline-flex items-center gap-1 self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+							<div title="With the video moved off this layout, a kind adds a new layout there">
+								{kinds(l.kind, (kind) => {
+									const at = now();
+									if ((at < l.start || at > l.end) && layouts.length < LAYOUT.maxItems) add(kind);
+									else update(l.id, { kind });
+								})}
+							</div>
+							{row("Your part", range(l.split, LAYOUT.split.min, LAYOUT.split.max, 0.01, percent(l.split), (split) => update(l.id, { split })))}
+							<button onClick={() => update(l.id, { meFirst: !l.meFirst })} className={`self-start ${MAIN_BUTTON}`} style={mainStyle(2)}>
 								<ArrowLeftRight className="h-3.5 w-3.5" aria-hidden /> Swap sides
 							</button>
-							{row(
-								ON_TIMELINE,
-								<TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />,
-							)}
-							{row("Your part", range(l.split, LAYOUT.split.min, LAYOUT.split.max, 0.01, percent(l.split), (split) => update(l.id, { split })))}
-						</div>
+						</ToolGroup>
 
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">Transition</span>
-							<div role="radiogroup" aria-label="Transition" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
-								{LAYOUT_ENTERS.map((e) => (
-									<button
-										key={e.id}
-										role="radio"
-										aria-checked={l.enter === e.id}
-										onClick={() => update(l.id, { enter: e.id })}
-										title={e.note}
-										className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap ${l.enter === e.id ? "bg-blue-400/15 font-medium ring-1 ring-inset ring-blue-400" : "text-foreground/70 hover:text-foreground"}`}
-									>
-										{e.name}
-									</button>
-								))}
-							</div>
-							<p className="text-xs text-foreground/60">{LAYOUT_ENTERS.find((e) => e.id === l.enter)?.note}, at the start and the end.</p>
-						</div>
-
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">You in your part</span>
+						<TabGroup
+							tone={3}
+							value={tab}
+							onChange={setTab}
+							tabs={[
+								{ id: "you", label: "You", icon: <User className="h-5 w-5" aria-hidden /> },
+								{ id: "other", label: "Other part", icon: <ImageIcon className="h-5 w-5" aria-hidden /> },
+							]}
+						>
+							{tab === "you" && (
+								<>
+									<span className="text-[11px] text-foreground/60">Pause, then drag yourself on the video</span>
 							{/* meX / meY: the point of you in your part's middle. Sliding right moves you right, so it goes down. */}
-							{l.kind === "side"
-								? row("Left / right", range(1 - l.meX, 0, 1, 0.005, percent(1 - l.meX), (v) => update(l.id, { meX: Math.round((1 - v) * 1000) / 1000 })))
-								: row("Up / down", range(1 - l.meY, 0, 1, 0.005, percent(1 - l.meY), (v) => update(l.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
-							<button onClick={() => update(l.id, { meX: LAYOUT.me.x, meY: LAYOUT.me.y })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+							{/* Zoom: you bigger or smaller; what you then don't cover shows a blurred, dimmed copy of yourself. Setting it frees you to move both ways and past your own edge. */}
+							{row("Zoom", range(l.meZoom ?? 1, LAYOUT.meZoom.min, LAYOUT.meZoom.max, 0.01, percent(l.meZoom ?? 1), (meZoom) => update(l.id, { meZoom })))}
+							{(l.meZoom !== undefined || l.kind === "side") && row("Left / right", range(1 - l.meX, l.meZoom !== undefined ? 1 - LAYOUT.meRange.max : 0, l.meZoom !== undefined ? 1 - LAYOUT.meRange.min : 1, 0.005, percent(1 - l.meX), (v) => update(l.id, { meX: Math.round((1 - v) * 1000) / 1000 })))}
+							{(l.meZoom !== undefined || l.kind !== "side") && row("Up / down", range(1 - l.meY, l.meZoom !== undefined ? 1 - LAYOUT.meRange.max : 0, l.meZoom !== undefined ? 1 - LAYOUT.meRange.min : 1, 0.005, percent(1 - l.meY), (v) => update(l.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
+							<button onClick={() => update(l.id, { meX: LAYOUT.me.x, meY: LAYOUT.me.y, ...(l.meZoom !== undefined && { meZoom: LAYOUT.meZoom.start }) })} className={`self-start ${PLAIN_BUTTON}`}>
 								Center me
 							</button>
-						</div>
-
-						{subtitles && (() => {
-							// Subtitles here (coach 20 Nov): top / bottom put them over a face or over what is shown. Their own height for
-							// this layout's time only, in one step; the timeline shows it as its own piece.
-							const own = subtitles.at(l);
-							const seam = l.meFirst ? 1 - l.split : l.split; // the line between the two parts, from the bottom
-							return (
-								<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-									<span className="text-xs font-medium text-foreground/80">Subtitles here</span>
-									{row("Height", range(own ?? subtitles.normal, LIMITS.position.min, LIMITS.position.max, 0.01, own === null ? "As the rest" : percent(own), (v) => subtitles.set(l, Math.round(v * 1000) / 1000)))}
-									<div className="flex flex-wrap gap-1">
-										{l.kind === "stack" && (
-											<button onClick={() => subtitles.set(l, Math.min(LIMITS.position.max, Math.max(LIMITS.position.min, Math.round((seam - 0.03) * 1000) / 1000)))} className="rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
-												On the line between
-											</button>
+						</>
+							)}
+							{tab === "other" && (
+								<>
+							{/* Picked: one row (its picture, its name, Change); the pictures to pick from open only on Change (coach 22 Nov: it was crowded). */}
+							<>
+										{l.file && (
+											<div className="flex items-center gap-2">
+												<span className="relative h-10 w-[22px] shrink-0 overflow-hidden rounded border border-foreground/20 bg-black">
+													{l.media === "video" ? (
+														<video src={projectFileSrc(l.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+													) : (
+														// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+														<img src={projectFileSrc(l.file)} alt="" className="h-full w-full object-cover" />
+													)}
+												</span>
+												<span className="min-w-0 flex-1 truncate text-xs">{current?.name ?? (l.media === "video" ? "Clip" : "Picture")}</span>
+												<button onClick={() => setPicking(picking === l.id ? null : l.id)} aria-expanded={picking === l.id} className={MAIN_BUTTON} style={mainStyle(3)}>
+													{picking === l.id ? "Done" : "Change"}
+												</button>
+											</div>
 										)}
-										{own !== null && (
-											<button onClick={() => subtitles.set(l, null)} className="rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
-												Same as the rest
-											</button>
+										{choosing && (
+											<div className="grid grid-cols-4 gap-1">
+												{files.map((item) => (
+													<button
+														key={item.file}
+														onClick={() => {
+															pickFile(l, item);
+															setPicking(null);
+														}}
+														draggable
+														// Can also be dragged onto the video (PlayerFrame drops it in the other part).
+														onDragStart={(e) => {
+															e.dataTransfer.setData(LAYOUT_DRAG, JSON.stringify({ file: item.file, media: item.media }));
+															e.dataTransfer.effectAllowed = "copy";
+														}}
+														title={item.name}
+														aria-pressed={l.file === item.file}
+														className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${l.file === item.file ? "border-[#4D8DBA]" : "border-transparent hover:border-foreground/30"}`}
+													>
+														{item.media === "video" ? (
+															<>
+																<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+																<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
+															</>
+														) : (
+															// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+															<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
+														)}
+													</button>
+												))}
+											</div>
 										)}
-									</div>
-									<p className="text-xs text-foreground/60">Only while this layout shows. Or pause on it and drag the subtitles. If you move the layout later, set this again.</p>
+										{choosing && (
+											<div className="flex flex-wrap items-center gap-1">
+												{onImportFile && (
+													<button
+														onClick={() => upload(l.id)}
+														title="A picture or clip from your computer. It goes into My files too."
+														className={l.file ? PLAIN_BUTTON : MAIN_BUTTON}
+ style={l.file ? undefined : mainStyle(3)}
+													>
+														<Upload className="h-3 w-3 shrink-0" aria-hidden />
+														Upload
+													</button>
+												)}
+												{l.file && (
+													<button onClick={() => update(l.id, { file: undefined, media: undefined, volume: undefined, muted: undefined })} className={PLAIN_BUTTON}>
+														Use a color
+													</button>
+												)}
+												<span className="flex items-center gap-1 text-[11px] text-foreground/55" title="Or drag one onto the video">
+													<ImageIcon className="h-3 w-3 shrink-0" aria-hidden /> or drop on the video{library === null && " · Loading…"}
+												</span>
+											</div>
+										)}
+</>
+							{!l.file && (
+								<div className="flex flex-wrap items-center gap-1">
+									{LAYOUT_COLORS.map((c) => (
+										<button key={c} onClick={() => update(l.id, { color: c })} aria-label={`Color ${c}`} className={`h-5 w-5 rounded-full border-2 ${l.color === c ? "border-[#4D8DBA]" : "border-foreground/20"}`} style={{ background: c }} />
+									))}
+									<input type="color" value={l.color} onChange={(e) => update(l.id, { color: e.target.value.toUpperCase() })} aria-label="Any color" className="h-5 w-7 cursor-pointer rounded border border-foreground/20 bg-transparent" />
 								</div>
-							);
-						})()}
-
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">The other part</span>
-							<div className="grid grid-cols-4 gap-1">
-								{files.map((item) => (
-									<button
-										key={item.file}
-										onClick={() => pickFile(l, item)}
-										draggable
-										// Can also be dragged onto the video (PlayerFrame drops it in the other part).
-										onDragStart={(e) => {
-											e.dataTransfer.setData(LAYOUT_DRAG, JSON.stringify({ file: item.file, media: item.media }));
-											e.dataTransfer.effectAllowed = "copy";
-										}}
-										title={item.name}
-										aria-pressed={l.file === item.file}
-										className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${l.file === item.file ? "border-blue-600" : "border-transparent hover:border-foreground/30"}`}
-									>
-										{item.media === "video" ? (
-											<>
-												<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-												<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
-											</>
-										) : (
-											// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-											<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
-										)}
-									</button>
-								))}
-							</div>
+							)}
 							{l.file && (
 								// Its size and which bit of it shows (coach, 14 Nov). fileX / fileY: the point of it in the part's middle,
 								// so sliding right moves it right and the number goes down. Drag it on the video too.
-								<div className="flex flex-col gap-1.5 rounded-md bg-foreground/5 p-1.5">
+								<>
 									{row("Size", range(l.fileZoom ?? 1, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 0.01, percent(l.fileZoom ?? 1), (fileZoom) => update(l.id, { fileZoom })))}
 									{/* Zoom in / Zoom out while it shows (coach 20 Nov, as Cutout's Movement): layoutFileZoom in lib/layout.ts. */}
 									{row(
 										"Movement",
 										<span className="flex gap-1 text-xs">
 											{PIC_MOTION.map(([id, name]) => (
-												<button key={id} onClick={() => update(l.id, { fileMotion: id === "still" ? undefined : id })} className={`rounded border px-1.5 py-0.5 ${(l.fileMotion ?? "still") === id ? "border-blue-600 bg-blue-600/10" : "border-foreground/20"}`}>
+												<button key={id} onClick={() => update(l.id, { fileMotion: id === "still" ? undefined : id })} className={`rounded border px-1.5 py-0.5 ${(l.fileMotion ?? "still") === id ? "border-[#4D8DBA] bg-[#4D8DBA]/20" : "border-foreground/20"}`}>
 													{name}
 												</button>
 											))}
 										</span>,
 									)}
-									{l.fileMotion && row("Zoom speed", range(l.fileMotionZoom ?? LAYOUT.motionZoom.start, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, 0.05, percent(l.fileMotionZoom ?? LAYOUT.motionZoom.start), (fileMotionZoom) => update(l.id, { fileMotionZoom })))}
+									{l.fileMotion && row("Speed", range(l.fileMotionZoom ?? LAYOUT.motionZoom.start, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, 0.05, percent(l.fileMotionZoom ?? LAYOUT.motionZoom.start), (fileMotionZoom) => update(l.id, { fileMotionZoom })))}
 									{row("Left / right", range(1 - (l.fileX ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileX ?? 0.5)), (v) => update(l.id, { fileX: Math.round((1 - v) * 1000) / 1000 })))}
 									{row("Up / down", range(1 - (l.fileY ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileY ?? 0.5)), (v) => update(l.id, { fileY: Math.round((1 - v) * 1000) / 1000 })))}
-									<p className="text-xs text-foreground/60">Pause the video and drag your picture to move it. It always fills its part, so it moves only where it is bigger than the part: make it bigger to move it both ways.</p>
-									<button onClick={() => update(l.id, { fileZoom: undefined, fileX: undefined, fileY: undefined })} className="self-start rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
+									<span className="text-[11px] text-foreground/55" title="It always fills its part, so it moves only where it is bigger than the part: make it bigger to move it both ways.">
+										Pause, then drag it. Bigger than the part to move it.
+									</span>
+									<button onClick={() => update(l.id, { fileZoom: undefined, fileX: undefined, fileY: undefined })} className={`self-start ${PLAIN_BUTTON}`}>
 										Fit and center
 									</button>
-								</div>
-							)}
-							<div className="flex flex-wrap items-center gap-1">
-								{onImportFile && (
-									<button
-										onClick={() => {
-											importFor.current = l.id;
-											fileRef.current?.click();
-										}}
-										title="A picture or clip from your computer. It goes into My files too."
-										className="inline-flex items-center gap-1 rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5"
-									>
-										<Upload className="h-3 w-3 shrink-0" aria-hidden />
-										Upload
-									</button>
-								)}
-								{l.file && (
-									<button onClick={() => update(l.id, { file: undefined, media: undefined, volume: undefined, muted: undefined })} className="rounded-md border border-foreground/20 px-2 py-0.5 text-xs hover:bg-foreground/5">
-										Use a color instead
-									</button>
-								)}
-							</div>
-							{!l.file && (
-								<div className="flex flex-wrap items-center gap-1">
-									{LAYOUT_COLORS.map((c) => (
-										<button key={c} onClick={() => update(l.id, { color: c })} aria-label={`Color ${c}`} className={`h-5 w-5 rounded-full border-2 ${l.color === c ? "border-blue-600" : "border-foreground/20"}`} style={{ background: c }} />
-									))}
-									<input type="color" value={l.color} onChange={(e) => update(l.id, { color: e.target.value.toUpperCase() })} aria-label="Any color" className="h-5 w-7 cursor-pointer rounded border border-foreground/20 bg-transparent" />
-								</div>
+								</>
 							)}
 							{l.file && l.media === "video" && (
 								<div className="flex items-center gap-2 text-xs text-foreground/70">
@@ -375,12 +386,53 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								</div>
 							)}
 							{l.file && l.media === "video" && <ClipTrim id={l.id} file={l.file} start={l.start} end={l.end} clipFrom={l.clipFrom} total={total} onChange={(patch) => update(l.id, patch)} />}
-							<p className="flex items-center gap-1 text-xs text-foreground/60">
-								<ImageIcon className="h-3.5 w-3.5 shrink-0" aria-hidden /> Pick one here, drag it onto the video, or drop a picture or clip from your computer on the video.{library === null && " Loading…"}
-							</p>
-						</div>
+								</>
+							)}
+						</TabGroup>
+
+						<ToolGroup tone={1} title="Transition">
+							<div role="radiogroup" aria-label="Transition" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
+								{LAYOUT_ENTERS.map((e) => (
+									<button
+										key={e.id}
+										role="radio"
+										aria-checked={l.enter === e.id}
+										onClick={() => update(l.id, { enter: e.id })}
+										title={`${e.note}, at the start and the end`}
+										className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap ${l.enter === e.id ? PICKED : "text-foreground/70 hover:text-foreground"}`}
+									>
+										{e.name}
+									</button>
+								))}
+							</div>
+						</ToolGroup>
+
+						{subtitles && (() => {
+							// Subtitles here (coach 20 Nov): top / bottom put them over a face or over what is shown. Their own height for
+							// this layout's time only, in one step; the timeline shows it as its own piece.
+							const own = subtitles.at(l);
+							const seam = l.meFirst ? 1 - l.split : l.split; // the line between the two parts, from the bottom
+							return (
+								<ToolGroup tone={2} title="Subtitles here">
+									{row("Height", range(own ?? subtitles.normal, LIMITS.position.min, LIMITS.position.max, 0.01, own === null ? "As the rest" : percent(own), (v) => subtitles.set(l, Math.round(v * 1000) / 1000)))}
+									<div className="flex flex-wrap gap-1" title="Only while this layout shows. Or pause on it and drag the subtitles. If you move the layout later, set this again.">
+										{l.kind === "stack" && (
+											<button onClick={() => subtitles.set(l, Math.min(LIMITS.position.max, Math.max(LIMITS.position.min, Math.round((seam - 0.03) * 1000) / 1000)))} className={PLAIN_BUTTON}>
+												On the line between
+											</button>
+										)}
+										{own !== null && (
+											<button onClick={() => subtitles.set(l, null)} className={PLAIN_BUTTON}>
+												Same as the rest
+											</button>
+										)}
+									</div>
+								</ToolGroup>
+							);
+						})()}
 					</div>
-				))}
+				);
+				})}
 
 			{removing && (
 				<ConfirmDelete
