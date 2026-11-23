@@ -91,6 +91,13 @@ export async function fetchObject(key: string, range?: string | null) {
 	return client.fetch(objectUrl(key), { headers: range ? { Range: range } : {} });
 }
 
+// How big an object is, bytes (a HEAD, nothing is downloaded). 0 if it can't be told.
+export async function objectSize(key: string) {
+	const { client, objectUrl } = r2();
+	const res = await client.fetch(objectUrl(key), { method: "HEAD" });
+	return res.ok ? Number(res.headers.get("content-length")) || 0 : 0;
+}
+
 export async function exists(key: string) {
 	const { client, objectUrl } = r2();
 	const res = await client.fetch(objectUrl(key), { method: "HEAD" });
