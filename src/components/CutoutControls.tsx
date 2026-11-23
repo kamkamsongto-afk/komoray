@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, Copy, Droplets, Film, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, Film, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
@@ -14,7 +14,7 @@ import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
 import { newClipSound } from "@/lib/clip-sound";
-import { ToolGroup } from "./ToolGroup";
+import { TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 import { addToLibrary, clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
@@ -174,7 +174,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	// One thing at a time: the list, or the one picked with only its settings (coach, 12 Nov: with texts and pictures
 	// all in one box, it was hard to see what belonged to what).
 	const [view, setView] = useListView("komoray.cutoutView");
-	const [speakerOpen, setSpeakerOpen] = useState(false);
+	const [insertTab, setInsertTab] = useState<"you" | "picture">("you"); // the picture's box: You or the picture (coach 23 Nov)
 	const pick = (item: { id: string; start: number }) => {
 		setOpen(item.id);
 		onReveal?.(item.id, item.start);
@@ -628,18 +628,18 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{row("Name", <input value={i.name ?? ""} maxLength={BEHIND.maxName} placeholder={i.kind === "video" ? "Clip" : "Picture"} onChange={(e) => updateInsert(i.id, { name: e.target.value })} onBlur={(e) => updateInsert(i.id, { name: cleanInsertName(e.target.value) || undefined })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							<FadeSwitches item={i} onChange={(patch) => updateInsert(i.id, patch)} />
 						</ToolGroup>
-						{/* You, in a box that folds away (coach, 12 Nov): most of the time only the picture is changed. */}
-						<div className="rounded-lg border border-foreground/15">
-							<button onClick={() => setSpeakerOpen(!speakerOpen)} aria-expanded={speakerOpen} className="flex w-full items-center gap-1 px-2 py-1.5 text-left text-xs font-medium text-foreground/80 hover:bg-foreground/5">
-								{speakerOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />}
-								<User className="h-3.5 w-3.5 shrink-0 text-foreground/50" aria-hidden />
-								You
-								<span className="ml-auto font-normal text-foreground/50">
-									{i.seeThrough ? (i.hidden ? "Behind it" : "In front") : i.hidden ? "Hidden" : `${Math.round(i.speakerScale * 100)}%`}
-								</span>
-							</button>
-							{speakerOpen && (
-								<div className="flex flex-col gap-1.5 border-t border-foreground/10 p-2">
+												{/* You | The picture (coach 23 Nov): one tab at a time, as Frame Me and Layout. */}
+						<TabGroup
+							tone={3}
+							value={insertTab}
+							onChange={setInsertTab}
+							tabs={[
+								{ id: "you", label: "You", icon: <User className="h-5 w-5" aria-hidden /> },
+								{ id: "picture", label: i.kind === "video" ? "The clip" : "The picture", icon: <ImagePlus className="h-5 w-5" aria-hidden /> },
+							]}
+						>
+						{insertTab === "you" && (
+							<>
 									<label className="flex items-center gap-2 text-xs">
 										<input type="checkbox" checked={i.hidden} onChange={(e) => updateInsert(i.id, { hidden: e.target.checked })} />
 										{i.seeThrough ? "Put it in front of me" : "Hide me"}
@@ -649,10 +649,10 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, INSERT.lift.min, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
 									{!i.hidden && !i.seeThrough && row("Soft edges", range(i.soft ?? INSERT.edgeFade, 0, INSERT.soft.max, 0.01, `${Math.round((i.soft ?? INSERT.edgeFade) * 100)}%`, (soft) => updateInsert(i.id, { soft })))}
 									{!i.hidden && !i.seeThrough && <span className="text-xs text-foreground/60">Or pause the video and drag yourself on it.</span>}
-								</div>
-							)}
-						</div>
-						<ToolGroup tone={1} title={i.kind === "video" ? "The clip" : "The picture"}>
+							</>
+						)}
+						{insertTab === "picture" && (
+							<>
 							{i.kind === "image" && (
 								<BgMotionControl
 									motion={i.picMotion === "still" ? undefined : i.picMotion}
@@ -671,7 +671,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								{i.kind === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={i} onChange={(patch) => updateInsert(i.id, patch)} /></div>}
 								{i.kind === "video" && <ClipTrim id={i.id} file={i.file} start={i.start} end={i.end} clipFrom={i.clipFrom} total={total} onChange={(patch) => updateInsert(i.id, patch)} />}
 							{times(i, (patch) => updateInsert(i.id, patch))}
-						</ToolGroup>
+							</>
+						)}
+						</TabGroup>
 						</div>
 					))}
 

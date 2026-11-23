@@ -228,9 +228,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								{trash(l)}
 							</div>
 						</div>
-						<ToolGroup tone={1} title="When">
-							{row(ON_TIMELINE, <TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />)}
-						</ToolGroup>
+						
 
 						<ToolGroup tone={2} title="Layout">
 							{/* With the playhead moved off this layout, a kind is a new layout there, as in Frame Me (coach, 17 Nov:
@@ -430,6 +428,10 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								</ToolGroup>
 							);
 						})()}
+						<ToolGroup tone={1} title="When">
+							{row(ON_TIMELINE, <TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />)}
+						</ToolGroup>
+
 					</div>
 				);
 				})}
