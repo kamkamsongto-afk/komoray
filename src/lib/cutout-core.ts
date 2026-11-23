@@ -71,7 +71,20 @@ export function scaler(w: number, h: number) {
 
 const CODECS = ["avc1.42E01F", "avc1.4D401F", "avc1.640028"];
 
-export async function matteEncoder(w: number, h: number, bitrate: number, fail: (error: Error) => void) {
+// Waits for the next 'dequeue' of a codec, but looks up every quarter second: a codec that failed never sends one, and a wait
+// without this would hang for good (found in review 23 Nov, before workers made it a silent hang).
+export const nextDequeue = (codec: { addEventListener: (type: "dequeue", listener: () => void, options: { once: boolean }) => void }) =>
+	new Promise<void>((resolve) => {
+		codec.addEventListener("dequeue", () => resolve(), { once: true });
+		setTimeout(resolve, 250);
+	});
+
+export async function matteEncoder(w: number, h: number, bitrate: number, failOut: (error: Error) => void) {
+	let broken: Error | null = null;
+	const fail = (error: Error) => {
+		broken = error;
+		failOut(error);
+	};
 	const pieces: Uint8Array<ArrayBuffer>[] = [];
 	const encoder = new VideoEncoder({
 		output: (chunk) => {
@@ -97,7 +110,10 @@ export async function matteEncoder(w: number, h: number, bitrate: number, fail: 
 					encoder.encode(frame, { keyFrame: index % FPS === 0 });
 					frame.close();
 					index++;
-					while (encoder.encodeQueueSize > 8) await new Promise((resolve) => encoder.addEventListener("dequeue", resolve, { once: true }));
+					while (encoder.encodeQueueSize > 8) {
+						if (broken) throw broken;
+						await nextDequeue(encoder);
+					}
 				},
 				async finish() {
 					await encoder.flush();
@@ -196,7 +212,10 @@ export async function matteStretch(o: {
 				check();
 				decoder.decode(new EncodedVideoChunk({ type: frame.key ? "key" : "delta", timestamp: Math.round(frame.time * 1e6), data }));
 				await timed(times, "decodeWait", async () => {
-					while (decoder.decodeQueueSize > 4) await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
+					while (decoder.decodeQueueSize > 4) {
+						check(); // a decoder that failed never sends 'dequeue'
+						await nextDequeue(decoder);
+					}
 				});
 				await take();
 			}
