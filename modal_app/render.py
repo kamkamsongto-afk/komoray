@@ -1507,7 +1507,7 @@ THAI_NO_END = {"ที่", "ที่จะ", "ซึ่ง", "จะ", "ขอ
 THAI_NUMBER_WORDS = {"ศูนย์", "หนึ่ง", "เอ็ด", "สอง", "ยี่", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน", "ล้าน"}
 NO_END_PENALTY = 24  # frames: a break there costs as much as a pause this long
 OPEN_PAUSE = 10  # frames: after a pause this long the speaker did stop, so the break is fine
-THAI_NO_START = {"นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก"}
+THAI_NO_START = {"นี้", "นั้น", "โน้น", "ไหม", "มั้ย", "เลย", "ด้วย", "กัน", "ได้", "ๆ", "อยู่", "หรอ", "เหรอ", "เดียว", "กว่า", "ที่สุด", "มาก", "หน่อย", "บ้าง", "เอง", "ไว้", "ขึ้น", "ออก", "บาท"}
 THAI_STARTS = {"แต่", "ถ้า", "และ", "หรือ", "เพราะ", "ซึ่ง", "โดย", "ดังนั้น", "เช่น", "คือ", "เมื่อ", "ตอนที่", "จน", "ทำให้", "แล้วก็", "ก็"}
 START_BONUS = 8  # frames: a phrase start or a polite ending is worth a pause this long
 # Where an English line may break (coach 20 Nov: "With Komoray, I"): never after a word that leads into the next one,
