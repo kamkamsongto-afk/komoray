@@ -1128,7 +1128,7 @@ const panelMoveNow = useRef({ x: 0, y: 0 });
 useEffect(() => {
 	panelMoveNow.current = panelMove;
 }, [panelMove]);
-const DRAG_SKIP = "button, input, textarea, select, label, a, [role=slider], [contenteditable], [role=tab], [role=radio]";
+const DRAG_SKIP = "button, input, textarea, select, label, a, [role=slider], [contenteditable], [role=tab], [role=radio], [role=separator]"; // separator: the corner that makes the box taller
 function startPanelMove(e: ReactPointerEvent<HTMLElement>) {
 if (!window.matchMedia("(min-width: 1024px)").matches || e.button !== 0) return;
 if ((e.target as HTMLElement).closest(DRAG_SKIP)) return;
