@@ -3,7 +3,7 @@ import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, sib
 import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
 import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/features";
-import { BETA_MINUTES, OUT_OF_MINUTES } from "@/lib/limits";
+import { ADMIN_MAX_GB, BETA_MINUTES, OUT_OF_MINUTES } from "@/lib/limits";
 import { cycleAround, extraLeft, PLAN_LABEL, PLAN_RULES, type PlanName, type PlanRules, PLANS_LIVE, shortDate } from "@/lib/plans";
 import { planFor } from "@/lib/billing-store";
 import { type JobFiles, PART_JOB, WHOLE_JOB } from "./render-part";
@@ -92,7 +92,7 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	const base = { limit: BETA_MINUTES, perVideo: beta.perVideo, maxGb: beta.maxGb, storageGb: beta.storageGb, monthly: null, extra: null, perks: perksOf(beta), renders: rendersOf(beta) };
 	const none: AccessStatus = { ...base, allowed: false, unlimited: false, plan: null, used: 0, left: 0, features: NO_FEATURES };
 	if (!email) return none;
-	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, plan: "admin", used: 0, left: BETA_MINUTES, features: ALL_FEATURES };
+	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, plan: "admin", used: 0, left: BETA_MINUTES, maxGb: ADMIN_MAX_GB, features: ALL_FEATURES };
 	const [person, bought] = await Promise.all([getJson<PersonRecord>(await personKey(email)), planFor(email).catch(() => null)]);
 	const granted = person ? readFeatures(person.features) : NO_FEATURES;
 	const paid = bought && bought.plan !== "free" ? bought.plan : null;

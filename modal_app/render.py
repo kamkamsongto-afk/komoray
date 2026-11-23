@@ -3044,6 +3044,48 @@ def make_thumb(video: Path, thumb: Path) -> None:
     )
 
 
+AUDIO_RATE = 16000  # Hz: what speech-to-text needs; mono, lossless (FLAC), so nothing is lost for Deepgram
+
+
+def audio_command(src: str, out: Path) -> list[str]:
+    """ffmpeg: only the sound of a video (src: a file, or a link ffmpeg reads piece by piece), mono at AUDIO_RATE, as FLAC."""
+    return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", str(AUDIO_RATE), "-c:a", "flac", str(out)]
+
+
+def audio_whole(src: str, out: Path) -> bool:
+    """Is the sound as long as the video? ffmpeg can end with no error and a short or empty sound when it can't jump about in a
+    link (a file with its index at the end, a server without Range: found in a test 23 Nov), so a good exit isn't enough."""
+    if not out.exists() or out.stat().st_size == 0:
+        return False
+    try:
+        whole = duration_of(src)  # type: ignore[arg-type]  # a link works as well as a path
+        return whole > 0 and duration_of(out) >= whole * 0.98 - 1
+    except Exception:
+        return False
+
+
+@app.function(image=image, cpu=2, memory=4096, timeout=60 * 60)
+def audio(video_url: str, output_url: str, error_url: str | None = None) -> dict:
+    """The sound of a video that is too big for Deepgram (over 2 GB, coach 22 Nov), so Deepgram gets the sound alone.
+    Reads the video straight from its link, never all of it at once; a file ffmpeg can't read that way is downloaded and tried again."""
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "audio.flac"
+            result = subprocess.run(audio_command(video_url, out), capture_output=True, text=True)
+            if result.returncode != 0 or not audio_whole(video_url, out):
+                src = Path(tmp) / "source"
+                urllib.request.urlretrieve(video_url, src)
+                result = subprocess.run(audio_command(str(src), out), capture_output=True, text=True)
+                if result.returncode != 0 or not audio_whole(str(src), out):
+                    raise RuntimeError(f"ffmpeg failed or the sound is shorter than the video: {result.stderr[-600:]}")
+            put(output_url, out.read_bytes(), "audio/flac")
+            return {"ok": True, "bytes": out.stat().st_size}
+    except Exception as err:
+        if error_url:
+            put(error_url, json.dumps({"error": str(err)}).encode(), "application/json")
+        raise
+
+
 @app.function(image=image, cpu=2, memory=2048, timeout=30 * 60)
 def faces(video_url: str, faces_url: str, thumb_url: str | None = None) -> dict:
     """Where the face is (and the My projects picture), for a preview copy made before these existed."""
@@ -3154,6 +3196,8 @@ def start(body: dict) -> dict:
         return {"ok": True}
     if body.get("kind") == "proxy":
         call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"), body.get("progressUrl"))
+    elif body.get("kind") == "audio":
+        call = audio.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"))
     elif body.get("kind") == "faces":
         call = faces.spawn(body["videoUrl"], body["facesUrl"], body.get("thumbUrl"))
     else:
