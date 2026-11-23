@@ -21,6 +21,7 @@ import { hashEmail } from "@/lib/email-hash";
 // video gives nothing back; a failed job does (refundListen).
 export const LISTENS_PER_VIDEO = 3; // the first, and Wrong language? twice. Each one pays speech-to-text again
 export const JOB_TOO_OLD_MS = 30 * 60 * 1000; // a job still running after this has died (same as the admin page)
+export const BIG_JOB_TOO_OLD_MS = 90 * 60 * 1000; // a big video: the sound first, then Deepgram (audio-first.ts GIVE_UP_MS)
 
 export const NO_INVITE = "Komoray is invite-only for now. Your invite will come by email.";
 
@@ -226,8 +227,10 @@ export async function startListening(key: string, email?: string | null): Promis
 
 // A job that never reported back has died: say so and give the minutes back. true = it had died.
 export async function settleDeadListen(key: string) {
-	const started = await getJson<{ startedAt?: string; usageKey?: string }>(siblingKey(key, "analyze.json"));
-	if (!started?.startedAt || Date.now() - new Date(started.startedAt).getTime() < JOB_TOO_OLD_MS) return false;
+	const started = await getJson<{ startedAt?: string; usageKey?: string; audioFirst?: boolean }>(siblingKey(key, "analyze.json"));
+	// A big video first takes its sound out (up to an hour in Modal, lib/audio-first.ts), so it gets longer than a small one.
+	const limit = started?.audioFirst ? BIG_JOB_TOO_OLD_MS : JOB_TOO_OLD_MS;
+	if (!started?.startedAt || Date.now() - new Date(started.startedAt).getTime() < limit) return false;
 	await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error: "This took too long and stopped. Your minutes are back. Please try again.", at: new Date().toISOString() }), "application/json");
 	if (started.usageKey) await refundListen(key, started.usageKey).catch(() => {});
 	return true;

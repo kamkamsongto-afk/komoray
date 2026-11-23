@@ -93,7 +93,7 @@ export type MatteTimes = { setup: number; modelLoad: number; read: number; decod
 
 // Workers: half of the cores, at most 3 (the computer stays usable, memory stays small), and none for a short video.
 const MIN_PARALLEL_FRAMES = 120;
-const STALL_MS = 90_000; // no word from any worker for this long: give up on them (loading the model takes ~1-20 s)
+const STALL_MS = 180_000; // no word from any worker for this long: give up on them (start-up downloads the model, slow connections take minutes)
 const MAX_WORKERS = 3; // measured 23 Nov on a 12-core computer: 3 workers 1.65x, more gave little (each frame got slower when more ran at once)
 export const workersFor = (frames: number) => {
 	const cores = typeof navigator === "undefined" ? 1 : navigator.hardwareConcurrency || 1;
@@ -211,7 +211,11 @@ async function parallelMatte(o: {
 
 	const workers: Worker[] = [];
 	const stop = () => workers.forEach((worker) => worker.terminate());
-	o.signal.addEventListener("abort", stop, { once: true });
+	const onAbort = () => {
+		stop();
+		stalled(new DOMException("Stopped", "AbortError")); // Stop answers at once, not after the stall timer
+	};
+	o.signal.addEventListener("abort", onAbort, { once: true });
 	const setup = performance.now();
 	let done = 0;
 	// A worker that goes quiet (a browser that can't run it, a codec that stopped) must not hang the page: no message for this long
@@ -219,6 +223,7 @@ async function parallelMatte(o: {
 	let alarm: ReturnType<typeof setTimeout> | undefined;
 	let stalled: (error: Error) => void = () => {};
 	const stall = new Promise<never>((_, reject) => (stalled = reject));
+	stall.catch(() => {}); // nobody is waiting on it once the pieces are in
 	const wake = () => {
 		clearTimeout(alarm);
 		alarm = setTimeout(() => stalled(new Error("The workers stopped answering.")), STALL_MS);
@@ -256,6 +261,6 @@ async function parallelMatte(o: {
 	} finally {
 		clearTimeout(alarm);
 		stop();
-		o.signal.removeEventListener("abort", stop);
+		o.signal.removeEventListener("abort", onAbort);
 	}
 }

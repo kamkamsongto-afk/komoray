@@ -286,7 +286,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		}
 		// No break was good enough, and the next word must not start the line ("บาท", "ค่ะ"): it goes with the word before it
 		// instead (coach 23 Nov: "บาท" still began lines). render.py best_break does the same.
-		if (bestScore === -Infinity && run.length > 1 && (THAI_NO_START.has(next.text) || THAI_ENDINGS.has(next.text) || next.glue || insideNumber(run[run.length - 1], next))) return run.length - 1;
+		if (bestScore === -Infinity && run.length > 1 && (THAI_NO_START.has(next.text) || THAI_ENDINGS.has(next.text) || next.glue || next.text.startsWith("ๆ") || insideNumber(run[run.length - 1], next))) return run.length - 1;
 		return best;
 	};
 

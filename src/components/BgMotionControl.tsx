@@ -35,7 +35,7 @@ export function BgMotionControl({ motion, amount, speed, onMotion, onAmount, onS
 							key={id}
 							role="radio"
 							aria-checked={picked}
-							onClick={() => onMotion(id === "still" ? undefined : id)}
+							onClick={() => { if (!picked) onMotion(id === "still" ? undefined : id); }}
 							className={`rounded-md border px-1 py-1 text-[11px] leading-tight ${picked ? "font-medium" : "border-foreground/20 text-foreground/70 hover:bg-foreground/5"}`}
 							style={picked ? { borderColor: tone, background: `${tone}33` } : undefined}
 						>

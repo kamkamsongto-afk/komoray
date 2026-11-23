@@ -848,7 +848,7 @@ def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
     """ffmpeg: a Cutout picture's zoom, pan or tilt while it shows, over the whole screen (pictures only). Same as pictureWindow in behind.ts."""
     if ins.get("kind") == "video":
         return ""
-    return bg_motion_filter(ins.get("picMotion"), ins.get("picZoom") or INSERT_ZOOM, ins.get("picSpeed") or 1.0, seconds, size)
+    return bg_motion_filter(ins.get("picMotion"), ins.get("picZoom", INSERT_ZOOM) if ins.get("picZoom") is not None else INSERT_ZOOM, ins.get("picSpeed") if ins.get("picSpeed") is not None else 1.0, seconds, size)
 
 
 def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
@@ -856,7 +856,7 @@ def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
     Same as layoutFileWindow in layout.ts."""
     if not l.get("file"):
         return ""
-    return bg_motion_filter(l.get("fileMotion"), l.get("fileMotionZoom") or INSERT_ZOOM, l.get("fileMotionSpeed") or 1.0, seconds, size)
+    return bg_motion_filter(l.get("fileMotion"), l.get("fileMotionZoom") if l.get("fileMotionZoom") is not None else INSERT_ZOOM, l.get("fileMotionSpeed") if l.get("fileMotionSpeed") is not None else 1.0, seconds, size)
 
 
 def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: dict, inputs: dict) -> str:
@@ -1069,7 +1069,7 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
             parts.append(
                 f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
-                f"{bg_motion_filter(f.get('backMotion'), f.get('backAmount') or INSERT_ZOOM, f.get('backSpeed') or 1.0, d, size)}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
+                f"{bg_motion_filter(f.get('backMotion'), f.get('backAmount') if f.get('backAmount') is not None else INSERT_ZOOM, f.get('backSpeed') if f.get('backSpeed') is not None else 1.0, d, size)}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
             )
             parts.append(f"[fmb{j}]drawbox=c=black:t=fill[fbk{j}]")
             parts.append(f"[fbk{j}][fbf{j}]overlay=eof_action=repeat[fbg{j}]")
@@ -1571,7 +1571,7 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
                 best, best_score = k, score
         # No break was good enough, and the next word must not start the line ("บาท", "ค่ะ"): it goes with the word before it
         # instead (timeline.ts bestBreak, coach 23 Nov).
-        if best_score == -math.inf and len(run) > 1 and (nxt["text"] in THAI_NO_START or nxt["text"] in THAI_ENDINGS or nxt.get("glue") or inside_number(run[-1], nxt)):
+        if best_score == -math.inf and len(run) > 1 and (nxt["text"] in THAI_NO_START or nxt["text"] in THAI_ENDINGS or nxt.get("glue") or nxt["text"].startswith("ๆ") or inside_number(run[-1], nxt)):
             return len(run) - 1
         return best
 
