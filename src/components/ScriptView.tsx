@@ -1136,6 +1136,10 @@ const box = panelRef.current;
 if (!box) return;
 e.preventDefault();
 const at = box.getBoundingClientRect();
+// The box keeps its size while it is dragged (coach 23 Nov: it grew and shrank under the pointer): frozen here, released when the pointer lets go.
+box.style.width = `${at.width}px`;
+box.style.height = `${at.height}px`;
+box.style.maxHeight = "none";
 const from = { x: e.clientX, y: e.clientY, move: { ...panelMoveNow.current } };
 let last = { ...from.move };
 // Never out of reach: a strip of its title stays on the screen.
@@ -1153,6 +1157,9 @@ frame = requestAnimationFrame(() => place(ev));
 };
 const stop = () => {
 cancelAnimationFrame(frame);
+box.style.width = "";
+box.style.height = "";
+box.style.maxHeight = "";
 window.removeEventListener("pointermove", move);
 window.removeEventListener("pointerup", stop);
 window.removeEventListener("pointercancel", stop);
