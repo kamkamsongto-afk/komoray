@@ -288,7 +288,7 @@ function FrameEdge({ f, W, H, scale, box, onChange }: { f: FrameMe; W: number; H
 		const clamp = (n: number, lo: number, hi: number) => Math.round(Math.min(hi, Math.max(lo, n)) * 1000) / 1000;
 		if (d.mode === "move") onChange(f.id, { x: clamp(d.from.x + dx, FRAME.move.min, FRAME.move.max), y: clamp(d.from.y + dy, FRAME.move.min, FRAME.move.max) });
 		// The point of the speaker in the frame's middle: dragging right brings a point further left there.
-		else if (d.mode === "me") onChange(f.id, { meX: clamp(d.from.meX - dx / d.from.zoom, 0, 1), meY: clamp(d.from.meY - dy / d.from.zoom, 0, 1) });
+		else if (d.mode === "me") onChange(f.id, { meX: clamp(d.from.meX - dx / d.from.zoom, FRAME.meRange.min, FRAME.meRange.max), meY: clamp(d.from.meY - dy / d.from.zoom, FRAME.meRange.min, FRAME.meRange.max) });
 		else {
 			// The shape and the picture in it grow together (coach, 15 Nov), so the same part of the speaker stays in the
 			// shape; Size and Zoom in the box still set them one at a time. The growth stops where either one hits its limit.
