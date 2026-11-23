@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { covered } from "./behind";
 import { clock, type CutoutTier, finishSeconds, slowSeconds, type Window } from "./cutout";
 import { type LocalTier, localSupport, makeLocalMatte } from "./cutout-local";
+import { createDebugLog } from "./debug-log";
 import { putWithProgress } from "./put-file";
 
 // The editor's side of Cutout (lib/cutout.ts, lib/behind.ts): is it on for this person, how far the
@@ -137,16 +138,23 @@ export function useCutout(key: string | null, videoSeconds = 0) {
 				setState((s) => (s.local ? { ...s, local: { ...s.local, part, left } } : s));
 			};
 			try {
-				const matte = await makeLocalMatte(tier, videoUrl, windows, progress, controller.signal);
+				// ?debug=1: how long each step took, to logs/debug/ (coach 22 Nov: measure before changing how Cut me out runs).
+				const recorder = createDebugLog({ what: "cutout", key, tier, cores: navigator.hardwareConcurrency });
+				let times: Record<string, unknown> = {};
+				const matte = await makeLocalMatte(tier, videoUrl, windows, progress, controller.signal, (t) => (times = { ...t }));
+				const sendStart = performance.now();
 				setState((s) => (s.local ? { ...s, savingSince: Date.now(), local: { ...s.local, phase: "sending", part: 1, left: null } } : s));
 				const asked = await fetch("/api/cutout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, windows, tier }) });
 				const place = (await asked.json().catch(() => ({}))) as { uploadUrl?: string; error?: string };
 				if (!asked.ok || !place.uploadUrl) return failed(place.error ?? "Could not save the cutout. Please try again.");
 				const sent = await fetch(place.uploadUrl, { method: "PUT", headers: { "Content-Type": "video/h264" }, body: matte, signal: controller.signal });
 				if (!sent.ok) return failed("The upload stopped. Please try again.");
+				const uploaded = performance.now();
 				const done = await fetch("/api/cutout/finish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) });
 				const data = (await done.json().catch(() => ({}))) as { error?: string };
 				if (!done.ok) return failed(data.error ?? "Could not finish the cutout. Please try again.");
+				recorder.log("cutout-times", { ...times, matteBytes: matte.size, uploadMs: Math.round(uploaded - sendStart), finishCallMs: Math.round(performance.now() - uploaded), windows });
+				recorder.close();
 				setState((s) => ({ ...s, local: null, status: "processing", tier, previewUrl: undefined, version: undefined }));
 				void refresh();
 			} catch (error) {

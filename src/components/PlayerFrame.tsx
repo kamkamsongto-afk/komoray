@@ -1,13 +1,14 @@
 "use client";
 
-import { Pause, Play } from "lucide-react";
+import { Pause, Play, RotateCw } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useContext, useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerInk, bannerMotion, bannerRows } from "@/lib/banners";
-import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureZoom, runText, speakerTransform } from "@/lib/behind";
+import { BANNER, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerPad, bannerRows, bannerStrokeShadow } from "@/lib/banners";
+import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, speakerTransform } from "@/lib/behind";
+import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
-import { type FrameMe, FRAME, frameAt, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
-import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileZoom, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
+import { type FrameMe, FRAME, frameAt, frameBackWindow, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
+import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileWindow, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import { logoPictureName, logoPictureUrl } from "@/lib/logo";
 import { myFileUrl } from "@/lib/my-files";
@@ -287,7 +288,7 @@ function FrameEdge({ f, W, H, scale, box, onChange }: { f: FrameMe; W: number; H
 		const clamp = (n: number, lo: number, hi: number) => Math.round(Math.min(hi, Math.max(lo, n)) * 1000) / 1000;
 		if (d.mode === "move") onChange(f.id, { x: clamp(d.from.x + dx, FRAME.move.min, FRAME.move.max), y: clamp(d.from.y + dy, FRAME.move.min, FRAME.move.max) });
 		// The point of the speaker in the frame's middle: dragging right brings a point further left there.
-		else if (d.mode === "me") onChange(f.id, { meX: clamp(d.from.meX - dx / d.from.zoom, 0, 1), meY: clamp(d.from.meY - dy / d.from.zoom, 0, 1) });
+		else if (d.mode === "me") onChange(f.id, { meX: clamp(d.from.meX - dx / d.from.zoom, FRAME.meRange.min, FRAME.meRange.max), meY: clamp(d.from.meY - dy / d.from.zoom, FRAME.meRange.min, FRAME.meRange.max) });
 		else {
 			// The shape and the picture in it grow together (coach, 15 Nov), so the same part of the speaker stays in the
 			// shape; Size and Zoom in the box still set them one at a time. The growth stops where either one hits its limit.
@@ -459,9 +460,9 @@ export function PlayerFrame({
 
 	// Move a banner (its middle follows the pointer) or resize it (by how far the pointer is from its
 	// middle, compared with where the drag started). Changes are sent while dragging.
-	function startBannerDrag(e: ReactPointerEvent<HTMLElement>, banner: Banner, mode: "move" | "size") {
+	function startBannerDrag(e: ReactPointerEvent<HTMLElement>, banner: Banner, mode: "move" | "size" | "rotate") {
 		const box = boxRef.current;
-		const target = (mode === "size" ? e.currentTarget.parentElement : e.currentTarget) as HTMLElement | null;
+		const target = (mode === "size" || mode === "rotate" ? e.currentTarget.parentElement : e.currentTarget) as HTMLElement | null;
 		if (!box || !target || !onBannersChange) return;
 		e.stopPropagation();
 		e.preventDefault();
@@ -472,9 +473,20 @@ export function PlayerFrame({
 		const start = { x: e.clientX, y: e.clientY, reach: Math.max(8, Math.hypot(e.clientX - middle.x, e.clientY - middle.y)) };
 		const scale0 = banner.scale ?? 1;
 		const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-		const move = (ev: globalThis.PointerEvent) => {
-			const patch =
-				mode === "move"
+// Turning (coach 23 Nov): the angle the pointer makes round the banner's middle, from where it started; near upright or flat it settles there.
+const turn0 = banner.rotate ?? 0;
+const pointer0 = Math.atan2(e.clientY - middle.y, e.clientX - middle.x);
+const move = (ev: globalThis.PointerEvent) => {
+if (mode === "rotate") {
+let deg = turn0 + ((Math.atan2(ev.clientY - middle.y, ev.clientX - middle.x) - pointer0) * 180) / Math.PI;
+deg = ((((deg + 180) % 360) + 360) % 360) - 180;
+for (const snap of [0, 90, -90, 180, -180]) if (Math.abs(deg - snap) < 3) deg = snap;
+bannersRef.current = bannersRef.current.map((b) => (b.id === banner.id ? { ...b, rotate: Math.round(deg * 10) / 10 || undefined } : b));
+onBannersChange(bannersRef.current);
+return;
+}
+const patch =
+mode === "move"
 					? {
 							x: Math.round(clamp(from.x + (ev.clientX - start.x) / frame.width, 0.05, 0.95) * 1000) / 1000,
 							y: Math.round(clamp(from.y + (ev.clientY - start.y) / frame.height, 0.03, 0.97) * 1000) / 1000,
@@ -669,7 +681,7 @@ export function PlayerFrame({
 					const fill: CSSProperties = moved && ratio ? { position: "absolute", maxWidth: "none", objectFit: "fill", ...picturePlace(i, ratio, W / H) } : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 					return (
 						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
-							<div className="absolute inset-0" style={{ transform: `scale(${pictureZoom(i, outTime)})` }}>
+							<div className="absolute inset-0" style={bgStyle(pictureWindow(i, outTime))}>
 								{i.kind === "video" ? (
 									<InsertClip src={src} at={Math.max(0, outTime - i.start)} from={i.clipFrom} playing={playing && outTime >= i.start} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
 								) : (
@@ -708,7 +720,7 @@ export function PlayerFrame({
 							} else {
 								const speakerX = d.speakerX + (e.clientX - d.x) / box.clientWidth;
 								const speakerLift = d.lift - (e.clientY - d.y) / box.clientHeight;
-								onInsert(insert.id, { speakerX: Math.round(Math.min(1, Math.max(0, speakerX)) * 1000) / 1000, speakerLift: Math.round(Math.min(INSERT.lift.max, Math.max(0, speakerLift)) * 1000) / 1000 });
+								onInsert(insert.id, { speakerX: Math.round(Math.min(INSERT.stand.max, Math.max(INSERT.stand.min, speakerX)) * 1000) / 1000, speakerLift: Math.round(Math.min(INSERT.lift.max, Math.max(INSERT.lift.min, speakerLift)) * 1000) / 1000 });
 							}
 						}}
 						onPointerUp={() => (speakerDrag.current = null)}
@@ -743,13 +755,16 @@ export function PlayerFrame({
 		return (
 			<div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ background: f.back === "color" ? f.backColor : "#000" }}>
 				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} ratio={W / H} />}
-				{src &&
-					(f.media === "video" ? (
-						<InsertClip src={src} at={outTime - f.start} from={f.clipFrom} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
-					) : (
-						// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-						<img src={src} alt="" style={fill} />
-					))}
+				{src && (
+<div className="absolute inset-0" style={bgStyle(frameBackWindow(f, outTime))}>
+{f.media === "video" ? (
+<InsertClip src={src} at={outTime - f.start} from={f.clipFrom} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
+) : (
+// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
+<img src={src} alt="" style={fill} />
+)}
+</div>
+)}
 			</div>
 		);
 	}
@@ -799,8 +814,8 @@ export function PlayerFrame({
 			: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 		return (
 			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
-				{/* Zoom in / Zoom out around the part's middle (layoutFileZoom), as layout_file_zoom in render.py. */}
-				<div className="absolute inset-0" style={{ transform: `scale(${layoutFileZoom(l, outTime)})` }}>
+				{/* Zoom, pan or tilt (layoutFileWindow, lib/bg-motion.ts), as layout_file_zoom in render.py. */}
+<div className="absolute inset-0" style={bgStyle(layoutFileWindow(l, outTime))}>
 					{src &&
 						(l.media === "video" ? (
 							<InsertClip src={src} at={outTime - l.start} from={l.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(l)} length={l.end - l.start} />
@@ -881,8 +896,8 @@ export function PlayerFrame({
 									onClick={(e) => movable && e.stopPropagation()}
 									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
 									style={{
-										// Arrives as picked, around its middle (banner_file_filters in render.py).
-										transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
+										// Arrives as picked, around its middle (banner_file_filters in render.py), turned by its Rotate.
+										transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})${b.rotate ? ` rotate(${b.rotate}deg)` : ""}`,
 										...(movable && { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 }),
 									}}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
@@ -892,6 +907,17 @@ export function PlayerFrame({
 									) : (
 										// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
 										<img src={src} alt="" draggable={false} style={fit} />
+									)}
+									{movable && (
+										<span
+											onPointerDown={(e) => startBannerDrag(e, b, "rotate")}
+											title="Drag round to turn it"
+											aria-label="Turn the banner"
+											className="absolute flex items-center justify-center rounded-full border-4 border-black bg-white"
+											style={{ width: 44, height: 44, left: "50%", bottom: -74, marginLeft: -22, cursor: "grab", touchAction: "none" }}
+										>
+											<RotateCw className="h-6 w-6 text-black" aria-hidden />
+										</span>
 									)}
 									{movable && (
 										<span
@@ -954,8 +980,10 @@ export function PlayerFrame({
 						const move = bannerMotion(b, outTime);
 						const opacity = move.opacity;
 						if (!opacity) return null;
-						const size = b.scale ?? 1;
-						const padY = (BANNER.padding / 2) * size;
+						// Smaller by itself when its rows would not fit the screen (bannerFit); Size works on top of that. Same as banner_fit in render.py.
+const size = (b.scale ?? 1) * bannerFit(b, H);
+const pad = bannerPad(b);
+const padY = (pad / 2) * size;
 						const rows = bannerRows(b);
 						// One box around all its rows (coach, 11 Nov: two lines were two boxes), as banner_events draws it: rows
 						// row-size tall, lineGap apart, inside the padding; never shorter than its tallest row. It arrives as one
@@ -968,7 +996,7 @@ export function PlayerFrame({
 							minHeight: Math.max(...rows.map((row) => row.size)) * size,
 							background: b.noBox ? "transparent" : `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,
 							borderRadius: (b.radius ?? 0) * size,
-							padding: `${padY}px ${BANNER.padding * size}px`,
+							padding: `${padY}px ${pad * size}px`,
 							transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
 						};
 						const movable = Boolean(onBannersChange) && !playing;
@@ -994,7 +1022,7 @@ export function PlayerFrame({
 									className="relative flex flex-col items-center"
 									onClick={(e) => movable && e.stopPropagation()}
 									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
-									style={movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : undefined}
+									style={{ ...(b.rotate ? { transform: `rotate(${b.rotate}deg)` } : {}), ...(movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : {}) }}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									<span style={box}>
@@ -1012,7 +1040,9 @@ export function PlayerFrame({
 														fontFamily: rowFace.family,
 														fontWeight: rowFace.weight,
 														fontSize: (row.size / rowFace.em) * size,
-														lineHeight: `${row.size * size}px`,
+lineHeight: `${row.size * size}px`,
+// A line round the letters, outside them with round corners like the ASS outline (bannerStrokeShadow).
+...(b.stroke ? { textShadow: bannerStrokeShadow(b.stroke * size, b.strokeColor ?? "#000000") } : {}),
 													}}
 												>
 													{row.text}
@@ -1020,6 +1050,17 @@ export function PlayerFrame({
 											);
 										})}
 									</span>
+									{movable && (
+										<span
+											onPointerDown={(e) => startBannerDrag(e, b, "rotate")}
+											title="Drag round to turn it"
+											aria-label="Turn the banner"
+											className="absolute flex items-center justify-center rounded-full border-4 border-black bg-white"
+											style={{ width: 44, height: 44, left: "50%", bottom: -74, marginLeft: -22, cursor: "grab", touchAction: "none" }}
+										>
+											<RotateCw className="h-6 w-6 text-black" aria-hidden />
+										</span>
+									)}
 									{movable && (
 										<span
 											onPointerDown={(e) => startBannerDrag(e, b, "size")}

@@ -7,7 +7,8 @@ import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type L
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { knownLibrary, LIBRARY_ACCEPT, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
-import { PIC_MOTION } from "@/lib/behind";
+import { startMotion } from "@/lib/bg-motion";
+import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { ConfirmDelete } from "./ConfirmDelete";
@@ -100,8 +101,9 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 	};
 	const remove = (l: VideoLayout) => setRemoving({ name: layoutName(l), remove: () => onChange(layouts.filter((x) => x.id !== l.id)) });
 
-	const row = (label: React.ReactNode, control: React.ReactNode) => (
-		<label className="flex items-center gap-2 text-xs text-foreground/70">
+	const row = (label: React.ReactNode, control: React.ReactNode, middle?: () => void) => (
+		// Double-click the name: back to the middle (coach 23 Nov).
+		<label onDoubleClick={middle} title={middle ? "Double-click the name: back to the middle" : undefined} className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
 			{control}
 		</label>
@@ -226,9 +228,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								{trash(l)}
 							</div>
 						</div>
-						<ToolGroup tone={1} title="When">
-							{row(ON_TIMELINE, <TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />)}
-						</ToolGroup>
+						
 
 						<ToolGroup tone={2} title="Layout">
 							{/* With the playhead moved off this layout, a kind is a new layout there, as in Frame Me (coach, 17 Nov:
@@ -261,8 +261,8 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							{/* meX / meY: the point of you in your part's middle. Sliding right moves you right, so it goes down. */}
 							{/* Zoom: you bigger or smaller; what you then don't cover shows a blurred, dimmed copy of yourself. Setting it frees you to move both ways and past your own edge. */}
 							{row("Zoom", range(l.meZoom ?? 1, LAYOUT.meZoom.min, LAYOUT.meZoom.max, 0.01, percent(l.meZoom ?? 1), (meZoom) => update(l.id, { meZoom })))}
-							{(l.meZoom !== undefined || l.kind === "side") && row("Left / right", range(1 - l.meX, l.meZoom !== undefined ? 1 - LAYOUT.meRange.max : 0, l.meZoom !== undefined ? 1 - LAYOUT.meRange.min : 1, 0.005, percent(1 - l.meX), (v) => update(l.id, { meX: Math.round((1 - v) * 1000) / 1000 })))}
-							{(l.meZoom !== undefined || l.kind !== "side") && row("Up / down", range(1 - l.meY, l.meZoom !== undefined ? 1 - LAYOUT.meRange.max : 0, l.meZoom !== undefined ? 1 - LAYOUT.meRange.min : 1, 0.005, percent(1 - l.meY), (v) => update(l.id, { meY: Math.round((1 - v) * 1000) / 1000 })))}
+							{(l.meZoom !== undefined || l.kind === "side") && row("Left / right", range(1 - l.meX, l.meZoom !== undefined ? 1 - LAYOUT.meRange.max : 0, l.meZoom !== undefined ? 1 - LAYOUT.meRange.min : 1, 0.005, percent(1 - l.meX), (v) => update(l.id, { meX: Math.round((1 - v) * 1000) / 1000 })), () => update(l.id, { meX: LAYOUT.me.x }))}
+							{(l.meZoom !== undefined || l.kind !== "side") && row("Up / down", range(1 - l.meY, l.meZoom !== undefined ? 1 - LAYOUT.meRange.max : 0, l.meZoom !== undefined ? 1 - LAYOUT.meRange.min : 1, 0.005, percent(1 - l.meY), (v) => update(l.id, { meY: Math.round((1 - v) * 1000) / 1000 })), () => update(l.id, { meY: LAYOUT.me.y }))}
 							<button onClick={() => update(l.id, { meX: LAYOUT.me.x, meY: LAYOUT.me.y, ...(l.meZoom !== undefined && { meZoom: LAYOUT.meZoom.start }) })} className={`self-start ${PLAIN_BUTTON}`}>
 								Center me
 							</button>
@@ -272,6 +272,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								<>
 							{/* Picked: one row (its picture, its name, Change); the pictures to pick from open only on Change (coach 22 Nov: it was crowded). */}
 							<>
+										<div className="relative flex flex-col gap-1.5">
 										{l.file && (
 											<div className="flex items-center gap-2">
 												<span className="relative h-10 w-[22px] shrink-0 overflow-hidden rounded border border-foreground/20 bg-black">
@@ -289,6 +290,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 											</div>
 										)}
 										{choosing && (
+											<div className={l.file ? "absolute left-0 right-0 top-full z-40 mt-1 flex max-h-72 flex-col gap-2 overflow-y-auto rounded-lg border border-foreground/20 bg-background p-2 shadow-xl" : "flex flex-col gap-2"}>
 											<div className="grid grid-cols-4 gap-1">
 												{files.map((item) => (
 													<button
@@ -319,8 +321,6 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 													</button>
 												))}
 											</div>
-										)}
-										{choosing && (
 											<div className="flex flex-wrap items-center gap-1">
 												{onImportFile && (
 													<button
@@ -342,7 +342,9 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 													<ImageIcon className="h-3 w-3 shrink-0" aria-hidden /> or drop on the video{library === null && " · Loading…"}
 												</span>
 											</div>
+											</div>
 										)}
+									</div>
 </>
 							{!l.file && (
 								<div className="flex flex-wrap items-center gap-1">
@@ -357,20 +359,16 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								// so sliding right moves it right and the number goes down. Drag it on the video too.
 								<>
 									{row("Size", range(l.fileZoom ?? 1, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 0.01, percent(l.fileZoom ?? 1), (fileZoom) => update(l.id, { fileZoom })))}
-									{/* Zoom in / Zoom out while it shows (coach 20 Nov, as Cutout's Movement): layoutFileZoom in lib/layout.ts. */}
-									{row(
-										"Movement",
-										<span className="flex gap-1 text-xs">
-											{PIC_MOTION.map(([id, name]) => (
-												<button key={id} onClick={() => update(l.id, { fileMotion: id === "still" ? undefined : id })} className={`rounded border px-1.5 py-0.5 ${(l.fileMotion ?? "still") === id ? "border-[#4D8DBA] bg-[#4D8DBA]/20" : "border-foreground/20"}`}>
-													{name}
-												</button>
-											))}
-										</span>,
-									)}
-									{l.fileMotion && row("Speed", range(l.fileMotionZoom ?? LAYOUT.motionZoom.start, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, 0.05, percent(l.fileMotionZoom ?? LAYOUT.motionZoom.start), (fileMotionZoom) => update(l.id, { fileMotionZoom })))}
-									{row("Left / right", range(1 - (l.fileX ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileX ?? 0.5)), (v) => update(l.id, { fileX: Math.round((1 - v) * 1000) / 1000 })))}
-									{row("Up / down", range(1 - (l.fileY ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileY ?? 0.5)), (v) => update(l.id, { fileY: Math.round((1 - v) * 1000) / 1000 })))}
+									<BgMotionControl
+										motion={l.fileMotion}
+										amount={l.fileMotionZoom}
+										speed={l.fileMotionSpeed}
+										onMotion={(fileMotion) => update(l.id, { fileMotion, fileMotionSpeed: startMotion(fileMotion, l.fileMotionSpeed) })}
+										onAmount={(fileMotionZoom) => update(l.id, { fileMotionZoom })}
+										onSpeed={(fileMotionSpeed) => update(l.id, { fileMotionSpeed })}
+									/>
+									{row("Left / right", range(1 - (l.fileX ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileX ?? 0.5)), (v) => update(l.id, { fileX: Math.round((1 - v) * 1000) / 1000 })), () => update(l.id, { fileX: undefined }))}
+									{row("Up / down", range(1 - (l.fileY ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileY ?? 0.5)), (v) => update(l.id, { fileY: Math.round((1 - v) * 1000) / 1000 })), () => update(l.id, { fileY: undefined }))}
 									<span className="text-[11px] text-foreground/55" title="It always fills its part, so it moves only where it is bigger than the part: make it bigger to move it both ways.">
 										Pause, then drag it. Bigger than the part to move it.
 									</span>
@@ -430,6 +428,10 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								</ToolGroup>
 							);
 						})()}
+						<ToolGroup tone={1} title="When">
+							{row(ON_TIMELINE, <TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />)}
+						</ToolGroup>
+
 					</div>
 				);
 				})}

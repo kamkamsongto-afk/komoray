@@ -237,7 +237,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 					)}
 					{(
 						[
-							{ title: "On timeline now", list: items.filter(isUsed), tone: "border-green-600/40 bg-green-600/10", head: "text-green-700 dark:text-green-400" },
+							{ title: "On timeline now", list: items.filter(isUsed), tone: "border-green-600/40 bg-green-600/10", head: "text-(--ok)" },
 							{ title: "Kept in this video before", list: items.filter((i) => !i.mine && !isUsed(i)), tone: "border-foreground/15", head: "text-foreground/60" },
 						] as const
 					).map(

@@ -7,6 +7,7 @@ import { CLEAN_SOUND, facesFor, mediaUrl, previewFiles, previewPercent, proxySta
 import type { Faces } from "@/lib/framing";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
+import { AUDIO_FILE, continueAudioFirst, needsAudioFirst, startAudio } from "@/lib/audio-first";
 import { startTranscription } from "@/lib/transcribe";
 import { readOptions } from "@/lib/upload-options";
 
@@ -38,18 +39,25 @@ export async function POST(request: Request) {
 	try {
 		// Listening again (Wrong language?) sends no choices: the ones made the first time stay.
 		const options = readOptions(asked) ?? readOptions((await getJson<{ options?: unknown }>(siblingKey(key, "analyze.json")))?.options);
-		await Promise.all([deleteObject(siblingKey(key, "edit.json")), deleteObject(siblingKey(key, "analyze-error.json"))]);
+		// A video over Deepgram's 2 GB goes to it as its sound alone (lib/audio-first.ts).
+const big = await needsAudioFirst(key);
+await Promise.all([deleteObject(siblingKey(key, "edit.json")), deleteObject(siblingKey(key, "analyze-error.json")), deleteObject(siblingKey(key, "deepgram-started.json"))]);
 		// usageKey: lets the callback give the minutes back if the job fails. language: what was listened for, so the
 		// admin's Accuracy tab can score each language (13 Nov; older videos are guessed from their letters).
 		await putObject(
 			siblingKey(key, "analyze.json"),
-			JSON.stringify({ startedAt: new Date().toISOString(), usageKey: listen.usageKey, language: language || "en", ...(options && { options }) }),
+			JSON.stringify({ startedAt: new Date().toISOString(), usageKey: listen.usageKey, language: language || "en", ...(big && { audioFirst: true }), ...(options && { options }) }),
 			"application/json",
 		);
 
-		const callbackUrl = await signedCallbackUrl(new URL("/api/analyze/callback", request.url).toString(), key, env.RENDER_TOKEN);
-		// Deepgram downloads the video itself through a temporary read-only link.
-		await startTranscription(await signedUrl(key, "GET", LINK_SECONDS), env.DEEPGRAM_API_KEY, language || "en", callbackUrl);
+		if (big) {
+// Modal takes the sound out; the page's next asks start Deepgram on it (continueAudioFirst). A sound from an earlier try is used again.
+if (!(await exists(siblingKey(key, AUDIO_FILE)))) await startAudio(key, env);
+} else {
+const callbackUrl = await signedCallbackUrl(new URL("/api/analyze/callback", request.url).toString(), key, env.RENDER_TOKEN);
+// Deepgram downloads the video itself through a temporary read-only link.
+await startTranscription(await signedUrl(key, "GET", LINK_SECONDS), env.DEEPGRAM_API_KEY, language || "en", callbackUrl);
+}
 		// Make the editor's preview copy meanwhile; it is usually ready before the script is.
 		const proxy = await proxyStatus(key);
 		if (proxy !== "done" && proxy !== "processing") {
@@ -111,8 +119,10 @@ export async function GET(request: Request) {
 		return Response.json({ status: "done", editKey, ...edit, videoUrl, studio, proxy, cleanPending, faces, facesPending, preparing });
 	}
 
-	const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));
-	if (failure) return Response.json({ status: "failed", error: failure.error ?? "Analysis failed" });
+	// A video sent as its sound alone: this ask may be the one that finds the sound ready and starts Deepgram.
+await continueAudioFirst(key, request.url, getCloudflareContext().env as unknown as AnalyzeEnv).catch(() => {});
+const failure = await getJson<{ error?: string }>(siblingKey(key, "analyze-error.json"));
+if (failure) return Response.json({ status: "failed", error: failure.error ?? "Analysis failed" });
 	if (await settleDeadListen(key)) return Response.json({ status: "failed", error: "This took too long and stopped. Your minutes are back. Please try again." });
 
 	const started = await exists(siblingKey(key, "analyze.json"));

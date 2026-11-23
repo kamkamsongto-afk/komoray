@@ -180,7 +180,7 @@ export default function PricingPage() {
 					{mine.monthly ? ` ${mine.monthly.left} of ${mine.monthly.limit} minutes left · resets ${shortDate(mine.monthly.resetsAt)}.` : ""}
 					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}{" "}
 					{/* Paddle's own page: cancel, change card, invoices (api/billing/portal; money promise 5). */}
-					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-blue-600 underline hover:text-blue-700 disabled:opacity-60 dark:text-blue-400">
+					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-(--link) underline hover:opacity-80 disabled:opacity-60">
 						{opening ? "Opening…" : "Manage billing"}
 					</button>
 				</p>
@@ -207,7 +207,7 @@ export default function PricingPage() {
 								<span className="text-sm text-foreground/60"> / month{yearly && price ? `, $${price * 12} a year` : ""}</span>
 							</p>
 							{/* What paying yearly saves, in dollars (coach, 18 Nov: people should see how much they keep). */}
-							{yearly && price > 0 && <p className="-mt-2 text-sm font-medium text-green-700 dark:text-green-400">Save ${(plan.month - plan.year) * 12} a year</p>}
+							{yearly && price > 0 && <p className="-mt-2 text-sm font-semibold text-(--ok)">Save ${(plan.month - plan.year) * 12} a year</p>}
 							<p className="text-sm font-medium">{plan.minutes}</p>
 							<ul className="flex flex-col gap-1 text-sm text-foreground/75">
 								{plan.points.map((p) => (

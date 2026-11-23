@@ -1,16 +1,17 @@
 "use client";
 
-import { AlignCenter, AlignLeft, AlignRight, ChevronDown, ChevronRight, Copy, ImagePlus, Megaphone, Plus, Star, Tag, X } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, RefreshCw, Star, Trash2, Type, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_RADIUS, BANNER_SCALE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
+import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerFileSrc, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
-import { ClashNote, OwnFontOptions } from "./MyFilePickers";
-import { EDGE_COLORS, FONTS, type FontId, type Format } from "@/lib/subtitle-style";
+import { ClashNote } from "./MyFilePickers";
+import { FontSelect } from "./FontSelect";
+import { EDGE_COLORS, type FontId, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
-import { LayerTools } from "./LayerTools";
+import { MAIN_BUTTON, mainStyle, PICKED, TabGroup, ToolGroup } from "./ToolGroup";
 import { addToLibrary, clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
 import { layerPlace, moveLayer, sameBannerPass } from "@/lib/layers";
@@ -28,11 +29,10 @@ type Props = {
 	onReveal?: (id: string, start: number) => void; // show it: the blue line to its start, its strip picked on the timeline
 };
 
-// One tab per kind, with a light blue frame on the open one, as in the Cutout box (coach, 11 Nov).
-// Follow still shows on videos that already have one, under Call to action: it was the same thing.
-type BannerTab = "price" | "cta" | "file";
-const TABS: [BannerTab, typeof Tag, string][] = [["price", Tag, "Price"], ["cta", Megaphone, "Call to action"], ["file", ImagePlus, "Upload"]];
-const tabOf = (kind: BannerKind): BannerTab => (kind === "follow" ? "cta" : kind);
+// Two tabs (coach 23 Nov): Text (any words: Call to action, a price, a title; old Price and Follow banners show here too) and
+// Pic & Clip (an uploaded picture, GIF or clip). Price and Follow are no longer added, only kept.
+type BannerTab = "text" | "file";
+const tabOf = (kind: BannerKind): BannerTab => (kind === "file" ? "file" : "text");
 // What the browser can show in the preview, and render.py can put on the final video (api/banner-file).
 const FILE_TYPES = "image/jpeg,image/png,image/webp,image/gif,video/mp4";
 
@@ -43,7 +43,10 @@ const round = (n: number) => Math.round(n * 10) / 10;
 export function BannerControls({ banners, onChange, now, total, brand, focus, format, videoKey, onUseFile, onReveal }: Props) {
 	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
 	const [open, setOpen] = useState<string | null>(focus);
-	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "price"));
+	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "cta"));
+	// Which pop-up of pictures is open: a banner (Change), or "new" (Add a picture or clip).
+	const [picking, setPicking] = useState<string | null>(null);
+	const uploadFor = useRef<string | null>(null); // the banner a file picked in the upload dialog is for, null = a new banner
 	// Another banner clicked on the timeline: open it, on its tab (set while drawing, not in an effect, as in CutoutControls).
 	const [seenFocus, setSeenFocus] = useState(focus);
 	if (focus !== seenFocus) {
@@ -60,12 +63,6 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		onChange([...banners, banner]);
 		onReveal?.(banner.id, banner.start);
 	};
-	function moveHere(b: Banner) {
-		const seconds = b.end - b.start;
-		const start = round(Math.max(0, Math.min(now(), total - seconds)));
-		update(b.id, { start, end: round(Math.min(total, start + seconds)) });
-		onReveal?.(b.id, start);
-	}
 	// The banner waiting for "yes, delete it" (coach, 11 Nov: the × is small and easy to hit).
 	const [removing, setRemoving] = useState<Banner | null>(null);
 
@@ -89,7 +86,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	const fileRef = useRef<HTMLInputElement>(null);
 	const [uploading, setUploading] = useState(false);
 	const [fileNote, setFileNote] = useState("");
-	async function addFile(file: File) {
+	async function addFile(file: File, replaceId?: string) {
 		setFileNote("");
 		// The AI studio's address names the video (/edit?key=…), as for its preview (bannerFileSrc).
 		const key = videoKey ?? new URLSearchParams(window.location.search).get("key");
@@ -101,11 +98,20 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		if ("error" in sent) return setFileNote(sent.error);
 		const data = { file: sent.item.file, media: sent.item.media };
 		keepBannerFile(data.file, URL.createObjectURL(file));
+		if (replaceId) {
+			setPicking(null);
+			return changeFile(replaceId, sent.item);
+		}
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		// A clip shows for as long as it plays; a picture for a few seconds, as a word banner.
 		const seconds = Math.max(0.5, Math.min(clip ?? BANNER.seconds, total - start));
 		const name = cleanBannerText(file.name.replace(/\.[^.]+$/, "")) || BANNER_KINDS.file.text;
 		addBanner({ id: crypto.randomUUID(), kind: "file", text: name, sub: "", start, end: round(start + seconds), place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: data.file, media: data.media, ...newClipSound(data.media) });
+	}
+	// A banner shows another picture or clip: its sound starts as for a new one, and a clip's Trim starts again.
+	function changeFile(id: string, item: LibraryItem) {
+		const old = banners.find((x) => x.id === id);
+		update(id, { file: item.file, media: item.media, clipFrom: undefined, text: cleanBannerText(item.name.replace(/\.[^.]+$/, "")) || old?.text || BANNER_KINDS.file.text, ...(item.media === "video" ? (old?.volume === undefined && !old?.muted ? newClipSound("video") : {}) : { volume: undefined, muted: undefined }) });
 	}
 	// Pictures and clips this project already has (api/library), shown on the Upload tab: so nobody uploads the same file
 	// again because they didn't know about Import (coach, 11 Nov). Loaded again after each upload here.
@@ -154,7 +160,23 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	}
 	function saveAsTemplate(b: Banner) {
 		const seconds = round(Math.max(0.5, b.end - b.start));
-		saveTemplates([...templates, { ...b, id: crypto.randomUUID(), start: 0, end: seconds }].slice(-BANNER.maxBanners));
+		const id = crypto.randomUUID();
+		saveTemplates([...templates, { ...b, id, templateId: undefined, start: 0, end: seconds }].slice(-BANNER.maxBanners));
+		update(b.id, { templateId: id }); // so Update My banner knows which one it is
+	}
+	// The banner's looks that My banners keeps; if they differ from the saved one, Update My banner shows (coach 23 Nov).
+	const looksOf = (b: Banner) =>
+		JSON.stringify([b.text, b.sub, b.color, b.ink, b.radius, b.opacity, b.anim, b.font, b.ownFont?.file, b.lineGap, b.noBox, b.align, b.scale, b.stroke, b.strokeColor, b.padding, b.rotate, b.fadeIn, b.fadeOut]);
+	const master = (b: Banner) => (b.templateId ? templates.find((t) => t.id === b.templateId) : undefined);
+	const changedFromMaster = (b: Banner) => {
+		const m = master(b);
+		return Boolean(m) && looksOf(m as Banner) !== looksOf(b);
+	};
+	// Only the saved copy changes; banners already put on the timeline from it stay as they are.
+	function updateMaster(b: Banner) {
+		const m = master(b);
+		if (!m) return;
+		saveTemplates(templates.map((t) => (t.id === m.id ? { ...b, id: m.id, templateId: undefined, start: 0, end: round(Math.max(0.5, b.end - b.start)) } : t)));
 	}
 	// A copy of a banner, with every setting, right after it ends (or where the video is now if there's no
 	// room after it), to change only its words (coach, 11 Nov).
@@ -165,7 +187,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	}
 	function addTemplate(t: Banner) {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
-		addBanner({ ...t, id: crypto.randomUUID(), start, end: round(Math.min(total, start + t.end)) });
+		addBanner({ ...t, id: crypto.randomUUID(), templateId: t.id, start, end: round(Math.min(total, start + t.end)) });
 	}
 
 	function add(kind: Exclude<BannerKind, "file">) {
@@ -174,7 +196,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		addBanner({ id: crypto.randomUUID(), kind, text: preset.text, sub: preset.sub, start, end: round(Math.min(total, start + BANNER.seconds)), place: "top" });
 	}
 
-	const swatches = (b: Banner, label: string, key: "color" | "ink", value: string) => (
+	const swatches = (b: Banner, label: string, key: "color" | "ink" | "strokeColor", value: string) => (
 		<div className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
 			<div className="flex flex-wrap items-center gap-1">
@@ -199,267 +221,163 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		</label>
 	);
 
-	const inTemplates = (b: Banner) => templates.some((t) => t.text === cleanBannerText(b.text, BANNER.maxLines) && t.sub === b.sub);
+	const inTemplates = (b: Banner) => Boolean(master(b)) || templates.some((t) => t.text === cleanBannerText(b.text, BANNER.maxLines) && t.sub === b.sub);
 
-	return (
-		<div className="flex flex-col gap-2 p-3 pt-1">
-			<div role="tablist" aria-label="Banner kinds" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
-				{TABS.map(([id, Icon, name]) => {
-					const count = banners.filter((b) => tabOf(b.kind) === id).length;
-					return (
-						<button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`inline-flex items-center justify-center gap-1 rounded-md px-1.5 py-1 text-sm whitespace-nowrap ${tab === id ? "bg-blue-400/15 font-medium text-foreground ring-1 ring-inset ring-blue-400" : "text-foreground/70 hover:text-foreground"}`}>
-							<Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /> {name}
-							{count > 0 && <span className="text-xs text-foreground/50 tabular-nums">{count}</span>}
-						</button>
-					);
-				})}
-			</div>
-			{tab === "file" ? (
-				<>
-					<button onClick={() => fileRef.current?.click()} disabled={uploading || banners.length >= BANNER.maxBanners} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
-						<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading ? "Uploading…" : "Upload a picture or clip"}
-					</button>
-					<input
-						ref={fileRef}
-						type="file"
-						accept={FILE_TYPES}
-						className="hidden"
-						onChange={(e) => {
-							const file = e.target.files?.[0];
-							e.target.value = "";
-							if (file) void addFile(file);
-						}}
-					/>
-					{fileNote && <p className="text-xs text-red-500">{fileNote}</p>}
-					{onUseFile && kept.length > 0 && (
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<p className="text-xs text-foreground/70">Uploaded before: click one to use it again, no need to upload it twice. All of them are in My files.</p>
-							<div className="flex gap-1.5 overflow-x-auto pb-1">
-								{kept.map((item) => (
-									<button
-										key={item.file}
-										onClick={() => onUseFile(item)}
-										disabled={banners.length >= BANNER.maxBanners}
-										title={`Use “${item.name}” as a banner where the video is now`}
-										className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md border border-foreground/20 bg-foreground/5 hover:ring-2 hover:ring-blue-500 disabled:opacity-40"
-									>
-										{item.media === "image" ? (
-											// eslint-disable-next-line @next/next/no-img-element
-											<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-contain" />
-										) : (
-											<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-contain" />
-										)}
-									</button>
-								))}
-							</div>
-						</div>
-					)}
-					{shown.length === 0 && (
-						<p className="text-xs text-foreground/60">
-							Have a banner made already? Upload it: JPG, PNG, WebP or GIF up to {BANNER_FILE.maxBytes.image / 1_000_000} MB, or an MP4 clip up to {BANNER_FILE.maxBytes.video / 1_000_000} MB (clips show without their sound). It goes over you, where the video is now.
-						</p>
-					)}
-				</>
-			) : (
-				<button onClick={() => add(tab)} disabled={banners.length >= BANNER.maxBanners} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
-					<Plus className="h-3.5 w-3.5" aria-hidden /> Add {tab === "price" ? "a price" : "a call to action"}
-				</button>
-			)}
-			{tab !== "file" && templates.length > 0 && (
-				<div className="flex flex-col gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
-					<p className="flex items-center gap-1 text-xs font-medium">
-						<Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" aria-hidden />
-						My banners
-						<span className="font-normal text-foreground/60">· made by you, for any video. Click one to add it.</span>
-					</p>
-					<div className="flex flex-wrap items-center gap-1.5 text-sm">
-						{templates.map((t) =>
-							forgetting === t.id ? (
-								<span key={t.id} className="flex items-center gap-1.5 rounded-md border border-red-500/50 bg-background px-2 py-0.5 text-xs">
-									Delete &ldquo;{t.text}&rdquo; from My banners?
-									<button onClick={() => { saveTemplates(templates.filter((x) => x.id !== t.id)); setForgetting(null); }} className="rounded bg-red-600 px-1.5 py-0.5 font-medium text-white hover:bg-red-700">
-										Delete
-									</button>
-									<button onClick={() => setForgetting(null)} className="rounded border border-foreground/20 px-1.5 py-0.5 hover:bg-foreground/5">
-										Keep
-									</button>
-								</span>
+	const chooseUpload = (target: string | "new") => {
+		uploadFor.current = target === "new" ? null : target;
+		fileRef.current?.click();
+	};
+	// The pictures and clips this project already has, as a pop-up that scrolls (coach 23 Nov: not unrolled down the box): pick one, or
+	// upload a new one. For a banner (it is changed) or for a new one.
+	const filePicker = (target: string | "new") => (
+		<div className="absolute left-0 right-0 top-full z-40 mt-1 flex max-h-72 flex-col gap-2 overflow-y-auto rounded-lg border border-foreground/20 bg-background p-2 shadow-xl">
+			{kept.length > 0 ? (
+				<div className="grid grid-cols-4 gap-1">
+					{kept.map((item) => (
+						<button
+							key={item.file}
+							onClick={() => {
+								if (target === "new") onUseFile?.(item);
+								else changeFile(target, item);
+								setPicking(null);
+							}}
+							disabled={target === "new" && banners.length >= BANNER.maxBanners}
+							title={`Use “${item.name}”`}
+							className="relative aspect-[9/16] overflow-hidden rounded-md border-2 border-transparent bg-black hover:border-foreground/30 disabled:opacity-40"
+						>
+							{item.media === "image" ? (
+								// eslint-disable-next-line @next/next/no-img-element
+								<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
 							) : (
-								<span key={t.id} className="flex items-center overflow-hidden rounded-md border border-foreground/20 bg-background">
-									<button
-										onClick={() => addTemplate(t)}
-										disabled={banners.length >= BANNER.maxBanners}
-										title="Add it where the video is now"
-										className="flex max-w-44 items-center gap-1.5 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-40"
-									>
-										<span className="h-3 w-3 shrink-0 rounded-sm border border-foreground/20" style={{ background: t.color ?? brand }} aria-hidden />
-										<span className="truncate">{t.text.replace(/\n/g, " ")}</span>
-										<Plus className="h-3 w-3 shrink-0 text-foreground/50" aria-hidden />
-									</button>
-									<button
-										onClick={() => setForgetting(t.id)}
-										aria-label={`Delete ${t.text} from My banners`}
-										title="Delete from My banners"
-										className="border-l border-foreground/10 px-1.5 py-1 text-foreground/50 hover:bg-red-500/10 hover:text-red-600"
-									>
-										<X className="h-3 w-3 shrink-0" aria-hidden />
-									</button>
-								</span>
-							),
-						)}
-					</div>
+								<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+							)}
+						</button>
+					))}
 				</div>
+			) : (
+				<p className="text-xs text-foreground/60">Nothing uploaded to this video yet.</p>
 			)}
-			{banners.length === 0 && tab !== "file" && (
-				<p className="text-xs text-foreground/60">A price or a call to action. It is added where the video is now, and shows on the timeline: drag it there to change when it appears.</p>
-			)}
-			{shown.map((b) => (
-				<div key={b.id} className={`flex flex-col gap-1.5 rounded-md bg-foreground/5 p-2 text-sm ${open === b.id ? "ring-1 ring-blue-400" : ""}`}>
-					<div className="flex items-start gap-2">
-						<button
-							onClick={() => setOpen(open === b.id ? null : b.id)}
-							aria-expanded={open === b.id}
-							title={open === b.id ? "Hide its settings" : "Show its settings"}
-							className="flex w-16 shrink-0 items-center gap-0.5 pt-1 text-left text-xs text-foreground/60 hover:text-foreground"
-						>
-							{open === b.id ? <ChevronDown className="h-3 w-3 shrink-0" aria-hidden /> : <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />}
-							{b.kind === "file" ? (b.media === "video" ? "Clip" : "Picture") : b.kind === "cta" ? "CTA" : BANNER_KINDS[b.kind].name}
-						</button>
-						{b.kind === "file" ? (
-							<input
-								value={b.text}
-								maxLength={BANNER.maxText}
-								onChange={(e) => update(b.id, { text: e.target.value.replace(/\n/g, " ") })}
-								aria-label="Name (shown on the timeline)"
-								title="Its name, shown on the timeline"
-								className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-0.5"
-							/>
-						) : (
-							// Enter starts a new line, up to BANNER.maxLines (coach, 11 Nov).
-							<textarea
-								value={b.text}
-								rows={Math.min(BANNER.maxLines, Math.max(1, b.text.split("\n").length))}
-								onChange={(e) => update(b.id, { text: e.target.value.split("\n").slice(0, BANNER.maxLines).map((line) => line.slice(0, BANNER.maxText)).join("\n") })}
-								aria-label="Banner text"
-								title={`Press Enter for a new line (up to ${BANNER.maxLines})`}
-								className="min-w-0 flex-1 resize-none rounded-md border border-foreground/20 bg-background px-2 py-0.5"
-							/>
-						)}
-						{b.kind !== "file" && (
-							<button
-								onClick={() => saveAsTemplate(b)}
-								disabled={!cleanBannerText(b.text) || inTemplates(b)}
-								title={inTemplates(b) ? "In My banners" : "Save to My banners, to use on any video"}
-								aria-label="Save to My banners"
-								className="rounded px-1.5 pt-1 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:opacity-30"
-							>
-								<Star className={`h-3.5 w-3.5 shrink-0 ${inTemplates(b) ? "fill-amber-400 text-amber-500" : ""}`} aria-hidden />
-							</button>
-						)}
-						<button
-							onClick={() => duplicate(b)}
-							disabled={banners.length >= BANNER.maxBanners}
-							title="Duplicate: a copy right after it"
-							aria-label="Duplicate banner"
-							className="rounded px-1.5 pt-1 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:opacity-30"
-						>
-							<Copy className="h-3.5 w-3.5 shrink-0" aria-hidden />
-						</button>
-						<button
-							onClick={() => setRemoving(b)}
-							aria-label="Remove banner"
-							title="Delete this banner"
-							className="rounded px-1.5 pt-1.5 text-foreground/50 hover:bg-red-500/10 hover:text-red-600"
-						>
-							<X className="h-3 w-3 shrink-0" aria-hidden />
-						</button>
+			<button
+				onClick={() => chooseUpload(target)}
+				disabled={uploading || (target === "new" && banners.length >= BANNER.maxBanners)}
+				className={`self-start ${MAIN_BUTTON} disabled:opacity-40`}
+				style={mainStyle(3)}
+			>
+				<Upload className="h-3 w-3 shrink-0" aria-hidden /> {uploading ? "Uploading…" : "Upload a picture or clip"}
+			</button>
+		</div>
+	);
+
+	// The header row of a banner: its name, then the star, the layer arrows, Duplicate and the bin (coach 23 Nov).
+	const bannerHeader = (b: Banner) => {
+		const place = layerPlace(banners, b.id, sameBannerPass);
+		const isOpen = open === b.id;
+		return (
+			<div className="flex items-center gap-1">
+				<button onClick={() => setOpen(isOpen ? null : b.id)} aria-expanded={isOpen} title={isOpen ? "Hide its settings" : "Show its settings"} className="rounded p-1 text-foreground/60 hover:bg-foreground/5 hover:text-foreground">
+					{isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+				</button>
+				{b.kind === "file" ? (
+					<input
+						value={b.text}
+						maxLength={BANNER.maxText}
+						onChange={(e) => update(b.id, { text: e.target.value.replace(/\n/g, " ") })}
+						aria-label="Name (shown on the timeline)"
+						title="Its name, shown on the timeline"
+						className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium hover:border-foreground/20 focus:border-foreground/30 focus:outline-none"
+					/>
+				) : (
+					<input
+						value={b.name ?? ""}
+						placeholder={cleanBannerText(b.text).split("\n")[0] || BANNER_KINDS[b.kind].name}
+						maxLength={40}
+						onChange={(e) => update(b.id, { name: e.target.value.replace(/[\n\r\t]/g, " ") || undefined })}
+						aria-label="Name on the timeline"
+						title="Name on the timeline"
+						className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm font-medium placeholder:text-foreground placeholder:opacity-100 hover:border-foreground/20 focus:border-foreground/30 focus:outline-none"
+					/>
+				)}
+				{b.kind !== "file" && (
+					<button
+						onClick={() => saveAsTemplate(b)}
+						disabled={!cleanBannerText(b.text) || inTemplates(b)}
+						title={inTemplates(b) ? "In My banners" : "Save to My banners, to use on any video"}
+						aria-label="Save to My banners"
+						className="rounded p-1 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:opacity-30"
+					>
+						<Star className={`h-3.5 w-3.5 shrink-0 ${inTemplates(b) ? "fill-amber-400 text-amber-500" : ""}`} aria-hidden />
+					</button>
+				)}
+				<span className="shrink-0 text-[11px] text-foreground/60" title="Its layer among the things showing with it">
+					{place ? `${place.at}/${place.of}` : "1/1"}
+				</span>
+				<button onClick={() => onChange(moveLayer(banners, b.id, true, sameBannerPass))} disabled={!place || place.at === place.of} title={place ? "Bring it in front of the one over it" : "Nothing else shows at the same time"} aria-label="Bring forward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+					<ArrowUp className="h-3.5 w-3.5" aria-hidden />
+				</button>
+				<button onClick={() => onChange(moveLayer(banners, b.id, false, sameBannerPass))} disabled={!place || place.at === 1} title={place ? "Send it behind the one under it" : "Nothing else shows at the same time"} aria-label="Send backward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
+					<ArrowDown className="h-3.5 w-3.5" aria-hidden />
+				</button>
+				<button onClick={() => duplicate(b)} disabled={banners.length >= BANNER.maxBanners} title="Duplicate: a copy right after it" aria-label="Duplicate banner" className="rounded p-1 text-foreground/50 hover:bg-foreground/10 hover:text-foreground disabled:opacity-30">
+					<Copy className="h-3.5 w-3.5 shrink-0" aria-hidden />
+				</button>
+				<button onClick={() => setRemoving(b)} aria-label="Remove banner" title="Delete this banner" className="rounded p-1 text-foreground/50 hover:bg-red-500/10 hover:text-red-600">
+					<Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+				</button>
+			</div>
+		);
+	};
+
+	const animPick = (b: Banner) => (
+		<select value={b.anim ?? "fade"} onChange={(e) => update(b.id, { anim: e.target.value as BannerAnim })} aria-label="How it arrives" className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-1 py-0.5 text-xs">
+			{(Object.keys(BANNER_ANIMS) as BannerAnim[]).map((a) => (
+				<option key={a} value={a}>
+					{BANNER_ANIMS[a].name}
+				</option>
+			))}
+		</select>
+	);
+
+	// A text banner's settings, in cards (coach 23 Nov): its words, how it shows, its font, its letters, its box.
+	const textCards = (b: Banner) => (
+		<div className="flex flex-col gap-2">
+			<ToolGroup tone={1} title="Words">
+				<textarea
+					value={b.text}
+					rows={Math.min(BANNER.maxLines, Math.max(2, b.text.split("\n").length))}
+					onChange={(e) => update(b.id, { text: e.target.value.split("\n").slice(0, BANNER.maxLines).map((line) => line.slice(0, BANNER.maxText)).join("\n") })}
+					aria-label="Banner text"
+					title={`Press Enter for a new line (up to ${BANNER.maxLines})`}
+					className="w-full resize-y rounded-md border border-foreground/20 bg-background px-2 py-1 text-sm"
+				/>
+				<span className="text-[11px] text-foreground/55">Enter a new line, up to {BANNER.maxLines} lines</span>
+				{b.kind === "price" && (
+					<input value={b.sub} maxLength={BANNER.maxText} onChange={(e) => update(b.id, { sub: e.target.value })} placeholder="Small line under it (optional)" aria-label="Small line" className="rounded-md border border-foreground/20 bg-background px-2 py-0.5 text-sm" />
+				)}
+			</ToolGroup>
+
+			<ToolGroup tone={2} title="Show">
+				<div className="flex items-center gap-2">
+					{animPick(b)}
+					<select value={b.x !== undefined ? "dragged" : b.place} onChange={(e) => placeBanner(b, e.target.value)} aria-label="Where on the video" className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-1 py-0.5 text-xs">
+						<option value="dragged">{dragged[b.id] ? "Position" : "Anywhere (drag it on the video)"}</option>
+						<option value="top">Top</option>
+						<option value="middle">Middle</option>
+						<option value="bottom">Bottom</option>
+					</select>
+				</div>
+				<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
+				{range(b, "Rotate", b.rotate ?? 0, BANNER_ROTATE.min, BANNER_ROTATE.max, 1, `${Math.round(b.rotate ?? 0)}°`, (n) => update(b.id, { rotate: n || undefined }))}
+			</ToolGroup>
+
+			<ToolGroup tone={3} title="Font">
+				<div className="flex items-start gap-2">
+					<div className="w-3/5 min-w-0">
+						<FontSelect value={b.font === "own" ? ownValue(b.ownFont) : (b.font ?? "")} current={b.font === "own" ? b.ownFont : undefined} myFonts={myFonts} onPick={(value) => pickFont(b, value)} />
 					</div>
-					{open === b.id && (
-						<LayerTools
-							onMoveHere={() => moveHere(b)}
-							onUp={() => onChange(moveLayer(banners, b.id, true, sameBannerPass))}
-							onDown={() => onChange(moveLayer(banners, b.id, false, sameBannerPass))}
-							place={layerPlace(banners, b.id, sameBannerPass)}
-						/>
-					)}
-					{open === b.id && b.kind === "price" && (
-						<input
-							value={b.sub}
-							maxLength={BANNER.maxText}
-							onChange={(e) => update(b.id, { sub: e.target.value })}
-							placeholder="Small line under it (optional)"
-							aria-label="Small line"
-							className="rounded-md border border-foreground/20 bg-background px-2 py-0.5"
-						/>
-					)}
-					{open === b.id && b.kind === "file" && <>
-						<p className="text-xs text-foreground/60">Pause the video on it to drag it anywhere, or drag its corner to make it bigger or smaller.</p>
-						<select
-							value={b.anim ?? "fade"}
-							onChange={(e) => update(b.id, { anim: e.target.value as BannerAnim })}
-							aria-label="How it arrives"
-							className="self-start rounded-md border border-foreground/20 bg-background px-1 py-0.5 text-xs"
-						>
-							{(Object.keys(BANNER_ANIMS) as BannerAnim[]).map((a) => (
-								<option key={a} value={a}>
-									{BANNER_ANIMS[a].name}
-								</option>
-							))}
-						</select>
-						<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
-						{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
-						{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
-						{b.media === "video" && <ClipSound sound={b} onChange={(patch) => update(b.id, patch)} />}
-						{b.media === "video" && b.file && <ClipTrim id={b.id} file={b.file} start={b.start} end={b.end} clipFrom={b.clipFrom} total={total} onChange={(patch) => update(b.id, patch)} />}
-					</>}
-					{open === b.id && b.kind !== "file" && <>
-					<div className="flex flex-wrap items-center gap-2 text-xs text-foreground/70">
-						<select
-							value={b.anim ?? "fade"}
-							onChange={(e) => update(b.id, { anim: e.target.value as BannerAnim })}
-							aria-label="How it arrives"
-							className="rounded-md border border-foreground/20 bg-background px-1 py-0.5"
-						>
-							{(Object.keys(BANNER_ANIMS) as BannerAnim[]).map((a) => (
-								<option key={a} value={a}>
-									{BANNER_ANIMS[a].name}
-								</option>
-							))}
-						</select>
-						<select
-							value={b.x !== undefined ? "dragged" : b.place}
-							onChange={(e) => placeBanner(b, e.target.value)}
-							aria-label="Where on the video"
-							className="rounded-md border border-foreground/20 bg-background px-1 py-0.5"
-						>
-							<option value="dragged">{dragged[b.id] ? "Where you dragged it" : "Anywhere (drag it on the video)"}</option>
-							<option value="top">Top</option>
-							<option value="middle">Middle</option>
-							<option value="bottom">Bottom</option>
-						</select>
-					</div>
-					<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
-					<div className="flex items-center gap-2 text-xs text-foreground/70">
-						<span className="w-16 shrink-0">Font</span>
-						<select
-							value={b.font === "own" ? ownValue(b.ownFont) : (b.font ?? "")}
-							onChange={(e) => pickFont(b, e.target.value)}
-							aria-label="Banner font"
-							className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-1 py-0.5"
-						>
-							<option value="">Same as the subtitles</option>
-							<OwnFontOptions current={b.font === "own" ? b.ownFont : undefined} myFonts={myFonts} />
-							{(Object.keys(FONTS) as FontId[]).map((id) => (
-								<option key={id} value={id}>
-									{FONTS[id].name}
-									{FONTS[id].thai ? " (Thai)" : ""}
-								</option>
-							))}
-						</select>
-					</div>
-					<div className="flex flex-wrap items-center gap-2 pl-[4.5rem] text-xs text-foreground/60">
-						<label className={`cursor-pointer underline hover:text-foreground ${myFonts.busy ? "opacity-50" : ""}`}>
-							{myFonts.busy ? "Uploading…" : myFonts.fonts.length || myFonts.older ? "Upload another font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
+					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+						<label className={`inline-flex cursor-pointer items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap hover:brightness-110 ${myFonts.busy ? "opacity-50" : ""}`} style={{ background: "#1F5F9F", borderColor: "#1F5F9F", color: "#FFFFFF" }}>
+							<Upload className="h-3 w-3 shrink-0" aria-hidden />
+							{myFonts.busy ? "Uploading…" : "Upload your font"}
 							<input
 								type="file"
 								accept=".ttf,.otf,font/ttf,font/otf"
@@ -472,57 +390,196 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 								}}
 							/>
 						</label>
-						{clashFor === b.id && myFonts.error && <span className="text-red-500">{myFonts.error}</span>}
-						{clashFor === b.id && myFonts.clash && (
-							<ClashNote clash={myFonts.clash} what="font" onUse={() => void uploadFont(b, myFonts.clash!.file, "use")} onKeep={() => void uploadFont(b, myFonts.clash!.file, "keep")} onCancel={myFonts.dismiss} />
+						<span className="text-center text-[10px] text-foreground/55">Supported formats: .ttf, .otf</span>
+					</div>
+				</div>
+				{clashFor === b.id && myFonts.error && <span className="text-xs text-red-500">{myFonts.error}</span>}
+				{clashFor === b.id && myFonts.clash && (
+					<ClashNote clash={myFonts.clash} what="font" onUse={() => void uploadFont(b, myFonts.clash!.file, "use")} onKeep={() => void uploadFont(b, myFonts.clash!.file, "keep")} onCancel={myFonts.dismiss} />
+				)}
+			</ToolGroup>
+
+			<ToolGroup tone={1} title="Letters">
+				{swatches(b, "Text", "ink", b.ink ?? bannerInk(b.color ?? brand))}
+				{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
+				{range(b, "Line gap", b.lineGap ?? 0, BANNER_LINE_GAP.min, BANNER_LINE_GAP.max, 2, String(b.lineGap ?? 0), (n) => update(b.id, { lineGap: n }))}
+				<div className="flex items-center gap-2 text-xs text-foreground/70">
+					<span className="w-16 shrink-0">Align</span>
+					{(
+						[
+							[undefined, AlignCenter, "Center"],
+							["left", AlignLeft, "Left"],
+							["right", AlignRight, "Right"],
+						] as const
+					).map(([align, Icon, name]) => (
+						<button
+							key={name}
+							onClick={() => update(b.id, { align })}
+							aria-pressed={b.align === align}
+							title={name}
+							aria-label={`Align ${name.toLowerCase()}`}
+							className={`rounded-md border p-1 ${b.align === align ? PICKED : "border-foreground/20 hover:bg-foreground/5"}`}
+						>
+							<Icon className="h-3.5 w-3.5" aria-hidden />
+						</button>
+					))}
+				</div>
+			</ToolGroup>
+
+			<ToolGroup tone={2} title="Stroke">
+				{range(b, "Stroke", b.stroke ?? 0, BANNER_STROKE.min, BANNER_STROKE.max, 0.5, b.stroke ? `${b.stroke}px` : "Off", (n) => update(b.id, { stroke: n > 0 ? n : undefined }))}
+				{b.stroke ? swatches(b, "Colour", "strokeColor", b.strokeColor ?? "#000000") : <span className="text-[11px] text-foreground/55">The line round the letters is always round at the corners.</span>}
+			</ToolGroup>
+
+			<ToolGroup tone={3} title="Box">
+				<label className="flex items-center gap-2 text-xs text-foreground/70">
+					<span className="w-16 shrink-0">Background</span>
+					<input type="checkbox" checked={!b.noBox} onChange={(e) => update(b.id, { noBox: e.target.checked ? undefined : true })} className="accent-blue-600" />
+					<span>{b.noBox ? "Off: letters only" : "On"}</span>
+				</label>
+				{!b.noBox && swatches(b, "Box colour", "color", b.color ?? brand)}
+				{!b.noBox && range(b, "Padding", b.padding ?? BANNER.padding, BANNER_PADDING.min, BANNER_PADDING.max, 1, String(b.padding ?? BANNER.padding), (n) => update(b.id, { padding: n === BANNER.padding ? undefined : n }))}
+				{!b.noBox && range(b, "Corners", b.radius ?? 0, BANNER_RADIUS.min, BANNER_RADIUS.max, 2, String(b.radius ?? 0), (n) => update(b.id, { radius: n }))}
+				{!b.noBox && range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
+			</ToolGroup>
+		</div>
+	);
+
+	// A picture or clip banner's settings (coach 23 Nov): the file as one row with Change, then how it shows and its size.
+	const fileCards = (b: Banner) => (
+		<div className="flex flex-col gap-2">
+			<ToolGroup tone={1} title={b.media === "video" ? "The clip" : "The picture"}>
+				<div className="relative flex flex-col gap-1.5">
+					<div className="flex items-center gap-2">
+						<span className="relative h-10 w-[22px] shrink-0 overflow-hidden rounded border border-foreground/20 bg-black">
+							{b.file && (b.media === "video" ? (
+								<video src={bannerFileSrc(b.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+							) : (
+								// eslint-disable-next-line @next/next/no-img-element
+								<img src={bannerFileSrc(b.file)} alt="" className="h-full w-full object-cover" />
+							))}
+						</span>
+						<span className="min-w-0 flex-1 truncate text-xs">{b.text}</span>
+						<button onClick={() => setPicking(picking === b.id ? null : b.id)} aria-expanded={picking === b.id} className={MAIN_BUTTON} style={mainStyle(3)}>
+							{picking === b.id ? "Done" : "Change"}
+						</button>
+					</div>
+					{picking === b.id && filePicker(b.id)}
+				</div>
+				<span className="text-[11px] text-foreground/55">Pause the video on it to drag it anywhere, or drag its corner to make it bigger or smaller.</span>
+				{b.media === "video" && <ClipSound sound={b} onChange={(patch) => update(b.id, patch)} />}
+				{b.media === "video" && b.file && <ClipTrim id={b.id} file={b.file} start={b.start} end={b.end} clipFrom={b.clipFrom} total={total} onChange={(patch) => update(b.id, patch)} />}
+			</ToolGroup>
+			<ToolGroup tone={2} title="Show">
+				<div className="flex items-center gap-2">{animPick(b)}</div>
+				<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
+			</ToolGroup>
+			<ToolGroup tone={3} title="Size">
+				{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
+				{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
+				{range(b, "Rotate", b.rotate ?? 0, BANNER_ROTATE.min, BANNER_ROTATE.max, 1, `${Math.round(b.rotate ?? 0)}°`, (n) => update(b.id, { rotate: n || undefined }))}
+			</ToolGroup>
+		</div>
+	);
+
+	return (
+		<div className="flex flex-col gap-2 p-3 pt-1">
+			<input
+				ref={fileRef}
+				type="file"
+				accept={FILE_TYPES}
+				className="hidden"
+				onChange={(e) => {
+					const file = e.target.files?.[0];
+					e.target.value = "";
+					const target = uploadFor.current;
+					uploadFor.current = null;
+					if (file) void addFile(file, target ?? undefined);
+				}}
+			/>
+			<TabGroup
+				tone={3}
+				value={tab}
+				onChange={setTab}
+				tabs={[
+					{ id: "text", label: "Text", icon: <Type className="h-5 w-5" aria-hidden /> },
+					{ id: "file", label: "Pic & Clip", icon: <ImagePlus className="h-5 w-5" aria-hidden /> },
+				]}
+			>
+				{tab === "text" ? (
+					<>
+						<button onClick={() => add("cta")} disabled={banners.length >= BANNER.maxBanners} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
+							<Plus className="h-3.5 w-3.5" aria-hidden /> Add a text
+						</button>
+						{templates.length > 0 && (
+							<div className="flex flex-col gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
+								<p className="flex items-center gap-1 text-xs font-medium">
+									<Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" aria-hidden />
+									My banners
+									<span className="font-normal text-foreground/60">· add your favorite banner</span>
+								</p>
+								<div className="flex flex-wrap items-center gap-1.5 text-sm">
+									{templates.map((t) =>
+										forgetting === t.id ? (
+											<span key={t.id} className="flex items-center gap-1.5 rounded-md border border-red-500/50 bg-background px-2 py-0.5 text-xs">
+												Delete &ldquo;{t.text}&rdquo; from My banners?
+												<button onClick={() => { saveTemplates(templates.filter((x) => x.id !== t.id)); setForgetting(null); }} className="rounded bg-red-600 px-1.5 py-0.5 font-medium text-white hover:bg-red-700">
+													Delete
+												</button>
+												<button onClick={() => setForgetting(null)} className="rounded border border-foreground/20 px-1.5 py-0.5 hover:bg-foreground/5">
+													Keep
+												</button>
+											</span>
+										) : (
+											<span key={t.id} className="flex items-center overflow-hidden rounded-md border border-foreground/20 bg-background">
+												<button onClick={() => addTemplate(t)} disabled={banners.length >= BANNER.maxBanners} title="Add it where the video is now" className="flex max-w-44 items-center gap-1.5 px-2 py-0.5 hover:bg-foreground/5 disabled:opacity-40">
+													<span className="h-3 w-3 shrink-0 rounded-sm border border-foreground/20" style={{ background: t.color ?? brand }} aria-hidden />
+													<span className="truncate">{t.text.replace(/\n/g, " ")}</span>
+													<Plus className="h-3 w-3 shrink-0 text-foreground/50" aria-hidden />
+												</button>
+												<button onClick={() => setForgetting(t.id)} aria-label={`Delete ${t.text} from My banners`} title="Delete from My banners" className="border-l border-foreground/10 px-1.5 py-1 text-foreground/50 hover:bg-red-500/10 hover:text-red-600">
+													<X className="h-3 w-3 shrink-0" aria-hidden />
+												</button>
+											</span>
+										),
+									)}
+								</div>
+							</div>
+						)}
+						{shown.length === 0 && <p className="text-xs text-foreground/60">Any words on the video: a price, a link, a title. It is added where the video is now and shows on the timeline: drag it there to change when it appears.</p>}
+					</>
+				) : (
+					<div className="relative flex flex-col gap-1.5">
+						<button onClick={() => setPicking(picking === "new" ? null : "new")} aria-expanded={picking === "new"} disabled={uploading || banners.length >= BANNER.maxBanners} className="inline-flex items-center justify-center gap-1 rounded-md border border-dashed border-foreground/30 px-2 py-1 text-sm hover:bg-foreground/5 disabled:opacity-40">
+							<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading ? "Uploading…" : "Add a picture or clip"}
+						</button>
+						{picking === "new" && filePicker("new")}
+						{fileNote && <p className="text-xs text-red-500">{fileNote}</p>}
+						{shown.length === 0 && (
+							<p className="text-xs text-foreground/60">
+								Have a banner made already? JPG, PNG, WebP or GIF up to {BANNER_FILE.maxBytes.image / 1_000_000} MB, or an MP4 clip up to {BANNER_FILE.maxBytes.video / 1_000_000} MB (clips show without their sound). It goes over you, where the video is now.
+							</p>
 						)}
 					</div>
-					<label className="flex items-center gap-2 text-xs text-foreground/70">
-						<span className="w-16 shrink-0">Background</span>
-						<input type="checkbox" checked={!b.noBox} onChange={(e) => update(b.id, { noBox: e.target.checked ? undefined : true })} className="accent-blue-600" />
-						<span>{b.noBox ? "Off: letters only" : "On"}</span>
-					</label>
-					{!b.noBox && swatches(b, "Box colour", "color", b.color ?? brand)}
-					{swatches(b, "Text", "ink", b.ink ?? bannerInk(b.color ?? brand))}
-					{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
-					{(b.text.includes("\n") || (b.kind === "price" && cleanBannerText(b.sub))) && (
-						// Its rows to one side of the box (coach 15 Nov). One row fills the box, so only for two or more.
-						<div className="flex items-center gap-2 text-xs text-foreground/70">
-							<span className="w-16 shrink-0">Align</span>
-							{(
-								[
-									[undefined, AlignCenter, "Center"],
-									["left", AlignLeft, "Left"],
-									["right", AlignRight, "Right"],
-								] as const
-							).map(([align, Icon, name]) => (
-								<button
-									key={name}
-									onClick={() => update(b.id, { align })}
-									aria-pressed={b.align === align}
-									title={name}
-									aria-label={`Align ${name.toLowerCase()}`}
-									className={`rounded-md border p-1 ${b.align === align ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
-								>
-									<Icon className="h-3.5 w-3.5" aria-hidden />
-								</button>
-							))}
-						</div>
-					)}
-					{(b.text.includes("\n") || (b.kind === "price" && cleanBannerText(b.sub))) &&
-						range(b, "Line gap", b.lineGap ?? 0, BANNER_LINE_GAP.min, BANNER_LINE_GAP.max, 2, String(b.lineGap ?? 0), (n) => update(b.id, { lineGap: n }))}
-					{!b.noBox && range(b, "Corners", b.radius ?? 0, BANNER_RADIUS.min, BANNER_RADIUS.max, 2, String(b.radius ?? 0), (n) => update(b.id, { radius: n }))}
-					{!b.noBox && range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
-					</>}
-				</div>
-			))}
-			{shown.length > 0 && <p className="text-xs text-foreground/60">
-					Drag a banner along the timeline to change when it shows, or its right end to change how long. Pause the video on a banner to drag it anywhere on the picture.
-					{tab !== "file" && " Emoji can't be shown in banners."}
-				</p>}
+				)}
+				{shown.map((b) => (
+					<div key={b.id} className={`flex flex-col gap-2 rounded-md bg-foreground/5 p-1.5 text-sm ${open === b.id ? "ring-1 ring-blue-400" : ""}`}>
+						{bannerHeader(b)}
+						{b.kind !== "file" && changedFromMaster(b) && (
+							<button onClick={() => updateMaster(b)} title="Save these changes to My banners. Banners already on the timeline stay as they are." className="inline-flex items-center justify-center gap-1.5 rounded-md border border-amber-500/60 bg-amber-500/15 px-2 py-1 text-xs font-medium hover:bg-amber-500/25">
+								<RefreshCw className="h-3.5 w-3.5 shrink-0" aria-hidden /> Update My banner
+							</button>
+						)}
+						{open === b.id && (b.kind === "file" ? fileCards(b) : textCards(b))}
+					</div>
+				))}
+				{shown.length > 0 && (
+					<p className="text-[11px] text-foreground/55">Move banner on timeline to set start time; pause video over banner to move its position.{tab === "text" && " No emojis allowed."}</p>
+				)}
+			</TabGroup>
 			{removing && (
 				<ConfirmDelete
-					name={`"${removing.text.replace(/\n/g, " ")}"`}
+					name={`"${(removing.name ?? removing.text).replace(/\n/g, " ")}"`}
 					onCancel={() => setRemoving(null)}
 					onConfirm={() => {
 						onChange(banners.filter((x) => x.id !== removing.id));

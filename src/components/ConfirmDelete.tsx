@@ -3,10 +3,10 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
-type ConfirmProps = { title: string; body: string; action: string; danger?: boolean; onCancel: () => void; onConfirm: () => void };
+type ConfirmProps = { title: string; body: string; warning?: string; action: string; danger?: boolean; onCancel: () => void; onConfirm: () => void }; // warning: a line in red under the question (what else it will change)
 
 // Asks once before something that is easy to do by mistake and costly to undo (coach, 9 Nov).
-export function Confirm({ title, body, action, danger, onCancel, onConfirm }: ConfirmProps) {
+export function Confirm({ title, body, warning, action, danger, onCancel, onConfirm }: ConfirmProps) {
 	const box = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		// While it asks, keys belong to it: Esc closes this question only, not the box behind it, and Delete or
@@ -33,6 +33,7 @@ export function Confirm({ title, body, action, danger, onCancel, onConfirm }: Co
 			<div ref={box} role="alertdialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="flex w-full max-w-sm flex-col gap-3 rounded-xl border border-foreground/15 bg-background p-4 text-foreground shadow-2xl">
 				<p className="text-sm font-medium break-words">{title}</p>
 				<p className="text-xs text-foreground/60">{body}</p>
+				{warning && <p className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-xs font-medium text-red-600 dark:text-red-400">{warning}</p>}
 				<div className="flex justify-end gap-2">
 					<button autoFocus onClick={onCancel} className="rounded-md border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
 						Cancel

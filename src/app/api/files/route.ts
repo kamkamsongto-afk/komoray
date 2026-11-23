@@ -90,11 +90,17 @@ export async function DELETE(request: Request) {
 	const { user } = await currentUser();
 	if (!user) return Response.json({ error: "Please sign in" }, { status: 401 });
 	const id = new URL(request.url).searchParams.get("id");
-	if (!id || !MY_FILE_ID.test(id) || !(await getJson<MyFile>(myFileCardKey(user.id, id)))) return Response.json({ error: "That file is gone" }, { status: 404 });
-	// Never one that is used: a Brand Kit would lose its logo or font, and a project's Make video would stop (api/render).
-	const use = await whereUsed(user.id, id).catch(() => null);
-	if (!use) return Response.json({ error: UNSURE }, { status: 503 });
-	if (inUse(use)) return Response.json({ error: "It is still used", use }, { status: 409 });
+	const card = id && MY_FILE_ID.test(id) ? await getJson<MyFile>(myFileCardKey(user.id, id)) : null;
+	if (!id || !card) return Response.json({ error: "That file is gone" }, { status: 404 });
+	// A font may go even when it is used (coach 23 Nov, force=1 after the creator was told in red where): what used it shows
+	// the standard font from then on (the preview does at once; Make video: api/render). Pictures, clips and logos never go
+	// while used: a Brand Kit would lose its logo and a project's Make video would stop (api/render).
+	const force = new URL(request.url).searchParams.get("force") === "1" && card.kind === "font";
+	if (!force) {
+		const use = await whereUsed(user.id, id).catch(() => null);
+		if (!use) return Response.json({ error: UNSURE }, { status: 503 });
+		if (inUse(use)) return Response.json({ error: "It is still used", use }, { status: 409 });
+	}
 	await deleteObject(myFileKey(user.id, id));
 	await deleteObject(myFileCardKey(user.id, id));
 	return Response.json({ ok: true });

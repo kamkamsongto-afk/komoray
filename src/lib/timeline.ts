@@ -284,6 +284,9 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 			const score = first.start - last.end + (THAI_STARTS.has(first.text) ? START_BONUS : 0) + (THAI_ENDINGS.has(last.text) ? START_BONUS : 0) - (leans ? NO_END_PENALTY : 0) + 0.3 * k;
 			if (score >= bestScore) [best, bestScore] = [k, score];
 		}
+		// No break was good enough, and the next word must not start the line ("บาท", "ค่ะ"): it goes with the word before it
+		// instead (coach 23 Nov: "บาท" still began lines). render.py best_break does the same.
+		if (bestScore === -Infinity && run.length > 1 && (THAI_NO_START.has(next.text) || THAI_ENDINGS.has(next.text) || next.glue || next.text.startsWith("ๆ") || insideNumber(run[run.length - 1], next))) return run.length - 1;
 		return best;
 	};
 

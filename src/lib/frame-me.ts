@@ -6,6 +6,7 @@
 import { readClipSound } from "./clip-sound";
 import { type Fades, fadeLevel, readFades } from "./fades";
 import { MY_REF } from "./my-files";
+import { BG_MOTION, type BgMotion, bgWindow, isBgMotion } from "./bg-motion";
 
 export type FrameShape = "circle" | "oval" | "square" | "rounded" | "triangle" | "star" | "heart";
 export type FrameBack = "blur" | "color" | "file";
@@ -46,6 +47,10 @@ export type FrameMe = {
 	volume?: number; // a clip background's own sound (lib/clip-sound.ts)
 	muted?: boolean;
 	clipFrom?: number; // a clip background: the second of it that plays first (Trim, lib/clip-sound.ts). Added 19 Nov
+	// back "file": the picture or clip zooms, pans or tilts slowly while the frame shows (lib/bg-motion.ts). Amount, Speed. Added 23 Nov
+	backMotion?: BgMotion;
+	backAmount?: number;
+	backSpeed?: number;
 	name?: string;
 } & Fades; // Fade in / Fade out switches (lib/fades.ts). Added 20 Nov
 
@@ -60,6 +65,10 @@ export const FRAME = {
 	seconds: 3,
 	fade: 0.25, // seconds it takes to fade in, and out (coach, 12 Nov). FRAME_FADE in render.py
 	me: { x: 0.5, y: 0.4 }, // where a face sits in the framed video (FACE_HEIGHT in framing.ts)
+	// meX / meY may go past the picture's own edge (coach 22 Nov): shot from head to waist, the speaker can sit low in the
+	// shape with the background showing under the waist, so the shape works as a crop. Where the picture doesn't reach, the
+	// background shows (frame_filters in render.py has no limit of its own).
+	meRange: { min: -0.5, max: 1.5 },
 };
 
 export const BORDER_COLORS = ["#FFFFFF", "#000000", "#FFE600", "#FF3B30", "#FF2D95", "#34C759", "#0A84FF"];
@@ -93,6 +102,9 @@ export function frameShown(f: FrameMe, t: number) {
 	const fade = Math.min(FRAME.fade, (f.end - f.start) / 2);
 	return fadeLevel(f, t, fade);
 }
+
+// The window the background picture or clip is looked through at final-video second t. Same as frame_filters in render.py.
+export const frameBackWindow = (f: FrameMe, t: number) => (f.back === "file" && f.file && f.backMotion ? bgWindow(f.backMotion, f.backAmount, f.backSpeed, t, f.start, f.end) : bgWindow(undefined, undefined, undefined, t, f.start, f.end));
 
 export const frameAt = (frames: FrameMe[] | undefined, t: number) => frames?.findLast((f) => t >= f.start && t < f.end);
 
@@ -194,8 +206,8 @@ export function readFrames(value: unknown): FrameMe[] | null {
 			y: round(num(f.y, FRAME.move.min, FRAME.move.max, 0.42)),
 			size: round(num(f.size, FRAME.size.min, FRAME.size.max, FRAME.size.start)),
 			zoom: round(num(f.zoom, FRAME.zoom.min, FRAME.zoom.max, FRAME.zoom.start)),
-			meX: round(num(f.meX, 0, 1, FRAME.me.x)),
-			meY: round(num(f.meY, 0, 1, FRAME.me.y)),
+			meX: round(num(f.meX, FRAME.meRange.min, FRAME.meRange.max, FRAME.me.x)),
+			meY: round(num(f.meY, FRAME.meRange.min, FRAME.meRange.max, FRAME.me.y)),
 			border: Math.round(num(f.border, 0, FRAME.border.max, 0)),
 			borderColor: colour(f.borderColor, "#FFFFFF"),
 			back,
@@ -204,6 +216,7 @@ export function readFrames(value: unknown): FrameMe[] | null {
 			blur: Math.round(num(f.blur, 0, FRAME.blur.max, FRAME.blur.start)),
 			...(file && { file, media: /\.(mp4|mov)$/.test(file) ? ("video" as const) : ("image" as const) }),
 			...readClipSound(f, Boolean(file && /\.(mp4|mov)$/.test(file))),
+			...(file && isBgMotion(f.backMotion) && { backMotion: f.backMotion, backAmount: round(num(f.backAmount, BG_MOTION.amount.min, BG_MOTION.amount.max, BG_MOTION.amount.start), 100), ...(f.backSpeed !== undefined && { backSpeed: round(num(f.backSpeed, BG_MOTION.speed.min, BG_MOTION.speed.max, BG_MOTION.speed.start), 100) }) }),
 			...readFades(f),
 			...(typeof f.name === "string" && f.name.trim() && { name: f.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});

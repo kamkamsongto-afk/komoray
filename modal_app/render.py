@@ -365,8 +365,24 @@ def watermark_filters(parts: list[str], base: str, size: tuple[int, int], index:
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
 BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
 BANNER_SCALE = (0.5, 5)  # smallest and biggest size (BANNER_SCALE in banners.ts)
-BANNER_MAX_LINES = 3  # lines of a banner's text (BANNER.maxLines in banners.ts)
+BANNER_MAX_LINES = 20  # lines of a banner's text (BANNER.maxLines in banners.ts)
+BANNER_FIT = 0.9  # a banner taller than this share of the video is made smaller to fit (BANNER_FIT in banners.ts)
+BANNER_STROKE_MAX = 20  # px of a line round the letters (BANNER_STROKE in banners.ts)
+BANNER_PADDING = (0, 60)  # BANNER_PADDING in banners.ts
 BANNER_LINE_GAP = (-60, 80)  # extra px between its rows, at normal size (BANNER_LINE_GAP in banners.ts)
+
+
+def banner_fit(rows: list, line_gap: float, height: int, padding: float = 28) -> float:
+    """How much smaller a banner's words are drawn so all its rows fit on the screen (20 lines at the normal size are taller than a
+    wide video, coach 23 Nov); 1 = no change. Same as bannerFit in banners.ts: the box's height at normal size is its rows, the gaps
+    between them, and one full padding."""
+    if not rows:
+        return 1.0
+    gap = min(BANNER_LINE_GAP[1], max(BANNER_LINE_GAP[0], line_gap))
+    sizes = [row_size for _, row_size in rows]
+    tall = max(sum(sizes) + gap * (len(rows) - 1), max(sizes)) + padding
+    return min(1.0, height * BANNER_FIT / tall)
+
 # An uploaded banner (BANNER_FILE in banners.ts): its width at size 100%, share of the video's; where it starts.
 BANNER_FILE = {"width": 0.5, "x": 0.5, "y": 0.3}
 # How a banner arrives (BANNER_ANIMS in banners.ts): size keyframes (ms, %), fades in, starts this far off (px).
@@ -570,7 +586,7 @@ def row_shifts(align, widths: list[float]) -> list[float]:
     return [side * (widest - w) / 2 for w in widths]
 
 
-def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity, layer=2, shifts=None) -> list[str]:
+def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, middles, size, fill_opacity, layer=2, shifts=None, edge="\\bord0", turn=0.0) -> list[str]:
     """A banner of several rows that grows as it arrives (Pop, Bounce, Pulse), frame by frame: the box and every row
     grow around the box's middle, as in the preview. Once it stops growing (Pop, Bounce), one plain event each.
     layer: its box's ASS layer, its letters one above (banner_events). shifts: each row's middle from the box's (row_shifts)."""
@@ -590,20 +606,22 @@ def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, mid
         if opacity <= 0.004:
             continue
         when = f"{ass_time(f / FPS)},{ass_time((f + 1) / FPS)}"
+        spin_f = f"\\org({centre + dx:.1f},{box_middle + dy:.1f})\\frz{-turn:g}" if turn else ""
         if not b.get("noBox"):
-            events.append(f"Dialogue: {layer},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{colour}\\1a{alpha_of(fill_opacity * opacity)}\\pos({centre + dx:.1f},{box_middle + dy:.1f})\\fscx{scale * 100:.2f}\\fscy{scale * 100:.2f}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer},{when},Banner,,0,0,0,,{{\\an5{spin_f}\\bord0\\shad0{colour}\\1a{alpha_of(fill_opacity * opacity)}\\pos({centre + dx:.1f},{box_middle + dy:.1f})\\fscx{scale * 100:.2f}\\fscy{scale * 100:.2f}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
             y = box_middle + (middle - box_middle) * scale + dy
             grow = size * scale * 100
-            events.append(f"Dialogue: {layer + 1},{when},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + shift * scale + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{when},Banner,,0,0,0,,{{\\an5{spin_f}{edge}\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + shift * scale + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
+    spin_s = f"\\org({centre:.1f},{box_middle:.1f})\\frz{-turn:g}" if turn else ""
     if last / FPS < end:
         # Settled: still until the end, then the fade out, as banner_motion does it.
         rest = f"{ass_time(last / FPS)},{ass_time(end)}"
         fade = int(BANNER["fade"] * 1000) if fades_of(b)[1] else 0
         if not b.get("noBox"):
-            events.append(f"Dialogue: {layer},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer},{rest},Banner,,0,0,0,,{{\\an5{spin_s}\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
-            events.append(f"Dialogue: {layer + 1},{rest},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}\\pos({centre + shift:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{rest},Banner,,0,0,0,,{{\\an5{spin_s}{edge}\\shad0\\1c{ink}{look}\\pos({centre + shift:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
     return events
 
 
@@ -638,13 +656,20 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             key = picked if picked in FONTS else "kanit"
             row_style, row_own, name = {**style, "font": key}, False, FONTS[key]
         size = min(BANNER_SCALE[1], max(BANNER_SCALE[0], float(b.get("scale") or 1)))
-        pad_x, pad_y = BANNER["padding"] * size, BANNER["padding"] / 2 * size
         sub = ass_text(str(b.get("sub", ""))).strip()
+        rows = [(line, BANNER["size"]) for line in lines] + ([(sub, BANNER["sub_size"])] if sub else [])
+        # Smaller by itself when its rows would not fit the screen; Size then works on top of that (banner_fit).
+        padding = min(BANNER_PADDING[1], max(BANNER_PADDING[0], float(b["padding"] if b.get("padding") is not None else BANNER["padding"])))  # the space between box and letters (bannerPad in banners.ts)
+        size *= banner_fit(rows, float(b.get("lineGap") or 0), height, padding)
+        pad_x, pad_y = padding * size, padding / 2 * size
         background = b.get("color") or brand
         ink = ass_colour(b.get("ink") or banner_ink(background))
         fill = f"\\1c{ass_colour(background)}\\1a{alpha_of(float(b.get('opacity') or 1))}"
         radius = float(b.get("radius") or 0) * size
-        rows = [(line, BANNER["size"]) for line in lines] + ([(sub, BANNER["sub_size"])] if sub else [])
+        # A line round its letters (stroke, strokeColor): the ASS outline, outside the letters, as the preview's stroke.
+        stroke = min(BANNER_STROKE_MAX, max(0.0, float(b.get("stroke") or 0))) * size
+        turn = float(b.get("rotate") or 0)
+        edge = f"\\bord{stroke:g}\\3c{ass_colour(b.get('strokeColor') or '#000000')}" if stroke > 0 else "\\bord0"
         # One box around all the rows (coach, 11 Nov: two lines were two boxes), as the preview draws it (PlayerFrame):
         # rows row-size tall, lineGap apart, inside the padding; never shorter than its tallest row.
         heights = [row_size * size for _, row_size in rows]
@@ -659,6 +684,8 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             # A place is where the first row's letters start; the box reaches a little above them.
             centre, top = width / 2, places.get(b.get("place"), places["top"]) * height - pad_y
         box_middle = top + tall / 2
+        # Turned (rotate): every part turns round the box's middle. ASS turns anticlockwise, the preview clockwise, hence the minus.
+        spin = f"\\org({centre:.1f},{box_middle:.1f})\\frz{-turn:g}" if turn else ""
         middles, at = [], top + pad_y
         for row_height in heights:
             middles.append(at + row_height / 2)
@@ -678,12 +705,12 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         if len(rows) > 1 and grows:
             # Growing as one piece: libass grows each line around its own middle, so the rows would come apart
             # from the box. Here every frame puts them where the box's growth takes them (banner_pose).
-            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2, shifts)
+            events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2, shifts, edge, turn)
             continue
         if not b.get("noBox"):
-            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1, fades_of(b))}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1, fades_of(b))}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
-            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5\\bord0\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b))}}}{row_text}")
+            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}{edge}\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b))}}}{row_text}")
     return events
 
 
@@ -814,31 +841,49 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
     )
 
 
-def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
-    """ffmpeg: a picture growing or shrinking around the screen's middle while it shows. Same as pictureZoom in behind.ts.
-    Scale and crop only move in whole pixels, which shakes a slow zoom, so `perspective` does it (smooth_filter)."""
-    motion = ins.get("picMotion")
-    if ins.get("kind") == "video" or motion not in ("in", "out"):
+BG_AMOUNT = (-1.0, 1.2)  # BG_MOTION.amount in src/lib/bg-motion.ts (negative zoom in / out: the other way)
+BG_SPEED = (0.5, 20.0)  # BG_MOTION.speed
+BG_MOTIONS = ("in", "out", "panLeft", "panRight", "tiltUp", "tiltDown")
+
+
+def bg_motion_filter(motion: str | None, amount: float, speed: float, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a picture or clip that zooms in or out, pans left / right or tilts up / down while it shows, over `size` (coach 23 Nov).
+    Same maths as bgWindow in src/lib/bg-motion.ts: the picture is looked at through a window of 1/s of it, s = 1 + amount (a pan or
+    tilt: all the time; zoom: growing or shrinking), slid by the share p of what is left over (p = time shown x speed, at most 1).
+    Scale and crop only move in whole pixels, which shakes a slow move, so `perspective` places the window (smooth_filter). The
+    window's corners are the picture's own points that land on the output's corners. Returns "" for no motion."""
+    if motion not in BG_MOTIONS:
         return ""
     W, H = size
-    p = f"clip((in-1)/{seconds * FPS:.3f},0,1)"
-    amount = float(ins.get("picZoom", INSERT_ZOOM))
-    z = f"(1+{amount:.3f}*{p})" if motion == "in" else f"(1+{amount:.3f}*(1-{p}))"
-    x, y = f"({W}/2*(1-1/{z}))", f"({H}/2*(1-1/{z}))"
+    a = min(BG_AMOUNT[1], max(BG_AMOUNT[0], float(amount)))
+    speed = min(BG_SPEED[1], max(BG_SPEED[0], float(speed)))
+    p = f"clip((in-1)/{seconds * FPS:.3f}*{speed:.3f},0,1)"
+    grow = f"{a:.3f}*{p}" if motion == "in" else f"{a:.3f}*(1-{p})" if motion == "out" else f"{max(a, 0.05):.3f}"
+    s = f"max(0.1,1+{grow})"
+    room = f"(1-1/{s})"
+    fx = p if motion == "panRight" else f"(1-{p})" if motion == "panLeft" else "0.5"
+    fy = p if motion == "tiltDown" else f"(1-{p})" if motion == "tiltUp" else "0.5"
+    x, y = f"({W}*{room}*{fx})", f"({H}*{room}*{fy})"
+    w, h = f"({W}/{s})", f"({H}/{s})"
     return (
-        f"format=yuva420p,perspective=x0='{x}':y0='{y}':x1='{W}-{x}':y1='{y}':x2='{x}':y2='{H}-{y}':x3='{W}-{x}':y3='{H}-{y}'"
+        f"format=yuva420p,perspective=x0='{x}':y0='{y}':x1='{x}+{w}':y1='{y}':x2='{x}':y2='{y}+{h}':x3='{x}+{w}':y3='{y}+{h}'"
         ":interpolation=linear:eval=frame,"
     )
 
 
-def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
-    """ffmpeg: a Layout's picture or clip growing (fileMotion "in") or shrinking ("out") around its part's middle while
-    the layout shows, on top of its Size (coach 20 Nov). Same as layoutFileZoom in layout.ts; done as picture_zoom does it."""
-    motion = l.get("fileMotion")
-    if not l.get("file") or motion not in ("in", "out"):
+def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a Cutout picture's zoom, pan or tilt while it shows, over the whole screen (pictures only). Same as pictureWindow in behind.ts."""
+    if ins.get("kind") == "video":
         return ""
-    amount = min(0.6, max(0.05, float(l.get("fileMotionZoom") or INSERT_ZOOM)))  # LAYOUT.motionZoom in layout.ts
-    return picture_zoom({"picMotion": motion, "picZoom": amount}, seconds, size)
+    return bg_motion_filter(ins.get("picMotion"), ins.get("picZoom", INSERT_ZOOM) if ins.get("picZoom") is not None else INSERT_ZOOM, ins.get("picSpeed") if ins.get("picSpeed") is not None else 1.0, seconds, size)
+
+
+def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
+    """ffmpeg: a Layout's picture or clip zooming, panning or tilting over its part while the layout shows (coach 20 and 23 Nov).
+    Same as layoutFileWindow in layout.ts."""
+    if not l.get("file"):
+        return ""
+    return bg_motion_filter(l.get("fileMotion"), l.get("fileMotionZoom") if l.get("fileMotionZoom") is not None else INSERT_ZOOM, l.get("fileMotionSpeed") if l.get("fileMotionSpeed") is not None else 1.0, seconds, size)
 
 
 def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: dict, inputs: dict) -> str:
@@ -1051,7 +1096,7 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
             parts.append(
                 f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
-                f"format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
+                f"{bg_motion_filter(f.get('backMotion'), f.get('backAmount') if f.get('backAmount') is not None else INSERT_ZOOM, f.get('backSpeed') if f.get('backSpeed') is not None else 1.0, d, size)}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
             )
             parts.append(f"[fmb{j}]drawbox=c=black:t=fill[fbk{j}]")
             parts.append(f"[fbk{j}][fbf{j}]overlay=eof_action=repeat[fbg{j}]")
@@ -1313,12 +1358,16 @@ def banner_file_filters(parts: list[str], base: str, size: tuple[int, int], bann
                 level = f"min({level},{term})"
             shown = f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*{level}',"
             fades = ""
+        # Turned (rotate, clockwise like the preview): on its own transparent canvas big enough for it, round its middle, so the
+        # place it is laid at (its middle) does not change.
+        turn = float(b.get("rotate") or 0)
+        turned = f"rotate={turn * math.pi / 180:.5f}:ow='rotw({turn * math.pi / 180:.5f})':oh='roth({turn * math.pi / 180:.5f})':c=black@0," if turn else ""
         # A clip or a GIF that ends early stays on its last frame, as the preview shows it (same as an insert).
         moving = b.get("media") == "video" or str(b.get("file", "")).endswith(".gif")
         hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
         parts.append(
             f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},setpts=PTS-STARTPTS,format=rgba,scale={w}:-2,setsar=1,"
-            f"colorchannelmixer=aa={opacity:.2f},{shown}pad=iw+4:ih+4:2:2:color=black@0,{motion}"
+            f"colorchannelmixer=aa={opacity:.2f},{shown}pad=iw+4:ih+4:2:2:color=black@0,{turned}{motion}"
             f"format=yuva420p,{fades}"
             f"setpts=PTS-STARTPTS+{a:.3f}/TB[bf{j}]"
         )
@@ -1551,6 +1600,10 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
             score = first["start"] - last["end"] + (START_BONUS if first["text"] in THAI_STARTS else 0) + (START_BONUS if last["text"] in THAI_ENDINGS else 0) - (NO_END_PENALTY if leans else 0) + 0.3 * k
             if score >= best_score:
                 best, best_score = k, score
+        # No break was good enough, and the next word must not start the line ("บาท", "ค่ะ"): it goes with the word before it
+        # instead (timeline.ts bestBreak, coach 23 Nov).
+        if best_score == -math.inf and len(run) > 1 and (nxt["text"] in THAI_NO_START or nxt["text"] in THAI_ENDINGS or nxt.get("glue") or nxt["text"].startswith("ๆ") or inside_number(run[-1], nxt)):
+            return len(run) - 1
         return best
 
     def english_break(run: list[dict], nxt: dict) -> int:
@@ -1889,7 +1942,9 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             # Bold stays off: the weight comes from the font name (e.g. "Kanit Medium").
             f"0,0,0,0,100,100,{int(style.get('letterSpacing') or 0)},0,{border_style},{border},{shadow},2,80,80,{margin_v},1",
             f"Style: Banner,{font},{BANNER['size']},{ass_colour(banner_ink(brand))[:-1]},&H00FFFFFF,{ass_colour(brand)[:-1]},&H00000000,"
-            f"0,0,0,0,100,100,0,0,3,{BANNER['padding']},0,8,80,80,0,1",
+            # BorderStyle 1, not 3: with 3 the stroke of a banner's letters (\bord, \3c) becomes an opaque box round each row, not a line
+            # (tried on Modal 24 Nov). Every banner event sets its own \bord (0 or its stroke), so the style's Outline is 0.
+            f"0,0,0,0,100,100,0,0,1,0,0,8,80,80,0,1",
             f"Style: Logo,{font},{LOGO['size']},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
             f"0,0,0,0,100,100,0,0,1,{LOGO['outline']},0,{logo_align},{LOGO['side']},{LOGO['side']},{LOGO['top']},1",
             "",
@@ -3027,6 +3082,48 @@ def make_thumb(video: Path, thumb: Path) -> None:
     )
 
 
+AUDIO_RATE = 16000  # Hz: what speech-to-text needs; mono, lossless (FLAC), so nothing is lost for Deepgram
+
+
+def audio_command(src: str, out: Path) -> list[str]:
+    """ffmpeg: only the sound of a video (src: a file, or a link ffmpeg reads piece by piece), mono at AUDIO_RATE, as FLAC."""
+    return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", str(AUDIO_RATE), "-c:a", "flac", str(out)]
+
+
+def audio_whole(src: str, out: Path) -> bool:
+    """Is the sound as long as the video? ffmpeg can end with no error and a short or empty sound when it can't jump about in a
+    link (a file with its index at the end, a server without Range: found in a test 23 Nov), so a good exit isn't enough."""
+    if not out.exists() or out.stat().st_size == 0:
+        return False
+    try:
+        whole = duration_of(src)  # type: ignore[arg-type]  # a link works as well as a path
+        return whole > 0 and duration_of(out) >= whole * 0.98 - 1
+    except Exception:
+        return False
+
+
+@app.function(image=image, cpu=2, memory=4096, timeout=60 * 60)
+def audio(video_url: str, output_url: str, error_url: str | None = None) -> dict:
+    """The sound of a video that is too big for Deepgram (over 2 GB, coach 22 Nov), so Deepgram gets the sound alone.
+    Reads the video straight from its link, never all of it at once; a file ffmpeg can't read that way is downloaded and tried again."""
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "audio.flac"
+            result = subprocess.run(audio_command(video_url, out), capture_output=True, text=True)
+            if result.returncode != 0 or not audio_whole(video_url, out):
+                src = Path(tmp) / "source"
+                urllib.request.urlretrieve(video_url, src)
+                result = subprocess.run(audio_command(str(src), out), capture_output=True, text=True)
+                if result.returncode != 0 or not audio_whole(str(src), out):
+                    raise RuntimeError(f"ffmpeg failed or the sound is shorter than the video: {result.stderr[-600:]}")
+            put(output_url, out.read_bytes(), "audio/flac")
+            return {"ok": True, "bytes": out.stat().st_size}
+    except Exception as err:
+        if error_url:
+            put(error_url, json.dumps({"error": str(err)}).encode(), "application/json")
+        raise
+
+
 @app.function(image=image, cpu=2, memory=2048, timeout=30 * 60)
 def faces(video_url: str, faces_url: str, thumb_url: str | None = None) -> dict:
     """Where the face is (and the My projects picture), for a preview copy made before these existed."""
@@ -3137,6 +3234,8 @@ def start(body: dict) -> dict:
         return {"ok": True}
     if body.get("kind") == "proxy":
         call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"), body.get("progressUrl"))
+    elif body.get("kind") == "audio":
+        call = audio.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"))
     elif body.get("kind") == "faces":
         call = faces.spawn(body["videoUrl"], body["facesUrl"], body.get("thumbUrl"))
     else:

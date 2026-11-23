@@ -96,6 +96,7 @@ export async function POST(request: Request) {
 	const ownFonts = [subtitleStyle.font === "own" ? subtitleStyle.ownFont : undefined, ...(edit.banners ?? []).map((b) => (b.font === "own" ? b.ownFont : undefined))];
 	const pinnedFonts = new Map(ownFonts.flatMap((f) => (f?.file && MY_FILE_ID.test(f.file) ? [[f.file, f.family] as const] : [])));
 	let fontFiles: Record<string, string> = {};
+	const lostFonts = new Set<string>(); // own fonts deleted from My files since this video pinned them
 	if (pinnedFonts.size) {
 		const { user } = await currentUser();
 		const found = await Promise.all(
@@ -104,9 +105,10 @@ export async function POST(request: Request) {
 				return { id, family, key, there: !!key && (await exists(key)) };
 			}),
 		);
-		const missing = found.find((f) => !f.there);
-		if (missing) return Response.json({ error: `Your font "${missing.family}" is missing. Please pick or upload it again in the font list, then press Make video.` }, { status: 409 });
-		fontFiles = Object.fromEntries(found.map((f) => [f.id, f.key!]));
+		// A font deleted from My files (it may be, even when used: coach 23 Nov) is the standard font from then on: Make video goes on
+		// with Kanit for it (the banners fall back by themselves in banner_events), no stop, no other font in its place.
+		for (const f of found) if (!f.there) lostFonts.add(f.id);
+		fontFiles = Object.fromEntries(found.filter((f) => f.there).map((f) => [f.id, f.key!]));
 	}
 	// Pictures and clips from My files (MY_REF) on the video: there, or the video is not made, as for the logo and fonts.
 	const ownerId = (await currentUser()).user?.id ?? "";
@@ -160,6 +162,8 @@ export async function POST(request: Request) {
 		// Only when it is on (agent review, 18 Nov): always adding the key changed every saved video's fingerprint, so each
 		// unchanged video would have been made again once. A Free video and the same one on a paid plan still differ.
 		...(watermarkOn(access) && { watermark: WATERMARK.rev }),
+		// A font gone since: the same edit now makes a different picture, so the last video is not handed back.
+		...(lostFonts.size && { lostFonts: [...lostFonts].sort() }),
 	});
 	const before = await getJson<{ fingerprint?: string; stoppedAt?: string }>(siblingKey(key, files.job)).catch(() => null);
 	if (!again && before?.fingerprint === fingerprint && !before.stoppedAt && (await exists(finalKey))) return Response.json({ status: "done", unchanged: true });
@@ -174,6 +178,7 @@ export async function POST(request: Request) {
 	// The user's own font: Modal gets a short-lived link to the file and the name to ask for.
 	// A banner can have the own font too, while the subtitles don't (banner_events falls back to Kanit without it).
 	const style: Record<string, unknown> = readStyle(edit.style);
+	if (style.font === "own" && subtitleStyle.ownFont?.file && lostFonts.has(subtitleStyle.ownFont.file)) style.font = "kanit"; // its font was deleted
 	if (ownFont) {
 		const { user } = await currentUser();
 		const keys = user ? fontKeys(user.id) : null;

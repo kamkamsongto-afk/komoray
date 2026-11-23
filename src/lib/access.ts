@@ -3,7 +3,7 @@ import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, sib
 import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
 import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/features";
-import { BETA_MINUTES, OUT_OF_MINUTES } from "@/lib/limits";
+import { ADMIN_MAX_GB, BETA_MINUTES, OUT_OF_MINUTES } from "@/lib/limits";
 import { cycleAround, extraLeft, PLAN_LABEL, PLAN_RULES, type PlanName, type PlanRules, PLANS_LIVE, shortDate } from "@/lib/plans";
 import { planFor } from "@/lib/billing-store";
 import { type JobFiles, PART_JOB, WHOLE_JOB } from "./render-part";
@@ -21,6 +21,7 @@ import { hashEmail } from "@/lib/email-hash";
 // video gives nothing back; a failed job does (refundListen).
 export const LISTENS_PER_VIDEO = 3; // the first, and Wrong language? twice. Each one pays speech-to-text again
 export const JOB_TOO_OLD_MS = 30 * 60 * 1000; // a job still running after this has died (same as the admin page)
+export const BIG_JOB_TOO_OLD_MS = 90 * 60 * 1000; // a big video: the sound first, then Deepgram (audio-first.ts GIVE_UP_MS)
 
 export const NO_INVITE = "Komoray is invite-only for now. Your invite will come by email.";
 
@@ -92,7 +93,7 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	const base = { limit: BETA_MINUTES, perVideo: beta.perVideo, maxGb: beta.maxGb, storageGb: beta.storageGb, monthly: null, extra: null, perks: perksOf(beta), renders: rendersOf(beta) };
 	const none: AccessStatus = { ...base, allowed: false, unlimited: false, plan: null, used: 0, left: 0, features: NO_FEATURES };
 	if (!email) return none;
-	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, plan: "admin", used: 0, left: BETA_MINUTES, features: ALL_FEATURES };
+	if (isAdmin(email)) return { ...base, allowed: true, unlimited: true, plan: "admin", used: 0, left: BETA_MINUTES, maxGb: ADMIN_MAX_GB, features: ALL_FEATURES };
 	const [person, bought] = await Promise.all([getJson<PersonRecord>(await personKey(email)), planFor(email).catch(() => null)]);
 	const granted = person ? readFeatures(person.features) : NO_FEATURES;
 	const paid = bought && bought.plan !== "free" ? bought.plan : null;
@@ -226,8 +227,10 @@ export async function startListening(key: string, email?: string | null): Promis
 
 // A job that never reported back has died: say so and give the minutes back. true = it had died.
 export async function settleDeadListen(key: string) {
-	const started = await getJson<{ startedAt?: string; usageKey?: string }>(siblingKey(key, "analyze.json"));
-	if (!started?.startedAt || Date.now() - new Date(started.startedAt).getTime() < JOB_TOO_OLD_MS) return false;
+	const started = await getJson<{ startedAt?: string; usageKey?: string; audioFirst?: boolean }>(siblingKey(key, "analyze.json"));
+	// A big video first takes its sound out (up to an hour in Modal, lib/audio-first.ts), so it gets longer than a small one.
+	const limit = started?.audioFirst ? BIG_JOB_TOO_OLD_MS : JOB_TOO_OLD_MS;
+	if (!started?.startedAt || Date.now() - new Date(started.startedAt).getTime() < limit) return false;
 	await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error: "This took too long and stopped. Your minutes are back. Please try again.", at: new Date().toISOString() }), "application/json");
 	if (started.usageKey) await refundListen(key, started.usageKey).catch(() => {});
 	return true;

@@ -3,30 +3,37 @@
 // (white = person) as a plain H.264 stream, one frame for every frame of the video, black outside the
 // windows. /api/cutout/finish then turns that stream into the same files Best makes (modal_app/cutout.py),
 // so the player and Make video don't know the difference.
-//   Fast      Google's selfie model, on the processor, every frame (40 fps on a plain Intel laptop)
+//   Fast      Google's selfie model, on the processor, every frame (40 fps on a plain Intel laptop). On a computer with
+//             several cores the video is cut into stretches that workers do at the same time (cutout-worker.ts)
 //   Balanced  MODNet (Apache 2.0, code and weights) on the graphics card, every second frame, the ones
 //             between blended (2.8 fps on the same laptop: every frame would take twice as long)
 // Tested 9 Nov on a real clip against BiRefNet: both agree with it on 98% of the person, Balanced has the cleaner edge.
 import type { Window } from "./cutout";
+import {
+	fastModelFrom,
+	type LocalTier,
+	matteEncoder,
+	matteSize,
+	type Model,
+	matteStretch,
+	newTimes,
+	runsOf,
+	scaler,
+	SETTINGS,
+	type Times,
+	VISION_ROOT,
+	type Vision,
+} from "./cutout-core";
+import type { CutoutJob, CutoutMessage } from "./cutout-worker";
 import { RangeSource } from "./player/bytes";
-import { type Frame, readVideoTrack } from "./player/mp4";
+import { readVideoTrack } from "./player/mp4";
 
-export type LocalTier = "fast" | "balanced";
+export type { LocalTier };
 
-// Pinned, and only the program and the model come from these: the customer's video never leaves their computer here.
-const VISION_ROOT = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2";
-const SELFIE_MODEL = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite";
 // ort.all, not the smaller ort.webgpu: with that one MODNet gave a ragged matte (agreement with BiRefNet 79% instead of 97%).
 const ORT_ROOT = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/";
 const MODNET_MODEL = "https://huggingface.co/Xenova/modnet/resolve/fa2fa546052fba4c08921230a26cc69a333fca12/onnx/model_fp16.onnx";
-
-const FPS = 30;
-const SETTINGS: Record<LocalTier, { side: number; every: number; bitrate: number }> = {
-	fast: { side: 288, every: 1, bitrate: 1_500_000 }, // matte's short side, px
-	balanced: { side: 540, every: 2, bitrate: 3_000_000 },
-};
 const MODEL_SIDE = 512; // Balanced: the picture MODNet sees, short side (a multiple of 32)
-const FAST_SIDE = 256; // Fast: what Google's model is made for
 
 // What this browser can do, to grey out the rest.
 export async function localSupport(): Promise<Record<LocalTier, boolean>> {
@@ -34,92 +41,6 @@ export async function localSupport(): Promise<Record<LocalTier, boolean>> {
 	const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
 	const adapter = await gpu?.requestAdapter().catch(() => null);
 	return { fast: true, balanced: Boolean(adapter) };
-}
-
-// A pause between frames that the browser doesn't slow down when the tab is in the background (timers it does).
-function breathe() {
-	return new Promise<void>((resolve) => {
-		const channel = new MessageChannel();
-		channel.port1.onmessage = () => resolve();
-		channel.port2.postMessage(0);
-	});
-}
-
-const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
-
-function matteSize(width: number, height: number, side: number) {
-	const k = Math.min(1, side / Math.min(width, height));
-	return { w: even(width * k), h: even(height * k) };
-}
-
-function scaler(w: number, h: number) {
-	const from = document.createElement("canvas");
-	const to = new OffscreenCanvas(w, h);
-	const out = to.getContext("2d", { willReadFrequently: true });
-	if (!out) throw new Error("This browser can't draw the cutout.");
-	out.imageSmoothingQuality = "high";
-	return (mask: Uint8ClampedArray, mw: number, mh: number) => {
-		from.width = mw;
-		from.height = mh;
-		const ctx = from.getContext("2d", { willReadFrequently: true });
-		if (!ctx) throw new Error("This browser can't draw the cutout.");
-		const image = ctx.createImageData(mw, mh);
-		for (let i = 0; i < mw * mh; i++) {
-			image.data[i * 4] = mask[i];
-			image.data[i * 4 + 3] = 255;
-		}
-		ctx.putImageData(image, 0, 0);
-		out.drawImage(from, 0, 0, w, h);
-		const data = out.getImageData(0, 0, w, h).data;
-		const y = new Uint8Array(w * h);
-		for (let i = 0; i < y.length; i++) y[i] = data[i * 4];
-		return y;
-	};
-}
-
-type Model = { run: (frame: VideoFrame) => Promise<Uint8Array>; close: () => void };
-
-type MaskResult = { confidenceMasks: { width: number; height: number; getAsFloat32Array: () => Float32Array; close: () => void }[] };
-type Segmenter = { segmentForVideo: (image: OffscreenCanvas, at: number, done: (result: MaskResult) => void) => void; close: () => void };
-type Vision = {
-	FilesetResolver: { forVisionTasks: (root: string) => Promise<unknown> };
-	ImageSegmenter: { createFromOptions: (files: unknown, options: unknown) => Promise<Segmenter> };
-};
-
-async function fastModel(width: number, height: number, w: number, h: number): Promise<Model> {
-	const vision = (await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ `${VISION_ROOT}/vision_bundle.mjs`)) as Vision;
-	const files = await vision.FilesetResolver.forVisionTasks(`${VISION_ROOT}/wasm`);
-	// The processor: on the plain Intel laptop it tested faster than the graphics card, and it works everywhere.
-	const model = await vision.ImageSegmenter.createFromOptions(files, {
-		baseOptions: { modelAssetPath: SELFIE_MODEL, delegate: "CPU" },
-		runningMode: "VIDEO",
-		outputCategoryMask: false,
-		outputConfidenceMasks: true,
-	});
-	const k = FAST_SIDE / Math.min(width, height);
-	const input = new OffscreenCanvas(Math.round(width * k), Math.round(height * k));
-	const ctx = input.getContext("2d", { willReadFrequently: true });
-	if (!ctx) throw new Error("This browser can't draw the cutout.");
-	const scale = scaler(w, h);
-	let at = 1;
-	return {
-		async run(frame) {
-			ctx.drawImage(frame, 0, 0, input.width, input.height);
-			let out: Uint8Array | null = null;
-			model.segmentForVideo(input, (at += 33), (result) => {
-				const masks = result.confidenceMasks;
-				const mask = masks[masks.length - 1];
-				const values = mask.getAsFloat32Array();
-				const bytes = new Uint8ClampedArray(values.length);
-				for (let i = 0; i < values.length; i++) bytes[i] = values[i] * 255;
-				out = scale(bytes, mask.width, mask.height);
-				masks.forEach((m) => m.close());
-			});
-			if (!out) throw new Error("The cutout model gave no result.");
-			return out;
-		},
-		close: () => model.close(),
-	};
 }
 
 type Tensor = { data: Float32Array; dispose?: () => void };
@@ -168,146 +89,178 @@ async function balancedModel(width: number, height: number, w: number, h: number
 	};
 }
 
-const CODECS = ["avc1.42E01F", "avc1.4D401F", "avc1.640028"];
+export type MatteTimes = { setup: number; modelLoad: number; read: number; decodeWait: number; model: number; encode: number; breathe: number; frames: number; modelFrames: number; total: number; size: string; workers: number };
 
-async function matteEncoder(w: number, h: number, bitrate: number, fail: (error: Error) => void) {
-	const pieces: Uint8Array<ArrayBuffer>[] = [];
-	const encoder = new VideoEncoder({
-		output: (chunk) => {
-			const bytes = new Uint8Array(chunk.byteLength);
-			chunk.copyTo(bytes);
-			pieces.push(bytes);
-		},
-		error: fail,
-	});
-	for (const codec of CODECS) {
-		const config = { codec, width: w, height: h, bitrate, framerate: FPS, latencyMode: "quality", avc: { format: "annexb" } } as VideoEncoderConfig;
-		if ((await VideoEncoder.isConfigSupported(config).catch(() => null))?.supported) {
-			encoder.configure(config);
-			const buffer = new Uint8Array((w * h * 3) / 2);
-			buffer.fill(128, w * h); // no colour
-			let index = 0;
-			return {
-				async add(y: Uint8Array | null) {
-					if (y) buffer.set(y);
-					else buffer.fill(0, 0, w * h);
-					const frame = new VideoFrame(buffer, { format: "I420", codedWidth: w, codedHeight: h, timestamp: Math.round((index * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
-					encoder.encode(frame, { keyFrame: index % FPS === 0 });
-					frame.close();
-					index++;
-					while (encoder.encodeQueueSize > 8) await new Promise((resolve) => encoder.addEventListener("dequeue", resolve, { once: true }));
-				},
-				async finish() {
-					await encoder.flush();
-					encoder.close();
-					return new Blob(pieces, { type: "video/h264" });
-				},
-				close() {
-					if (encoder.state !== "closed") encoder.close();
-				},
-			};
-		}
-	}
-	throw new Error("This browser can't save the cutout. Please choose Slow.");
-}
+// Workers: half of the cores, at most 3 (the computer stays usable, memory stays small), and none for a short video.
+const MIN_PARALLEL_FRAMES = 120;
+const STALL_MS = 180_000; // no word from any worker for this long: give up on them (start-up downloads the model, slow connections take minutes)
+const MAX_WORKERS = 3; // measured 23 Nov on a 12-core computer: 3 workers 1.65x, more gave little (each frame got slower when more ran at once)
+export const workersFor = (frames: number) => {
+	const cores = typeof navigator === "undefined" ? 1 : navigator.hardwareConcurrency || 1;
+	if (typeof Worker === "undefined" || frames < MIN_PARALLEL_FRAMES) return 1;
+	return Math.max(1, Math.min(MAX_WORKERS, Math.floor(cores / 2), Math.floor(frames / 60)));
+};
 
-// The runs of frames inside the windows: [first, past the last).
-function runsOf(frames: Frame[], windows: Window[]) {
-	const inside = (t: number) => windows.some(([a, b]) => a <= t && t < b);
-	const runs: [number, number][] = [];
-	frames.forEach((frame, i) => {
-		if (!inside(frame.time)) return;
-		const last = runs.at(-1);
-		if (last && last[1] === i) last[1] = i + 1;
-		else runs.push([i, i + 1]);
-	});
-	return runs;
-}
+export type LocalOptions = {
+	workers?: number; // how many workers (default workersFor); 1 = no workers
+	makeWorker?: () => Worker; // how a worker is made (the test page has its own)
+};
 
-export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows: Window[], onProgress: (part: number) => void, signal: AbortSignal): Promise<Blob> {
+const defaultWorker = () => new Worker(new URL("./cutout-worker.ts", import.meta.url));
+
+export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows: Window[], onProgress: (part: number) => void, signal: AbortSignal, onTimes?: (times: MatteTimes) => void, options: LocalOptions = {}): Promise<Blob> {
+	const t0 = performance.now();
 	const source = new RangeSource(videoUrl);
 	const track = await readVideoTrack(source);
 	const { frames } = track;
 	const settings = SETTINGS[tier];
 	const { w, h } = matteSize(track.width, track.height, settings.side);
-	const model = await (tier === "fast" ? fastModel : balancedModel)(track.width, track.height, w, h);
+	const runs = runsOf(frames, windows);
+	const total = runs.reduce((sum, [a, b]) => sum + b - a, 0);
+	const size = `${track.width}x${track.height} -> ${w}x${h}`;
+	const ms = (n: number) => Math.round(n);
+
+	const wanted = tier === "fast" ? (options.workers ?? workersFor(total)) : 1;
+	if (wanted >= 2) {
+		try {
+			const result = await parallelMatte({ n: wanted, track, runs, total, settings, url: videoUrl, onProgress, signal, makeWorker: options.makeWorker ?? defaultWorker });
+			onTimes?.({ setup: ms(result.setup - t0), modelLoad: 0, read: ms(result.times.read), decodeWait: ms(result.times.decodeWait), model: ms(result.times.model), encode: ms(result.times.encode), breathe: ms(result.times.breathe), frames: total, modelFrames: result.times.modelFrames, total: ms(performance.now() - t0), size, workers: wanted });
+			return result.blob;
+		} catch (error) {
+			if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
+			console.warn("Cutting in workers did not work, cutting alone:", error);
+			onProgress(0);
+		}
+	}
+
+	const times = newTimes();
+	const t1 = performance.now();
+	const model = await (tier === "fast"
+		? (async () => fastModelFrom((await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ `${VISION_ROOT}/vision_bundle.mjs`)) as Vision, track.width, track.height, w, h))()
+		: balancedModel(track.width, track.height, w, h));
+	const t2 = performance.now();
 	let failure: Error | null = null;
 	const fail = (error: Error) => {
 		failure = error;
 	};
 	const encoder = await matteEncoder(w, h, settings.bitrate, fail);
-	const runs = runsOf(frames, windows);
-	const total = runs.reduce((sum, [a, b]) => sum + b - a, 0);
 	let done = 0;
-	const check = () => {
-		if (signal.aborted) throw new DOMException("Stopped", "AbortError");
-		if (failure) throw failure;
-	};
-
-	const decoded: VideoFrame[] = [];
-	const decoder = new VideoDecoder({ output: (frame) => decoded.push(frame), error: fail });
-	decoder.configure({ codec: track.codec, description: track.description, hardwareAcceleration: "prefer-hardware" });
 	try {
-		let written = 0;
-		for (const [first, past] of runs) {
-			for (; written < first; written++) await encoder.add(null); // black outside the windows
-			check();
-			let start = first;
-			while (start > 0 && !frames[start].key) start--;
-			let next = start; // which frame the decoder gives next (no B-frames: in order)
-			let previous: Uint8Array | null = null;
-			let between = -1; // Balanced: a frame waiting for the next model result, to blend
-
-			const take = async () => {
-				while (decoded.length) {
-					const frame = decoded.shift() as VideoFrame;
-					const at = next++;
-					if (at < first || at >= past) {
-						frame.close();
-						continue;
-					}
-					check();
-					if ((at - first) % settings.every !== 0) {
-						frame.close();
-						between = at;
-					} else {
-						const matte: Uint8Array = await model.run(frame);
-						frame.close();
-						if (between >= 0 && previous) {
-							const middle = new Uint8Array(matte.length);
-							for (let i = 0; i < matte.length; i++) middle[i] = (matte[i] + previous[i]) / 2;
-							await encoder.add(middle);
-							between = -1;
-						}
-						await encoder.add(matte);
-						previous = matte;
-					}
-					done++;
-					onProgress(done / total);
-					await breathe();
-				}
-			};
-
-			for (let i = start; i < past; i++) {
-				const frame = frames[i];
-				const data = await source.read(frame.offset, frame.size);
-				check();
-				decoder.decode(new EncodedVideoChunk({ type: frame.key ? "key" : "delta", timestamp: Math.round(frame.time * 1e6), data }));
-				while (decoder.decodeQueueSize > 4) await new Promise((resolve) => decoder.addEventListener("dequeue", resolve, { once: true }));
-				await take();
-			}
-			await decoder.flush();
-			await take();
-			if (between >= 0) await encoder.add(previous); // the run ended on a frame with nothing after it
-			written = past;
-		}
-		for (; written < frames.length; written++) await encoder.add(null);
-		check();
-		return await encoder.finish();
+		await matteStretch({
+			source,
+			codec: track.codec,
+			description: track.description,
+			frames,
+			runs,
+			from: 0,
+			to: frames.length,
+			model,
+			encoder,
+			every: settings.every,
+			check: () => {
+				if (signal.aborted) throw new DOMException("Stopped", "AbortError");
+				if (failure) throw failure;
+			},
+			onFrame: () => onProgress(++done / total),
+			times,
+			fail,
+		});
+		const blob = await encoder.finish();
+		onTimes?.({ setup: ms(t1 - t0), modelLoad: ms(t2 - t1), read: ms(times.read), decodeWait: ms(times.decodeWait), model: ms(times.model), encode: ms(times.encode), breathe: ms(times.breathe), frames: done, modelFrames: times.modelFrames, total: ms(performance.now() - t0), size, workers: 1 });
+		return blob;
 	} finally {
-		decoded.forEach((frame) => frame.close());
-		if (decoder.state !== "closed") decoder.close();
 		encoder.close();
 		model.close();
+	}
+}
+
+// The matte cut in n stretches of about the same number of frames to cut out, one worker each, then joined end to end: every
+// stretch starts with a key frame and the same settings, so the pieces make one stream.
+async function parallelMatte(o: {
+	n: number;
+	track: Awaited<ReturnType<typeof readVideoTrack>>;
+	runs: [number, number][];
+	total: number;
+	settings: (typeof SETTINGS)["fast"];
+	url: string;
+	onProgress: (part: number) => void;
+	signal: AbortSignal;
+	makeWorker: () => Worker;
+}) {
+	const { track, runs, total } = o;
+	// Where each stretch ends, in frames of the whole video: after about total / n frames inside the runs.
+	const cuts: number[] = [0];
+	let seen = 0;
+	let nextCut = total / o.n;
+	for (const [first, past] of runs) {
+		for (let i = first; i < past; i++) {
+			if (seen >= nextCut && cuts.length < o.n) {
+				cuts.push(i);
+				nextCut = (total * cuts.length) / o.n;
+			}
+			seen++;
+		}
+	}
+	cuts.push(track.frames.length);
+	const jobs: CutoutJob[] = [];
+	for (let k = 0; k + 1 < cuts.length; k++) {
+		const [from, to] = [cuts[k], cuts[k + 1]];
+		const inside = runs.map(([a, b]): [number, number] => [Math.max(a, from), Math.min(b, to)]).filter(([a, b]) => b > a);
+		jobs.push({ url: o.url, codec: track.codec, description: track.description, frames: track.frames, runs: inside, from, to, width: track.width, height: track.height, side: o.settings.side, bitrate: o.settings.bitrate });
+	}
+
+	const workers: Worker[] = [];
+	const stop = () => workers.forEach((worker) => worker.terminate());
+	const onAbort = () => {
+		stop();
+		stalled(new DOMException("Stopped", "AbortError")); // Stop answers at once, not after the stall timer
+	};
+	o.signal.addEventListener("abort", onAbort, { once: true });
+	const setup = performance.now();
+	let done = 0;
+	// A worker that goes quiet (a browser that can't run it, a codec that stopped) must not hang the page: no message for this long
+	// and the pieces are given up, and the video is cut alone instead.
+	let alarm: ReturnType<typeof setTimeout> | undefined;
+	let stalled: (error: Error) => void = () => {};
+	const stall = new Promise<never>((_, reject) => (stalled = reject));
+	stall.catch(() => {}); // nobody is waiting on it once the pieces are in
+	const wake = () => {
+		clearTimeout(alarm);
+		alarm = setTimeout(() => stalled(new Error("The workers stopped answering.")), STALL_MS);
+	};
+	wake();
+	try {
+		const pieces = await Promise.race([stall, Promise.all(
+			jobs.map(
+				(job) =>
+					new Promise<{ blob: Blob; times: Times }>((resolve, reject) => {
+						const worker = o.makeWorker();
+						workers.push(worker);
+						worker.onmessage = (e: MessageEvent<CutoutMessage>) => {
+							wake();
+							const m = e.data;
+							if (m.type === "progress") {
+								done += m.frames;
+								o.onProgress(Math.min(1, done / total));
+							} else if (m.type === "done") resolve({ blob: m.blob, times: m.times });
+							else reject(new Error(m.message));
+						};
+						worker.onerror = (e) => reject(new Error(e.message || "A worker could not start."));
+						worker.onmessageerror = () => reject(new Error("A worker sent something unreadable."));
+						worker.postMessage(job);
+					}),
+			),
+		)]);
+		if (o.signal.aborted) throw new DOMException("Stopped", "AbortError");
+		const times = newTimes();
+		for (const p of pieces) (Object.keys(times) as (keyof Times)[]).forEach((key) => (times[key] += p.times[key]));
+		return { blob: new Blob(pieces.map((p) => p.blob), { type: "video/h264" }), times, setup };
+	} catch (error) {
+		if (o.signal.aborted) throw new DOMException("Stopped", "AbortError");
+		throw error;
+	} finally {
+		clearTimeout(alarm);
+		stop();
+		o.signal.removeEventListener("abort", onAbort);
 	}
 }

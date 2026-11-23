@@ -1,18 +1,20 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, Droplets, Film, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, Film, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { BACKDROP, PIC_MOTION, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
+import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
 import { type useCutout, waitLabel } from "@/lib/use-cutout";
 import { Confirm, ConfirmDelete } from "./ConfirmDelete";
+import { startMotion } from "@/lib/bg-motion";
+import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
 import { newClipSound } from "@/lib/clip-sound";
-import { LayerTools } from "./LayerTools";
+import { TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 import { ViewSwitch, useListView } from "./ViewSwitch";
 import { addToLibrary, clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
@@ -172,16 +174,10 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	// One thing at a time: the list, or the one picked with only its settings (coach, 12 Nov: with texts and pictures
 	// all in one box, it was hard to see what belonged to what).
 	const [view, setView] = useListView("komoray.cutoutView");
-	const [speakerOpen, setSpeakerOpen] = useState(false);
+	const [insertTab, setInsertTab] = useState<"you" | "picture">("you"); // the picture's box: You or the picture (coach 23 Nov)
 	const pick = (item: { id: string; start: number }) => {
 		setOpen(item.id);
 		onReveal?.(item.id, item.start);
-	};
-	const moveHere = <T extends { id: string; start: number; end: number }>(item: T, set: (id: string, patch: Partial<T>) => void) => {
-		const seconds = item.end - item.start;
-		const start = round(Math.max(0, Math.min(now(), total - seconds)));
-		set(item.id, { start, end: round(Math.min(total, start + seconds)) } as Partial<T>);
-		onReveal?.(item.id, start);
 	};
 	const openText = layers.texts.find((t) => t.id === open && tab === "text");
 	const openInsert = layers.inserts.find((i) => i.id === open && tab === "inserts");
@@ -221,7 +217,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	);
 	// The top of one open thing: back to the list, what it is, duplicate, delete. copy: a duplicate right after it,
 	// opened (coach, 14 Nov: the same in every box); left out at the most there can be.
-	const header = (back: string, icon: React.ReactNode, title: string, name: string, remove: () => void, copy?: () => void) => (
+	const header = (back: string, icon: React.ReactNode, title: string, name: string, remove: () => void, copy?: () => void, layer?: { up: () => void; down: () => void; place: { at: number; of: number } | null }) => (
 		<div className="flex flex-col gap-1">
 			<button onClick={() => setOpen(null)} className="inline-flex items-center gap-1 self-start rounded-md px-1 py-0.5 text-xs text-foreground/70 hover:bg-foreground/5 hover:text-foreground">
 				<ArrowLeft className="h-3.5 w-3.5" aria-hidden /> {back}
@@ -229,6 +225,13 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			<div className="flex items-center gap-1.5">
 				{icon}
 				<span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
+				{layer && (
+					<>
+						<span className="shrink-0 text-[11px] text-foreground/60" title="Its layer among the things showing with it">{layer.place ? `${layer.place.at}/${layer.place.of}` : "1/1"}</span>
+						<button onClick={layer.up} disabled={!layer.place || layer.place.at === layer.place.of} title={layer.place ? "Bring it in front of the one over it" : "Nothing else shows at the same time"} aria-label="Bring forward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" aria-hidden /></button>
+						<button onClick={layer.down} disabled={!layer.place || layer.place.at === 1} title={layer.place ? "Send it behind the one under it" : "Nothing else shows at the same time"} aria-label="Send backward" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" aria-hidden /></button>
+					</>
+				)}
 				<button onClick={copy} disabled={!copy} aria-label="Duplicate" title="Duplicate: a copy right after it (Ctrl+D on the timeline)" className="rounded p-1 text-foreground/50 hover:bg-foreground/5 hover:text-foreground disabled:opacity-30">
 					<Copy className="h-3.5 w-3.5" aria-hidden />
 				</button>
@@ -513,15 +516,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						const copy = duplicateOf(t, total);
 						setTexts([...layers.texts, copy]);
 						pick(copy);
-					} : undefined)}
-					<LayerTools
-						onMoveHere={() => moveHere(t, updateText)}
-						onUp={() => setTexts(moveLayer(layers.texts, t.id, true))}
-						onDown={() => setTexts(moveLayer(layers.texts, t.id, false))}
-						place={layerPlace(layers.texts, t.id)}
-					/>
+					} : undefined, { up: () => setTexts(moveLayer(layers.texts, t.id, true)), down: () => setTexts(moveLayer(layers.texts, t.id, false)), place: layerPlace(layers.texts, t.id) })}
 					{notCutYet}
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+						<ToolGroup tone={1} title="Text">
 							{row("Words", <textarea rows={BEHIND.maxLines} value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value.split("\n").slice(0, BEHIND.maxLines).join("\n") })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} className="min-w-0 flex-1 resize-none rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							{row(
 								"Effect",
@@ -565,13 +562,12 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}
 							{row("Height", range(Math.round((1 - t.y) * 100), 3, 97, 1, `${Math.round((1 - t.y) * 100)}%`, (up) => updateText(t.id, { y: Math.round((1 - up / 100) * 1000) / 1000 })))}
 							{times(t, (patch) => updateText(t.id, patch))}
-						</div>
+						</ToolGroup>
 						{/* Everything but you, while this text shows (BehindText dim / blur). */}
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">Background</span>
+						<ToolGroup tone={2} title="Background">
 							{row("Darken", range(t.dim ?? 0, 0, BACKDROP.dim.max, 0.05, `${Math.round((t.dim ?? 0) * 100)}%`, (dim) => updateText(t.id, { dim: dim || undefined })))}
 							{row("Blur", range(t.blur ?? 0, 0, BACKDROP.blur.max, 1, `${t.blur ?? 0}px`, (blur) => updateText(t.id, { blur: blur || undefined })))}
-						</div>
+						</ToolGroup>
 				</div>
 			))}
 
@@ -626,56 +622,47 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								const copy = duplicateOf(i, total);
 								setInserts([...layers.inserts, copy]);
 								pick(copy);
-							} : undefined)}
-							<LayerTools
-								onMoveHere={() => moveHere(i, updateInsert)}
-								onUp={() => setInserts(moveLayer(layers.inserts, i.id, true))}
-								onDown={() => setInserts(moveLayer(layers.inserts, i.id, false))}
-								place={layerPlace(layers.inserts, i.id)}
-							/>
+							} : undefined, { up: () => setInserts(moveLayer(layers.inserts, i.id, true)), down: () => setInserts(moveLayer(layers.inserts, i.id, false)), place: layerPlace(layers.inserts, i.id) })}
 							{notCutYet}
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
+						<ToolGroup tone={3} title="Name">
 							{row("Name", <input value={i.name ?? ""} maxLength={BEHIND.maxName} placeholder={i.kind === "video" ? "Clip" : "Picture"} onChange={(e) => updateInsert(i.id, { name: e.target.value })} onBlur={(e) => updateInsert(i.id, { name: cleanInsertName(e.target.value) || undefined })} className="min-w-0 flex-1 rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
 							<FadeSwitches item={i} onChange={(patch) => updateInsert(i.id, patch)} />
-						</div>
-						{/* You, in a box that folds away (coach, 12 Nov): most of the time only the picture is changed. */}
-						<div className="rounded-lg border border-foreground/15">
-							<button onClick={() => setSpeakerOpen(!speakerOpen)} aria-expanded={speakerOpen} className="flex w-full items-center gap-1 px-2 py-1.5 text-left text-xs font-medium text-foreground/80 hover:bg-foreground/5">
-								{speakerOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />}
-								<User className="h-3.5 w-3.5 shrink-0 text-foreground/50" aria-hidden />
-								Speaker
-								<span className="ml-auto font-normal text-foreground/50">
-									{i.seeThrough ? (i.hidden ? "Behind it" : "In front") : i.hidden ? "Hidden" : `${Math.round(i.speakerScale * 100)}%`}
-								</span>
-							</button>
-							{speakerOpen && (
-								<div className="flex flex-col gap-1.5 border-t border-foreground/10 p-2">
+						</ToolGroup>
+												{/* You | The picture (coach 23 Nov): one tab at a time, as Frame Me and Layout. */}
+						<TabGroup
+							tone={3}
+							value={insertTab}
+							onChange={setInsertTab}
+							tabs={[
+								{ id: "you", label: "You", icon: <User className="h-5 w-5" aria-hidden /> },
+								{ id: "picture", label: i.kind === "video" ? "The clip" : "The picture", icon: <ImagePlus className="h-5 w-5" aria-hidden /> },
+							]}
+						>
+						{insertTab === "you" && (
+							<>
 									<label className="flex items-center gap-2 text-xs">
 										<input type="checkbox" checked={i.hidden} onChange={(e) => updateInsert(i.id, { hidden: e.target.checked })} />
 										{i.seeThrough ? "Put it in front of me" : "Hide me"}
 									</label>
 									{!i.hidden && !i.seeThrough && row("Your size", range(i.speakerScale, INSERT.scale.min, INSERT.scale.max, 0.05, `${Math.round(i.speakerScale * 100)}%`, (speakerScale) => updateInsert(i.id, { speakerScale })))}
-									{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, 0, 1, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
-									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, 0, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
+									{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, INSERT.stand.min, INSERT.stand.max, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
+									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, INSERT.lift.min, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
 									{!i.hidden && !i.seeThrough && row("Soft edges", range(i.soft ?? INSERT.edgeFade, 0, INSERT.soft.max, 0.01, `${Math.round((i.soft ?? INSERT.edgeFade) * 100)}%`, (soft) => updateInsert(i.id, { soft })))}
 									{!i.hidden && !i.seeThrough && <span className="text-xs text-foreground/60">Or pause the video and drag yourself on it.</span>}
-								</div>
+							</>
+						)}
+						{insertTab === "picture" && (
+							<>
+							{i.kind === "image" && (
+								<BgMotionControl
+									motion={i.picMotion === "still" ? undefined : i.picMotion}
+									amount={i.picZoom}
+									speed={i.picSpeed}
+									onMotion={(m) => updateInsert(i.id, { picMotion: m ?? "still", picSpeed: startMotion(m, i.picSpeed) })}
+									onAmount={(picZoom) => updateInsert(i.id, { picZoom })}
+									onSpeed={(picSpeed) => updateInsert(i.id, { picSpeed })}
+								/>
 							)}
-						</div>
-						<div className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2">
-							<span className="text-xs font-medium text-foreground/80">{i.kind === "video" ? "The clip" : "The picture"}</span>
-							{i.kind === "image" &&
-								row(
-									"Movement",
-									<span className="flex gap-1">
-										{PIC_MOTION.map(([id, name]) => (
-											<button key={id} onClick={() => updateInsert(i.id, { picMotion: id })} className={`rounded border px-1.5 py-0.5 ${(i.picMotion ?? "still") === id ? "border-blue-600 bg-blue-600/10" : "border-foreground/20"}`}>
-												{name}
-											</button>
-										))}
-									</span>,
-								)}
-							{i.kind === "image" && (i.picMotion === "in" || i.picMotion === "out") && row("Zoom speed", range(i.picZoom ?? INSERT.zoom.start, INSERT.zoom.min, INSERT.zoom.max, 0.05, `${Math.round((i.picZoom ?? INSERT.zoom.start) * 100)}%`, (picZoom) => updateInsert(i.id, { picZoom })))}
 							{row("Size", range(i.picScale ?? 1, INSERT.picture.scale.min, INSERT.picture.scale.max, 0.05, `${Math.round((i.picScale ?? 1) * 100)}%`, (picScale) => updateInsert(i.id, { picScale })))}
 							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
 							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}
@@ -684,7 +671,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								{i.kind === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={i} onChange={(patch) => updateInsert(i.id, patch)} /></div>}
 								{i.kind === "video" && <ClipTrim id={i.id} file={i.file} start={i.start} end={i.end} clipFrom={i.clipFrom} total={total} onChange={(patch) => updateInsert(i.id, patch)} />}
 							{times(i, (patch) => updateInsert(i.id, patch))}
-						</div>
+							</>
+						)}
+						</TabGroup>
 						</div>
 					))}
 

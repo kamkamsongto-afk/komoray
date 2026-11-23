@@ -11,6 +11,7 @@
 
 import { readClipSound } from "./clip-sound";
 import { MY_REF } from "./my-files";
+import { BG_MOTION, type BgMotion, bgWindow, isBgMotion } from "./bg-motion";
 
 export type LayoutKind = "stack" | "side"; // stack: top / bottom. side: left / right
 export type LayoutEnter = "slide" | "flash" | "cut";
@@ -48,8 +49,9 @@ export type VideoLayout = {
 	// Zoom in / Zoom out (coach 20 Nov, as Cutout's Movement): the picture or clip grows (in) or shrinks (out) slowly
 	// around its part's middle while the layout shows, on top of Size; fileMotionZoom: how much bigger it gets in that
 	// time (LAYOUT.motionZoom). Left out: still. Same as layoutFileZoom = layout_file_zoom in render.py.
-	fileMotion?: "in" | "out";
-	fileMotionZoom?: number;
+	fileMotion?: BgMotion; // zoom, pan or tilt (lib/bg-motion.ts)
+	fileMotionZoom?: number; // Amount
+	fileMotionSpeed?: number; // Speed (BG_MOTION.speed), left out = 1. Added 23 Nov
 	name?: string;
 };
 
@@ -65,7 +67,7 @@ export const LAYOUT = {
 	meZoom: { min: 0.4, max: 2.5, start: 1 },
 	meRange: { min: -0.5, max: 1.5 }, // meX / meY once meZoom is set: may go past the picture's edge
 	fill: { blur: 30, dim: 0.3 }, // the blurred copy under you, as Frame Me's Blur. LAYOUT_FILL in render.py
-	motionZoom: { start: 0.2, min: 0.05, max: 0.6 }, // the same as Cutout's Zoom speed (INSERT.zoom in behind.ts)
+	motionZoom: BG_MOTION.amount, // the same as Cutout's and Frame Me's (lib/bg-motion.ts)
 };
 
 export const LAYOUT_KINDS: { id: LayoutKind; name: string }[] = [
@@ -174,12 +176,11 @@ export function layoutFilePlace(l: VideoLayout, w: number, h: number, ratio: num
 	return { x: along(w, fw, l.fileX ?? 0.5), y: along(h, fh, l.fileY ?? 0.5), w: fw, h: fh };
 }
 
-// How much bigger the picture or clip is at final-video second t (Zoom in / Zoom out), around its part's middle.
+// The window the picture or clip is looked through at final-video second t (zoom, pan, tilt), over its part.
 // Same as layout_file_zoom in render.py.
-export function layoutFileZoom(l: VideoLayout, t: number) {
-	if (!l.file || !l.fileMotion) return 1;
-	const p = Math.min(1, Math.max(0, (t - l.start) / (l.end - l.start)));
-	return 1 + (l.fileMotionZoom ?? LAYOUT.motionZoom.start) * (l.fileMotion === "in" ? p : 1 - p);
+export function layoutFileWindow(l: VideoLayout, t: number) {
+	if (!l.file || !l.fileMotion) return bgWindow(undefined, undefined, undefined, t, l.start, l.end);
+	return bgWindow(l.fileMotion, l.fileMotionZoom, l.fileMotionSpeed, t, l.start, l.end);
 }
 
 // Dropped on the video: a file from the computer, or a project file dragged from the Layout box (LAYOUT_DRAG).
@@ -225,7 +226,7 @@ export function readLayouts(value: unknown): VideoLayout[] | null {
 			...(file && Number(l.fileZoom) > LAYOUT.fileZoom.min && { fileZoom: round(num(l.fileZoom, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 1), 100) }),
 			...(file && l.fileX !== undefined && { fileX: round(num(l.fileX, 0, 1, 0.5)) }),
 			...(file && l.fileY !== undefined && { fileY: round(num(l.fileY, 0, 1, 0.5)) }),
-			...(file && (l.fileMotion === "in" || l.fileMotion === "out") && { fileMotion: l.fileMotion as "in" | "out", fileMotionZoom: round(num(l.fileMotionZoom, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, LAYOUT.motionZoom.start), 100) }),
+			...(file && isBgMotion(l.fileMotion) && { fileMotion: l.fileMotion, fileMotionZoom: round(num(l.fileMotionZoom, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, LAYOUT.motionZoom.start), 100), ...(l.fileMotionSpeed !== undefined && { fileMotionSpeed: round(num(l.fileMotionSpeed, BG_MOTION.speed.min, BG_MOTION.speed.max, BG_MOTION.speed.start), 100) }) }),
 			...(typeof l.name === "string" && l.name.trim() && { name: l.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});
 	}

@@ -3,7 +3,7 @@
 import { ArrowDown, ArrowUp, MapPin } from "lucide-react";
 
 type Props = {
-	onMoveHere: () => void; // start it where the blue line on the timeline is, same length
+	onMoveHere?: () => void; // left out: no button (coach 22 Nov: Move here confused, pressing a kind where the video is adds one there)
 	onUp?: () => void; // left out: this kind has no layers to swap
 	onDown?: () => void;
 	place?: { at: number; of: number } | null; // its layer among the things showing with it
@@ -15,9 +15,11 @@ export function LayerTools({ onMoveHere, onUp, onDown, place }: Props) {
 	const button = "inline-flex items-center gap-1 rounded-md border border-foreground/20 px-1.5 py-0.5 hover:bg-foreground/5 disabled:opacity-30";
 	return (
 		<div className="flex flex-wrap items-center gap-1.5 text-xs text-foreground/70">
-			<button onClick={onMoveHere} title="Start it where the blue line on the timeline is now. It keeps its length." className={button}>
-				<MapPin className="h-3 w-3" aria-hidden /> Move here
-			</button>
+			{onMoveHere && (
+				<button onClick={onMoveHere} title="Start it where the blue line on the timeline is now. It keeps its length." className={button}>
+					<MapPin className="h-3 w-3" aria-hidden /> Move here
+				</button>
+			)}
 			{onUp && onDown && (
 				<>
 					<span className="ml-auto">{place ? `Layer ${place.at} of ${place.of}` : "Layer"}</span>
