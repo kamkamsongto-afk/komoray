@@ -393,6 +393,7 @@ BANNER_ANIMS = {
     "slideUp": {"fade_in": True, "slide": (0, 160)},
     "slideSide": {"fade_in": True, "slide": (-300, 0)},
     "pulse": {"fade_in": True},
+    "rollUp": {"fade_in": False},  # travels up the whole screen while it shows (bannerRoll in banners.ts); banner_motion's roll
 }
 SLIDE_MS = 320
 PULSE_MS = 450
@@ -533,8 +534,12 @@ def alpha_fades(start: float, end: float, seconds: float, fades: tuple[bool, boo
     return out + (f"fade=t=out:st={max(start, end - seconds):.3f}:d={seconds:.3f}:alpha=1," if fades[1] else "")
 
 
-def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float, fades: tuple[bool, bool] = (True, True)) -> str:
-    """The tags that make a banner's part arrive at (x, y). factor: its size, 1 = normal. fades: its switches (fades_of)."""
+def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float, fades: tuple[bool, bool] = (True, True), roll: tuple[float, float] | None = None) -> str:
+    """The tags that make a banner's part arrive at (x, y). factor: its size, 1 = normal. fades: its switches (fades_of).
+    roll (Roll up): how far from (x, y) it is at its start and at its end, px down: it moves evenly between them."""
+    if roll:
+        size = f"\\fscx{factor * 100:g}\\fscy{factor * 100:g}" if factor != 1 else ""
+        return f"\\move({x:.1f},{y + roll[0]:.1f},{x:.1f},{y + roll[1]:.1f},0,{int(seconds * 1000)})" + size
     spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
     fade = int(BANNER["fade"] * 1000)
     fade_in, fade_out = spec["fade_in"] and fades[0], fades[1]
@@ -684,6 +689,11 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             # A place is where the first row's letters start; the box reaches a little above them.
             centre, top = width / 2, places.get(b.get("place"), places["top"]) * height - pad_y
         box_middle = top + tall / 2
+        # Roll up: the whole box from just below the screen to just above it (bannerRoll). It is not turned: ASS would turn
+        # it round a point that stays put while the words move.
+        roll = (height - top, -tall - top) if b.get("anim") == "rollUp" else None
+        if roll:
+            turn = 0.0
         # Turned (rotate): every part turns round the box's middle. ASS turns anticlockwise, the preview clockwise, hence the minus.
         spin = f"\\org({centre:.1f},{box_middle:.1f})\\frz{-turn:g}" if turn else ""
         middles, at = [], top + pad_y
@@ -708,9 +718,9 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2, shifts, edge, turn)
             continue
         if not b.get("noBox"):
-            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1, fades_of(b))}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1, fades_of(b), roll)}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
-            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}{edge}\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b))}}}{row_text}")
+            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}{edge}\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b), roll)}}}{row_text}")
     return events
 
 
@@ -788,7 +798,7 @@ def behind_motion(b: dict, t: float, width: int, height: int) -> list[dict]:
     return [pose(p, y + 40 * (1 - p))]
 
 
-def build_behind(texts: list[dict], shape: str = "9:16") -> str:
+def build_behind(texts: list[dict], shape: str = "9:16", style: dict | None = None) -> str:
     """The text behind the speaker as subtitles, one line per text per frame (the motion is worked out here,
     see behind_motion). Each text was checked by the app (readCutout in behind.ts)."""
     width, height = FORMATS.get(shape, (WIDTH, HEIGHT))
@@ -804,6 +814,10 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
         # Each row is its own event: subtitles have no line spacing of their own. Rows sit around the text's middle.
         row_step = float(b["size"]) + float(b.get("lineGap") or 0)
         font = FONTS.get(b.get("font"), FONTS["kanit"])
+        # Its own font, by the name its copy here goes by (as a banner's); not here: Kanit, as the preview falls back.
+        own = b.get("ownFont")
+        if b.get("font") == "own" and own_font_path(style or {}, own) and own_font_family(style or {}, own):
+            font = own_font_family(style or {}, own)
         stroke = int(b.get("stroke") or 0)
         look = f"\\fn{font}\\fs{int(b['size'])}\\1c{ass_colour(b.get('color', '#FFFFFF'))}\\3c{ass_colour(b.get('strokeColor', '#000000'))}\\bord{stroke}\\shad2\\4c&H000000&"
         for f in range(math.ceil(float(b["start"]) * FPS), math.ceil(float(b["end"]) * FPS)):
@@ -1098,18 +1112,25 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             done = f"{motion}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
             grow = float(f["backSize"]) if f.get("backSize") is not None else 1.0
             dx, dy = float(f.get("backX") or 0) * W, float(f.get("backY") or 0) * H
+            turn = float(f.get("backRotate") or 0)
             read = f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},"
-            if grow == 1 and dx == 0 and dy == 0:
+            if grow == 1 and dx == 0 and dy == 0 and turn == 0:
                 parts.append(f"{read}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{done}")
             else:
                 # A size or place of its own: the whole picture on backColor, so shrinking shows the edges cover cuts off
                 # (coach 25 Nov). Same as frameBackPlace in frame-me.ts. Only what can land on the screen is kept, around
                 # the picture's middle, before it is resized (as the Cutout pictures, for memory).
                 reach_w, reach_h = (math.ceil((side + 2 * abs(off)) / grow) + 2 for side, off in ((W, dx), (H, dy)))
+                rotate = ""
+                if turn:
+                    # Turned (backRotate): what can land on the screen is then a circle around the picture's middle.
+                    half_w, half_h = W / 2 + abs(dx), H / 2 + abs(dy)
+                    reach_w = reach_h = math.ceil(2 * math.hypot(half_w, half_h) / grow) + 2
+                    rotate = f",rotate={turn}*PI/180:ow={2 * math.ceil(half_w)}:oh={2 * math.ceil(half_h)}:c=none"
                 colour = str(f.get("backColor") or "#000000").lstrip("#")
                 parts.append(
                     f"{read}setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,format=rgba,"
-                    f"crop=w='min(iw,{reach_w})':h='min(ih,{reach_h})':exact=1,scale=iw*{grow}:ih*{grow}[fbp{j}]"
+                    f"crop=w='min(iw,{reach_w})':h='min(ih,{reach_h})':exact=1,scale=iw*{grow}:ih*{grow}{rotate}[fbp{j}]"
                 )
                 parts.append(f"color=c=0x{colour}:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[fbc{j}]")
                 parts.append(f"[fbc{j}][fbp{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1:format=rgb,{done}")
@@ -1149,6 +1170,7 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
 # Layout (src/lib/layout.ts): the screen split, the speaker in one part and a picture, clip or colour in the other.
 LAYOUT_SLIDE = 0.5  # seconds the other part takes to slide in, and out (LAYOUT.slide in layout.ts)
 LAYOUT_FLASH = 0.15  # seconds the white flash takes to come up, and to go, at each edge (LAYOUT.flash in layout.ts)
+LAYOUT_FADE = 0.25  # seconds a Fade layout fades in, and out (LAYOUT.fade, layoutAlpha in layout.ts)
 LAYOUT_JOIN = 0.05  # seconds: a layout starting this close after another ends joins it, no slide between (LAYOUT.join)
 LAYOUT_FILL = {"blur": 30, "dim": 0.3}  # the blurred, dimmed copy of the picture under a Layout speaker with a meZoom (LAYOUT.fill)
 LAYOUT_ME_ZOOM = (0.4, 2.5)  # LAYOUT.meZoom in layout.ts
@@ -1269,9 +1291,22 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
             z = min(3.0, max(1.0, float(l.get("fileZoom") or 1)))
             fx, fy = (min(1.0, max(0.0, float(l.get(k, 0.5)))) for k in ("fileX", "fileY"))
             grow = f"max({ow}/iw,{oh}/ih)*{z:g}"
+            cut = f"crop={ow}:{oh}:x='clip(iw*{fx:g}-{ow / 2:g},0,iw-{ow})':y='clip(ih*{fy:g}-{oh / 2:g},0,ih-{oh})'"
+            turn = float(l.get("fileRotate") or 0)
+            if turn:
+                # Turned around its part's middle (fileRotate, as the preview): a square big enough for any angle is cut
+                # around that middle, from the picture padded with the layout's colour, turned, and its middle kept.
+                side = math.ceil(math.hypot(ow, oh) / 2) * 2 + 2
+                colour = str(l.get("color") or "#000000").lstrip("#")
+                x = f"clip((iw-{2 * side})*{fx:g}-{ow / 2:g},0,iw-{2 * side + ow})+{side + ow / 2 - side / 2:g}"
+                y = f"clip((ih-{2 * side})*{fy:g}-{oh / 2:g},0,ih-{2 * side + oh})+{side + oh / 2 - side / 2:g}"
+                cut = (
+                    f"format=rgba,pad=iw+{2 * side}:ih+{2 * side}:{side}:{side}:color=0x{colour},"
+                    f"crop={side}:{side}:x='{x}':y='{y}':exact=1,rotate={turn}*PI/180:ow={ow}:oh={oh}:c=0x{colour}"
+                )
             parts.append(
                 f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale=w='ceil(iw*{grow}/2)*2':h='ceil(ih*{grow}/2)*2',"
-                f"crop={ow}:{oh}:x='clip(iw*{fx:g}-{ow / 2:g},0,iw-{ow})':y='clip(ih*{fy:g}-{oh / 2:g},0,ih-{oh})',setsar=1,"
+                f"{cut},setsar=1,"
                 f"{layout_file_zoom(l, d, (ow, oh))}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[lyf{j}]"
             )
         else:
@@ -1284,7 +1319,16 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
         x = f"{ox}" if stack else f"{ox}+{sign * ow}*(1-({e}))"
         y = f"{oy}+{sign * oh}*(1-({e}))" if stack else f"{oy}"
         parts.append(f"[lyv{j}][lyf{j}]overlay=x='{x}':y='{y}':eof_action=repeat[lyo{j}]")
-        parts.append(f"{base}[lyo{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[lyx{j}]")
+        shown = f"[lyo{j}]"
+        if l.get("enter") == "fade":
+            # The split screen fades in and out over the picture under it, not at an edge another layout covers
+            # (layoutAlpha). Timestamps are the whole video's here.
+            join_start, join_end = layout_joins(l, every or layouts)
+            fade = alpha_fades(a, b, min(LAYOUT_FADE, d / 2), (not join_start, not join_end))
+            if fade:
+                parts.append(f"{shown}format=yuva420p,{fade.rstrip(',')}[lyz{j}]")
+                shown = f"[lyz{j}]"
+        parts.append(f"{base}{shown}overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[lyx{j}]")
         base = f"[lyx{j}]"
     return base
 
@@ -2859,7 +2903,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             if layers.get("texts") or layers.get("inserts"):
                 cutout = {"fontsdir": fonts_dir, "inserts": [], "texts": layers.get("texts") or []}
                 if layers.get("texts"):
-                    (workdir / "behind.ass").write_text(build_behind(layers["texts"], style.get("format", "9:16")), encoding="utf-8")
+                    (workdir / "behind.ass").write_text(build_behind(layers["texts"], style.get("format", "9:16"), style), encoding="utf-8")
                     cutout["behind"] = "behind.ass"
                 if layers.get("matteUrl"):
                     urllib.request.urlretrieve(layers["matteUrl"], workdir / "matte.mp4")

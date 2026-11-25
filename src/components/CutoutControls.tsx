@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, Film, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
-import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, ImagePlus, Moon, Plus, Trash2, Type, User } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, canBeInsert, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
@@ -13,11 +13,14 @@ import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
+import { FontField } from "./FontField";
+import { fontChoice, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { newClipSound } from "@/lib/clip-sound";
 import { TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 import { ViewSwitch, useListView } from "./ViewSwitch";
-import { addToLibrary, clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { addToLibrary, clipLength, hasClearParts, type LibraryItem } from "@/lib/media-library";
+import { FilePicker, PickedFile, useLibrary } from "./FilePicker";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 
 type Props = {
@@ -37,6 +40,7 @@ type Props = {
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
+const INSERT_ACCEPT = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime";
 
 // Chosen before cutting out (coach, 9 Nov): Fast and Normal run on the customer's device and cost no GPU, Slow on ours.
 // In the code they stay fast, balanced and best; people see these names.
@@ -60,34 +64,33 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
 	// Two lists instead of one long mixed one (coach, 9 Nov).
-	const [tab, setTab] = useState<"text" | "inserts" | "motion">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
-	// Pic/Clip shows one thing at a time (coach 15 Nov): adding from the computer, from Import, or what is on the timeline.
-	const [picView, setPicView] = useState<"add" | "import" | "timeline">(layers.inserts.length ? "timeline" : "add");
+	const [tab, setTab] = useState<"text" | "inserts">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
+	// Pic & Clip lists what is on the video, as the other boxes do; the list makes way while the choices to add one are
+	// open (coach 15 Nov: one thing at a time).
+	const [adding, setAdding] = useState(false);
 	if (focus !== focused) {
 		setFocused(focus);
 		setOpen(focus);
 		if (layers.inserts.some((i) => i.id === focus)) {
 			setTab("inserts");
-			setPicView("timeline");
+			setAdding(false);
 		}
 		else if (layers.texts.some((t) => t.id === focus)) setTab("text");
 	}
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
+	const myFonts = useMyFonts(); // own fonts for the words, as banners have
 	const closeRemoving = useCallback(() => setRemoving(null), []);
 	const [askSlow, setAskSlow] = useState(false);
 	const closeAskSlow = useCallback(() => setAskSlow(false), []);
 	const [changing, setChanging] = useState(false); // once cut out, the three qualities fold away until asked for
 	const [uploading, setUploading] = useState<number | null>(null); // percent sent, null: not uploading
 	const [notice, setNotice] = useState("");
-	const fileRef = useRef<HTMLInputElement>(null);
-	// From Import: the project's files, asked for when the list is opened (again each time: one may have just gone in).
-	const [library, setLibrary] = useState<LibraryItem[] | null>(null);
-	const openLibrary = () => {
-		setPicView("import");
-		const key = new URLSearchParams(window.location.search).get("key");
-		if (!key) return setLibrary([]);
-		setLibrary((list) => list ?? knownLibrary(key) ?? null);
-		void loadLibrary(key).then(setLibrary);
+	// The choices to add one: asked for again each time they are opened (a file may have just gone in).
+	const [library, reloadLibrary] = useLibrary();
+	const choices = library && library.filter((i) => canBeInsert(i.file));
+	const toggleAdd = () => {
+		if (!adding) reloadLibrary();
+		setAdding(!adding);
 	};
 
 	const [choice, setPicked] = useState<CutoutTier>(CUTOUT_ON[0]);
@@ -142,6 +145,49 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		onReveal?.(text.id, text.start);
 	}
 
+	// Change (coach 26 Nov): another picture or clip in the same place. When it shows, its layer, and the picture's size
+	// and place stay; a clip starts from its first second again.
+	const [changingFile, setChangingFile] = useState<string | null>(null); // the picture or clip whose choices are open
+	const [swapping, setSwapping] = useState<number | null>(null); // percent sent of a file uploaded to take its place
+	function changeFile(list: Insert[], put: (inserts: Insert[]) => void, id: string, item: LibraryItem) {
+		const old = list.find((i) => i.id === id);
+		if (!old || old.file === item.file) return;
+		// A name the person typed stays; one that came from the old file follows the new file.
+		const bare = (name: string) => cleanInsertName(name.replace(/\.[^.]+$/, ""));
+		const was = library?.find((i) => i.file === old.file)?.name;
+		const typed = old.name && !(was && bare(old.name) === bare(was));
+		const clear = item.media === "image" && Boolean(item.clear);
+		const next: Insert = { ...old, kind: item.media, file: item.file, clipFrom: undefined, seeThrough: clear, name: typed ? old.name : bare(item.name) || undefined };
+		// With or without see-through parts, "hidden" and the speaker's place mean something else: as for a new one.
+		if (clear !== Boolean(old.seeThrough)) Object.assign(next, { hidden: false, speakerScale: clear ? 1 : INSERT.scale.start, speakerX: clear ? 0.5 : 0.25, speakerLift: 0 });
+		if (item.media === "image") Object.assign(next, { volume: undefined, muted: undefined });
+		else if (old.kind !== "video") Object.assign(next, newClipSound("video"));
+		put(list.map((i) => (i.id === id ? next : i)));
+	}
+	// An upload takes a while, so it goes into the pictures as they are by then; with the box closed meanwhile it only goes
+	// into My files.
+	const latest = useRef<{ list: Insert[]; put: (inserts: Insert[]) => void; change: typeof changeFile } | null>(null);
+	useEffect(() => {
+		latest.current = { list: layers.inserts, put: (inserts) => onChange({ ...layers, inserts }), change: changeFile };
+		return () => {
+			latest.current = null;
+		};
+	});
+	async function uploadInstead(file: File, id: string) {
+		setNotice("");
+		setSwapping(0);
+		onUploading?.(true);
+		const sent = await addToLibrary("", file, setSwapping);
+		setSwapping(null);
+		onUploading?.(false, !("error" in sent));
+		if ("error" in sent) return setNotice(sent.error);
+		reloadLibrary();
+		const now = latest.current;
+		if (!now) return;
+		now.change(now.list, now.put, id, sent.item);
+		setChangingFile(null);
+	}
+
 	async function addInsert(file: File) {
 		setNotice("");
 		// Too big: said at once, before anything else (coach 16 Nov: a 150 MB+ clip sat there with no word). The server
@@ -161,12 +207,13 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		setUploading(null);
 		onUploading?.(false, !("error" in done));
 		if ("error" in done) return setNotice(done.error);
+		reloadLibrary(); // so Change lists it too (review 26 Nov)
 		const start = startAt();
 		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
 		const insert: Insert = { ...newClipSound(done.kind), id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
 		setOpen(insert.id);
 		setTab("inserts");
-		setPicView("timeline");
+		setAdding(false);
 		setInserts([...layers.inserts, insert]);
 		onReveal?.(insert.id, insert.start);
 	}
@@ -183,8 +230,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const openInsert = layers.inserts.find((i) => i.id === open && tab === "inserts");
 	const byTime = <T extends { start: number }>(list: T[]) => [...list].sort((a, b) => a.start - b.start);
 
-	const row = (label: React.ReactNode, control: React.ReactNode) => (
-		<label className="flex items-center gap-2 text-xs text-foreground/70">
+	const row = (label: React.ReactNode, control: React.ReactNode, middle?: () => void) => (
+		// Double-click the name: back to the middle (coach 23 Nov), as in Layout and Frame Me.
+		<label onDoubleClick={middle} title={middle ? "Double-click the name: back to the middle" : undefined} className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
 			{control}
 		</label>
@@ -367,12 +415,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				)}
 			</div>
 
-			<div role="tablist" aria-label="Cutout layers" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
+			<div role="tablist" aria-label="Cutout layers" className="grid grid-cols-2 gap-1 rounded-lg bg-foreground/5 p-0.5">
 				{(
 					[
 						["text", Type, "Text behind", layers.texts.length],
-						["inserts", ImagePlus, "Pic/Clip", layers.inserts.length],
-						["motion", Sparkles, "Motion", 0],
+						["inserts", ImagePlus, "Pic & Clip", layers.inserts.length],
 					] as const
 				).map(([id, Icon, name, count]) => (
 					// A light blue frame says which one is open, in both themes (coach, 10 Nov).
@@ -383,8 +430,6 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				))}
 			</div>
 			{notice && <p className="text-xs text-red-500">{notice}</p>}
-
-			{tab === "motion" && <p className="rounded-lg border border-dashed border-foreground/20 p-3 text-center text-xs text-foreground/60">Motion templates are coming soon.</p>}
 
 			{tab === "text" && (
 				<>
@@ -407,91 +452,32 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			)}
 			{tab === "inserts" && (
 				<>
-					<div className="grid grid-cols-2 gap-1">
-						<button
-							onClick={() => {
-								setPicView("add");
-								fileRef.current?.click();
+					<button
+						onClick={toggleAdd}
+						aria-expanded={adding}
+						disabled={!adding && layers.inserts.length >= BEHIND.maxItems}
+						className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${adding ? "border-blue-600 bg-blue-600/10" : "border-dashed border-foreground/30 hover:bg-foreground/5"}`}
+					>
+						<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading ${uploading}%` : "Add picture or clip"}
+					</button>
+					{adding && (
+						<FilePicker
+							items={choices}
+							disabled={layers.inserts.length >= BEHIND.maxItems}
+							onPick={(item) => {
+								setAdding(false);
+								setTab("inserts");
+								onPickImported?.(item);
 							}}
-							aria-pressed={picView === "add"}
-							disabled={uploading !== null || layers.inserts.length >= BEHIND.maxItems}
-							className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "add" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
-						>
-							<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading ${uploading}%` : "Add picture or clip"}
-						</button>
-						<button
-							onClick={openLibrary}
-							disabled={!onPickImported || layers.inserts.length >= BEHIND.maxItems}
-							aria-pressed={picView === "import"}
-							title="Use a picture or clip already in My files"
-							className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "import" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
-						>
-							<FolderInput className="h-3.5 w-3.5" aria-hidden /> From My files
-						</button>
-						<button
-							onClick={() => setPicView("timeline")}
-							aria-pressed={picView === "timeline"}
-							className={`col-span-2 inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm ${picView === "timeline" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
-						>
-							<ImagePlus className="h-3.5 w-3.5" aria-hidden /> Pic or clip on Timeline
-							{layers.inserts.length > 0 && <span className="text-xs text-foreground/50 tabular-nums">{layers.inserts.length}</span>}
-						</button>
-					</div>
-					<input
-						ref={fileRef}
-						type="file"
-						accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime"
-						className="hidden"
-						onChange={(e) => {
-							const file = e.target.files?.[0];
-							e.target.value = "";
-							if (file) void addInsert(file);
-						}}
-					/>
-					{picView === "add" && (
-						<button onClick={() => fileRef.current?.click()} disabled={uploading !== null || layers.inserts.length >= BEHIND.maxItems} className="relative overflow-hidden rounded-md border border-dashed border-foreground/30 px-2 py-6 text-sm text-foreground/70 hover:bg-foreground/5 disabled:opacity-60">
-							{uploading !== null && <span className="absolute inset-y-0 left-0 bg-blue-600/15 transition-all" style={{ width: `${uploading}%` }} aria-hidden />}
-							<span className="relative">
-								{uploading !== null
-									? `Uploading… ${uploading}%`
-									: `Choose a picture or clip from your computer (JPG, PNG, WebP, GIF up to ${INSERT.maxBytes.image / 1_000_000} MB, MP4, MOV up to ${INSERT.maxBytes.video / 1_000_000} MB)`}
-							</span>
-						</button>
+							upload={{ accept: INSERT_ACCEPT, busy: uploading ?? false, onFile: (file) => void addInsert(file) }}
+							footer={
+								<span className="text-[11px] text-foreground/55">
+									JPG, PNG, WebP, GIF up to {INSERT.maxBytes.image / 1_000_000} MB · MP4, MOV up to {INSERT.maxBytes.video / 1_000_000} MB
+								</span>
+							}
+						/>
 					)}
-					{picView === "timeline" && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
-					{picView === "timeline" && !layers.inserts.length && <p className="text-xs text-foreground/60">Nothing on the timeline yet. Add a picture or clip, or pick one from My files.</p>}
-					{picView === "import" && onPickImported && (
-						library === null ? (
-							<p className="text-xs text-foreground/60">Loading…</p>
-						) : library.length === 0 ? (
-							<p className="text-xs text-foreground/60">Nothing in My files yet. + Upload pictures or clips in the My files box, then pick them here.</p>
-						) : (
-							<div className="grid grid-cols-4 gap-1">
-								{library.map((item) => (
-									<button
-										key={item.file}
-										onClick={() => {
-											setPicView("timeline");
-											setTab("inserts");
-											onPickImported(item);
-										}}
-										title={item.name}
-										className="relative aspect-[9/16] overflow-hidden rounded-md border-2 border-transparent bg-black hover:border-foreground/30"
-									>
-										{item.media === "video" ? (
-											<>
-												<video src={`${projectFileSrc(item.file)}#t=0.5`} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-												<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
-											</>
-										) : (
-											// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-											<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
-										)}
-									</button>
-								))}
-							</div>
-						)
-					)}
+					{!adding && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
 				</>
 			)}
 			</>}
@@ -518,8 +504,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						pick(copy);
 					} : undefined, { up: () => setTexts(moveLayer(layers.texts, t.id, true)), down: () => setTexts(moveLayer(layers.texts, t.id, false)), place: layerPlace(layers.texts, t.id) })}
 					{notCutYet}
-						<ToolGroup tone={1} title="Text">
-							{row("Words", <textarea rows={BEHIND.maxLines} value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value.split("\n").slice(0, BEHIND.maxLines).join("\n") })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} className="min-w-0 flex-1 resize-none rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
+						<ToolGroup tone={1} title="Words">
+							<textarea rows={BEHIND.maxLines} value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value.split("\n").slice(0, BEHIND.maxLines).join("\n") })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} aria-label="Words" className="w-full resize-y rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />
+							<span className="text-[11px] text-foreground/55">Enter a new line, up to {BEHIND.maxLines} lines</span>
+						</ToolGroup>
+						<ToolGroup tone={2} title="Show">
 							{row(
 								"Effect",
 								<select value={t.fx} onChange={(e) => updateText(t.id, { fx: e.target.value as BehindFx })} className="rounded border border-foreground/20 bg-background px-1 py-0.5">
@@ -530,7 +519,6 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									))}
 								</select>,
 							)}
-							<FadeSwitches item={t} onChange={(patch) => updateText(t.id, patch)} />
 							{/* How fast the words move, nothing to do with the cutout's quality. Heartbeat has one speed. */}
 							{t.fx !== "pulse" &&
 								row(
@@ -543,35 +531,43 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										))}
 									</span>,
 								)}
-							{row(
-								"Font",
-								<select value={t.font} onChange={(e) => updateText(t.id, { font: e.target.value as FontId })} className="rounded border border-foreground/20 bg-background px-1 py-0.5">
-									{(Object.entries(FONTS) as [FontId, (typeof FONTS)[FontId]][])
-										.filter(([, f]) => !thai || f.thai)
-										.map(([id, f]) => (
-											<option key={id} value={id}>
-												{f.name}
-											</option>
-										))}
-								</select>,
-							)}
-							{row("Size", range(t.size, BEHIND.size.min, BEHIND.size.max, 10, `${t.size}px`, (size) => updateText(t.id, { size })))}
-							{t.text.includes("\n") && row("Line gap", range(t.lineGap ?? 0, BEHIND.lineGap.min, BEHIND.lineGap.max, 5, `${t.lineGap ?? 0}px`, (lineGap) => updateText(t.id, { lineGap })))}
-							{row("Color", swatches(TEXT_COLORS, t.color, (color) => updateText(t.id, { color }), "Text color"))}
-							{row("Outline", range(t.stroke, 0, BEHIND.stroke.max, 1, `${t.stroke}px`, (stroke) => updateText(t.id, { stroke })))}
-							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}
+							<FadeSwitches item={t} onChange={(patch) => updateText(t.id, patch)} />
 							{row("Height", range(Math.round((1 - t.y) * 100), 3, 97, 1, `${Math.round((1 - t.y) * 100)}%`, (up) => updateText(t.id, { y: Math.round((1 - up / 100) * 1000) / 1000 })))}
 							{times(t, (patch) => updateText(t.id, patch))}
 						</ToolGroup>
+						<ToolGroup tone={3} title="Font">
+							<FontField
+								key={t.id}
+								label="Text font"
+								builtins={(Object.keys(FONTS) as FontId[]).filter((id) => !thai || FONTS[id].thai)}
+								value={t.font === "own" ? ownValue(t.ownFont) : t.font}
+								current={t.font === "own" ? t.ownFont : undefined}
+								myFonts={myFonts}
+								onPick={(value) => {
+									const choice = fontChoice(value, t.ownFont, myFonts);
+									if (choice) updateText(t.id, choice as Pick<BehindText, "font" | "ownFont">);
+								}}
+								onUploaded={(font) => updateText(t.id, { font: "own", ownFont: font })}
+							/>
+						</ToolGroup>
+						<ToolGroup tone={1} title="Letters">
+							{row("Size", range(t.size, BEHIND.size.min, BEHIND.size.max, 10, `${t.size}px`, (size) => updateText(t.id, { size })))}
+							{t.text.includes("\n") && row("Line gap", range(t.lineGap ?? 0, BEHIND.lineGap.min, BEHIND.lineGap.max, 5, `${t.lineGap ?? 0}px`, (lineGap) => updateText(t.id, { lineGap })))}
+							{row("Color", swatches(TEXT_COLORS, t.color, (color) => updateText(t.id, { color }), "Text color"))}
+						</ToolGroup>
+						<ToolGroup tone={2} title="Stroke">
+							{row("Outline", range(t.stroke, 0, BEHIND.stroke.max, 1, `${t.stroke}px`, (stroke) => updateText(t.id, { stroke })))}
+							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}
+						</ToolGroup>
 						{/* Everything but you, while this text shows (BehindText dim / blur). */}
-						<ToolGroup tone={2} title="Background">
+						<ToolGroup tone={3} title="Background">
 							{row("Darken", range(t.dim ?? 0, 0, BACKDROP.dim.max, 0.05, `${Math.round((t.dim ?? 0) * 100)}%`, (dim) => updateText(t.id, { dim: dim || undefined })))}
 							{row("Blur", range(t.blur ?? 0, 0, BACKDROP.blur.max, 1, `${t.blur ?? 0}px`, (blur) => updateText(t.id, { blur: blur || undefined })))}
 						</ToolGroup>
 				</div>
 			))}
 
-			{listing && tab === "inserts" && picView === "timeline" && layers.inserts.length > 0 && (
+			{listing && tab === "inserts" && !adding && layers.inserts.length > 0 && (
 				<div className={view === "grid" ? "grid grid-cols-3 gap-1.5" : "flex flex-col gap-1"}>
 					{byTime(layers.inserts).map((i) => {
 						const url = cutout.files[i.file];
@@ -635,7 +631,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							onChange={setInsertTab}
 							tabs={[
 								{ id: "you", label: "You", icon: <User className="h-5 w-5" aria-hidden /> },
-								{ id: "picture", label: i.kind === "video" ? "The clip" : "The picture", icon: <ImagePlus className="h-5 w-5" aria-hidden /> },
+								{ id: "picture", label: "Pic & Clip", icon: <ImagePlus className="h-5 w-5" aria-hidden /> },
 							]}
 						>
 						{insertTab === "you" && (
@@ -645,14 +641,30 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										{i.seeThrough ? "Put it in front of me" : "Hide me"}
 									</label>
 									{!i.hidden && !i.seeThrough && row("Your size", range(i.speakerScale, INSERT.scale.min, INSERT.scale.max, 0.05, `${Math.round(i.speakerScale * 100)}%`, (speakerScale) => updateInsert(i.id, { speakerScale })))}
-									{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, INSERT.stand.min, INSERT.stand.max, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
-									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, INSERT.lift.min, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
+									{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, INSERT.stand.min, INSERT.stand.max, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })), () => updateInsert(i.id, { speakerX: 0.5 }))}
+									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, INSERT.lift.min, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })), () => updateInsert(i.id, { speakerLift: 0 }))}
 									{!i.hidden && !i.seeThrough && row("Soft edges", range(i.soft ?? INSERT.edgeFade, 0, INSERT.soft.max, 0.01, `${Math.round((i.soft ?? INSERT.edgeFade) * 100)}%`, (soft) => updateInsert(i.id, { soft })))}
 									{!i.hidden && !i.seeThrough && <span className="text-xs text-foreground/60">Or pause the video and drag yourself on it.</span>}
 							</>
 						)}
 						{insertTab === "picture" && (
 							<>
+							<div className="relative flex flex-col gap-1.5">
+								<PickedFile file={i.file} media={i.kind} name={library?.find((x) => x.file === i.file)?.name ?? insertName(i)} open={changingFile === i.id} onToggle={() => setChangingFile(changingFile === i.id ? null : i.id)} />
+								{changingFile === i.id && (
+									<FilePicker
+										floating
+										items={choices}
+										current={i.file}
+										onPick={(item) => {
+											changeFile(layers.inserts, setInserts, i.id, item);
+											setChangingFile(null);
+										}}
+										upload={{ accept: INSERT_ACCEPT, busy: swapping ?? false, onFile: (file) => void uploadInstead(file, i.id) }}
+										note={notice}
+									/>
+								)}
+							</div>
 							{i.kind === "image" && (
 								<BgMotionControl
 									motion={i.picMotion === "still" ? undefined : i.picMotion}
@@ -664,9 +676,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								/>
 							)}
 							{row("Size", range(i.picScale ?? 1, INSERT.picture.scale.min, INSERT.picture.scale.max, 0.05, `${Math.round((i.picScale ?? 1) * 100)}%`, (picScale) => updateInsert(i.id, { picScale })))}
-							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
-							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}
-							{row("Rotate", range(i.picRotate ?? 0, -INSERT.picture.rotate, INSERT.picture.rotate, 1, `${i.picRotate ?? 0}°`, (picRotate) => updateInsert(i.id, { picRotate })))}
+							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })), () => updateInsert(i.id, { picX: 0 }))}
+							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })), () => updateInsert(i.id, { picY: 0 }))}
+							{row("Rotate", range(i.picRotate ?? 0, -INSERT.picture.rotate, INSERT.picture.rotate, 1, `${i.picRotate ?? 0}°`, (picRotate) => updateInsert(i.id, { picRotate })), () => updateInsert(i.id, { picRotate: 0 }))}
 								{/* Not in a <label>: Mute has its own. */}
 								{i.kind === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={i} onChange={(patch) => updateInsert(i.id, patch)} /></div>}
 								{i.kind === "video" && <ClipTrim id={i.id} file={i.file} start={i.start} end={i.end} clipFrom={i.clipFrom} total={total} onChange={(patch) => updateInsert(i.id, patch)} />}

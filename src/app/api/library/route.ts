@@ -133,7 +133,7 @@ export async function DELETE(request: Request) {
 	if (siblingKey(key, body.file) === key) return Response.json({ error: "That is your video itself. Delete it on My projects." }, { status: 409 });
 	// Checked on the saved video: a banner or Pic/Clip still showing it would come out empty.
 	if (filesInUse(await getJson<Edit>(siblingKey(key, "edit.json"))).has(body.file)) {
-		return Response.json({ error: "This file is still on your video. Delete it from Banners, Pic/Clip, Frame Me or Layout first." }, { status: 409 });
+		return Response.json({ error: "This file is still on your video. Delete it from Banners, Cutout, Frame Me or Layout first." }, { status: 409 });
 	}
 	await deleteObject(siblingKey(key, body.file));
 	const library = await getJson<Library>(libraryKey(key));

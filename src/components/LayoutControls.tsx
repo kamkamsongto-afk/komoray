@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, Upload, User } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, ChevronRight, Copy, Image as ImageIcon, Trash2, User } from "lucide-react";
+import { useCallback, useState } from "react";
 import { LIMITS } from "@/lib/subtitle-style";
 import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type LayoutKind, layoutName, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
-import { knownLibrary, LIBRARY_ACCEPT, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { LIBRARY_ACCEPT, type LibraryItem } from "@/lib/media-library";
+import { FilePicker, PickedFile, useLibrary } from "./FilePicker";
 import { newClipSound } from "@/lib/clip-sound";
 import { startMotion } from "@/lib/bg-motion";
 import { BgMotionControl } from "./BgMotionControl";
@@ -49,9 +50,6 @@ function KindIcon({ kind, meFirst = true, split = 0.5, size = 22 }: { kind: Layo
 // picture or clip from Import in the other, top / bottom or side by side, sliding in or with a flash.
 // Drawn by PlayerFrame, made by layout_filters (render.py).
 export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0, onImportFile, ruler = FINAL_CLOCK, subtitles }: Props) {
-	// Import file (coach 15 Nov): one hidden picker, told which layout it is for when its button is pressed.
-	const fileRef = useRef<HTMLInputElement>(null);
-	const importFor = useRef<string | null>(null);
 	const [open, setOpen] = useState<string | null>(focus);
 	const [focused, setFocused] = useState(focus);
 	if (focus !== focused) {
@@ -62,23 +60,13 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 	const [picking, setPicking] = useState<string | null>(null); // the layout whose pictures are open to change (Other part)
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
-	// The project's pictures and clips (Import), for the other part. Asked for once the box opens.
-	const [library, setLibrary] = useState<LibraryItem[] | null>(() => (typeof window === "undefined" ? null : (knownLibrary(new URLSearchParams(window.location.search).get("key")) ?? null)));
-	useEffect(() => {
-		const key = new URLSearchParams(window.location.search).get("key");
-		if (!key) return;
-		let gone = false;
-		// A new file in Import (libraryVersion went up): a list from after it.
-		void loadLibrary(key, libraryVersion > 0).then((items) => !gone && setLibrary(items));
-		return () => {
-			gone = true;
-		};
-	}, [libraryVersion]);
+	// The pictures and clips for the other part. A new file in Import (libraryVersion went up): a list from after it.
+	const [library] = useLibrary(libraryVersion);
 	const files = (library ?? []).filter((i) => i.media === "image" || /\.mp4$/.test(i.file));
 
 	const update = (id: string, patch: Partial<VideoLayout>) => onChange(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 	// A clip: quietly on at first, so people hear it plays (as Frame Me, coach 12 Nov). A picture has no sound.
-	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, clipFrom: undefined, fileZoom: undefined, fileX: undefined, fileY: undefined, fileMotion: undefined, fileMotionZoom: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
+	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, clipFrom: undefined, fileZoom: undefined, fileX: undefined, fileY: undefined, fileRotate: undefined, fileMotion: undefined, fileMotionZoom: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
 	const add = (kind: LayoutKind) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const layout = NEW_LAYOUT(start, round(Math.min(total, start + LAYOUT.seconds)), kind);
@@ -137,26 +125,11 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 		</div>
 	);
 
-	const upload = (id: string) => {
-		importFor.current = id;
-		fileRef.current?.click();
-	};
 	const openLayout = layouts.find((l) => l.id === open);
 
 	return (
 		<div className="flex flex-col gap-2 p-3 pt-1">
 			{note && <p className="rounded-md bg-blue-500/10 px-2 py-1 text-xs">{note}</p>}
-			<input
-				ref={fileRef}
-				type="file"
-				accept={LIBRARY_ACCEPT}
-				className="hidden"
-				onChange={(e) => {
-					const file = e.target.files?.[0];
-					e.target.value = "";
-					if (file && importFor.current) onImportFile?.(file, importFor.current);
-				}}
-			/>
 			{!openLayout && (
 				<>
 					<p className="text-xs text-foreground/60">Split the screen: you in one part, your own picture or clip in the other. Nothing is cut out, so it&apos;s ready right away. Or drop a picture or clip on the video.</p>
@@ -273,76 +246,43 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 							{/* Picked: one row (its picture, its name, Change); the pictures to pick from open only on Change (coach 22 Nov: it was crowded). */}
 							<>
 										<div className="relative flex flex-col gap-1.5">
-										{l.file && (
-											<div className="flex items-center gap-2">
-												<span className="relative h-10 w-[22px] shrink-0 overflow-hidden rounded border border-foreground/20 bg-black">
-													{l.media === "video" ? (
-														<video src={projectFileSrc(l.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-													) : (
-														// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-														<img src={projectFileSrc(l.file)} alt="" className="h-full w-full object-cover" />
-													)}
-												</span>
-												<span className="min-w-0 flex-1 truncate text-xs">{current?.name ?? (l.media === "video" ? "Clip" : "Picture")}</span>
-												<button onClick={() => setPicking(picking === l.id ? null : l.id)} aria-expanded={picking === l.id} className={MAIN_BUTTON} style={mainStyle(3)}>
-													{picking === l.id ? "Done" : "Change"}
-												</button>
-											</div>
-										)}
+										{l.file && <PickedFile file={l.file} media={l.media === "video" ? "video" : "image"} name={current?.name ?? (l.media === "video" ? "Clip" : "Picture")} open={picking === l.id} onToggle={() => setPicking(picking === l.id ? null : l.id)} />}
 										{choosing && (
-											<div className={l.file ? "absolute left-0 right-0 top-full z-40 mt-1 flex max-h-72 flex-col gap-2 overflow-y-auto rounded-lg border border-foreground/20 bg-background p-2 shadow-xl" : "flex flex-col gap-2"}>
-											<div className="grid grid-cols-4 gap-1">
-												{files.map((item) => (
-													<button
-														key={item.file}
-														onClick={() => {
-															pickFile(l, item);
+											<FilePicker
+												floating={Boolean(l.file)}
+												items={library && files}
+												current={l.file}
+												onPick={(item) => {
+													pickFile(l, item);
+													setPicking(null);
+												}}
+												// Can also be dragged onto the video (PlayerFrame drops it in the other part).
+												onDragStart={(e, item) => {
+													e.dataTransfer.setData(LAYOUT_DRAG, JSON.stringify({ file: item.file, media: item.media }));
+													e.dataTransfer.effectAllowed = "copy";
+												}}
+												upload={
+													onImportFile && {
+														accept: LIBRARY_ACCEPT,
+														onFile: (file) => {
 															setPicking(null);
-														}}
-														draggable
-														// Can also be dragged onto the video (PlayerFrame drops it in the other part).
-														onDragStart={(e) => {
-															e.dataTransfer.setData(LAYOUT_DRAG, JSON.stringify({ file: item.file, media: item.media }));
-															e.dataTransfer.effectAllowed = "copy";
-														}}
-														title={item.name}
-														aria-pressed={l.file === item.file}
-														className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${l.file === item.file ? "border-[#4D8DBA]" : "border-transparent hover:border-foreground/30"}`}
-													>
-														{item.media === "video" ? (
-															<>
-																<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-																<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
-															</>
-														) : (
-															// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-															<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
+															onImportFile(file, l.id);
+														},
+													}
+												}
+												footer={
+													<div className="flex flex-wrap items-center gap-1">
+														{l.file && (
+															<button onClick={() => update(l.id, { file: undefined, media: undefined, volume: undefined, muted: undefined })} className={PLAIN_BUTTON}>
+																Use a color
+															</button>
 														)}
-													</button>
-												))}
-											</div>
-											<div className="flex flex-wrap items-center gap-1">
-												{onImportFile && (
-													<button
-														onClick={() => upload(l.id)}
-														title="A picture or clip from your computer. It goes into My files too."
-														className={l.file ? PLAIN_BUTTON : MAIN_BUTTON}
- style={l.file ? undefined : mainStyle(3)}
-													>
-														<Upload className="h-3 w-3 shrink-0" aria-hidden />
-														Upload
-													</button>
-												)}
-												{l.file && (
-													<button onClick={() => update(l.id, { file: undefined, media: undefined, volume: undefined, muted: undefined })} className={PLAIN_BUTTON}>
-														Use a color
-													</button>
-												)}
-												<span className="flex items-center gap-1 text-[11px] text-foreground/55" title="Or drag one onto the video">
-													<ImageIcon className="h-3 w-3 shrink-0" aria-hidden /> or drop on the video{library === null && " · Loading…"}
-												</span>
-											</div>
-											</div>
+														<span className="flex items-center gap-1 text-[11px] text-foreground/55" title="Or drag one onto the video">
+															<ImageIcon className="h-3 w-3 shrink-0" aria-hidden /> or drop on the video
+														</span>
+													</div>
+												}
+											/>
 										)}
 									</div>
 </>
@@ -369,10 +309,11 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									/>
 									{row("Left / right", range(1 - (l.fileX ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileX ?? 0.5)), (v) => update(l.id, { fileX: Math.round((1 - v) * 1000) / 1000 })), () => update(l.id, { fileX: undefined }))}
 									{row("Up / down", range(1 - (l.fileY ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileY ?? 0.5)), (v) => update(l.id, { fileY: Math.round((1 - v) * 1000) / 1000 })), () => update(l.id, { fileY: undefined }))}
+									{row("Rotate", range(l.fileRotate ?? 0, -LAYOUT.fileRotate, LAYOUT.fileRotate, 1, `${l.fileRotate ?? 0}°`, (fileRotate) => update(l.id, { fileRotate: fileRotate || undefined })), () => update(l.id, { fileRotate: undefined }))}
 									<span className="text-[11px] text-foreground/55" title="It always fills its part, so it moves only where it is bigger than the part: make it bigger to move it both ways.">
 										Pause, then drag it. Bigger than the part to move it.
 									</span>
-									<button onClick={() => update(l.id, { fileZoom: undefined, fileX: undefined, fileY: undefined })} className={`self-start ${PLAIN_BUTTON}`}>
+									<button onClick={() => update(l.id, { fileZoom: undefined, fileX: undefined, fileY: undefined, fileRotate: undefined })} className={`self-start ${PLAIN_BUTTON}`}>
 										Fit and center
 									</button>
 								</>
@@ -389,7 +330,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 						</TabGroup>
 
 						<ToolGroup tone={1} title="Transition">
-							<div role="radiogroup" aria-label="Transition" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
+							<div role="radiogroup" aria-label="Transition" className="grid grid-cols-4 gap-1 rounded-lg bg-foreground/5 p-0.5">
 								{LAYOUT_ENTERS.map((e) => (
 									<button
 										key={e.id}

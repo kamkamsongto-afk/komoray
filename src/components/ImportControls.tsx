@@ -94,7 +94,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 		<button
 			onClick={() => setRemoving(item)}
 			disabled={isUsed(item)}
-			title={isUsed(item) ? "It is on your video: delete it from Banners, Pic/Clip, Frame Me or Layout first" : "Delete from this project"}
+			title={isUsed(item) ? "It is on your video: delete it from Banners, Cutout, Frame Me or Layout first" : "Delete from this project"}
 			aria-label={`Delete ${item.name}`}
 			className={`rounded ${small} text-foreground/50 hover:bg-red-500/10 hover:text-red-600 disabled:opacity-30`}
 		>
@@ -124,7 +124,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 				<Tag className="h-3 w-3" aria-hidden />
 			</button>
 			{onUseInPicClip && (
-				<button onClick={() => onUseInPicClip(item)} title="Put it behind you (Cutout → Pic/Clip), where the video is now" aria-label={`Use ${item.name} in Pic/Clip`} className="rounded border border-foreground/20 p-1 hover:bg-foreground/5">
+				<button onClick={() => onUseInPicClip(item)} title="Put it behind you (Cutout → Pic & Clip), where the video is now" aria-label={`Use ${item.name} in Pic & Clip`} className="rounded border border-foreground/20 p-1 hover:bg-foreground/5">
 					<Layers className="h-3 w-3" aria-hidden />
 				</button>
 			)}
@@ -156,8 +156,8 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 					<Tag className="h-3 w-3" aria-hidden /> Banner
 				</button>
 				{onUseInPicClip && (
-					<button onClick={() => onUseInPicClip(item)} title="Put it behind you (Cutout → Pic/Clip), where the video is now" className="inline-flex flex-1 items-center justify-center gap-0.5 rounded border border-foreground/20 px-1 py-0.5 hover:bg-foreground/5">
-						<Layers className="h-3 w-3" aria-hidden /> Pic/Clip
+					<button onClick={() => onUseInPicClip(item)} title="Put it behind you (Cutout → Pic & Clip), where the video is now" className="inline-flex flex-1 items-center justify-center gap-0.5 rounded border border-foreground/20 px-1 py-0.5 hover:bg-foreground/5">
+						<Layers className="h-3 w-3 shrink-0" aria-hidden /> <span className="whitespace-nowrap">Pic & Clip</span>
 					</button>
 				)}
 			</div>

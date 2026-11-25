@@ -14,7 +14,7 @@ import { MY_REF } from "./my-files";
 import { BG_MOTION, type BgMotion, bgWindow, isBgMotion } from "./bg-motion";
 
 export type LayoutKind = "stack" | "side"; // stack: top / bottom. side: left / right
-export type LayoutEnter = "slide" | "flash" | "cut";
+export type LayoutEnter = "slide" | "fade" | "flash" | "cut";
 
 // start / end: seconds of the final video. meFirst: the speaker on top (stack) or on the left (side).
 // split: the speaker's share of the height (stack) or width (side). meX, meY: the point of the speaker's picture
@@ -46,6 +46,9 @@ export type VideoLayout = {
 	fileZoom?: number;
 	fileX?: number;
 	fileY?: number;
+	// The picture or clip turned around its part's middle, degrees clockwise (coach 24 Nov); the layout's colour shows in
+	// the corners it leaves. Left out: 0.
+	fileRotate?: number;
 	// Zoom in / Zoom out (coach 20 Nov, as Cutout's Movement): the picture or clip grows (in) or shrinks (out) slowly
 	// around its part's middle while the layout shows, on top of Size; fileMotionZoom: how much bigger it gets in that
 	// time (LAYOUT.motionZoom). Left out: still. Same as layoutFileZoom = layout_file_zoom in render.py.
@@ -60,10 +63,12 @@ export const LAYOUT = {
 	me: { x: 0.5, y: 0.4 }, // where a face sits in the framed video (FACE_HEIGHT in framing.ts)
 	slide: 0.5, // seconds the other part takes to slide in, and out. LAYOUT_SLIDE in render.py
 	flash: 0.15, // seconds the white flash takes to come up, and to go, at each edge. LAYOUT_FLASH in render.py
+	fade: 0.25, // seconds a Fade layout takes to fade in, and out, as Frame Me does. LAYOUT_FADE in render.py
 	join: 0.05, // seconds: a layout starting this close after another ends joins it, no slide between. LAYOUT_JOIN in render.py
 	maxItems: 10,
 	seconds: 5,
 	fileZoom: { min: 1, max: 3 },
+	fileRotate: 180,
 	meZoom: { min: 0.4, max: 2.5, start: 1 },
 	meRange: { min: -0.5, max: 1.5 }, // meX / meY once meZoom is set: may go past the picture's edge
 	fill: { blur: 30, dim: 0.3 }, // the blurred copy under you, as Frame Me's Blur. LAYOUT_FILL in render.py
@@ -76,6 +81,7 @@ export const LAYOUT_KINDS: { id: LayoutKind; name: string }[] = [
 ];
 export const LAYOUT_ENTERS: { id: LayoutEnter; name: string; note: string }[] = [
 	{ id: "slide", name: "Slide", note: "The other half slides in and pushes you over" },
+	{ id: "fade", name: "Fade", note: "The split screen fades in and out" },
 	{ id: "flash", name: "Flash", note: "A white flash, and the screen is split" },
 	{ id: "cut", name: "Cut", note: "Splits at once" },
 ];
@@ -122,6 +128,16 @@ export function layoutProgress(l: VideoLayout, t: number, layouts: VideoLayout[]
 	if (!slides) return 1;
 	const d = Math.min(LAYOUT.slide, (l.end - l.start) / slides);
 	return ease(Math.max(0, Math.min(1, join.start ? 1 : (t - l.start) / d, join.end ? 1 : (l.end - t) / d)));
+}
+
+// How solid a Fade layout is at final-video second t, 0..1, over the whole screen: it fades in at its start and out at
+// its end, but not at an edge another layout covers (layoutJoins), so the whole speaker never shows between two. A layout
+// shorter than both fades fades over half its time each way. The others are always solid. Same as layout_filters.
+export function layoutAlpha(l: VideoLayout, t: number, layouts: VideoLayout[] | undefined) {
+	if (l.enter !== "fade") return 1;
+	const join = layoutJoins(l, layouts);
+	const d = Math.min(LAYOUT.fade, (l.end - l.start) / 2);
+	return Math.max(0, Math.min(1, join.start ? 1 : (t - l.start) / d, join.end ? 1 : (l.end - t) / d));
 }
 
 // The white flash over the picture at final-video second t, 0..1: up to full at each edge of a Flash layout, from
@@ -226,6 +242,7 @@ export function readLayouts(value: unknown): VideoLayout[] | null {
 			...(file && Number(l.fileZoom) > LAYOUT.fileZoom.min && { fileZoom: round(num(l.fileZoom, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 1), 100) }),
 			...(file && l.fileX !== undefined && { fileX: round(num(l.fileX, 0, 1, 0.5)) }),
 			...(file && l.fileY !== undefined && { fileY: round(num(l.fileY, 0, 1, 0.5)) }),
+			...(file && Math.round(Number(l.fileRotate)) && { fileRotate: Math.round(num(l.fileRotate, -LAYOUT.fileRotate, LAYOUT.fileRotate, 0)) }),
 			...(file && isBgMotion(l.fileMotion) && { fileMotion: l.fileMotion, fileMotionZoom: round(num(l.fileMotionZoom, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, LAYOUT.motionZoom.start), 100), ...(l.fileMotionSpeed !== undefined && { fileMotionSpeed: round(num(l.fileMotionSpeed, BG_MOTION.speed.min, BG_MOTION.speed.max, BG_MOTION.speed.start), 100) }) }),
 			...(typeof l.name === "string" && l.name.trim() && { name: l.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});

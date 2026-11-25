@@ -93,7 +93,8 @@ export async function POST(request: Request) {
 	// downgrade they work in the projects that already have them; only new picks follow the plan). Missing = not made,
 	// never another font in its place, as for the logo.
 	const subtitleStyle = readStyle(edit.style);
-	const ownFonts = [subtitleStyle.font === "own" ? subtitleStyle.ownFont : undefined, ...(edit.banners ?? []).map((b) => (b.font === "own" ? b.ownFont : undefined))];
+	// Subtitles, each banner and each of Cutout's texts.
+	const ownFonts = [subtitleStyle.font === "own" ? subtitleStyle.ownFont : undefined, ...[...(edit.banners ?? []), ...(edit.cutout?.texts ?? [])].map((b) => (b.font === "own" ? b.ownFont : undefined))];
 	const pinnedFonts = new Map(ownFonts.flatMap((f) => (f?.file && MY_FILE_ID.test(f.file) ? [[f.file, f.family] as const] : [])));
 	let fontFiles: Record<string, string> = {};
 	const lostFonts = new Set<string>(); // own fonts deleted from My files since this video pinned them

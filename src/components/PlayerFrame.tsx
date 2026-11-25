@@ -3,12 +3,12 @@
 import { Pause, Play, RotateCw } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useContext, useEffect, useRef, useState } from "react";
-import { BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerPad, bannerRows, bannerStrokeShadow } from "@/lib/banners";
+import { BANNER_ANIMS, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerPad, bannerRoll, bannerRows, bannerStrokeShadow, bannerTall } from "@/lib/banners";
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, speakerTransform } from "@/lib/behind";
 import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameBackMoved, frameBackPlace, frameBackWindow, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
-import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileWindow, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
+import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAlpha, layoutAt, layoutFileWindow, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import { logoPictureName, logoPictureUrl } from "@/lib/logo";
 import { myFileUrl } from "@/lib/my-files";
@@ -383,9 +383,13 @@ function LayoutFileHandle({ l, box, place, scale, onChange }: { l: VideoLayout; 
 				const d = drag.current;
 				if (!d) return;
 				moved.current = true;
-				// Dragging right brings a point further left into the middle; one that can't come further stays put.
+				// Dragging right brings a point further left into the middle; one that can't come further stays put. A turned
+				// picture: the drag is turned back first, so it still follows the pointer.
 				const clamp = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
-				onChange(l.id, { fileX: clamp(d.fileX - (e.clientX - d.x) / (place.w * scale)), fileY: clamp(d.fileY - (e.clientY - d.y) / (place.h * scale)) });
+				const turn = ((l.fileRotate ?? 0) * Math.PI) / 180;
+				const [sx, sy] = [e.clientX - d.x, e.clientY - d.y];
+				const [mx, my] = [sx * Math.cos(turn) + sy * Math.sin(turn), -sx * Math.sin(turn) + sy * Math.cos(turn)];
+				onChange(l.id, { fileX: clamp(d.fileX - mx / (place.w * scale)), fileY: clamp(d.fileY - my / (place.h * scale)) });
 			}}
 			onPointerUp={() => (drag.current = null)}
 			className="absolute cursor-move outline-2 -outline-offset-2 outline-amber-400 outline-dashed"
@@ -532,7 +536,7 @@ mode === "move"
 		return () => observer.disconnect();
 	}, []);
 
-	useOwnFonts([subtitle.font === "own" ? subtitle.ownFont : undefined, ...banners.map((b) => (b.font === "own" ? b.ownFont : undefined))]);
+	useOwnFonts([subtitle.font === "own" ? subtitle.ownFont : undefined, ...banners.map((b) => (b.font === "own" ? b.ownFont : undefined)), ...(cutout?.layers.texts ?? []).map((t) => (t.font === "own" ? t.ownFont : undefined))]);
 	// How the logo comes and goes at this moment of the final video (lib/logo-motion.ts, the same sums as render.py),
 	// grown or shrunk from its own corner.
 	const logoNow = logoLook(logoTime ?? outTime, subtitle.logoEffect, subtitle.logoSpeed, subtitle.logoEvery);
@@ -642,8 +646,10 @@ mode === "move"
 				})}
 				<div className="pointer-events-none absolute top-0 left-0" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 1 }}>
 					{layers.texts.flatMap((t) => {
-						const face = FONT_FACES[t.font] ?? FONT_FACES.kanit;
-						const em = FONTS[t.font]?.height ?? FONTS.kanit.height;
+						// Its own font (build_behind in render.py), falling back to Kanit when it can't load, as there.
+						const own = t.font === "own" ? t.ownFont : undefined;
+						const face = own ? { family: ownFamily(own), weight: 400 } : (FONT_FACES[t.font as FontId] ?? FONT_FACES.kanit);
+						const em = own ? own.height : (FONTS[t.font as FontId]?.height ?? FONTS.kanit.height);
 						const words = t.fx === "runLeft" || t.fx === "runRight" ? runText(t, W) : t.text;
 						return behindMotion(t, outTime, W, H).map((pose, k) => (
 							<div
@@ -778,6 +784,7 @@ mode === "move"
 	const split = layoutAt(layouts, outTime);
 	const pose = split ? layoutPose(split, layoutProgress(split, outTime, layouts), W, H) : null;
 	const flash = layoutFlash(layouts, outTime);
+	const laid = split ? layoutAlpha(split, outTime, layouts) : 1; // a Fade layout coming or going
 	const [dropping, setDropping] = useState(false); // a file is being dragged over the video
 	const canDrop = (e: ReactDragEvent) => Boolean(onLayoutDrop) && (e.dataTransfer.types.includes("Files") || e.dataTransfer.types.includes(LAYOUT_DRAG));
 	const dropProps = onLayoutDrop
@@ -814,7 +821,16 @@ mode === "move"
 		const seen = (r: number) => l.file && setRatios((all) => (all[l.file as string] === r ? all : { ...all, [l.file as string]: r }));
 		const place = ratio ? layoutFilePlace(l, box.w, box.h, ratio) : null;
 		const fill: CSSProperties = place
-			? { position: "absolute", maxWidth: "none", left: place.x * scale, top: place.y * scale, width: place.w * scale, height: place.h * scale }
+			? {
+					position: "absolute",
+					maxWidth: "none",
+					left: place.x * scale,
+					top: place.y * scale,
+					width: place.w * scale,
+					height: place.h * scale,
+					// Turned around its part's middle, as layout_filters turns it.
+					...(l.fileRotate && { transform: `rotate(${l.fileRotate}deg)`, transformOrigin: `${(box.w / 2 - place.x) * scale}px ${(box.h / 2 - place.y) * scale}px` }),
+				}
 			: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 		return (
 			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
@@ -848,6 +864,10 @@ mode === "move"
 					{/* Always the same elements, with or without a frame: a new canvas would lose the picture the engine draws on. */}
 					<div className="absolute inset-0" style={framed ? frameMask(framed) : undefined}>
 						<div className="absolute inset-0" style={framed ? framePlace(framed) : undefined}>
+{/* A Fade layout coming or going: the plain picture, copied, under the split screen, which fades over it. */}
+{laid < 1 && <BlurBack source={pictureRef} blur={0} dim={0} ratio={W / H} side={720} />}
+{/* Always here, faded or not: a new canvas would lose the picture the engine draws on. */}
+<div className="absolute inset-0" style={laid < 1 ? { opacity: laid } : undefined}>
 {/* Layout with You at a size of its own (meZoom): what you don't cover shows a blurred, dimmed copy of the picture, as layout_filters. */}
 {pose?.free && <BlurBack source={pictureRef} blur={LAYOUT.fill.blur * scale} dim={LAYOUT.fill.dim} ratio={W / H} />}
 {/* Layout moves the speaker (and the Cutout layers with them) into their part: always this element, moved or not. */}
@@ -862,6 +882,7 @@ mode === "move"
 								{cutout && cutoutLayers(cutout)}
 							</div>
 							{split && pose && layoutOther(split, pose.other)}
+							</div>
 							{/* Flash: white over the picture at the edges of a Flash layout, as layout_flashes (render.py). */}
 							{flash > 0 && <div className="pointer-events-none absolute inset-0 bg-white" style={{ opacity: flash }} />}
 							{split && pose && onLayoutChange && !playing && <LayoutHandle l={split} box={pose.me} W={W} H={H} scale={scale} onChange={onLayoutChange} />}
@@ -989,6 +1010,11 @@ const size = (b.scale ?? 1) * bannerFit(b, H);
 const pad = bannerPad(b);
 const padY = (pad / 2) * size;
 						const rows = bannerRows(b);
+						// Roll up: where its box would rest (as banner_events places it), then how far the roll has it from there.
+						const rolling = Boolean(BANNER_ANIMS[b.anim ?? "fade"].roll);
+						const tall = bannerTall(b, size);
+						const restTop = b.x !== undefined && b.y !== undefined ? b.y * H - tall / 2 : Math.round(BANNER_TOP[subtitle.format][b.place] * H) - padY;
+						const rolled = rolling ? bannerRoll(b, outTime, H, restTop, tall) : 0;
 						// One box around all its rows (coach, 11 Nov: two lines were two boxes), as banner_events draws it: rows
 						// row-size tall, lineGap apart, inside the padding; never shorter than its tallest row. It arrives as one
 						// piece, around the box's middle (render.py works that out frame by frame for the growing kinds).
@@ -1001,7 +1027,7 @@ const padY = (pad / 2) * size;
 							background: b.noBox ? "transparent" : `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,
 							borderRadius: (b.radius ?? 0) * size,
 							padding: `${padY}px ${pad * size}px`,
-							transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
+							transform: `translate(${move.x}px, ${move.y + rolled}px) scale(${move.scale})`,
 						};
 						const movable = Boolean(onBannersChange) && !playing;
 						// Dragged somewhere: its middle sits there. Else its first row's letters start at the top of its place.
@@ -1026,7 +1052,7 @@ const padY = (pad / 2) * size;
 									className="relative flex flex-col items-center"
 									onClick={(e) => movable && e.stopPropagation()}
 									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
-									style={{ ...(b.rotate ? { transform: `rotate(${b.rotate}deg)` } : {}), ...(movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : {}) }}
+									style={{ ...(b.rotate && !rolling ? { transform: `rotate(${b.rotate}deg)` } : {}), ...(movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : {}) }}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									<span style={box}>
@@ -1054,7 +1080,7 @@ lineHeight: `${row.size * size}px`,
 											);
 										})}
 									</span>
-									{movable && (
+									{movable && !rolling && (
 										<span
 											onPointerDown={(e) => startBannerDrag(e, b, "rotate")}
 											title="Drag round to turn it"

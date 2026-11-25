@@ -54,14 +54,16 @@ export type Banner = {
 } & Fades; // Fade in / Fade out switches (lib/fades.ts). Added 20 Nov
 
 // How a banner arrives. Same keyframes as BANNER_ANIMS in render.py, which writes them as ASS tags.
-export type BannerAnim = "fade" | "pop" | "bounce" | "slideUp" | "slideSide" | "pulse";
-export const BANNER_ANIMS: Record<BannerAnim, { name: string; keys?: [number, number][]; fadeIn: boolean; slide?: [number, number] }> = {
+export type BannerAnim = "fade" | "pop" | "bounce" | "slideUp" | "slideSide" | "pulse" | "rollUp";
+// roll: it travels up the whole screen for as long as it shows, as a film's closing titles (bannerRoll; coach 24 Nov).
+export const BANNER_ANIMS: Record<BannerAnim, { name: string; keys?: [number, number][]; fadeIn: boolean; slide?: [number, number]; roll?: true }> = {
 	fade: { name: "Fade in", fadeIn: true },
 	pop: { name: "Pop", fadeIn: false, keys: [[0, 60], [140, 112], [260, 100]] },
 	bounce: { name: "Bounce", fadeIn: false, keys: [[0, 30], [180, 118], [300, 92], [420, 104], [520, 100]] },
 	slideUp: { name: "Slide up", fadeIn: true, slide: [0, 160] },
 	slideSide: { name: "Slide in from the side", fadeIn: true, slide: [-300, 0] },
 	pulse: { name: "Pulse", fadeIn: true },
+	rollUp: { name: "Roll up", fadeIn: false, roll: true }, // words only: an uploaded banner is not offered it
 };
 const SLIDE_MS = 320;
 const PULSE_MS = 450; // up to 108% and back, again and again
@@ -75,6 +77,7 @@ const scaleOn = (keys: [number, number][], ms: number) => {
 export function bannerMotion(b: Banner, t: number) {
 	if (t < b.start || t >= b.end) return { opacity: 0, scale: 1, x: 0, y: 0 };
 	const anim = BANNER_ANIMS[b.anim ?? "fade"];
+	if (anim.roll) return { opacity: 1, scale: 1, x: 0, y: 0 }; // it comes and goes past the screen's edges: no fades
 	const ms = (t - b.start) * 1000;
 	const on = fadesOn(b);
 	const fadeIn = anim.fadeIn && on.in ? (t - b.start) / BANNER.fade : 1;
@@ -86,6 +89,23 @@ export function bannerMotion(b: Banner, t: number) {
 		x: (anim.slide?.[0] ?? 0) * left,
 		y: (anim.slide?.[1] ?? 0) * left,
 	};
+}
+
+// How far a rolling banner is from where it would rest, px down, at final-video second t: from wholly below a screen
+// `height` tall (its top at the bottom edge) to wholly above it (its bottom at the top edge), at one speed over all the
+// time it shows. restTop, tall: its resting box's top and height. Same as the \move in banner_events (render.py).
+export function bannerRoll(b: Pick<Banner, "start" | "end">, t: number, height: number, restTop: number, tall: number) {
+	const p = Math.min(1, Math.max(0, (t - b.start) / (b.end - b.start)));
+	return height + (-tall - height) * p - restTop;
+}
+// A word banner's box height at `size` (its Size times bannerFit), px: rows, the gaps between them and the padding;
+// never shorter than its tallest row. Same as `tall` in banner_events.
+export function bannerTall(b: Pick<Banner, "text" | "sub" | "lineGap" | "padding">, size: number) {
+	const rows = bannerRows(b);
+	if (!rows.length) return 0;
+	const gap = Math.min(BANNER_LINE_GAP.max, Math.max(BANNER_LINE_GAP.min, b.lineGap ?? 0));
+	const inside = Math.max(rows.reduce((sum, row) => sum + row.size, 0) + gap * (rows.length - 1), Math.max(...rows.map((row) => row.size)));
+	return (inside + bannerPad(b)) * size;
 }
 
 export const BANNER_KINDS: Record<BannerKind, { name: string; text: string; sub: string }> = {
@@ -109,6 +129,8 @@ export const BANNER_LINE_GAP = { min: -60, max: 80 }; // -60: rows can touch (co
 // Same as BANNER_FILE in render.py.
 export const BANNER_FILE = { width: 0.5, x: 0.5, y: 0.3, maxBytes: { image: 10_000_000, video: 150_000_000 } };
 export const BANNER_FILE_NAME = /^(banner|media)-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4)$/; // clips: MP4 only for now (Yoshi, 12 Nov)
+// A file a banner can keep. Its picker offers no other: readBanners would drop the whole banner on save (review 26 Nov).
+export const canBeBanner = (file: string) => BANNER_FILE_NAME.test(file) || MY_REF.test(file);
 
 // Where the preview gets an uploaded banner: the file just picked on this page (no waiting for it to come back),
 // else through /api/library for the video this page edits (projectFileSrc). "" off that page.
@@ -208,7 +230,7 @@ export function readBanners(value: unknown): Banner[] | null {
 		const end = Number(raw.end);
 		if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
 		// Its own file next to the video, or one from My files by reference (MY_REF, coach 21 Nov).
-		const file = kind === "file" && typeof raw.file === "string" && (BANNER_FILE_NAME.test(raw.file) || MY_REF.test(raw.file)) ? raw.file : undefined;
+		const file = kind === "file" && typeof raw.file === "string" && canBeBanner(raw.file) ? raw.file : undefined;
 		if (kind === "file" && !file) continue;
 		const text = cleanBannerText(String(raw.text ?? ""), file ? 1 : BANNER.maxLines) || (file ? BANNER_KINDS.file.text : "");
 		if (!text) continue;
