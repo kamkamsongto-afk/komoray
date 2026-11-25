@@ -235,7 +235,29 @@ def frame_back(cases):
     return out
 
 
-SECTIONS = {f.__name__: f for f in (constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back)}
+def bounce(cases):
+    """The Bounce look at moments well away from any edge: how many times each word is drawn, and which is coloured."""
+    h = lambda t: sum(float(x) * m for x, m in zip(t.split(":"), (3600, 60, 1)))
+    out = []
+    for c in cases:
+        line = [{"start": w} for w in c["starts"]]
+        names = [f"w{k}" for k in range(len(line))]
+        events = r.bounce_events(line, c["start"], c["end"], names, [(0.0, 0.0)] * len(line), "", 0, "&H0000FF&")
+        rows = []
+        for row in events:
+            f = row.split(",", 9)
+            tags, word = f[9][1:].split("}", 1)
+            rows.append((h(f[1]), h(f[2]), word, "&H0000FF&" in tags))
+        seen = []
+        for frame in c["frames"]:
+            t = frame / r.FPS
+            live = [e for e in rows if e[0] <= t < e[1]]
+            seen.append({"drawn": [sum(1 for e in live if e[2] == n) for n in names], "lit": sorted(int(e[2][1:]) for e in live if e[3])})
+        out.append(seen)
+    return out
+
+
+SECTIONS = {f.__name__: f for f in (bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back)}
 
 if __name__ == "__main__":
     asked = json.loads(sys.stdin.buffer.read().decode("utf-8"))
