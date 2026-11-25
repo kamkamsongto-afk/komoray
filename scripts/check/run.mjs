@@ -34,7 +34,7 @@ const style = lib("src/lib/subtitle-style");
 const { FPS } = timeline;
 
 // The same made-up cases every run.
-let seed = 20261125;
+let seed = Number(process.env.SEED) || 20261125; // SEED=7 npm run check: other cases
 const random = () => ((seed = (seed * 48271) % 2147483647) - 1) / 2147483646;
 const between = (a, b) => a + random() * (b - a);
 const pick = (list) => list[Math.floor(random() * list.length)];
@@ -217,7 +217,8 @@ const web = {
 };
 
 // Both sides' text without what only changes how it is drawn: letter case (the Big look) and where Two lines breaks.
-const plain = (lines, look) => lines.map((l) => ({ ...l, text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() }));
+// A line shorter than a frame may never be seen (the final video writes times in hundredths): left out on both sides.
+const plain = (lines, look) => lines.filter((l) => l.to - l.from > 0.025).map((l) => ({ from: l.from, to: l.to, text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() }));
 
 const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3 };
 let failed = 0;

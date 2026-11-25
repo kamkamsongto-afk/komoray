@@ -1922,9 +1922,12 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue
         # Highlight: one event per word, that word in the brand colour until the next one starts.
+        # As the preview picks it: the last word that has started is the lit one, inside the line's own time. A cut through
+        # a word can put a later word earlier than the one before it or than the line itself; the line was then drawn twice
+        # at once, or over the line before or after it (npm run check, 25 Nov).
+        starts = [start] + [max(start, w["start"]) for w in line[1:]]
         for k in range(len(line)):
-            a = start if k == 0 else line[k]["start"]
-            b = line[k + 1]["start"] if k + 1 < len(line) else end
+            a, b = starts[k], min([end, *starts[k + 1 :]])
             if b <= a:
                 continue
             since = (a - start) / FPS * 1000  # ms since the line started
