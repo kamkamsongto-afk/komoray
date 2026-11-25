@@ -20,7 +20,8 @@ r.__file__ = str(source)
 exec(compile(source.read_text(encoding="utf-8"), str(source), "exec"), r.__dict__)
 
 FUNCS = {"min": min, "max": max, "sin": math.sin, "cos": math.cos, "pow": pow, "PI": math.pi, "abs": abs,
-         "clip": lambda v, a, b: min(b, max(a, v)), "lt": lambda a, b: 1 if a < b else 0}
+         "clip": lambda v, a, b: min(b, max(a, v)), "lt": lambda a, b: 1 if a < b else 0, "gte": lambda a, b: 1 if a >= b else 0,
+         "mod": math.fmod, "ceil": math.ceil}
 
 
 def ffmpeg_value(expr: str, **names) -> float:
@@ -45,6 +46,10 @@ def constants(_):
         "layoutFill": r.LAYOUT_FILL,
         "partHold": r.PART_HOLD,
         "partGlide": r.PART_GLIDE,
+        "pop": [list(k) for k in r.POP],
+        "bounce": [list(k) for k in r.BOUNCE],
+        "bounceGap": r.BOUNCE_WORD_GAP,
+        "logo": [r.LOGO_MOTION[k] for k in ("show", "zoom_from", "flash", "glow")],
     }
 
 
@@ -168,7 +173,69 @@ def behind(cases):
     return [[r.behind_motion(c["text"], t, c["width"], c["height"]) for t in c["times"]] for c in cases]
 
 
-SECTIONS = {f.__name__: f for f in (constants, segments, subtitles, zoom, background, layouts, frames, banners, behind)}
+def framing(cases):
+    """The face to frame and where the whole picture then goes."""
+    out = []
+    for c in cases:
+        focus = r.focus_for(c["faces"], c["start"], c["end"])
+        out.append({"focus": list(focus) if focus else None, "rect": list(r.frame_piece(c["aspect"], focus, c["zoom"], tuple(c["size"])))})
+    return out
+
+
+def logo(cases):
+    """How far in the logo is: render.py's own sum, and the expression FFmpeg is given for a part starting at `start`."""
+    out = []
+    for c in cases:
+        expr = r.logo_phases(c["style"], c["start"], "T")[0]
+        effect, speed, every = r.logo_motion(c["style"])
+        out.append({"sum": [r.logo_in(c["start"] + t, effect, speed, every) for t in c["times"]],
+                    "ffmpeg": [ffmpeg_value(expr, T=t) for t in c["times"]]})
+    return out
+
+
+def words(cases):
+    """How big a popping line and a bouncing word are, ms after they start."""
+    return [[r.scale_at(r.POP, ms), r.scale_at(r.BOUNCE, ms)] for ms in cases]
+
+
+def layout_file(cases):
+    """Where a Layout's picture lands in its part, read from the filters layout_filters writes: px from the part's corner."""
+    out = []
+    for c in cases:
+        size, l = tuple(c["size"]), c["layout"]
+        parts = []
+        r.layout_filters(parts, "[b]", size, [l], [1])
+        text = ";".join(parts)
+        ow, oh = r.layout_boxes(l, size)["other"][2:]
+        iw, ih = c["picture"]
+        grow = re.search(r"scale=w='ceil\(iw\*(.+?)/2\)\*2'", text).group(1)
+        factor = ffmpeg_value(grow, iw=iw, ih=ih)
+        sw, sh = math.ceil(iw * factor / 2) * 2, math.ceil(ih * factor / 2) * 2
+        found = re.search(r"crop=\d+:\d+:x='([^']+)':y='([^']+)'", text)
+        x = ffmpeg_value(found.group(1), iw=sw, ih=sh)
+        y = ffmpeg_value(found.group(2), iw=sw, ih=sh)
+        out.append([-x, -y, sw, sh])
+    return out
+
+
+def frame_back(cases):
+    """Frame Me's background with a size or place of its own: how much bigger, and its middle away from the screen's, px."""
+    out = []
+    for c in cases:
+        f = c["frame"]
+        parts = []
+        r.frame_filters(parts, "[b]", tuple(c["size"]), [f], [{"mask": 1, "border": None, "file": 2}], None)
+        text = ";".join(parts)
+        moved = re.search(r"overlay=x=\(main_w-overlay_w\)/2\+(-?[\d.]+):y=\(main_h-overlay_h\)/2\+(-?[\d.]+)", text)
+        if not moved:
+            out.append({"moved": False})
+            continue
+        grow = float(re.search(r"scale=iw\*([\d.]+):ih\*", text).group(1))
+        out.append({"moved": True, "grow": grow, "dx": float(moved.group(1)), "dy": float(moved.group(2))})
+    return out
+
+
+SECTIONS = {f.__name__: f for f in (constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back)}
 
 if __name__ == "__main__":
     asked = json.loads(sys.stdin.buffer.read().decode("utf-8"))

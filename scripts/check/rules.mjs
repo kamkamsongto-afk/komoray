@@ -1,0 +1,141 @@
+// Old bugs that must not come back (docs/bugs.md), and saved settings that must survive saving. Web code only.
+import { isDeepStrictEqual } from "node:util";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { lib, repo, ts } from "./lib.mjs";
+
+const frame = lib("src/lib/frame-me");
+const layout = lib("src/lib/layout");
+const banners = lib("src/lib/banners");
+const behind = lib("src/lib/behind");
+const zoom = lib("src/lib/zoom");
+const style = lib("src/lib/subtitle-style");
+const fades = lib("src/lib/fades");
+const silences = lib("src/lib/silences");
+const thaiWords = lib("src/lib/thai-words");
+const thaiNumbers = lib("src/lib/thai-numbers");
+const rows = lib("src/lib/lane-rows");
+
+let failed = 0;
+function check(name, run) {
+	let problem;
+	try {
+		problem = run();
+	} catch (err) {
+		problem = `stopped: ${err.message}`;
+	}
+	console.log(`${problem ? "FAIL" : "ok  "}  ${name}${problem ? `\n        ${problem}` : ""}`);
+	if (problem) failed++;
+}
+const same = (got, want) => (isDeepStrictEqual(got, want) ? null : `got ${JSON.stringify(got)}, should be ${JSON.stringify(want)}`);
+
+// ---- saved settings: every field of a type must come back from its reader ----
+// The field names written in `export type <name> = { ... }`.
+function fieldsOf(file, name) {
+	const source = ts.createSourceFile(file, readFileSync(join(repo, file), "utf8"), ts.ScriptTarget.ES2022, true);
+	let found = null;
+	const members = (node) => {
+		if (ts.isTypeLiteralNode(node)) return node.members.filter(ts.isPropertySignature).map((m) => m.name.getText(source));
+		if (ts.isIntersectionTypeNode(node)) return node.types.flatMap(members);
+		return [];
+	};
+	source.forEachChild((node) => {
+		if (ts.isTypeAliasDeclaration(node) && node.name.text === name) found = members(node.type);
+	});
+	if (!found) throw new Error(`type ${name} not found in ${file}`);
+	return found;
+}
+const FADES = { fadeIn: false, fadeOut: false };
+const CLIP = { volume: 0.4, muted: true, clipFrom: 2.5 };
+// fields: the type's own field names. full: one item with every one of them set to something that is not the default.
+// elsewhere: fields this reader is right to drop for this kind of item.
+function survives(name, file, type, full, read, elsewhere = []) {
+	check(`${name}: every saved field survives`, () => {
+		const missing = fieldsOf(file, type).filter((f) => !(f in full) && !elsewhere.includes(f));
+		if (missing.length) return `this check has no value for the new field(s) ${missing.join(", ")}: add them in scripts/check/rules.mjs`;
+		const out = read(full);
+		if (!out) return "the reader refused the item";
+		const lost = Object.keys(full).filter((key) => !isDeepStrictEqual(out[key], full[key]));
+		if (lost.length) return lost.map((k) => `${k}: saved ${JSON.stringify(full[k])}, back ${JSON.stringify(out[k])}`).join("; ");
+		return same(read(out), out);
+	});
+}
+
+survives("Frame Me", "src/lib/frame-me.ts", "FrameMe", {
+	id: "a", start: 1, end: 3, shape: "heart", x: 0.4, y: 0.3, size: 0.8, zoom: 0.9, meX: 0.4, meY: 0.6, border: 12, borderColor: "#FFE600", back: "file", backColor: "#FF2D95", dim: 0.4, blur: 20,
+	file: "media-abc.mp4", media: "video", ...CLIP, backMotion: "panLeft", backAmount: 0.3, backSpeed: 3, backSize: 0.6, backX: 0.2, backY: -0.1, ...(frame.FRAME.back?.rotate && { backRotate: 25 }), name: "Mine", ...FADES,
+}, (x) => frame.readFrames([x])?.[0]);
+
+survives("Layout", "src/lib/layout.ts", "VideoLayout", {
+	id: "a", start: 1, end: 4, kind: "side", meFirst: false, split: 0.4, meX: 0.3, meY: 0.6, meZoom: 1.4, color: "#34C759", enter: "flash", file: "media-abc.mp4", media: "video", ...CLIP,
+	fileZoom: 1.5, fileX: 0.3, fileY: 0.7, ...(layout.LAYOUT.fileRotate && { fileRotate: -40 }), fileMotion: "in", fileMotionZoom: 0.3, fileMotionSpeed: 3, name: "Mine",
+}, (x) => layout.readLayouts([x])?.[0]);
+
+survives("Banner (words)", "src/lib/banners.ts", "Banner", {
+	id: "a", kind: "price", text: "One\nTwo", sub: "small", start: 1, end: 4, place: "bottom", x: 0.3, y: 0.6, scale: 1.5, color: "#0A84FF", ink: "#FFFFFF", radius: 20, opacity: 0.8, anim: "pop",
+	font: "kanit", lineGap: 12, noBox: true, align: "left", name: "Mine", rotate: 15, padding: 10, templateId: "t-1", stroke: 4, strokeColor: "#FF3B30", ...FADES,
+}, (x) => banners.readBanners([x])?.[0], ["ownFont", "file", "media", "volume", "muted", "clipFrom"]);
+
+survives("Banner (a clip)", "src/lib/banners.ts", "Banner", {
+	id: "a", kind: "file", text: "Clip", sub: "", start: 1, end: 4, place: "middle", x: 0.3, y: 0.6, scale: 1.5, opacity: 0.8, anim: "slideUp", name: "Mine", rotate: 15, templateId: "t-1", file: "banner-abc.mp4", media: "video", ...CLIP, ...FADES,
+}, (x) => banners.readBanners([x])?.[0], ["color", "ink", "radius", "font", "ownFont", "lineGap", "noBox", "align", "padding", "stroke", "strokeColor"]);
+
+survives("Cutout picture or clip", "src/lib/behind.ts", "Insert", {
+	id: "a", kind: "video", file: "insert-abc.mp4", start: 1, end: 4, speakerScale: 0.6, speakerX: 0.7, hidden: true, name: "Mine", soft: 0.1, speakerLift: 0.1, picScale: 1.2, picX: 0.1, picY: -0.1, picRotate: 20,
+	seeThrough: false, picMotion: "tiltUp", picZoom: 0.3, picSpeed: 3, ...CLIP, ...FADES,
+}, (x) => behind.readCutout({ texts: [], inserts: [x] })?.inserts[0]);
+
+survives("Cutout text", "src/lib/behind.ts", "BehindText", {
+	id: "a", text: "WOW", start: 1, end: 4, font: "kanit", size: 200, color: "#FFE600", stroke: 6, strokeColor: "#FF3B30", fx: "pulse", speed: "fast", y: 0.4, lineGap: 10, dim: 0.3, blur: 8, ...FADES,
+}, (x) => behind.readCutout({ texts: [x], inserts: [] })?.texts[0]);
+
+survives("Zoom part", "src/lib/zoom.ts", "ZoomPart", { start: 1, end: 4, zoom: "out", amount: 1.2, whole: true }, (x) => zoom.readZoomParts([x], 100)?.[0]);
+
+check("Subtitle style: reading it twice changes nothing", () => {
+	const once = style.readStyle({ ...style.DEFAULT_STYLE, size: 120, look: "two", zoom: "smooth", splits: [3, 1] });
+	return same(style.readStyle(once), once);
+});
+
+// ---- old bugs ----
+const w = (text, start, end) => ({ text, start, end });
+const said = (...texts) => texts.map((text, k) => w(text, k * 0.3, k * 0.3 + 0.28));
+const texts = (words) => words.map((x) => x.text);
+
+check("An item saved without fade switches still fades in and out (20 Nov)", () => same(fades.fadesOn({}), { in: true, out: true }));
+
+check("A pause longer than 0.4 s is cut, with room left round the words", () =>
+	same(silences.findSilences({ duration: 3, words: [w("a", 0, 0.5), w("b", 0.8, 1.2), w("c", 2.2, 3)] }).map((c) => [c.start, c.end]), [[1.3, 2.1]]));
+
+check("Thai: a number said digit by digit is one word (22 Nov)", () => same(texts(thaiWords.mergeThaiWords(said("ราคา", "9", "9", "0", "บาท"))), ["ราคา", "990", "บาท"]));
+check("Thai: two whole numbers are not joined (22 Nov)", () => {
+	const out = texts(thaiWords.mergeThaiWords(said("เลข", "10", "20", "ครับ")));
+	return out.includes("1020") ? `joined into ${out.join(" ")}` : null;
+});
+check("English: a count is not joined into one number (22 Nov)", () => same(texts(thaiWords.mergeThaiWords(said("count", "1", "2", "3", "now"))), ["count", "1", "2", "3", "now"]));
+check("Thai numbers in words become digits (22 Nov)", () => same(texts(thaiNumbers.mergeThaiNumbers(said("ราคา", "สาม", "สิบ", "บาท"))), ["ราคา", "30", "บาท"]));
+check("Thai: ร้อย ละ (percent) is left as heard (22 Nov)", () => same(texts(thaiNumbers.mergeThaiNumbers(said("คิด", "เป็น", "ร้อย", "ละ"))), ["คิด", "เป็น", "ร้อย", "ละ"]));
+
+check("Timeline: a strip stretched into its neighbour stops at it (17 Nov)", () => {
+	const memo = new Map();
+	rows.packRows([{ id: "a", start: 0, end: 2 }, { id: "b", start: 3, end: 5 }], "banners", 0, memo);
+	const fitted = rows.fitInRow(memo, "a", { start: 0, end: 2 }, { end: 4 }, 10);
+	return fitted.end === 3 && (fitted.start ?? 0) === 0 ? null : `became ${JSON.stringify(fitted)}`; // only what changes comes back
+});
+
+// Rules that came with a fix: checked once that fix's row is in docs/bugs.md, so they hold from then on.
+const bugs = readFileSync(join(repo, "docs/bugs.md"), "utf8");
+if (bugs.includes("findSilences` ตัดช่วงเงียบระหว่างตัวเลข")) {
+	check("Silences: nothing cut between two numbers said close together (25 Nov)", () =>
+		same(silences.findSilences({ duration: 2, words: [w("59", 0, 0.3), w("0", 0.9, 1.2), w("บาท", 1.25, 2)] }), []));
+}
+if (bugs.includes("`uploadName`")) {
+	check("Uploads: no name can land on a file Komoray writes (25 Nov)", () => {
+		const { uploadName } = lib("src/lib/upload-name");
+		const written = ["final.mp4", "part.mp4", "proxy.mp4", "matte.mp4", "proxy-cutout.mp4", "access.json", "edit.json", "owner.json", "removed.json", "banner-a.mp4", "media-a.mp4", "insert-a.mp4"];
+		const bad = written.map((n) => [n, uploadName(n, "video/mp4")]).filter(([, stored]) => written.includes(stored) || !/^src-.*\.(mp4|mov)$/i.test(stored));
+		return bad.length ? JSON.stringify(bad) : null;
+	});
+}
+
+console.log(failed ? `\n${failed} rule check(s) failed.` : "\nAll rule checks pass.");
+process.exit(failed ? 1 : 0);
