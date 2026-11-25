@@ -217,8 +217,9 @@ const web = {
 };
 
 // Both sides' text without what only changes how it is drawn: letter case (the Big look) and where Two lines breaks.
-// A line shorter than a frame may never be seen (the final video writes times in hundredths): left out on both sides.
-const plain = (lines, look) => lines.filter((l) => l.to - l.from > 0.025).map((l) => ({ from: l.from, to: l.to, text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() }));
+// Times as the final video writes them (hundredths of a second), then lines too short to exist are left out of both.
+const cs = (t) => Math.round(t * 100) / 100;
+const plain = (lines, look) => lines.map((l) => ({ from: cs(l.from), to: cs(l.to), text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() })).filter((l) => l.to - l.from > 0.005);
 
 const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3 };
 let failed = 0;
