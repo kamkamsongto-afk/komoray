@@ -15,7 +15,7 @@ export type HomeClip = "before" | "after" | "words" | "frame" | "cutout" | "layo
 const still = (name: HomeClip) => `/landing/${name}-poster.webp`;
 // A clip that was replaced gets a new number here as well as its new file name (api/home-video): browsers keep what
 // an address gave them for a week.
-const CLIP_REV: Partial<Record<HomeClip, number>> = { after: 2 };
+const CLIP_REV: Partial<Record<HomeClip, number>> = { after: 3 };
 const clipSrc = (name: HomeClip) => `/api/home-video?name=${name}${CLIP_REV[name] ? `&v=${CLIP_REV[name]}` : ""}`;
 
 // Plays while on screen. play: what to do once it is on screen (the After clip starts with sound).
