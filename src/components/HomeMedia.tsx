@@ -10,9 +10,13 @@ import { supabaseBrowser } from "@/lib/supabase/browser";
 // The home page's own clips, all filmed by the coach (20 Nov: no AI-made pictures). They come through /api/home-video
 // because iPhones and iPads need HTTP Range, which static files here don't answer. Each loads only when it comes
 // near the screen and stops when it leaves, so the page stays light; reduced motion keeps the still picture.
-export type HomeClip = "before" | "after" | "words" | "frame" | "cutout" | "layout" | "zoom" | "banner";
+export type HomeClip = "before" | "after" | "words" | "frame" | "cutout" | "layout" | "zoo" | "zoom" | "banner";
 
 const still = (name: HomeClip) => `/landing/${name}-poster.webp`;
+// A clip that was replaced gets a new number here as well as its new file name (api/home-video): browsers keep what
+// an address gave them for a week.
+const CLIP_REV: Partial<Record<HomeClip, number>> = { after: 4 };
+const clipSrc = (name: HomeClip) => `/api/home-video?name=${name}${CLIP_REV[name] ? `&v=${CLIP_REV[name]}` : ""}`;
 
 // Plays while on screen. play: what to do once it is on screen (the After clip starts with sound).
 function useOnScreen(ref: React.RefObject<HTMLVideoElement | null>, name: HomeClip, play: (v: HTMLVideoElement) => void) {
@@ -22,7 +26,7 @@ function useOnScreen(ref: React.RefObject<HTMLVideoElement | null>, name: HomeCl
 		const seen = new IntersectionObserver(
 			([entry]) => {
 				if (entry.isIntersecting) {
-					if (!v.src) v.src = `/api/home-video?name=${name}`;
+					if (!v.src) v.src = clipSrc(name);
 					play(v);
 				} else v.pause();
 			},
@@ -157,7 +161,9 @@ export function CutoutVideo({ className }: { className?: string }) {
 
 	return (
 		<>
-			<video ref={ref} muted loop playsInline preload="none" style={{ display: "none" }} />
+			{/* Unseen, not display: none: a hidden video never counts as on screen, so it was never loaded and the card
+			    stayed a still picture (coach 25 Nov). */}
+			<video ref={ref} muted loop playsInline preload="none" aria-hidden style={{ position: "absolute", left: 0, top: 0, width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
 			<canvas ref={canvas} className={className} aria-hidden />
 			{!drawn && <Image className={className} src={still("cutout")} alt="" width={480} height={854} unoptimized />}
 		</>

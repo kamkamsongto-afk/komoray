@@ -324,7 +324,9 @@ export function LayoutCard() {
 						<LoopVideo name="layout" />
 					</div>
 					<div className="k-layother">
-						<Image src="/landing/layout-other-v2.webp" alt="" width={720} height={1004} unoptimized />
+						{/* Each split has its own (coach 25 Nov), landing.css shows the one: the zoo clip top / bottom, the picture side by side. */}
+						<LoopVideo name="zoo" />
+						<Image src="/landing/layout-twins.webp" alt="" width={720} height={960} unoptimized />
 					</div>
 				</div>
 			</div>

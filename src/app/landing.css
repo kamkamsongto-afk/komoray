@@ -160,8 +160,14 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 @keyframes k-slam { 0% { transform: translateY(-160%) scale(1.5); opacity: 0; } 12% { transform: translateY(0) scale(1); opacity: 1; } 100% { transform: translateY(0) scale(1); opacity: 1; } }
 @keyframes k-heart { 0%, 100% { transform: scale(1); } 18% { transform: scale(1.14); } 36% { transform: scale(1); } 54% { transform: scale(1.09); } }
 .k-layme, .k-layother { position: absolute; overflow: hidden; transition: all .5s cubic-bezier(.65,0,.2,1); }
-.k-layme img, .k-layother img, .k-layme video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.k-layout .k-layother img { object-position: 50% 0; }
+.k-layme img, .k-layother img, .k-layme video, .k-layother video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* The other part (coach 25 Nov): top / bottom plays Zoo with Family, side by side holds Dad and twin and zooms out
+   slowly for as long as the split shows (4.8 s of each 6.4 s turn: useTick in LayoutCard). */
+.k-layout-stack .k-layother video { object-position: 72% 50%; }
+.k-layout-stack .k-layother img, .k-layout-side .k-layother video { display: none; }
+.k-layout-side .k-layother img { object-position: 65% 50%; transform-origin: 50% 40%; }
+.k-layout-side.k-layout-on .k-layother img { animation: k-zoomout 4.8s linear both; }
+@keyframes k-zoomout { from { transform: scale(1.35); } to { transform: scale(1); } }
 .k-layout .k-layme video { object-position: 50% 28%; }
 .k-layme { inset: 0; }
 .k-layout-stack .k-layother { left: 0; right: 0; top: 50%; bottom: 0; transform: translateY(100%); }
