@@ -389,7 +389,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 						</TabGroup>
 
 						<ToolGroup tone={1} title="Transition">
-							<div role="radiogroup" aria-label="Transition" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
+							<div role="radiogroup" aria-label="Transition" className="grid grid-cols-4 gap-1 rounded-lg bg-foreground/5 p-0.5">
 								{LAYOUT_ENTERS.map((e) => (
 									<button
 										key={e.id}

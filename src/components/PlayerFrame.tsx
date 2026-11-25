@@ -8,7 +8,7 @@ import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, in
 import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameBackMoved, frameBackPlace, frameBackWindow, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
-import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileWindow, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
+import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAlpha, layoutAt, layoutFileWindow, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import { logoPictureName, logoPictureUrl } from "@/lib/logo";
 import { myFileUrl } from "@/lib/my-files";
@@ -778,6 +778,7 @@ mode === "move"
 	const split = layoutAt(layouts, outTime);
 	const pose = split ? layoutPose(split, layoutProgress(split, outTime, layouts), W, H) : null;
 	const flash = layoutFlash(layouts, outTime);
+	const laid = split ? layoutAlpha(split, outTime, layouts) : 1; // a Fade layout coming or going
 	const [dropping, setDropping] = useState(false); // a file is being dragged over the video
 	const canDrop = (e: ReactDragEvent) => Boolean(onLayoutDrop) && (e.dataTransfer.types.includes("Files") || e.dataTransfer.types.includes(LAYOUT_DRAG));
 	const dropProps = onLayoutDrop
@@ -848,6 +849,10 @@ mode === "move"
 					{/* Always the same elements, with or without a frame: a new canvas would lose the picture the engine draws on. */}
 					<div className="absolute inset-0" style={framed ? frameMask(framed) : undefined}>
 						<div className="absolute inset-0" style={framed ? framePlace(framed) : undefined}>
+{/* A Fade layout coming or going: the plain picture, copied, under the split screen, which fades over it. */}
+{laid < 1 && <BlurBack source={pictureRef} blur={0} dim={0} ratio={W / H} side={720} />}
+{/* Always here, faded or not: a new canvas would lose the picture the engine draws on. */}
+<div className="absolute inset-0" style={laid < 1 ? { opacity: laid } : undefined}>
 {/* Layout with You at a size of its own (meZoom): what you don't cover shows a blurred, dimmed copy of the picture, as layout_filters. */}
 {pose?.free && <BlurBack source={pictureRef} blur={LAYOUT.fill.blur * scale} dim={LAYOUT.fill.dim} ratio={W / H} />}
 {/* Layout moves the speaker (and the Cutout layers with them) into their part: always this element, moved or not. */}
@@ -862,6 +867,7 @@ mode === "move"
 								{cutout && cutoutLayers(cutout)}
 							</div>
 							{split && pose && layoutOther(split, pose.other)}
+							</div>
 							{/* Flash: white over the picture at the edges of a Flash layout, as layout_flashes (render.py). */}
 							{flash > 0 && <div className="pointer-events-none absolute inset-0 bg-white" style={{ opacity: flash }} />}
 							{split && pose && onLayoutChange && !playing && <LayoutHandle l={split} box={pose.me} W={W} H={H} scale={scale} onChange={onLayoutChange} />}
