@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, ImagePlus, Moon, Plus, Trash2, Type, User } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
+import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, canBeInsert, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
 import type { Segment } from "@/lib/timeline";
@@ -87,6 +87,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [notice, setNotice] = useState("");
 	// The choices to add one: asked for again each time they are opened (a file may have just gone in).
 	const [library, reloadLibrary] = useLibrary();
+	const choices = library && library.filter((i) => canBeInsert(i.file));
 	const toggleAdd = () => {
 		if (!adding) reloadLibrary();
 		setAdding(!adding);
@@ -206,6 +207,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		setUploading(null);
 		onUploading?.(false, !("error" in done));
 		if ("error" in done) return setNotice(done.error);
+		reloadLibrary(); // so Change lists it too (review 26 Nov)
 		const start = startAt();
 		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
 		const insert: Insert = { ...newClipSound(done.kind), id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
@@ -460,7 +462,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					</button>
 					{adding && (
 						<FilePicker
-							items={library}
+							items={choices}
 							disabled={layers.inserts.length >= BEHIND.maxItems}
 							onPick={(item) => {
 								setAdding(false);
@@ -652,7 +654,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								{changingFile === i.id && (
 									<FilePicker
 										floating
-										items={library}
+										items={choices}
 										current={i.file}
 										onPick={(item) => {
 											changeFile(layers.inserts, setInserts, i.id, item);

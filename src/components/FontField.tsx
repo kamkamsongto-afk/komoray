@@ -1,7 +1,7 @@
 "use client";
 
 import { Upload } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OwnFont } from "@/lib/font-info";
 import type { FontId } from "@/lib/subtitle-style";
 import type { useMyFonts } from "@/lib/use-my-fonts";
@@ -26,10 +26,19 @@ export function FontField({
 	builtins?: FontId[];
 }) {
 	const [mine, setMine] = useState(false); // this row's upload is the one being answered
+	// An upload takes a while, so the font goes through the newest onUploaded: the one from when the file was picked would
+	// write the items back as they were then (review 26 Nov). With the row gone meanwhile, the font is only in My files.
+	const use = useRef<((font: OwnFont) => void) | null>(onUploaded);
+	useEffect(() => {
+		use.current = onUploaded;
+		return () => {
+			use.current = null;
+		};
+	});
 	async function upload(file: File, then?: "use" | "keep") {
 		setMine(true);
 		const font = await myFonts.upload(file, then);
-		if (font) onUploaded(font);
+		if (font) use.current?.(font);
 	}
 	return (
 		<>

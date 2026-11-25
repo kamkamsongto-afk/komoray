@@ -2,7 +2,7 @@
 
 import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, RefreshCw, Star, Trash2, Type, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
+import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, canBeBanner, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import { fontChoice, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { FontField } from "./FontField";
 import { EDGE_COLORS, type Format } from "@/lib/subtitle-style";
@@ -200,7 +200,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	const filePicker = (target: string | "new", current?: string) => (
 		<FilePicker
 			floating
-			items={library}
+			items={library && library.filter((i) => canBeBanner(i.file))}
 			current={current}
 			disabled={target === "new" && banners.length >= BANNER.maxBanners}
 			onPick={(item) => {

@@ -248,6 +248,8 @@ export const cleanBehindText = (text: string) =>
 		.trim();
 const id = (v: unknown) => String(v ?? "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 40) || crypto.randomUUID();
 const INSERT_FILE = /^(insert|media)-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4|mov)$/;
+// A file Pic & Clip can keep. Its picker offers no other: readCutout would drop the whole item on save (review 26 Nov).
+export const canBeInsert = (file: string) => INSERT_FILE.test(file) || MY_REF.test(file);
 
 export function readCutout(value: unknown): CutoutLayers | null {
 	if (!value || typeof value !== "object") return null;
@@ -281,7 +283,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 	for (const i of (Array.isArray(raw.inserts) ? raw.inserts : []).slice(0, BEHIND.maxItems) as Record<string, unknown>[]) {
 		const start = Number(i?.start);
 		const end = Number(i?.end);
-		if (typeof i?.file !== "string" || !(INSERT_FILE.test(i.file) || MY_REF.test(i.file)) || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
+		if (typeof i?.file !== "string" || !canBeInsert(i.file) || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
 		inserts.push({
 			id: id(i.id),
 			kind: /\.(mp4|mov)$/.test(i.file) ? "video" : "image",

@@ -129,6 +129,8 @@ export const BANNER_LINE_GAP = { min: -60, max: 80 }; // -60: rows can touch (co
 // Same as BANNER_FILE in render.py.
 export const BANNER_FILE = { width: 0.5, x: 0.5, y: 0.3, maxBytes: { image: 10_000_000, video: 150_000_000 } };
 export const BANNER_FILE_NAME = /^(banner|media)-[a-zA-Z0-9-]{1,40}\.(jpg|png|webp|gif|mp4)$/; // clips: MP4 only for now (Yoshi, 12 Nov)
+// A file a banner can keep. Its picker offers no other: readBanners would drop the whole banner on save (review 26 Nov).
+export const canBeBanner = (file: string) => BANNER_FILE_NAME.test(file) || MY_REF.test(file);
 
 // Where the preview gets an uploaded banner: the file just picked on this page (no waiting for it to come back),
 // else through /api/library for the video this page edits (projectFileSrc). "" off that page.
@@ -228,7 +230,7 @@ export function readBanners(value: unknown): Banner[] | null {
 		const end = Number(raw.end);
 		if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) continue;
 		// Its own file next to the video, or one from My files by reference (MY_REF, coach 21 Nov).
-		const file = kind === "file" && typeof raw.file === "string" && (BANNER_FILE_NAME.test(raw.file) || MY_REF.test(raw.file)) ? raw.file : undefined;
+		const file = kind === "file" && typeof raw.file === "string" && canBeBanner(raw.file) ? raw.file : undefined;
 		if (kind === "file" && !file) continue;
 		const text = cleanBannerText(String(raw.text ?? ""), file ? 1 : BANNER.maxLines) || (file ? BANNER_KINDS.file.text : "");
 		if (!text) continue;
