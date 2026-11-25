@@ -7,7 +7,7 @@ import { BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bann
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, speakerTransform } from "@/lib/behind";
 import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
-import { type FrameMe, FRAME, frameAt, frameBackWindow, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
+import { type FrameMe, FRAME, frameAt, frameBackMoved, frameBackPlace, frameBackWindow, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
 import { LAYOUT, LAYOUT_DRAG, type LayoutDrop, layoutAt, layoutFileWindow, layoutFilePlace, layoutFlash, layoutPose, layoutProgress, type VideoLayout } from "@/lib/layout";
 import { projectFileSrc } from "@/lib/media-library";
 import { logoPictureName, logoPictureUrl } from "@/lib/logo";
@@ -751,17 +751,21 @@ mode === "move"
 	};
 	function frameBack(f: FrameMe) {
 		const src = f.back === "file" && f.file ? projectFileSrc(f.file) : "";
-		const fill: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+		// Its own size and place (frameBackPlace, once its shape is known), with backColor around; else it fills the screen.
+		const moved = Boolean(src) && frameBackMoved(f);
+		const ratio = f.file ? ratios[f.file] : undefined;
+		const seen = (r: number) => f.file && setRatios((all) => (all[f.file as string] === r ? all : { ...all, [f.file as string]: r }));
+		const fill: CSSProperties = moved && ratio ? { position: "absolute", maxWidth: "none", objectFit: "fill", ...frameBackPlace(f, ratio, W / H) } : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 		return (
-			<div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ background: f.back === "color" ? f.backColor : "#000" }}>
+			<div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ background: f.back === "color" || moved ? f.backColor : "#000" }}>
 				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} ratio={W / H} />}
 				{src && (
 <div className="absolute inset-0" style={bgStyle(frameBackWindow(f, outTime))}>
 {f.media === "video" ? (
-<InsertClip src={src} at={outTime - f.start} from={f.clipFrom} playing={playing} style={fill} onRatio={() => {}} volume={soundOf(f)} length={f.end - f.start} />
+<InsertClip src={src} at={outTime - f.start} from={f.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(f)} length={f.end - f.start} />
 ) : (
 // eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-<img src={src} alt="" style={fill} />
+<img src={src} alt="" style={fill} onLoad={(e) => e.currentTarget.naturalHeight && seen(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />
 )}
 </div>
 )}

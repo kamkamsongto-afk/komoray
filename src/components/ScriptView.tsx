@@ -1561,6 +1561,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							focus={focusFrame}
 							onReveal={reveal}
 							ruler={ruler}
+							format={subtitle.format}
 						/>
 					)}
 					{panel === "layout" && (
