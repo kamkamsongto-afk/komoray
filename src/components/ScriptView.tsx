@@ -744,7 +744,9 @@ export function ScriptView({
 		const own = (spans: { start: number; end: number }[]) => spans.some((n) => n.start <= pick.start + 0.001 && n.end >= pick.end - 0.001);
 		const now: PartZoom | "off" | null = own(noZoom) ? "off" : (PART_ZOOMS.find((z) => own(zoomParts.filter((n) => n.zoom === z))) ?? null);
 		// Its own Zoom amount (coach 20 Nov), else the whole video's; kept when its kind changes.
-		const amount = zoomParts.find((n) => n.start <= pick.start + 0.001 && n.end >= pick.end - 0.001)?.amount;
+		const here = zoomParts.find((n) => n.start <= pick.start + 0.001 && n.end >= pick.end - 0.001);
+		const amount = here?.amount;
+		const whole = here?.whole; // Entire part, kept like the amount
 		const shown = amount ?? subtitle.zoomAmount;
 		return (
 			<div className="flex flex-col gap-1.5 rounded-lg border border-purple-500/40 p-2 text-xs">
@@ -758,7 +760,7 @@ export function ScriptView({
 							key={z}
 							role="radio"
 							aria-checked={now === z}
-							onClick={() => zoomRange(pick.start, pick.end, z, z === "off" ? undefined : amount)}
+							onClick={() => zoomRange(pick.start, pick.end, z, z === "off" ? undefined : amount, whole)}
 							className={`rounded-md border px-2 py-0.5 ${now === z ? "border-purple-600 bg-purple-600 text-white" : "border-foreground/20 hover:bg-purple-500/15"}`}
 						>
 							{z === "off" ? "No zoom" : ZOOM_NAMES[z]}
@@ -774,10 +776,16 @@ export function ScriptView({
 							max={PART_AMOUNT.max}
 							step={0.01}
 							value={shown}
-							onChange={(e) => zoomRange(pick.start, pick.end, now, Number(e.target.value))}
+							onChange={(e) => zoomRange(pick.start, pick.end, now, Number(e.target.value), whole)}
 							className="flex-1"
 						/>
 						<span className="w-8 text-right tabular-nums">{Math.round((shown - 1) * 100)}%</span>
+					</label>
+				)}
+				{(now === "in" || now === "out") && (
+					<label className="flex items-center gap-2 text-foreground/70" title="Ticked: moves evenly from the start of this part to its end. Not ticked: gets there quickly, then holds.">
+						<input type="checkbox" checked={Boolean(whole)} onChange={(e) => zoomRange(pick.start, pick.end, now, amount, e.target.checked)} className="accent-purple-600" />
+						Entire part
 					</label>
 				)}
 			</div>
@@ -786,12 +794,12 @@ export function ScriptView({
 
 	// Turn Auto zoom on or off for a stretch of the source.
 	// Give a stretch of the source its own zoom: a kind, "off" (no zoom), or null (back to the whole video's zoom).
-	// amount: its own Zoom amount (the Zoom box's This part), left out: the whole video's.
-	const zoomRange = (a: number, b: number, zoom: PartZoom | "off" | null, amount?: number) => {
+	// amount: its own Zoom amount (the Zoom box's This part), left out: the whole video's. whole: Entire part.
+	const zoomRange = (a: number, b: number, zoom: PartZoom | "off" | null, amount?: number, whole?: boolean) => {
 		const span = { start: a, end: b };
 		onZoomChange({
 			noZoom: zoom === "off" ? mergeSpans([...noZoom, span]) : subtractSpans(noZoom, [span]),
-			zoomParts: setZoomPart(zoomParts, span, zoom === "off" ? null : zoom, amount),
+			zoomParts: setZoomPart(zoomParts, span, zoom === "off" ? null : zoom, amount, whole),
 		});
 	};
 
@@ -1561,6 +1569,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							focus={focusFrame}
 							onReveal={reveal}
 							ruler={ruler}
+							format={subtitle.format}
 						/>
 					)}
 					{panel === "layout" && (

@@ -1094,10 +1094,25 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             # Fills the screen (cover), as the preview's object-fit: cover. A clip or GIF that ends early stays on its last frame.
             moving = f.get("media") == "video" or str(f.get("file", "")).endswith(".gif")
             hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
-            parts.append(
-                f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
-                f"{bg_motion_filter(f.get('backMotion'), f.get('backAmount') if f.get('backAmount') is not None else INSERT_ZOOM, f.get('backSpeed') if f.get('backSpeed') is not None else 1.0, d, size)}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
-            )
+            motion = bg_motion_filter(f.get("backMotion"), f.get("backAmount") if f.get("backAmount") is not None else INSERT_ZOOM, f.get("backSpeed") if f.get("backSpeed") is not None else 1.0, d, size)
+            done = f"{motion}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
+            grow = float(f["backSize"]) if f.get("backSize") is not None else 1.0
+            dx, dy = float(f.get("backX") or 0) * W, float(f.get("backY") or 0) * H
+            read = f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},"
+            if grow == 1 and dx == 0 and dy == 0:
+                parts.append(f"{read}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{done}")
+            else:
+                # A size or place of its own: the whole picture on backColor, so shrinking shows the edges cover cuts off
+                # (coach 25 Nov). Same as frameBackPlace in frame-me.ts. Only what can land on the screen is kept, around
+                # the picture's middle, before it is resized (as the Cutout pictures, for memory).
+                reach_w, reach_h = (math.ceil((side + 2 * abs(off)) / grow) + 2 for side, off in ((W, dx), (H, dy)))
+                colour = str(f.get("backColor") or "#000000").lstrip("#")
+                parts.append(
+                    f"{read}setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,format=rgba,"
+                    f"crop=w='min(iw,{reach_w})':h='min(ih,{reach_h})':exact=1,scale=iw*{grow}:ih*{grow}[fbp{j}]"
+                )
+                parts.append(f"color=c=0x{colour}:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[fbc{j}]")
+                parts.append(f"[fbc{j}][fbp{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1:format=rgb,{done}")
             parts.append(f"[fmb{j}]drawbox=c=black:t=fill[fbk{j}]")
             parts.append(f"[fbk{j}][fbf{j}]overlay=eof_action=repeat[fbg{j}]")
         else:
@@ -2040,8 +2055,8 @@ def no_zoom_frames(segments: list[tuple[int, int, int]], spans: list[dict] | Non
 
 
 def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple]:
-    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind, at, span, amount).
-    amount: the part's own Zoom amount (coach 20 Nov), None = the whole video's.
+    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind, at, span, amount, whole).
+    amount: the part's own Zoom amount (coach 20 Nov), None = the whole video's. whole: Entire part (coach 25 Nov).
     A part across a cut is one run, so its zoom carries on over the cut. at, span: where its own push in (or pull back)
     starts and how long it was before PART_HOLD moved its edge to a cut. Same as zoomPartFrames in src/lib/zoom.ts."""
     runs = []
@@ -2059,10 +2074,10 @@ def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | N
             else:
                 if run:
                     runs.append(tuple(run))
-                run = [lo, hi, n["zoom"], part_amount(n)]
+                run = [lo, hi, n["zoom"], part_amount(n), n.get("whole") is True]
         if run:
             runs.append(tuple(run))
-    runs = [[lo, hi, kind, lo, hi - lo, own] for lo, hi, kind, own in sorted(runs, key=lambda r: r[0])]
+    runs = [[lo, hi, kind, lo, hi - lo, own, whole] for lo, hi, kind, own, whole in sorted(runs, key=lambda r: r[0])]
     cuts = [start for start, _, _ in segments[1:]]
     hold = PART_HOLD * FPS
 
@@ -2091,13 +2106,15 @@ def part_zoom_expr(start: int, run: tuple, amount: float = ZOOM) -> str:
     """A zoom part's zoom as an ffmpeg expression of the frame number (`in` counts from 1) of a shot
     starting at output frame `start`. Same as partZoom in src/lib/zoom.ts."""
     lo, hi, kind, at, span = run[:5]
+    whole = len(run) > 6 and run[6]
     frame = f"(in-1+{start})"
     length = hi - lo
     if kind == "smooth":
         return f"(1+{amount - 1:.4f}*sin(PI*({frame}-{lo})/{length}))"
     # From where the part starts (at), over its own length at most; held before it (out) or after it (in), see PART_HOLD.
-    x = f"min(1,max(0,({frame}-{at})/{min(span, PART_GLIDE * FPS)}))"
-    k = f"({x}*{x}*(3-2*{x}))"
+    # Entire part (whole): over all its length, at one even speed; else eased over PART_GLIDE.
+    x = f"min(1,max(0,({frame}-{at})/{span if whole else min(span, PART_GLIDE * FPS)}))"
+    k = x if whole else f"({x}*{x}*(3-2*{x}))"
     return f"(1+{amount - 1:.4f}*{k if kind == 'in' else f'(1-{k})'})"
 
 
