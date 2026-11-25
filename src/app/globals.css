@@ -7,10 +7,11 @@
 	--inverse-foreground: #ffffff;
 	--inverse-scheme: dark;
 	color-scheme: light;
-	/* Words that mean ok / careful / a link, readable on both themes. Used as text-(--ok): Tailwind's dark: follows the computer, not the Theme switch. */
+	/* Words that mean ok / careful / a link / a warning, readable on both themes. Used as text-(--ok): Tailwind's dark: follows the computer, not the Theme switch. */
 	--ok: #15803d;
 	--warn: #b45309;
 	--link: #2563eb;
+	--bad: #dc2626;
 }
 
 @theme inline {
@@ -32,6 +33,7 @@
 		--ok: #4ade80;
 		--warn: #fbbf24;
 		--link: #60a5fa;
+		--bad: #f87171;
 	}
 }
 
@@ -39,6 +41,7 @@
 	--ok: #4ade80;
 	--warn: #fbbf24;
 	--link: #60a5fa;
+	--bad: #f87171;
 	--background: #0a0a0a;
 	--foreground: #ededed;
 	--inverse-background: #f7f7f7; /* warm white, coach 6 Nov */
