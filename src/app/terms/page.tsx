@@ -14,7 +14,7 @@ export default function TermsPage() {
 	return (
 		<LegalPage title="Terms of Service" updated="November 18, 2026">
 			<p>
-				By using Komoray, you agree to these terms. They are short on purpose. Komoray is run by {OPERATOR}
+				By using Komoray, you agree to these terms. They are short on purpose. Komoray is run by {OPERATOR}{" "}
 				(&ldquo;we&rdquo;).
 			</p>
 
