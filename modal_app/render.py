@@ -1767,10 +1767,12 @@ def bounce_events(line: list[dict], start: float, end: float, words: list[str], 
     seizure. The word in mid-jump is drawn on top. Same as motionScale and PlayerFrame.tsx."""
     events = []
     for k, text in enumerate(words):
-        said = max(start, line[k]["start"])
+        # All inside the line's own time, and coloured while it is the last word that has started, as the preview: a cut
+        # through a word can put the words' times out of order, and a word was then drawn after its line had gone.
+        said = min(max(start, line[k]["start"]), end)
         jump_end = said + BOUNCE_END / 1000 * FPS
-        colour_end = line[k + 1]["start"] if k + 1 < len(line) else end
-        cuts = sorted({start, said, min(jump_end, end), end} | ({min(colour_end, end)} if highlight else set()))
+        colour_end = min([end, *(max(start, w["start"]) for w in line[k + 1 :])])
+        cuts = sorted({start, said, min(jump_end, end), end} | ({colour_end} if highlight else set()))
         x, y = places[k]
         for a, b in zip(cuts, cuts[1:]):
             since = (a - said) / FPS * 1000
