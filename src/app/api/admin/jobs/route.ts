@@ -1,6 +1,7 @@
 import { CUTOUT_TIERS, savedFiles } from "@/lib/cutout";
 import { getJson, listObjects, signedUrl, type ObjectInfo } from "@/lib/r2";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
+import { shownName } from "@/lib/upload-name";
 
 // Everything the admin page shows: every video folder with how far it got and why it broke,
 // plus the errors browsers reported. Only for the admin's Google account.
@@ -56,7 +57,7 @@ export async function GET() {
 			const final = files.get("final.mp4");
 			return {
 				id,
-				filename: video!.key.split("/")[2],
+				filename: shownName(video!.key),
 				size: video!.size,
 				uploadedAt: video!.lastModified,
 				videoUrl: await signedUrl(video!.key, "GET", LINK_SECONDS),

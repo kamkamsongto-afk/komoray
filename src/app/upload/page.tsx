@@ -17,6 +17,7 @@ import { putWithProgress } from "@/lib/put-file";
 import { reportError } from "@/lib/report";
 import { ding } from "@/lib/ding";
 import { DEFAULT_OPTIONS, type UploadOptions as Options } from "@/lib/upload-options";
+import { shownName } from "@/lib/upload-name";
 
 type Status = "idle" | "uploading" | "done" | "error";
 type Access = AccessStatus & { email: string };
@@ -182,7 +183,7 @@ export default function UploadPage() {
 			setKey(saved);
 			setStatus("done");
 			setProgress(100);
-			setMessage(saved.split("/").pop() ?? saved);
+			setMessage(shownName(saved));
 			if (data.status === "failed") setAnalysisError(data.error ?? "Analysis failed");
 			if (data.status === "processing") void findSilences(saved, false);
 		})();

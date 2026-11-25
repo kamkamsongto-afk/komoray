@@ -3,6 +3,7 @@ import { accessFor } from "@/lib/access";
 import { LOCAL_MATTE, LOCAL_MATTE_MAX_BYTES, type Window } from "@/lib/cutout";
 import { getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
+import { CUTOUT_WRITES } from "@/lib/upload-name";
 
 // Fast and Balanced: the customer's computer has uploaded its matte (lib/cutout-local.ts). Modal turns it
 // into the same files Best makes (finish_local in modal_app/cutout.py). Costs a moment of plain server time.
@@ -18,6 +19,7 @@ export async function POST(request: Request) {
 	const access = await accessFor(user?.email);
 	if (!access.allowed || !access.features.cutout.on) return Response.json({ error: "Cutout isn't turned on for your account yet." }, { status: 403 });
 
+	if (CUTOUT_WRITES.test(key.split("/")[2])) return Response.json({ error: "This video's file has a name Komoray uses for what it makes. Please rename the file and upload it again." }, { status: 409 });
 	const jobKey = siblingKey(key, "cutout-job.json");
 	const job = await getJson<Job>(jobKey);
 	if (!job?.local) return Response.json({ error: "Nothing is waiting to be finished." }, { status: 409 });
