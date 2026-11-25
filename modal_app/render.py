@@ -2040,8 +2040,8 @@ def no_zoom_frames(segments: list[tuple[int, int, int]], spans: list[dict] | Non
 
 
 def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | None) -> list[tuple]:
-    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind, at, span, amount).
-    amount: the part's own Zoom amount (coach 20 Nov), None = the whole video's.
+    """Zoom parts (source seconds, each with its own kind) as frames of the final video: (from, to, kind, at, span, amount, whole).
+    amount: the part's own Zoom amount (coach 20 Nov), None = the whole video's. whole: Entire part (coach 25 Nov).
     A part across a cut is one run, so its zoom carries on over the cut. at, span: where its own push in (or pull back)
     starts and how long it was before PART_HOLD moved its edge to a cut. Same as zoomPartFrames in src/lib/zoom.ts."""
     runs = []
@@ -2059,10 +2059,10 @@ def zoom_part_frames(segments: list[tuple[int, int, int]], parts: list[dict] | N
             else:
                 if run:
                     runs.append(tuple(run))
-                run = [lo, hi, n["zoom"], part_amount(n)]
+                run = [lo, hi, n["zoom"], part_amount(n), n.get("whole") is True]
         if run:
             runs.append(tuple(run))
-    runs = [[lo, hi, kind, lo, hi - lo, own] for lo, hi, kind, own in sorted(runs, key=lambda r: r[0])]
+    runs = [[lo, hi, kind, lo, hi - lo, own, whole] for lo, hi, kind, own, whole in sorted(runs, key=lambda r: r[0])]
     cuts = [start for start, _, _ in segments[1:]]
     hold = PART_HOLD * FPS
 
@@ -2091,13 +2091,15 @@ def part_zoom_expr(start: int, run: tuple, amount: float = ZOOM) -> str:
     """A zoom part's zoom as an ffmpeg expression of the frame number (`in` counts from 1) of a shot
     starting at output frame `start`. Same as partZoom in src/lib/zoom.ts."""
     lo, hi, kind, at, span = run[:5]
+    whole = len(run) > 6 and run[6]
     frame = f"(in-1+{start})"
     length = hi - lo
     if kind == "smooth":
         return f"(1+{amount - 1:.4f}*sin(PI*({frame}-{lo})/{length}))"
     # From where the part starts (at), over its own length at most; held before it (out) or after it (in), see PART_HOLD.
-    x = f"min(1,max(0,({frame}-{at})/{min(span, PART_GLIDE * FPS)}))"
-    k = f"({x}*{x}*(3-2*{x}))"
+    # Entire part (whole): over all its length, at one even speed; else eased over PART_GLIDE.
+    x = f"min(1,max(0,({frame}-{at})/{span if whole else min(span, PART_GLIDE * FPS)}))"
+    k = x if whole else f"({x}*{x}*(3-2*{x}))"
     return f"(1+{amount - 1:.4f}*{k if kind == 'in' else f'(1-{k})'})"
 
 

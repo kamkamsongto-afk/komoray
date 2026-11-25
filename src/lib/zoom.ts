@@ -7,6 +7,7 @@
 // parts: stretches with their own kind of zoom (picked on the timeline, or the AI's key moments), whatever
 // the rest of the video does. Inside one, "in" pushes closer and stays, "out" starts close and pulls back,
 // "smooth" goes in and back out once, "cuts" (Jump) is closer the whole time.
+// An "in" or "out" part with `whole` (Entire part) moves evenly over all of it instead.
 // Same sums as no_zoom_frames, zoom_shots, zoom_part_frames, part_zoom_expr and smooth_zoom_expr in
 // render.py: change one, change the other.
 import { FPS, type Segment } from "./timeline";
@@ -16,7 +17,10 @@ type Span = { start: number; end: number };
 export type PartZoom = "in" | "out" | "smooth" | "cuts";
 // amount: how close this part gets (coach 20 Nov: Zoom amount for this part), as the style's zoomAmount; left out:
 // the whole video's. Same as the 6th item of zoom_part_frames' runs in render.py.
-export type ZoomPart = Span & { zoom: PartZoom; amount?: number };
+// whole: Entire part (coach 25 Nov), only for "in" and "out": the push (or pull back) is spread evenly over the whole part
+// instead of taking PART_GLIDE. Left out: as before.
+export type ZoomPart = Span & { zoom: PartZoom; amount?: number; whole?: boolean };
+export const glides = (zoom: unknown) => zoom === "in" || zoom === "out"; // the kinds Entire part is for
 export const PART_AMOUNT = { min: 1.04, max: 1.3 }; // LIMITS.zoomAmount in subtitle-style.ts
 export const PART_ZOOMS: PartZoom[] = ["in", "out", "smooth", "cuts"];
 export const ZOOM_NAMES: Record<PartZoom, string> = { in: "Zoom in", out: "Zoom out", smooth: "Back and forth", cuts: "Jump cut" };
@@ -32,18 +36,18 @@ export function readZoomParts(value: unknown, duration: number): ZoomPart[] | nu
 	if (!Array.isArray(value) || value.length > MAX_ZOOM_PARTS) return null;
 	const parts: ZoomPart[] = [];
 	for (const v of value as Partial<ZoomPart>[]) {
-		const { start, end, zoom, amount } = v ?? {};
+		const { start, end, zoom, amount, whole } = v ?? {};
 		if (typeof start !== "number" || typeof end !== "number" || !Number.isFinite(start) || !Number.isFinite(end)) return null;
 		if (!PART_ZOOMS.includes(zoom as PartZoom) || start < 0 || end <= start || start > duration) return null;
 		const own = typeof amount === "number" && Number.isFinite(amount) ? Math.round(Math.min(PART_AMOUNT.max, Math.max(PART_AMOUNT.min, amount)) * 100) / 100 : undefined;
-		parts.push({ start: Math.round(start * 1000) / 1000, end: Math.round(Math.min(end, duration) * 1000) / 1000, zoom: zoom as PartZoom, ...(own && { amount: own }) });
+		parts.push({ start: Math.round(start * 1000) / 1000, end: Math.round(Math.min(end, duration) * 1000) / 1000, zoom: zoom as PartZoom, ...(own && { amount: own }), ...(whole === true && glides(zoom) && { whole }) });
 	}
 	parts.sort((a, b) => a.start - b.start);
 	return parts.filter((p, i) => i === 0 || p.start >= parts[i - 1].end - 0.0005);
 }
 
 // The parts with `span` given this kind (or taken out of them: null). Parts it overlaps keep what is outside it.
-export function setZoomPart(parts: ZoomPart[], span: Span, zoom: PartZoom | null, amount?: number): ZoomPart[] {
+export function setZoomPart(parts: ZoomPart[], span: Span, zoom: PartZoom | null, amount?: number, whole?: boolean): ZoomPart[] {
 	const out: ZoomPart[] = [];
 	for (const p of parts) {
 		if (p.end <= span.start || p.start >= span.end) out.push(p);
@@ -52,14 +56,14 @@ export function setZoomPart(parts: ZoomPart[], span: Span, zoom: PartZoom | null
 			if (p.end > span.end) out.push({ ...p, start: span.end });
 		}
 	}
-	if (zoom) out.push({ ...span, zoom, ...(amount && { amount }) });
+	if (zoom) out.push({ ...span, zoom, ...(amount && { amount }), ...(whole && glides(zoom) && { whole }) });
 	return out.sort((a, b) => a.start - b.start);
 }
 
 // Each part as frames of the final video: [from, to) with its kind. A part across a cut is one run, so
 // its zoom carries on over the cut. Same as zoom_part_frames in render.py.
 // at, span: where the part's own push in (or pull back) starts and how long the part was, before PART_HOLD moved its edge.
-export type ZoomRun = { from: number; to: number; zoom: PartZoom; at: number; span: number; amount?: number };
+export type ZoomRun = { from: number; to: number; zoom: PartZoom; at: number; span: number; amount?: number; whole?: boolean };
 export function zoomPartFrames(segments: Segment[], parts: ZoomPart[]): ZoomRun[] {
 	const runs: ZoomRun[] = [];
 	for (const p of parts) {
@@ -73,7 +77,7 @@ export function zoomPartFrames(segments: Segment[], parts: ZoomPart[]): ZoomRun[
 			if (run && from === run.to) run.to = to;
 			else {
 				if (run) runs.push(run);
-				run = { from, to, zoom: p.zoom, at: from, span: 0, amount: p.amount };
+				run = { from, to, zoom: p.zoom, at: from, span: 0, amount: p.amount, whole: p.whole };
 			}
 		}
 		if (run) runs.push(run);
@@ -102,8 +106,9 @@ export function partZoom(run: ZoomRun, f: number, amount: number) {
 	const length = run.to - run.from;
 	if (run.zoom === "smooth") return 1 + (amount - 1) * Math.sin((Math.PI * (f - run.from)) / length);
 	// From where the part starts (at), over its own length at most; held before it (out) or after it (in), see PART_HOLD.
-	const x = Math.min(1, Math.max(0, (f - run.at) / Math.min(run.span, PART_GLIDE * FPS)));
-	const k = x * x * (3 - 2 * x); // eased: starts and ends gently
+	// Entire part (whole): over all its length, at one even speed.
+	const x = Math.min(1, Math.max(0, (f - run.at) / (run.whole ? run.span : Math.min(run.span, PART_GLIDE * FPS))));
+	const k = run.whole ? x : x * x * (3 - 2 * x); // else eased: starts and ends gently
 	return 1 + (amount - 1) * (run.zoom === "in" ? k : 1 - k);
 }
 
