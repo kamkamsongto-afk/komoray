@@ -1094,10 +1094,25 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             # Fills the screen (cover), as the preview's object-fit: cover. A clip or GIF that ends early stays on its last frame.
             moving = f.get("media") == "video" or str(f.get("file", "")).endswith(".gif")
             hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
-            parts.append(
-                f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
-                f"{bg_motion_filter(f.get('backMotion'), f.get('backAmount') if f.get('backAmount') is not None else INSERT_ZOOM, f.get('backSpeed') if f.get('backSpeed') is not None else 1.0, d, size)}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
-            )
+            motion = bg_motion_filter(f.get("backMotion"), f.get("backAmount") if f.get("backAmount") is not None else INSERT_ZOOM, f.get("backSpeed") if f.get("backSpeed") is not None else 1.0, d, size)
+            done = f"{motion}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
+            grow = float(f["backSize"]) if f.get("backSize") is not None else 1.0
+            dx, dy = float(f.get("backX") or 0) * W, float(f.get("backY") or 0) * H
+            read = f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},"
+            if grow == 1 and dx == 0 and dy == 0:
+                parts.append(f"{read}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{done}")
+            else:
+                # A size or place of its own: the whole picture on backColor, so shrinking shows the edges cover cuts off
+                # (coach 25 Nov). Same as frameBackPlace in frame-me.ts. Only what can land on the screen is kept, around
+                # the picture's middle, before it is resized (as the Cutout pictures, for memory).
+                reach_w, reach_h = (math.ceil((side + 2 * abs(off)) / grow) + 2 for side, off in ((W, dx), (H, dy)))
+                colour = str(f.get("backColor") or "#000000").lstrip("#")
+                parts.append(
+                    f"{read}setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,format=rgba,"
+                    f"crop=w='min(iw,{reach_w})':h='min(ih,{reach_h})':exact=1,scale=iw*{grow}:ih*{grow}[fbp{j}]"
+                )
+                parts.append(f"color=c=0x{colour}:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[fbc{j}]")
+                parts.append(f"[fbc{j}][fbp{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1:format=rgb,{done}")
             parts.append(f"[fmb{j}]drawbox=c=black:t=fill[fbk{j}]")
             parts.append(f"[fbk{j}][fbf{j}]overlay=eof_action=repeat[fbg{j}]")
         else:

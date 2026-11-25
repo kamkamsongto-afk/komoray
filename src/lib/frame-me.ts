@@ -51,6 +51,12 @@ export type FrameMe = {
 	backMotion?: BgMotion;
 	backAmount?: number;
 	backSpeed?: number;
+	// back "file": the picture or clip's size and place (coach 25 Nov: it could only fill the screen, so its edges were
+	// cut off). backSize 1 = just fills the screen, smaller shows more of it with backColor around; backX / backY: its middle
+	// away from the screen's, share of the width / height. Left out: 1, 0, 0 (frames saved before).
+	backSize?: number;
+	backX?: number;
+	backY?: number;
 	name?: string;
 } & Fades; // Fade in / Fade out switches (lib/fades.ts). Added 20 Nov
 
@@ -69,6 +75,7 @@ export const FRAME = {
 	// shape with the background showing under the waist, so the shape works as a crop. Where the picture doesn't reach, the
 	// background shows (frame_filters in render.py has no limit of its own).
 	meRange: { min: -0.5, max: 1.5 },
+	back: { size: { min: 0.1, max: 3 }, move: 1 }, // the background picture or clip: backSize, backX / backY
 };
 
 export const BORDER_COLORS = ["#FFFFFF", "#000000", "#FFE600", "#FF3B30", "#FF2D95", "#34C759", "#0A84FF"];
@@ -102,6 +109,21 @@ export function frameShown(f: FrameMe, t: number) {
 	const fade = Math.min(FRAME.fade, (f.end - f.start) / 2);
 	return fadeLevel(f, t, fade);
 }
+
+// The background picture or clip, once it has a size or place of its own. Not moved: it fills the screen (cover).
+export const frameBackMoved = (f: FrameMe) => (f.backSize ?? 1) !== 1 || (f.backX ?? 0) !== 0 || (f.backY ?? 0) !== 0;
+// Where it goes then, in percent of the screen. ratio: its width / height. screen: the screen's. Same as frame_filters in render.py.
+export function frameBackPlace(f: FrameMe, ratio: number, screen: number) {
+	return {
+		left: `${50 + (f.backX ?? 0) * 100}%`,
+		top: `${50 + (f.backY ?? 0) * 100}%`,
+		width: `${ratio > screen ? (ratio / screen) * 100 : 100}%`,
+		height: `${ratio > screen ? 100 : (screen / ratio) * 100}%`,
+		transform: `translate(-50%, -50%) scale(${f.backSize ?? 1})`,
+	};
+}
+// The backSize that shows the whole picture or clip (Whole picture), rounded down so no edge is cut.
+export const wholeBackSize = (ratio: number, screen: number) => Math.max(FRAME.back.size.min, Math.floor(Math.min(ratio / screen, screen / ratio) * 1000) / 1000);
 
 // The window the background picture or clip is looked through at final-video second t. Same as frame_filters in render.py.
 export const frameBackWindow = (f: FrameMe, t: number) => (f.back === "file" && f.file && f.backMotion ? bgWindow(f.backMotion, f.backAmount, f.backSpeed, t, f.start, f.end) : bgWindow(undefined, undefined, undefined, t, f.start, f.end));
@@ -217,6 +239,9 @@ export function readFrames(value: unknown): FrameMe[] | null {
 			...(file && { file, media: /\.(mp4|mov)$/.test(file) ? ("video" as const) : ("image" as const) }),
 			...readClipSound(f, Boolean(file && /\.(mp4|mov)$/.test(file))),
 			...(file && isBgMotion(f.backMotion) && { backMotion: f.backMotion, backAmount: round(num(f.backAmount, BG_MOTION.amount.min, BG_MOTION.amount.max, BG_MOTION.amount.start), 100), ...(f.backSpeed !== undefined && { backSpeed: round(num(f.backSpeed, BG_MOTION.speed.min, BG_MOTION.speed.max, BG_MOTION.speed.start), 100) }) }),
+			...(file && f.backSize !== undefined && { backSize: round(num(f.backSize, FRAME.back.size.min, FRAME.back.size.max, 1)) }),
+			...(file && f.backX !== undefined && { backX: round(num(f.backX, -FRAME.back.move, FRAME.back.move, 0)) }),
+			...(file && f.backY !== undefined && { backY: round(num(f.backY, -FRAME.back.move, FRAME.back.move, 0)) }),
 			...readFades(f),
 			...(typeof f.name === "string" && f.name.trim() && { name: f.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});

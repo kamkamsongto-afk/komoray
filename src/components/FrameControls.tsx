@@ -2,7 +2,8 @@
 
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameName, FRAME_SHAPES, type FrameShape, NEW_FRAME, shapePolygon } from "@/lib/frame-me";
+import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameBackMoved, frameName, FRAME_SHAPES, type FrameShape, NEW_FRAME, shapePolygon, wholeBackSize } from "@/lib/frame-me";
+import { type Format, outputSize } from "@/lib/subtitle-style";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { newClipSound } from "@/lib/clip-sound";
@@ -23,6 +24,7 @@ type Props = {
 	focus: string | null; // a frame to open here
 	onReveal?: (id: string, start: number) => void; // the blue line to its start
 	ruler?: Clock; // the timeline ruler's clock, for the times shown here
+	format?: Format; // the video's shape, for Whole picture
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -47,7 +49,7 @@ function ShapeIcon({ shape, size = 22 }: { shape: FrameShape; size?: number }) {
 
 // The editor's Frame Me box (coach, 12 Nov): for a stretch of the video, you show inside a shape over a background,
 // like an alpha mask in OBS. Nothing is cut out, so it shows at once. Drawn by PlayerFrame, made by frame_filters.
-export function FrameControls({ frames, onChange, now, total, focus, onReveal, ruler = FINAL_CLOCK }: Props) {
+export function FrameControls({ frames, onChange, now, total, focus, onReveal, ruler = FINAL_CLOCK, format }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	const [focused, setFocused] = useState(focus);
 	if (focus !== focused) {
@@ -73,7 +75,12 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 
 	const update = (id: string, patch: Partial<FrameMe>) => onChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)));
 	// A clip background: quietly on at first, so people hear it plays (coach, 12 Nov). A picture has no sound.
-	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, clipFrom: undefined, ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
+	// Another file starts filling the screen again, from its beginning.
+	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, clipFrom: undefined, ...(item.file !== f.file && { backSize: undefined, backX: undefined, backY: undefined }), ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
+	// Each file's width / height, learnt from its small picture below.
+	const [ratios, setRatios] = useState<Record<string, number>>({});
+	const seen = (file: string, w: number, h: number) => h && setRatios((all) => (all[file] === w / h ? all : { ...all, [file]: w / h }));
+	const screen = outputSize({ format });
 	const add = (shape: FrameShape) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const frame = NEW_FRAME(start, round(Math.min(total, start + FRAME.seconds)), shape);
@@ -289,10 +296,10 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 										<div className="flex items-center gap-2">
 											<span className="relative h-10 w-[22px] shrink-0 overflow-hidden rounded border border-foreground/20 bg-black">
 												{f.media === "video" ? (
-													<video src={projectFileSrc(f.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+													<video src={projectFileSrc(f.file)} muted playsInline preload="metadata" onLoadedMetadata={(e) => seen(f.file!, e.currentTarget.videoWidth, e.currentTarget.videoHeight)} className="h-full w-full object-cover" />
 												) : (
 													// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-													<img src={projectFileSrc(f.file)} alt="" className="h-full w-full object-cover" />
+													<img src={projectFileSrc(f.file)} alt="" onLoad={(e) => seen(f.file!, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} className="h-full w-full object-cover" />
 												)}
 											</span>
 											<span className="min-w-0 flex-1 truncate text-xs">{files.find((i) => i.file === f.file)?.name ?? (f.media === "video" ? "Clip" : "Picture")}</span>
@@ -328,6 +335,23 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 										</div>
 									)}
 									</div>
+									{f.back === "file" && f.file && (
+										// The picture or clip's size and place (frameBackPlace): it fills the screen until changed (coach 25 Nov).
+										<>
+											<div className="flex gap-1.5">
+												<button onClick={() => update(f.id, { backSize: wholeBackSize(ratios[f.file!], screen.width / screen.height), backX: 0, backY: 0 })} disabled={!ratios[f.file]} title="Make it small enough to see all of it" className={`${PLAIN_BUTTON} disabled:opacity-40`}>
+													Whole picture
+												</button>
+												<button onClick={() => update(f.id, { backSize: undefined, backX: undefined, backY: undefined })} disabled={!frameBackMoved(f)} title="Cover the whole screen again (its edges may be cut off)" className={`${PLAIN_BUTTON} disabled:opacity-40`}>
+													Fill screen
+												</button>
+											</div>
+											{row("Size", range(f.backSize ?? 1, FRAME.back.size.min, FRAME.back.size.max, 0.01, percent(f.backSize ?? 1), (backSize) => update(f.id, { backSize })), () => update(f.id, { backSize: 1 }))}
+											{row("Left / right", range(f.backX ?? 0, -FRAME.back.move, FRAME.back.move, 0.005, percent(f.backX ?? 0), (backX) => update(f.id, { backX })), () => update(f.id, { backX: 0 }))}
+											{row("Up / down", range(f.backY ?? 0, -FRAME.back.move, FRAME.back.move, 0.005, percent(f.backY ?? 0), (backY) => update(f.id, { backY })), () => update(f.id, { backY: 0 }))}
+											{frameBackMoved(f) && row("Around", swatches(BACK_COLORS, f.backColor, (backColor) => update(f.id, { backColor }), "Color around the picture"))}
+										</>
+									)}
 									{f.back === "file" && f.file && (
 										<BgMotionControl
 											motion={f.backMotion}
