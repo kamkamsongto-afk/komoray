@@ -2,27 +2,9 @@
 // Both sides' real functions get the same made-up cases, and their answers are compared. No video is made, nothing is
 // sent anywhere, nothing costs money. Needs Python (render_side.py). Exit code 1 when anything differs.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { lib, repo } from "./lib.mjs";
 
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const need = createRequire(join(repo, "package.json"));
-const ts = need("typescript");
-
-// The web code as it is, turned into plain JavaScript in memory.
-const loaded = new Map();
-function lib(file) {
-	const path = resolve(repo, file.endsWith(".ts") ? file : `${file}.ts`);
-	if (loaded.has(path)) return loaded.get(path).exports;
-	const module = { exports: {} };
-	loaded.set(path, module);
-	const code = ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
-	const requireHere = (name) => (name.startsWith("@/") ? lib(`src/${name.slice(2)}`) : name.startsWith(".") ? lib(join(dirname(path), name)) : need(name));
-	new Function("module", "exports", "require", code)(module, module.exports, requireHere);
-	return module.exports;
-}
 const timeline = lib("src/lib/timeline");
 const zoom = lib("src/lib/zoom");
 const bg = lib("src/lib/bg-motion");
