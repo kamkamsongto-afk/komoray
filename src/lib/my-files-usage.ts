@@ -13,7 +13,7 @@ export type FileUse = { kits: string[]; banners: number; projects: number };
 export type Pins = {
 	style?: Partial<SubtitleStyle> | null;
 	banners?: { font?: string; ownFont?: { file?: string }; kind?: string; file?: string }[] | null;
-	cutout?: { inserts?: { file: string }[] } | null;
+	cutout?: { inserts?: { file: string }[]; texts?: { font?: string; ownFont?: { file?: string } }[] } | null;
 	frames?: { back?: string; file?: string }[] | null;
 	layouts?: { file?: string }[] | null;
 };
@@ -41,6 +41,7 @@ export function idsIn(edit: Pins | null): string[] {
 		if (b.font === "own" && b.ownFont?.file) ids.push(b.ownFont.file);
 		if (b.kind === "file") ref(b.file);
 	}
+	for (const t of edit.cutout?.texts ?? []) if (t.font === "own" && t.ownFont?.file) ids.push(t.ownFont.file);
 	for (const i of edit.cutout?.inserts ?? []) ref(i.file);
 	for (const f of edit.frames ?? []) if (f.back === "file") ref(f.file);
 	for (const l of edit.layouts ?? []) ref(l.file);

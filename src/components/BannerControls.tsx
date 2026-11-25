@@ -3,10 +3,9 @@
 import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, RefreshCw, Star, Trash2, Type, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerFileSrc, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
-import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
-import { ClashNote } from "./MyFilePickers";
-import { FontSelect } from "./FontSelect";
-import { EDGE_COLORS, type FontId, type Format } from "@/lib/subtitle-style";
+import { fontChoice, ownValue, useMyFonts } from "@/lib/use-my-fonts";
+import { FontField } from "./FontField";
+import { EDGE_COLORS, type Format } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
@@ -68,18 +67,9 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 
 	// Own fonts, as for the subtitles (lib/use-my-fonts.ts): a pick pins that very file in the banner.
 	const myFonts = useMyFonts();
-	const [clashFor, setClashFor] = useState<string | null>(null); // the banner whose upload is waiting on the question
-	async function uploadFont(b: Banner, file: File, then?: "use" | "keep") {
-		setClashFor(b.id);
-		const font = await myFonts.upload(file, then);
-		if (font) update(b.id, { font: "own", ownFont: font });
-	}
 	function pickFont(b: Banner, value: string) {
-		const mine = value.startsWith("own:") ? myFonts.fonts.find((f) => f.id === value.slice(4)) : undefined;
-		if (!value) update(b.id, { font: undefined, ownFont: undefined });
-		else if (mine) update(b.id, { font: "own", ownFont: asOwnFont(mine) });
-		else if (value === "own" && myFonts.older) update(b.id, { font: "own", ownFont: myFonts.older });
-		else if (value !== ownValue(b.ownFont)) update(b.id, { font: value as FontId, ownFont: undefined });
+		const choice = fontChoice(value, b.ownFont, myFonts);
+		if (choice) update(b.id, choice as Pick<Banner, "font" | "ownFont">);
 	}
 
 	// A banner of your own: a picture, GIF or clip, uploaded into My files and shown from there (coach 21 Nov).
@@ -370,33 +360,16 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 			</ToolGroup>
 
 			<ToolGroup tone={3} title="Font">
-				<div className="flex items-start gap-2">
-					<div className="w-3/5 min-w-0">
-						<FontSelect value={b.font === "own" ? ownValue(b.ownFont) : (b.font ?? "")} current={b.font === "own" ? b.ownFont : undefined} myFonts={myFonts} onPick={(value) => pickFont(b, value)} />
-					</div>
-					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<label className={`inline-flex cursor-pointer items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap hover:brightness-110 ${myFonts.busy ? "opacity-50" : ""}`} style={{ background: "#1F5F9F", borderColor: "#1F5F9F", color: "#FFFFFF" }}>
-							<Upload className="h-3 w-3 shrink-0" aria-hidden />
-							{myFonts.busy ? "Uploading…" : "Upload your font"}
-							<input
-								type="file"
-								accept=".ttf,.otf,font/ttf,font/otf"
-								className="hidden"
-								disabled={myFonts.busy}
-								onChange={(e) => {
-									const file = e.target.files?.[0];
-									e.target.value = "";
-									if (file) void uploadFont(b, file);
-								}}
-							/>
-						</label>
-						<span className="text-center text-[10px] text-foreground/55">Supported formats: .ttf, .otf</span>
-					</div>
-				</div>
-				{clashFor === b.id && myFonts.error && <span className="text-xs text-red-500">{myFonts.error}</span>}
-				{clashFor === b.id && myFonts.clash && (
-					<ClashNote clash={myFonts.clash} what="font" onUse={() => void uploadFont(b, myFonts.clash!.file, "use")} onKeep={() => void uploadFont(b, myFonts.clash!.file, "keep")} onCancel={myFonts.dismiss} />
-				)}
+				<FontField
+					key={b.id}
+					label="Banner font"
+					inherit="Same as the subtitles"
+					value={b.font === "own" ? ownValue(b.ownFont) : (b.font ?? "")}
+					current={b.font === "own" ? b.ownFont : undefined}
+					myFonts={myFonts}
+					onPick={(value) => pickFont(b, value)}
+					onUploaded={(font) => update(b.id, { font: "own", ownFont: font })}
+				/>
 			</ToolGroup>
 
 			<ToolGroup tone={1} title="Letters">

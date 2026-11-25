@@ -89,3 +89,14 @@ export function useMyFonts() {
 
 // The value of an own font in a <select>: "own:<id>" for My files, "own" for the font from before.
 export const ownValue = (font: OwnFont | undefined) => (font?.file ? `own:${font.file}` : "own");
+
+// What a pick in a font list (FontSelect) means for an item that can have an own font (a banner, Cutout's words): its
+// font and own font from then on, or null when nothing changes. current: the own font it has now.
+export function fontChoice(value: string, current: OwnFont | undefined, myFonts: ReturnType<typeof useMyFonts>): { font: string | undefined; ownFont: OwnFont | undefined } | null {
+	const mine = value.startsWith("own:") ? myFonts.fonts.find((f) => f.id === value.slice(4)) : undefined;
+	if (!value) return { font: undefined, ownFont: undefined };
+	if (mine) return { font: "own", ownFont: asOwnFont(mine) };
+	if (value === "own" && myFonts.older) return { font: "own", ownFont: myFonts.older };
+	if (value === ownValue(current)) return null; // the own font it already has
+	return { font: value, ownFont: undefined };
+}

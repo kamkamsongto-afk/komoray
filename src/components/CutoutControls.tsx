@@ -13,6 +13,8 @@ import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
+import { FontField } from "./FontField";
+import { fontChoice, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { newClipSound } from "@/lib/clip-sound";
 import { TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
@@ -73,6 +75,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		else if (layers.texts.some((t) => t.id === focus)) setTab("text");
 	}
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
+	const myFonts = useMyFonts(); // own fonts for the words, as banners have
 	const closeRemoving = useCallback(() => setRemoving(null), []);
 	const [askSlow, setAskSlow] = useState(false);
 	const closeAskSlow = useCallback(() => setAskSlow(false), []);
@@ -518,8 +521,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						pick(copy);
 					} : undefined, { up: () => setTexts(moveLayer(layers.texts, t.id, true)), down: () => setTexts(moveLayer(layers.texts, t.id, false)), place: layerPlace(layers.texts, t.id) })}
 					{notCutYet}
-						<ToolGroup tone={1} title="Text">
-							{row("Words", <textarea rows={BEHIND.maxLines} value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value.split("\n").slice(0, BEHIND.maxLines).join("\n") })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} className="min-w-0 flex-1 resize-none rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />)}
+						<ToolGroup tone={1} title="Words">
+							<textarea rows={BEHIND.maxLines} value={t.text} maxLength={BEHIND.maxText} onChange={(e) => updateText(t.id, { text: e.target.value.split("\n").slice(0, BEHIND.maxLines).join("\n") })} onBlur={(e) => updateText(t.id, { text: cleanBehindText(e.target.value) || t.text })} aria-label="Words" className="w-full resize-y rounded border border-foreground/20 bg-background px-1.5 py-0.5 text-sm" />
+							<span className="text-[11px] text-foreground/55">Enter a new line, up to {BEHIND.maxLines} lines</span>
+						</ToolGroup>
+						<ToolGroup tone={2} title="Show">
 							{row(
 								"Effect",
 								<select value={t.fx} onChange={(e) => updateText(t.id, { fx: e.target.value as BehindFx })} className="rounded border border-foreground/20 bg-background px-1 py-0.5">
@@ -530,7 +536,6 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 									))}
 								</select>,
 							)}
-							<FadeSwitches item={t} onChange={(patch) => updateText(t.id, patch)} />
 							{/* How fast the words move, nothing to do with the cutout's quality. Heartbeat has one speed. */}
 							{t.fx !== "pulse" &&
 								row(
@@ -543,28 +548,36 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										))}
 									</span>,
 								)}
-							{row(
-								"Font",
-								<select value={t.font} onChange={(e) => updateText(t.id, { font: e.target.value as FontId })} className="rounded border border-foreground/20 bg-background px-1 py-0.5">
-									{(Object.entries(FONTS) as [FontId, (typeof FONTS)[FontId]][])
-										.filter(([, f]) => !thai || f.thai)
-										.map(([id, f]) => (
-											<option key={id} value={id}>
-												{f.name}
-											</option>
-										))}
-								</select>,
-							)}
-							{row("Size", range(t.size, BEHIND.size.min, BEHIND.size.max, 10, `${t.size}px`, (size) => updateText(t.id, { size })))}
-							{t.text.includes("\n") && row("Line gap", range(t.lineGap ?? 0, BEHIND.lineGap.min, BEHIND.lineGap.max, 5, `${t.lineGap ?? 0}px`, (lineGap) => updateText(t.id, { lineGap })))}
-							{row("Color", swatches(TEXT_COLORS, t.color, (color) => updateText(t.id, { color }), "Text color"))}
-							{row("Outline", range(t.stroke, 0, BEHIND.stroke.max, 1, `${t.stroke}px`, (stroke) => updateText(t.id, { stroke })))}
-							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}
+							<FadeSwitches item={t} onChange={(patch) => updateText(t.id, patch)} />
 							{row("Height", range(Math.round((1 - t.y) * 100), 3, 97, 1, `${Math.round((1 - t.y) * 100)}%`, (up) => updateText(t.id, { y: Math.round((1 - up / 100) * 1000) / 1000 })))}
 							{times(t, (patch) => updateText(t.id, patch))}
 						</ToolGroup>
+						<ToolGroup tone={3} title="Font">
+							<FontField
+								key={t.id}
+								label="Text font"
+								builtins={(Object.keys(FONTS) as FontId[]).filter((id) => !thai || FONTS[id].thai)}
+								value={t.font === "own" ? ownValue(t.ownFont) : t.font}
+								current={t.font === "own" ? t.ownFont : undefined}
+								myFonts={myFonts}
+								onPick={(value) => {
+									const choice = fontChoice(value, t.ownFont, myFonts);
+									if (choice) updateText(t.id, choice as Pick<BehindText, "font" | "ownFont">);
+								}}
+								onUploaded={(font) => updateText(t.id, { font: "own", ownFont: font })}
+							/>
+						</ToolGroup>
+						<ToolGroup tone={1} title="Letters">
+							{row("Size", range(t.size, BEHIND.size.min, BEHIND.size.max, 10, `${t.size}px`, (size) => updateText(t.id, { size })))}
+							{t.text.includes("\n") && row("Line gap", range(t.lineGap ?? 0, BEHIND.lineGap.min, BEHIND.lineGap.max, 5, `${t.lineGap ?? 0}px`, (lineGap) => updateText(t.id, { lineGap })))}
+							{row("Color", swatches(TEXT_COLORS, t.color, (color) => updateText(t.id, { color }), "Text color"))}
+						</ToolGroup>
+						<ToolGroup tone={2} title="Stroke">
+							{row("Outline", range(t.stroke, 0, BEHIND.stroke.max, 1, `${t.stroke}px`, (stroke) => updateText(t.id, { stroke })))}
+							{t.stroke > 0 && row("Outline color", swatches(EDGE_COLORS, t.strokeColor, (strokeColor) => updateText(t.id, { strokeColor }), "Outline color"))}
+						</ToolGroup>
 						{/* Everything but you, while this text shows (BehindText dim / blur). */}
-						<ToolGroup tone={2} title="Background">
+						<ToolGroup tone={3} title="Background">
 							{row("Darken", range(t.dim ?? 0, 0, BACKDROP.dim.max, 0.05, `${Math.round((t.dim ?? 0) * 100)}%`, (dim) => updateText(t.id, { dim: dim || undefined })))}
 							{row("Blur", range(t.blur ?? 0, 0, BACKDROP.blur.max, 1, `${t.blur ?? 0}px`, (blur) => updateText(t.id, { blur: blur || undefined })))}
 						</ToolGroup>

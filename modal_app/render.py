@@ -788,7 +788,7 @@ def behind_motion(b: dict, t: float, width: int, height: int) -> list[dict]:
     return [pose(p, y + 40 * (1 - p))]
 
 
-def build_behind(texts: list[dict], shape: str = "9:16") -> str:
+def build_behind(texts: list[dict], shape: str = "9:16", style: dict | None = None) -> str:
     """The text behind the speaker as subtitles, one line per text per frame (the motion is worked out here,
     see behind_motion). Each text was checked by the app (readCutout in behind.ts)."""
     width, height = FORMATS.get(shape, (WIDTH, HEIGHT))
@@ -804,6 +804,10 @@ def build_behind(texts: list[dict], shape: str = "9:16") -> str:
         # Each row is its own event: subtitles have no line spacing of their own. Rows sit around the text's middle.
         row_step = float(b["size"]) + float(b.get("lineGap") or 0)
         font = FONTS.get(b.get("font"), FONTS["kanit"])
+        # Its own font, by the name its copy here goes by (as a banner's); not here: Kanit, as the preview falls back.
+        own = b.get("ownFont")
+        if b.get("font") == "own" and own_font_path(style or {}, own) and own_font_family(style or {}, own):
+            font = own_font_family(style or {}, own)
         stroke = int(b.get("stroke") or 0)
         look = f"\\fn{font}\\fs{int(b['size'])}\\1c{ass_colour(b.get('color', '#FFFFFF'))}\\3c{ass_colour(b.get('strokeColor', '#000000'))}\\bord{stroke}\\shad2\\4c&H000000&"
         for f in range(math.ceil(float(b["start"]) * FPS), math.ceil(float(b["end"]) * FPS)):
@@ -2859,7 +2863,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
             if layers.get("texts") or layers.get("inserts"):
                 cutout = {"fontsdir": fonts_dir, "inserts": [], "texts": layers.get("texts") or []}
                 if layers.get("texts"):
-                    (workdir / "behind.ass").write_text(build_behind(layers["texts"], style.get("format", "9:16")), encoding="utf-8")
+                    (workdir / "behind.ass").write_text(build_behind(layers["texts"], style.get("format", "9:16"), style), encoding="utf-8")
                     cutout["behind"] = "behind.ass"
                 if layers.get("matteUrl"):
                     urllib.request.urlretrieve(layers["matteUrl"], workdir / "matte.mp4")

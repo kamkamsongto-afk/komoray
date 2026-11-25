@@ -3,7 +3,8 @@
 // behind_events / behind_motion / insert filters in modal_app/render.py for the final video: the motion
 // is worked out frame by frame with the same formulas on both sides (behindMotion = behind_motion).
 // The speaker is cut out by modal_app/cutout.py only for the windows these layers cover (cutoutWindows).
-import { FONTS, type FontId } from "./subtitle-style";
+import type { OwnFont } from "./font-info";
+import { type FontId, readFont } from "./subtitle-style";
 import { BG_MOTION, BG_MOTIONS, type BgMotion, bgWindow, isBgMotion } from "./bg-motion";
 import { FPS, type Segment } from "./timeline";
 import type { Window } from "./cutout";
@@ -34,7 +35,8 @@ export type BehindText = {
 	text: string;
 	start: number;
 	end: number;
-	font: FontId;
+	font: FontId | "own"; // "own": the account's uploaded font (ownFont), as a banner's. Added 25 Nov
+	ownFont?: OwnFont;
 	size: number;
 	color: string;
 	stroke: number; // outline width, px
@@ -261,7 +263,7 @@ export function readCutout(value: unknown): CutoutLayers | null {
 			text,
 			start: round(start),
 			end: round(end),
-			font: typeof t.font === "string" && t.font in FONTS ? (t.font as FontId) : "kanit",
+			...readFont(t.font, t.ownFont),
 			size: Math.round(num(t.size, BEHIND.size.min, BEHIND.size.max, BEHIND.size.start)),
 			color: typeof t.color === "string" && HEX.test(t.color) ? t.color.toUpperCase() : "#FFFFFF",
 			stroke: Math.round(num(t.stroke, 0, BEHIND.stroke.max, 8)),

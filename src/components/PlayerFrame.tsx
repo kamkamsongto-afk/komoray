@@ -532,7 +532,7 @@ mode === "move"
 		return () => observer.disconnect();
 	}, []);
 
-	useOwnFonts([subtitle.font === "own" ? subtitle.ownFont : undefined, ...banners.map((b) => (b.font === "own" ? b.ownFont : undefined))]);
+	useOwnFonts([subtitle.font === "own" ? subtitle.ownFont : undefined, ...banners.map((b) => (b.font === "own" ? b.ownFont : undefined)), ...(cutout?.layers.texts ?? []).map((t) => (t.font === "own" ? t.ownFont : undefined))]);
 	// How the logo comes and goes at this moment of the final video (lib/logo-motion.ts, the same sums as render.py),
 	// grown or shrunk from its own corner.
 	const logoNow = logoLook(logoTime ?? outTime, subtitle.logoEffect, subtitle.logoSpeed, subtitle.logoEvery);
@@ -642,8 +642,10 @@ mode === "move"
 				})}
 				<div className="pointer-events-none absolute top-0 left-0" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 1 }}>
 					{layers.texts.flatMap((t) => {
-						const face = FONT_FACES[t.font] ?? FONT_FACES.kanit;
-						const em = FONTS[t.font]?.height ?? FONTS.kanit.height;
+						// Its own font (build_behind in render.py), falling back to Kanit when it can't load, as there.
+						const own = t.font === "own" ? t.ownFont : undefined;
+						const face = own ? { family: ownFamily(own), weight: 400 } : (FONT_FACES[t.font as FontId] ?? FONT_FACES.kanit);
+						const em = own ? own.height : (FONTS[t.font as FontId]?.height ?? FONTS.kanit.height);
 						const words = t.fx === "runLeft" || t.fx === "runRight" ? runText(t, W) : t.text;
 						return behindMotion(t, outTime, W, H).map((pose, k) => (
 							<div
