@@ -31,6 +31,9 @@ const frame = lib("src/lib/frame-me");
 const banners = lib("src/lib/banners");
 const behind = lib("src/lib/behind");
 const style = lib("src/lib/subtitle-style");
+const framing = lib("src/lib/framing");
+const logo = lib("src/lib/logo-motion");
+const motion = lib("src/lib/motion");
 const { FPS } = timeline;
 
 // The same made-up cases every run.
@@ -129,6 +132,26 @@ const cases = {
 		const [width, height] = pick(SIZES);
 		return { text, width, height, times: many(10, (k) => ms(start + ((end - start) * k) / 10)) };
 	}),
+	framing: many(150, () => {
+		const faces = random() < 0.15 ? null : { width: 960, height: 540, faces: many(Math.floor(between(1, 12)), (n) => [n * 0.5, ms(between(0, 1)), ms(between(0, 1)), ms(between(0.05, 0.4))]) };
+		const start = ms(between(0, 5));
+		return { faces, start, end: ms(start + between(0.1, 3)), aspect: pick([16 / 9, 9 / 16, 4 / 3, 1, 2.35]), zoom: ms(between(1, 1.3)), size: pick(SIZES) };
+	}),
+	logo: many(80, () => ({
+		style: { logoEffect: pick(["still", "fade", "flash", "zoom"]), logoSpeed: pick([0.2, 0.5, 1, 2]), logoEvery: pick([0, 0, 3, 10, 60]) },
+		start: ms(between(0, 40)),
+		times: many(30, () => ms(between(0, 80))),
+	})),
+	words: many(300, () => ms(between(-20, 600))),
+	layout_file: many(150, (k) => ({
+		size: pick(SIZES),
+		picture: [Math.round(between(300, 4000)), Math.round(between(300, 4000))],
+		layout: { id: "l", start: 0, end: 2, kind: pick(["stack", "side"]), meFirst: random() < 0.5, split: ms(between(0.3, 0.7)), meX: 0.5, meY: 0.4, color: "#000000", enter: "cut", file: "p.png", media: "image", ...(k % 4 && { fileZoom: ms(between(1, 3)), fileX: ms(between(0, 1)), fileY: ms(between(0, 1)) }) },
+	})),
+	frame_back: many(80, (k) => ({
+		size: pick(SIZES),
+		frame: { id: "f", start: 0, end: 2, shape: "circle", x: 0.5, y: 0.5, size: 0.5, zoom: 0.7, meX: 0.5, meY: 0.4, border: 0, back: "file", backColor: "#000000", file: "p.png", media: "image", ...(k % 5 && { backSize: ms(between(0.1, 3)), backX: ms(between(-1, 1)), backY: ms(between(-1, 1)) }) },
+	})),
 };
 
 // ---- the final video's side ----
@@ -188,6 +211,10 @@ const web = {
 		layoutFill: layout.LAYOUT.fill,
 		partHold: zoom.PART_HOLD,
 		partGlide: zoom.PART_GLIDE,
+		pop: motion.POP,
+		bounce: motion.BOUNCE,
+		bounceGap: motion.BOUNCE_WORD_GAP,
+		logo: [logo.LOGO_MOTION.show, logo.LOGO_MOTION.zoomFrom, logo.LOGO_MOTION.flash, logo.LOGO_MOTION.glow],
 	}),
 	segments: (c) => timeline.keepSegments(c.duration, c.cuts).map((s) => [s.from, s.trim, s.frames]),
 	subtitles: (c) =>
@@ -214,12 +241,33 @@ const web = {
 		}),
 	}),
 	behind: (c) => c.times.map((t) => behind.behindMotion(c.text, t, c.width, c.height)),
+	framing: (c) => {
+		const focus = framing.focusFor(c.faces, c.start, c.end);
+		const rect = framing.framePiece(c.aspect, focus, c.zoom, { width: c.size[0], height: c.size[1] });
+		return { focus: focus ? [focus.x, focus.y] : null, rect: box(rect) };
+	},
+	logo: (c) => {
+		const seen = c.times.map((t) => logo.logoIn(c.start + t, c.style.logoEffect, c.style.logoSpeed, c.style.logoEvery));
+		return { sum: seen, ffmpeg: seen };
+	},
+	words: (t) => [motion.scaleAt(motion.POP, t), motion.scaleAt(motion.BOUNCE, t)],
+	// The preview places the picture from its width / height; the final video scales it to even px, so up to 2 px apart.
+	layout_file: (c) => {
+		const [, , w, h] = box(layout.layoutBoxes(c.layout, ...c.size).other);
+		const p = layout.layoutFilePlace(c.layout, w, h, c.picture[0] / c.picture[1]);
+		return [p.x, p.y, p.w, p.h];
+	},
+	frame_back: (c) => {
+		if (!frame.frameBackMoved(c.frame)) return { moved: false };
+		const p = frame.frameBackPlace(c.frame, 1, c.size[0] / c.size[1]);
+		return { moved: true, grow: c.frame.backSize ?? 1, dx: ((parseFloat(p.left) - 50) / 100) * c.size[0], dy: ((parseFloat(p.top) - 50) / 100) * c.size[1] };
+	},
 };
 
 // Both sides' text without what only changes how it is drawn: letter case (the Big look) and where Two lines breaks.
 const plain = (lines, look) => lines.map((l) => ({ ...l, text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() }));
 
-const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3 };
+const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06 };
 let failed = 0;
 for (const name of Object.keys(cases)) {
 	const answer = python[name];
