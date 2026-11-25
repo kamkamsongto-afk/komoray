@@ -21,6 +21,13 @@ export function BgMotionControl({ motion, amount, speed, onMotion, onAmount, onS
 	const a = amount ?? BG_MOTION.amount.start;
 	const s = speed ?? BG_SPEED_LEGACY;
 	const entire = Math.abs(s - 1) < 0.001;
+	// Amount (coach 25 Nov: at 0% nothing moved). A zoom's slider counts 5% steps with 0 left out: position -1 is -5%, position
+	// 0 is +5% (a negative amount zooms the other way). A pan or tilt starts at 5%: bgWindow treats anything less as 5%.
+	const zooms = motion === "in" || motion === "out";
+	const steps = Math.round(a * 20);
+	const place = steps > 0 ? steps - 1 : steps;
+	const amountAt = (p: number) => ((p >= 0 ? p + 1 : p) * 5) / 100;
+	const pan = Math.max(a, 0.05);
 	const slider = (label: string, value: number, min: number, max: number, step: number, show: string, set: (n: number) => void, faded = false) => (
 		<label className={`flex items-center gap-2 text-xs text-foreground/70 ${faded ? "opacity-50" : ""}`}>
 			<span className="w-16 shrink-0">{label}</span>
@@ -47,7 +54,8 @@ export function BgMotionControl({ motion, amount, speed, onMotion, onAmount, onS
 					);
 				})}
 			</div>
-			{motion && slider("Amount", a, BG_MOTION.amount.min, BG_MOTION.amount.max, 0.05, `${Math.round(a * 100)}%`, onAmount)}
+			{zooms && slider("Amount", place, BG_MOTION.amount.min * 20, Math.round(BG_MOTION.amount.max * 20) - 1, 1, `${Math.round(a * 100)}%`, (p) => onAmount(amountAt(p)))}
+			{motion && !zooms && slider("Amount", pan, 0.05, BG_MOTION.amount.max, 0.05, `${Math.round(pan * 100)}%`, onAmount)}
 			{motion && slider("Speed", s, BG_MOTION.speed.min, BG_MOTION.speed.max, 0.1, `${s.toFixed(1)}×`, onSpeed, entire)}
 			{motion && (
 				<label className="flex items-center gap-2 text-xs text-foreground/70" title="Ticked: moves evenly from the start of this part to its end. Not ticked: the Speed above.">
