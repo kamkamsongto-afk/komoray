@@ -6,11 +6,12 @@ import { fetchObject } from "@/lib/r2";
 // since browsers keep these for a week. cutout: the picture on top, the person's matte below (LandingDemos).
 const FILES: Record<string, string> = {
 	before: "site/home-before-v1.mp4",
-	after: "site/home-after-v1.mp4",
+	after: "site/home-after-v2.mp4",
 	words: "site/home-words-v1.mp4",
 	frame: "site/home-frame-v1.mp4",
 	cutout: "site/home-cutout-v1.mp4",
 	layout: "site/home-layout-v1.mp4",
+	zoo: "site/home-zoo-v1.mp4",
 	zoom: "site/home-zoom-v1.mp4",
 	banner: "site/home-banner-v1.mp4",
 };

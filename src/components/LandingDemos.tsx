@@ -324,7 +324,7 @@ export function LayoutCard() {
 						<LoopVideo name="layout" />
 					</div>
 					<div className="k-layother">
-						<Image src="/landing/layout-other-v2.webp" alt="" width={720} height={1004} unoptimized />
+						<LoopVideo name="zoo" />
 					</div>
 				</div>
 			</div>
