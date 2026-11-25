@@ -14,7 +14,7 @@ import { MY_REF } from "./my-files";
 import { BG_MOTION, type BgMotion, bgWindow, isBgMotion } from "./bg-motion";
 
 export type LayoutKind = "stack" | "side"; // stack: top / bottom. side: left / right
-export type LayoutEnter = "slide" | "flash" | "cut";
+export type LayoutEnter = "slide" | "fade" | "flash" | "cut";
 
 // start / end: seconds of the final video. meFirst: the speaker on top (stack) or on the left (side).
 // split: the speaker's share of the height (stack) or width (side). meX, meY: the point of the speaker's picture
@@ -63,6 +63,7 @@ export const LAYOUT = {
 	me: { x: 0.5, y: 0.4 }, // where a face sits in the framed video (FACE_HEIGHT in framing.ts)
 	slide: 0.5, // seconds the other part takes to slide in, and out. LAYOUT_SLIDE in render.py
 	flash: 0.15, // seconds the white flash takes to come up, and to go, at each edge. LAYOUT_FLASH in render.py
+	fade: 0.25, // seconds a Fade layout takes to fade in, and out, as Frame Me does. LAYOUT_FADE in render.py
 	join: 0.05, // seconds: a layout starting this close after another ends joins it, no slide between. LAYOUT_JOIN in render.py
 	maxItems: 10,
 	seconds: 5,
@@ -80,6 +81,7 @@ export const LAYOUT_KINDS: { id: LayoutKind; name: string }[] = [
 ];
 export const LAYOUT_ENTERS: { id: LayoutEnter; name: string; note: string }[] = [
 	{ id: "slide", name: "Slide", note: "The other half slides in and pushes you over" },
+	{ id: "fade", name: "Fade", note: "The split screen fades in and out" },
 	{ id: "flash", name: "Flash", note: "A white flash, and the screen is split" },
 	{ id: "cut", name: "Cut", note: "Splits at once" },
 ];
@@ -126,6 +128,16 @@ export function layoutProgress(l: VideoLayout, t: number, layouts: VideoLayout[]
 	if (!slides) return 1;
 	const d = Math.min(LAYOUT.slide, (l.end - l.start) / slides);
 	return ease(Math.max(0, Math.min(1, join.start ? 1 : (t - l.start) / d, join.end ? 1 : (l.end - t) / d)));
+}
+
+// How solid a Fade layout is at final-video second t, 0..1, over the whole screen: it fades in at its start and out at
+// its end, but not at an edge another layout covers (layoutJoins), so the whole speaker never shows between two. A layout
+// shorter than both fades fades over half its time each way. The others are always solid. Same as layout_filters.
+export function layoutAlpha(l: VideoLayout, t: number, layouts: VideoLayout[] | undefined) {
+	if (l.enter !== "fade") return 1;
+	const join = layoutJoins(l, layouts);
+	const d = Math.min(LAYOUT.fade, (l.end - l.start) / 2);
+	return Math.max(0, Math.min(1, join.start ? 1 : (t - l.start) / d, join.end ? 1 : (l.end - t) / d));
 }
 
 // The white flash over the picture at final-video second t, 0..1: up to full at each edge of a Flash layout, from

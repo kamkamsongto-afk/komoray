@@ -1170,6 +1170,7 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
 # Layout (src/lib/layout.ts): the screen split, the speaker in one part and a picture, clip or colour in the other.
 LAYOUT_SLIDE = 0.5  # seconds the other part takes to slide in, and out (LAYOUT.slide in layout.ts)
 LAYOUT_FLASH = 0.15  # seconds the white flash takes to come up, and to go, at each edge (LAYOUT.flash in layout.ts)
+LAYOUT_FADE = 0.25  # seconds a Fade layout fades in, and out (LAYOUT.fade, layoutAlpha in layout.ts)
 LAYOUT_JOIN = 0.05  # seconds: a layout starting this close after another ends joins it, no slide between (LAYOUT.join)
 LAYOUT_FILL = {"blur": 30, "dim": 0.3}  # the blurred, dimmed copy of the picture under a Layout speaker with a meZoom (LAYOUT.fill)
 LAYOUT_ME_ZOOM = (0.4, 2.5)  # LAYOUT.meZoom in layout.ts
@@ -1318,7 +1319,16 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
         x = f"{ox}" if stack else f"{ox}+{sign * ow}*(1-({e}))"
         y = f"{oy}+{sign * oh}*(1-({e}))" if stack else f"{oy}"
         parts.append(f"[lyv{j}][lyf{j}]overlay=x='{x}':y='{y}':eof_action=repeat[lyo{j}]")
-        parts.append(f"{base}[lyo{j}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[lyx{j}]")
+        shown = f"[lyo{j}]"
+        if l.get("enter") == "fade":
+            # The split screen fades in and out over the picture under it, not at an edge another layout covers
+            # (layoutAlpha). Timestamps are the whole video's here.
+            join_start, join_end = layout_joins(l, every or layouts)
+            fade = alpha_fades(a, b, min(LAYOUT_FADE, d / 2), (not join_start, not join_end))
+            if fade:
+                parts.append(f"{shown}format=yuva420p,{fade.rstrip(',')}[lyz{j}]")
+                shown = f"[lyz{j}]"
+        parts.append(f"{base}{shown}overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[lyx{j}]")
         base = f"[lyx{j}]"
     return base
 
