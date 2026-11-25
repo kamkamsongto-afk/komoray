@@ -3,6 +3,7 @@ import { isUpload, OWNER_FILE } from "@/lib/admin-activity";
 import { scriptFingerprint } from "@/lib/bad-takes";
 import { getJson, listObjects, type ObjectInfo } from "@/lib/r2";
 import { currentUser, isAdmin } from "@/lib/supabase/server";
+import { shownName } from "@/lib/upload-name";
 
 // The admin's Accuracy tab (lib/accuracy.ts): how right the speech-to-text was on each video the creator finished
 // (Make video done), as Deepgram wrote it and after the AI's spelling fixes. Only for the admin's Google account.
@@ -40,7 +41,9 @@ export async function GET() {
 			]);
 			const words = edit?.words;
 			if (!Array.isArray(words) || !words.length || !words.every((w) => typeof w?.text === "string")) return null;
-			const video = items.find((item) => isUpload({ name: name(item), lastModified: item.lastModified }));
+			// "src-" is the upload (lib/upload-name.ts): files we make beside it (matte.mp4, media-…) sort before it. Older
+			// uploads have no such mark.
+			const video = items.find((item) => name(item).startsWith("src-")) ?? items.find((item) => isUpload({ name: name(item), lastModified: item.lastModified }));
 			// The AI's fixes count only if it read the whole of this script: a part read, or an older script's, would
 			// score the AI on what it never saw (Codex review 13 Nov). Same check as api/spelling.
 			const aiRead = Array.isArray(spelling?.fixes) && (spelling.done ?? 0) >= words.length && spelling.script === (await scriptFingerprint(words));
@@ -53,7 +56,7 @@ export async function GET() {
 			return {
 				...score,
 				id,
-				file: video ? name(video) : "",
+				file: video ? shownName(video.key) : "",
 				email: owner?.email ?? null,
 				language: analyze?.language ?? guessScript(words),
 				guessed: !analyze?.language,

@@ -89,6 +89,9 @@ const PREVIEW_PROGRESS = "proxy-progress.json";
 export const previewPercent = async (key: string) => (await getJson<{ percent?: number }>(siblingKey(key, PREVIEW_PROGRESS)).catch(() => null))?.percent ?? 0;
 
 export async function startProxy(key: string, env: ProxyEnv): Promise<ProxyStatus> {
+	// A video uploaded before 25 Nov may itself be called proxy.mp4 (new ones are src-…): the preview would be written
+	// over it. It plays the original instead.
+	if (siblingKey(key, "proxy.mp4") === key) return "failed";
 	try {
 		await deleteObject(siblingKey(key, "proxy-error.json")).catch(() => {}); // from now on an error means this attempt failed
 		await deleteObject(siblingKey(key, PREVIEW_PROGRESS)).catch(() => {}); // a last attempt's number must not show
