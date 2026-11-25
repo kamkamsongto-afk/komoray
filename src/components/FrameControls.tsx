@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Film, Image as ImageIcon, Trash2, User } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Image as ImageIcon, Trash2, User } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameBackMoved, frameName, FRAME_SHAPES, type FrameShape, NEW_FRAME, shapePolygon, wholeBackSize } from "@/lib/frame-me";
 import { type Format, outputSize } from "@/lib/subtitle-style";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
-import { type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { addToLibrary, LIBRARY_ACCEPT, type LibraryItem } from "@/lib/media-library";
+import { FilePicker, PickedFile, useLibrary } from "./FilePicker";
 import { newClipSound } from "@/lib/clip-sound";
 import { startMotion } from "@/lib/bg-motion";
 import { BgMotionControl } from "./BgMotionControl";
@@ -13,7 +14,7 @@ import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
 import { ConfirmDelete } from "./ConfirmDelete";
-import { MAIN_BUTTON, mainStyle, PICKED, PLAIN_BUTTON, TabGroup, ToolGroup } from "./ToolGroup";
+import { PICKED, PLAIN_BUTTON, TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 
 type Props = {
@@ -58,21 +59,8 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 	}
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
-	// The project's pictures and clips (Import), for a background. Asked for once the box opens.
-	const [library, setLibrary] = useState<LibraryItem[] | null>(null);
-	useEffect(() => {
-		const key = new URLSearchParams(window.location.search).get("key");
-		if (!key) return;
-		let gone = false;
-		fetch(`/api/library?key=${encodeURIComponent(key)}`)
-			.then((r) => (r.ok ? (r.json() as Promise<{ items?: LibraryItem[] }>) : null))
-			.then((data) => !gone && setLibrary(data?.items ?? []))
-			.catch(() => !gone && setLibrary([]));
-		return () => {
-			gone = true;
-		};
-	}, []);
-
+	// The pictures and clips for a background.
+	const [library, reloadLibrary] = useLibrary();
 	const update = (id: string, patch: Partial<FrameMe>) => onChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)));
 	// A clip background: quietly on at first, so people hear it plays (coach, 12 Nov). A picture has no sound.
 	// Another file starts filling the screen again, from its beginning.
@@ -150,6 +138,32 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 	const [tab, setTab] = useState<"you" | "back">("you"); // under Shape: You, or the Background (coach 22 Nov)
 	const [picking, setPicking] = useState<string | null>(null); // the frame whose pictures are open to change
 	const files = (library ?? []).filter((i) => i.media === "image" || /\.mp4$/.test(i.file));
+	const [adding, setAdding] = useState<string | null>(null); // a frame with no file yet, its choices open
+	// A file from the computer (coach 26 Nov, as Layout): into My files, then behind this frame. The upload takes a while,
+	// so it goes into the frames as they are by then; with the box closed meanwhile it only goes into My files.
+	const [uploading, setUploading] = useState<number | null>(null);
+	const [uploadNote, setUploadNote] = useState("");
+	const latest = useRef<{ frames: FrameMe[]; pickFile: typeof pickFile } | null>(null);
+	useEffect(() => {
+		latest.current = { frames, pickFile };
+		return () => {
+			latest.current = null;
+		};
+	});
+	async function addFile(file: File, id: string) {
+		setUploadNote("");
+		setUploading(0);
+		const sent = await addToLibrary("", file, setUploading);
+		setUploading(null);
+		if ("error" in sent) return setUploadNote(sent.error);
+		reloadLibrary();
+		const now = latest.current;
+		const frame = now?.frames.find((f) => f.id === id);
+		if (!now || !frame) return;
+		now.pickFile(frame, sent.item);
+		setPicking(null);
+		setAdding(null);
+	}
 
 	return (
 		<div className="flex flex-col gap-2 p-3 pt-1">
@@ -271,13 +285,13 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 												role="radio"
 												aria-checked={f.back === id}
 												onClick={() => {
-													// A picture or clip: the one it had, else the project's newest.
+													// A picture or clip: the one it had, else the project's newest, else the choices open to upload one.
+													setAdding(null);
 													if (id !== "file" || f.file) update(f.id, { back: id });
 													else if (files[0]) pickFile(f, files[0]);
+													else setAdding(f.id);
 												}}
-												disabled={id === "file" && !f.file && !files.length}
-												title={id === "file" && !f.file && !files.length ? "Add a picture or clip in My files first" : undefined}
-												className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap disabled:opacity-40 ${f.back === id ? PICKED : "text-foreground/70 hover:text-foreground"}`}
+												className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap ${f.back === id ? PICKED : "text-foreground/70 hover:text-foreground"}`}
 											>
 												{name}
 											</button>
@@ -293,46 +307,21 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 									<div className="relative flex flex-col gap-1.5">
 									{f.back === "file" && f.file && (
 										// Picked: one row (its picture, its name, Change); the pictures to pick from open only on Change (coach 22 Nov).
-										<div className="flex items-center gap-2">
-											<span className="relative h-10 w-[22px] shrink-0 overflow-hidden rounded border border-foreground/20 bg-black">
-												{f.media === "video" ? (
-													<video src={projectFileSrc(f.file)} muted playsInline preload="metadata" onLoadedMetadata={(e) => seen(f.file!, e.currentTarget.videoWidth, e.currentTarget.videoHeight)} className="h-full w-full object-cover" />
-												) : (
-													// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-													<img src={projectFileSrc(f.file)} alt="" onLoad={(e) => seen(f.file!, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} className="h-full w-full object-cover" />
-												)}
-											</span>
-											<span className="min-w-0 flex-1 truncate text-xs">{files.find((i) => i.file === f.file)?.name ?? (f.media === "video" ? "Clip" : "Picture")}</span>
-											<button onClick={() => setPicking(picking === f.id ? null : f.id)} aria-expanded={picking === f.id} className={MAIN_BUTTON} style={mainStyle(3)}>
-												{picking === f.id ? "Done" : "Change"}
-											</button>
-										</div>
+										<PickedFile file={f.file} media={f.media === "video" ? "video" : "image"} name={files.find((i) => i.file === f.file)?.name ?? (f.media === "video" ? "Clip" : "Picture")} open={picking === f.id} onToggle={() => setPicking(picking === f.id ? null : f.id)} onRatio={(w, h) => seen(f.file!, w, h)} />
 									)}
-									{f.back === "file" && (!f.file || picking === f.id) && (
-										<div className={f.file ? "absolute left-0 right-0 top-full z-40 mt-1 grid max-h-72 grid-cols-4 gap-1 overflow-y-auto rounded-lg border border-foreground/20 bg-background p-2 shadow-xl" : "grid grid-cols-4 gap-1"}>
-											{files.map((item) => (
-												<button
-													key={item.file}
-													onClick={() => {
-														pickFile(f, item);
-														setPicking(null);
-													}}
-													title={item.name}
-													aria-pressed={f.file === item.file}
-													className={`relative aspect-[9/16] overflow-hidden rounded-md border-2 bg-black ${f.file === item.file ? "border-[#4D8DBA]" : "border-transparent hover:border-foreground/30"}`}
-												>
-													{item.media === "video" ? (
-														<>
-															<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-															<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
-														</>
-													) : (
-														// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-														<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
-													)}
-												</button>
-											))}
-										</div>
+									{((f.back === "file" && (!f.file || picking === f.id)) || adding === f.id) && (
+										<FilePicker
+											floating={Boolean(f.back === "file" && f.file)}
+											items={library && files}
+											current={f.file}
+											onPick={(item) => {
+												pickFile(f, item);
+												setPicking(null);
+												setAdding(null);
+											}}
+											upload={{ accept: LIBRARY_ACCEPT, busy: uploading ?? false, onFile: (file) => void addFile(file, f.id) }}
+											note={uploadNote}
+										/>
 									)}
 									</div>
 									{f.back === "file" && f.file && (
@@ -370,11 +359,6 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 										</div>
 									)}
 									{f.back === "file" && f.media === "video" && f.file && <ClipTrim id={f.id} file={f.file} start={f.start} end={f.end} clipFrom={f.clipFrom} total={total} onChange={(patch) => update(f.id, patch)} />}
-									{(f.back === "file" || !files.length) && (
-										<span className="flex items-center gap-1 text-[11px] text-foreground/55" title="Add your pictures and clips in My files, then pick one here">
-											<ImageIcon className="h-3 w-3 shrink-0" aria-hidden /> Pictures and clips: My files{library === null && " · Loading…"}
-										</span>
-									)}
 								</>
 							)}
 						</TabGroup>

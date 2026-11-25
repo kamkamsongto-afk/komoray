@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, Film, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
 import { EDGE_COLORS, FONTS, type FontId, TEXT_COLORS } from "@/lib/subtitle-style";
@@ -19,7 +19,8 @@ import { newClipSound } from "@/lib/clip-sound";
 import { TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 import { ViewSwitch, useListView } from "./ViewSwitch";
-import { addToLibrary, clipLength, hasClearParts, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { addToLibrary, clipLength, hasClearParts, type LibraryItem } from "@/lib/media-library";
+import { FilePicker, PickedFile, useLibrary } from "./FilePicker";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 
 type Props = {
@@ -39,6 +40,7 @@ type Props = {
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
+const INSERT_ACCEPT = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime";
 
 // Chosen before cutting out (coach, 9 Nov): Fast and Normal run on the customer's device and cost no GPU, Slow on ours.
 // In the code they stay fast, balanced and best; people see these names.
@@ -83,14 +85,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [uploading, setUploading] = useState<number | null>(null); // percent sent, null: not uploading
 	const [notice, setNotice] = useState("");
 	const fileRef = useRef<HTMLInputElement>(null);
-	// From Import: the project's files, asked for when the list is opened (again each time: one may have just gone in).
-	const [library, setLibrary] = useState<LibraryItem[] | null>(null);
+	// From My files: asked for again each time the list is opened (one may have just gone in).
+	const [library, reloadLibrary] = useLibrary();
 	const openLibrary = () => {
 		setPicView("import");
-		const key = new URLSearchParams(window.location.search).get("key");
-		if (!key) return setLibrary([]);
-		setLibrary((list) => list ?? knownLibrary(key) ?? null);
-		void loadLibrary(key).then(setLibrary);
+		reloadLibrary();
 	};
 
 	const [choice, setPicked] = useState<CutoutTier>(CUTOUT_ON[0]);
@@ -143,6 +142,49 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		setOpen(text.id);
 		setTexts([...layers.texts, text]); // on top of the others (lib/layers.ts)
 		onReveal?.(text.id, text.start);
+	}
+
+	// Change (coach 26 Nov): another picture or clip in the same place. When it shows, its layer, and the picture's size
+	// and place stay; a clip starts from its first second again.
+	const [changingFile, setChangingFile] = useState<string | null>(null); // the picture or clip whose choices are open
+	const [swapping, setSwapping] = useState<number | null>(null); // percent sent of a file uploaded to take its place
+	function changeFile(list: Insert[], put: (inserts: Insert[]) => void, id: string, item: LibraryItem) {
+		const old = list.find((i) => i.id === id);
+		if (!old || old.file === item.file) return;
+		// A name the person typed stays; one that came from the old file follows the new file.
+		const bare = (name: string) => cleanInsertName(name.replace(/\.[^.]+$/, ""));
+		const was = library?.find((i) => i.file === old.file)?.name;
+		const typed = old.name && !(was && bare(old.name) === bare(was));
+		const clear = item.media === "image" && Boolean(item.clear);
+		const next: Insert = { ...old, kind: item.media, file: item.file, clipFrom: undefined, seeThrough: clear, name: typed ? old.name : bare(item.name) || undefined };
+		// With or without see-through parts, "hidden" and the speaker's place mean something else: as for a new one.
+		if (clear !== Boolean(old.seeThrough)) Object.assign(next, { hidden: false, speakerScale: clear ? 1 : INSERT.scale.start, speakerX: clear ? 0.5 : 0.25, speakerLift: 0 });
+		if (item.media === "image") Object.assign(next, { volume: undefined, muted: undefined });
+		else if (old.kind !== "video") Object.assign(next, newClipSound("video"));
+		put(list.map((i) => (i.id === id ? next : i)));
+	}
+	// An upload takes a while, so it goes into the pictures as they are by then; with the box closed meanwhile it only goes
+	// into My files.
+	const latest = useRef<{ list: Insert[]; put: (inserts: Insert[]) => void; change: typeof changeFile } | null>(null);
+	useEffect(() => {
+		latest.current = { list: layers.inserts, put: (inserts) => onChange({ ...layers, inserts }), change: changeFile };
+		return () => {
+			latest.current = null;
+		};
+	});
+	async function uploadInstead(file: File, id: string) {
+		setNotice("");
+		setSwapping(0);
+		onUploading?.(true);
+		const sent = await addToLibrary("", file, setSwapping);
+		setSwapping(null);
+		onUploading?.(false, !("error" in sent));
+		if ("error" in sent) return setNotice(sent.error);
+		reloadLibrary();
+		const now = latest.current;
+		if (!now) return;
+		now.change(now.list, now.put, id, sent.item);
+		setChangingFile(null);
 	}
 
 	async function addInsert(file: File) {
@@ -444,7 +486,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					<input
 						ref={fileRef}
 						type="file"
-						accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime"
+						accept={INSERT_ACCEPT}
 						className="hidden"
 						onChange={(e) => {
 							const file = e.target.files?.[0];
@@ -465,36 +507,16 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 					{picView === "timeline" && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
 					{picView === "timeline" && !layers.inserts.length && <p className="text-xs text-foreground/60">Nothing on the timeline yet. Add a picture or clip, or pick one from My files.</p>}
 					{picView === "import" && onPickImported && (
-						library === null ? (
-							<p className="text-xs text-foreground/60">Loading…</p>
-						) : library.length === 0 ? (
-							<p className="text-xs text-foreground/60">Nothing in My files yet. + Upload pictures or clips in the My files box, then pick them here.</p>
-						) : (
-							<div className="grid grid-cols-4 gap-1">
-								{library.map((item) => (
-									<button
-										key={item.file}
-										onClick={() => {
-											setPicView("timeline");
-											setTab("inserts");
-											onPickImported(item);
-										}}
-										title={item.name}
-										className="relative aspect-[9/16] overflow-hidden rounded-md border-2 border-transparent bg-black hover:border-foreground/30"
-									>
-										{item.media === "video" ? (
-											<>
-												<video src={`${projectFileSrc(item.file)}#t=0.5`} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-												<Film className="absolute right-0.5 bottom-0.5 h-3 w-3 text-white drop-shadow" aria-hidden />
-											</>
-										) : (
-											// eslint-disable-next-line @next/next/no-img-element -- a private link to the customer's own upload
-											<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
-										)}
-									</button>
-								))}
-							</div>
-						)
+						<FilePicker
+							items={library}
+							disabled={layers.inserts.length >= BEHIND.maxItems}
+							onPick={(item) => {
+								setPicView("timeline");
+								setTab("inserts");
+								onPickImported(item);
+							}}
+							upload={{ accept: INSERT_ACCEPT, busy: uploading ?? false, onFile: (file) => void addInsert(file) }}
+						/>
 					)}
 				</>
 			)}
@@ -649,7 +671,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							onChange={setInsertTab}
 							tabs={[
 								{ id: "you", label: "You", icon: <User className="h-5 w-5" aria-hidden /> },
-								{ id: "picture", label: i.kind === "video" ? "The clip" : "The picture", icon: <ImagePlus className="h-5 w-5" aria-hidden /> },
+								{ id: "picture", label: "Pic & Clip", icon: <ImagePlus className="h-5 w-5" aria-hidden /> },
 							]}
 						>
 						{insertTab === "you" && (
@@ -667,6 +689,22 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 						)}
 						{insertTab === "picture" && (
 							<>
+							<div className="relative flex flex-col gap-1.5">
+								<PickedFile file={i.file} media={i.kind} name={library?.find((x) => x.file === i.file)?.name ?? insertName(i)} open={changingFile === i.id} onToggle={() => setChangingFile(changingFile === i.id ? null : i.id)} />
+								{changingFile === i.id && (
+									<FilePicker
+										floating
+										items={library}
+										current={i.file}
+										onPick={(item) => {
+											changeFile(layers.inserts, setInserts, i.id, item);
+											setChangingFile(null);
+										}}
+										upload={{ accept: INSERT_ACCEPT, busy: swapping ?? false, onFile: (file) => void uploadInstead(file, i.id) }}
+										note={notice}
+									/>
+								)}
+							</div>
 							{i.kind === "image" && (
 								<BgMotionControl
 									motion={i.picMotion === "still" ? undefined : i.picMotion}

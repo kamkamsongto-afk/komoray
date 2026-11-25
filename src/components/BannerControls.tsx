@@ -1,8 +1,8 @@
 "use client";
 
-import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, RefreshCw, Star, Trash2, Type, Upload, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerFileSrc, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, RefreshCw, Star, Trash2, Type, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import { fontChoice, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { FontField } from "./FontField";
 import { EDGE_COLORS, type Format } from "@/lib/subtitle-style";
@@ -10,8 +10,9 @@ import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
-import { MAIN_BUTTON, mainStyle, PICKED, TabGroup, ToolGroup } from "./ToolGroup";
-import { addToLibrary, clipLength, type LibraryItem, projectFileSrc } from "@/lib/media-library";
+import { PICKED, TabGroup, ToolGroup } from "./ToolGroup";
+import { addToLibrary, clipLength, type LibraryItem } from "@/lib/media-library";
+import { FilePicker, PickedFile, useLibrary } from "./FilePicker";
 import { newClipSound } from "@/lib/clip-sound";
 import { layerPlace, moveLayer, sameBannerPass } from "@/lib/layers";
 
@@ -45,7 +46,6 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "cta"));
 	// Which pop-up of pictures is open: a banner (Change), or "new" (Add a picture or clip).
 	const [picking, setPicking] = useState<string | null>(null);
-	const uploadFor = useRef<string | null>(null); // the banner a file picked in the upload dialog is for, null = a new banner
 	// Another banner clicked on the timeline: open it, on its tab (set while drawing, not in an effect, as in CutoutControls).
 	const [seenFocus, setSeenFocus] = useState(focus);
 	if (focus !== seenFocus) {
@@ -73,7 +73,6 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	}
 
 	// A banner of your own: a picture, GIF or clip, uploaded into My files and shown from there (coach 21 Nov).
-	const fileRef = useRef<HTMLInputElement>(null);
 	const [uploading, setUploading] = useState(false);
 	const [fileNote, setFileNote] = useState("");
 	async function addFile(file: File, replaceId?: string) {
@@ -88,10 +87,9 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		if ("error" in sent) return setFileNote(sent.error);
 		const data = { file: sent.item.file, media: sent.item.media };
 		keepBannerFile(data.file, URL.createObjectURL(file));
-		if (replaceId) {
-			setPicking(null);
-			return changeFile(replaceId, sent.item);
-		}
+		reloadLibrary();
+		setPicking(null);
+		if (replaceId) return changeFile(replaceId, sent.item);
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		// A clip shows for as long as it plays; a picture for a few seconds, as a word banner.
 		const seconds = Math.max(0.5, Math.min(clip ?? BANNER.seconds, total - start));
@@ -103,24 +101,9 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		const old = banners.find((x) => x.id === id);
 		update(id, { file: item.file, media: item.media, clipFrom: undefined, text: cleanBannerText(item.name.replace(/\.[^.]+$/, "")) || old?.text || BANNER_KINDS.file.text, ...(item.media === "video" ? (old?.volume === undefined && !old?.muted ? newClipSound("video") : {}) : { volume: undefined, muted: undefined }) });
 	}
-	// Pictures and clips this project already has (api/library), shown on the Upload tab: so nobody uploads the same file
-	// again because they didn't know about Import (coach, 11 Nov). Loaded again after each upload here.
-	const [kept, setKept] = useState<LibraryItem[]>([]);
-	const KEPT_MINE = 12; // the rest are in the My files box
-	const libraryKey = videoKey ?? (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("key"));
-	const fileBanners = banners.filter((b) => b.kind === "file").length;
-	const canReuse = Boolean(onUseFile); // not the callback itself: it is new on every frame while the video plays
-	useEffect(() => {
-		if (tab !== "file" || !libraryKey || !canReuse) return;
-		void fetch(`/api/library?key=${encodeURIComponent(libraryKey)}`)
-			.then(async (res) => (res.ok ? ((await res.json()) as { items?: LibraryItem[] }) : {}))
-			.then((data: { items?: LibraryItem[] }) => {
-				const items = data.items ?? [];
-				const mine = items.filter((i) => i.mine).sort((a, b) => b.at.localeCompare(a.at));
-				setKept([...items.filter((i) => !i.mine), ...mine.slice(0, KEPT_MINE)]);
-			})
-			.catch(() => {});
-	}, [tab, libraryKey, canReuse, fileBanners]);
+	// Every picture and clip this video can show (the picker): its own and My files'. So nobody uploads the same file
+	// again (coach 11 Nov).
+	const [library, reloadLibrary] = useLibrary();
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
 	// Where each banner was dragged to, so picking Top and then "Where you dragged it" brings it back (coach, 6 Nov).
@@ -213,49 +196,21 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 
 	const inTemplates = (b: Banner) => Boolean(master(b)) || templates.some((t) => t.text === cleanBannerText(b.text, BANNER.maxLines) && t.sub === b.sub);
 
-	const chooseUpload = (target: string | "new") => {
-		uploadFor.current = target === "new" ? null : target;
-		fileRef.current?.click();
-	};
-	// The pictures and clips this project already has, as a pop-up that scrolls (coach 23 Nov: not unrolled down the box): pick one, or
-	// upload a new one. For a banner (it is changed) or for a new one.
-	const filePicker = (target: string | "new") => (
-		<div className="absolute left-0 right-0 top-full z-40 mt-1 flex max-h-72 flex-col gap-2 overflow-y-auto rounded-lg border border-foreground/20 bg-background p-2 shadow-xl">
-			{kept.length > 0 ? (
-				<div className="grid grid-cols-4 gap-1">
-					{kept.map((item) => (
-						<button
-							key={item.file}
-							onClick={() => {
-								if (target === "new") onUseFile?.(item);
-								else changeFile(target, item);
-								setPicking(null);
-							}}
-							disabled={target === "new" && banners.length >= BANNER.maxBanners}
-							title={`Use “${item.name}”`}
-							className="relative aspect-[9/16] overflow-hidden rounded-md border-2 border-transparent bg-black hover:border-foreground/30 disabled:opacity-40"
-						>
-							{item.media === "image" ? (
-								// eslint-disable-next-line @next/next/no-img-element
-								<img src={projectFileSrc(item.file)} alt={item.name} className="h-full w-full object-cover" />
-							) : (
-								<video src={projectFileSrc(item.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-							)}
-						</button>
-					))}
-				</div>
-			) : (
-				<p className="text-xs text-foreground/60">Nothing uploaded to this video yet.</p>
-			)}
-			<button
-				onClick={() => chooseUpload(target)}
-				disabled={uploading || (target === "new" && banners.length >= BANNER.maxBanners)}
-				className={`self-start ${MAIN_BUTTON} disabled:opacity-40`}
-				style={mainStyle(3)}
-			>
-				<Upload className="h-3 w-3 shrink-0" aria-hidden /> {uploading ? "Uploading…" : "Upload a picture or clip"}
-			</button>
-		</div>
+	// The choices, as a pop-up (coach 23 Nov: not unrolled down the box), for a banner (it is changed) or for a new one.
+	const filePicker = (target: string | "new", current?: string) => (
+		<FilePicker
+			floating
+			items={library}
+			current={current}
+			disabled={target === "new" && banners.length >= BANNER.maxBanners}
+			onPick={(item) => {
+				if (target === "new") onUseFile?.(item);
+				else changeFile(target, item);
+				setPicking(null);
+			}}
+			upload={{ accept: FILE_TYPES, busy: uploading, onFile: (file) => void addFile(file, target === "new" ? undefined : target) }}
+			note={fileNote}
+		/>
 	);
 
 	// The header row of a banner: its name, then the star, the layer arrows, Duplicate and the bin (coach 23 Nov).
@@ -427,21 +382,8 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		<div className="flex flex-col gap-2">
 			<ToolGroup tone={1} title={b.media === "video" ? "The clip" : "The picture"}>
 				<div className="relative flex flex-col gap-1.5">
-					<div className="flex items-center gap-2">
-						<span className="relative h-10 w-[22px] shrink-0 overflow-hidden rounded border border-foreground/20 bg-black">
-							{b.file && (b.media === "video" ? (
-								<video src={bannerFileSrc(b.file)} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-							) : (
-								// eslint-disable-next-line @next/next/no-img-element
-								<img src={bannerFileSrc(b.file)} alt="" className="h-full w-full object-cover" />
-							))}
-						</span>
-						<span className="min-w-0 flex-1 truncate text-xs">{b.text}</span>
-						<button onClick={() => setPicking(picking === b.id ? null : b.id)} aria-expanded={picking === b.id} className={MAIN_BUTTON} style={mainStyle(3)}>
-							{picking === b.id ? "Done" : "Change"}
-						</button>
-					</div>
-					{picking === b.id && filePicker(b.id)}
+					{b.file && <PickedFile file={b.file} media={b.media === "video" ? "video" : "image"} name={b.text} open={picking === b.id} onToggle={() => setPicking(picking === b.id ? null : b.id)} />}
+					{picking === b.id && filePicker(b.id, b.file)}
 				</div>
 				<span className="text-[11px] text-foreground/55">Pause the video on it to drag it anywhere, or drag its corner to make it bigger or smaller.</span>
 				{b.media === "video" && <ClipSound sound={b} onChange={(patch) => update(b.id, patch)} />}
@@ -461,19 +403,6 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 
 	return (
 		<div className="flex flex-col gap-2 p-3 pt-1">
-			<input
-				ref={fileRef}
-				type="file"
-				accept={FILE_TYPES}
-				className="hidden"
-				onChange={(e) => {
-					const file = e.target.files?.[0];
-					e.target.value = "";
-					const target = uploadFor.current;
-					uploadFor.current = null;
-					if (file) void addFile(file, target ?? undefined);
-				}}
-			/>
 			<TabGroup
 				tone={3}
 				value={tab}
@@ -531,7 +460,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 							<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading ? "Uploading…" : "Add a picture or clip"}
 						</button>
 						{picking === "new" && filePicker("new")}
-						{fileNote && <p className="text-xs text-red-500">{fileNote}</p>}
+						{picking === null && fileNote && <p className="text-xs text-red-500">{fileNote}</p>}
 						{shown.length === 0 && (
 							<p className="text-xs text-foreground/60">
 								Have a banner made already? JPG, PNG, WebP or GIF up to {BANNER_FILE.maxBytes.image / 1_000_000} MB, or an MP4 clip up to {BANNER_FILE.maxBytes.video / 1_000_000} MB (clips show without their sound). It goes over you, where the video is now.
