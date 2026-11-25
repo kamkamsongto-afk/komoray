@@ -46,6 +46,9 @@ export type VideoLayout = {
 	fileZoom?: number;
 	fileX?: number;
 	fileY?: number;
+	// The picture or clip turned around its part's middle, degrees clockwise (coach 24 Nov); the layout's colour shows in
+	// the corners it leaves. Left out: 0.
+	fileRotate?: number;
 	// Zoom in / Zoom out (coach 20 Nov, as Cutout's Movement): the picture or clip grows (in) or shrinks (out) slowly
 	// around its part's middle while the layout shows, on top of Size; fileMotionZoom: how much bigger it gets in that
 	// time (LAYOUT.motionZoom). Left out: still. Same as layoutFileZoom = layout_file_zoom in render.py.
@@ -64,6 +67,7 @@ export const LAYOUT = {
 	maxItems: 10,
 	seconds: 5,
 	fileZoom: { min: 1, max: 3 },
+	fileRotate: 180,
 	meZoom: { min: 0.4, max: 2.5, start: 1 },
 	meRange: { min: -0.5, max: 1.5 }, // meX / meY once meZoom is set: may go past the picture's edge
 	fill: { blur: 30, dim: 0.3 }, // the blurred copy under you, as Frame Me's Blur. LAYOUT_FILL in render.py
@@ -226,6 +230,7 @@ export function readLayouts(value: unknown): VideoLayout[] | null {
 			...(file && Number(l.fileZoom) > LAYOUT.fileZoom.min && { fileZoom: round(num(l.fileZoom, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 1), 100) }),
 			...(file && l.fileX !== undefined && { fileX: round(num(l.fileX, 0, 1, 0.5)) }),
 			...(file && l.fileY !== undefined && { fileY: round(num(l.fileY, 0, 1, 0.5)) }),
+			...(file && Math.round(Number(l.fileRotate)) && { fileRotate: Math.round(num(l.fileRotate, -LAYOUT.fileRotate, LAYOUT.fileRotate, 0)) }),
 			...(file && isBgMotion(l.fileMotion) && { fileMotion: l.fileMotion, fileMotionZoom: round(num(l.fileMotionZoom, LAYOUT.motionZoom.min, LAYOUT.motionZoom.max, LAYOUT.motionZoom.start), 100), ...(l.fileMotionSpeed !== undefined && { fileMotionSpeed: round(num(l.fileMotionSpeed, BG_MOTION.speed.min, BG_MOTION.speed.max, BG_MOTION.speed.start), 100) }) }),
 			...(typeof l.name === "string" && l.name.trim() && { name: l.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});

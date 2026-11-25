@@ -57,6 +57,7 @@ export type FrameMe = {
 	backSize?: number;
 	backX?: number;
 	backY?: number;
+	backRotate?: number; // degrees, clockwise (coach 24 Nov). Left out: 0
 	name?: string;
 } & Fades; // Fade in / Fade out switches (lib/fades.ts). Added 20 Nov
 
@@ -75,7 +76,7 @@ export const FRAME = {
 	// shape with the background showing under the waist, so the shape works as a crop. Where the picture doesn't reach, the
 	// background shows (frame_filters in render.py has no limit of its own).
 	meRange: { min: -0.5, max: 1.5 },
-	back: { size: { min: 0.1, max: 3 }, move: 1 }, // the background picture or clip: backSize, backX / backY
+	back: { size: { min: 0.1, max: 3 }, move: 1, rotate: 180 }, // the background picture or clip: backSize, backX / backY, backRotate
 };
 
 export const BORDER_COLORS = ["#FFFFFF", "#000000", "#FFE600", "#FF3B30", "#FF2D95", "#34C759", "#0A84FF"];
@@ -111,7 +112,7 @@ export function frameShown(f: FrameMe, t: number) {
 }
 
 // The background picture or clip, once it has a size or place of its own. Not moved: it fills the screen (cover).
-export const frameBackMoved = (f: FrameMe) => (f.backSize ?? 1) !== 1 || (f.backX ?? 0) !== 0 || (f.backY ?? 0) !== 0;
+export const frameBackMoved = (f: FrameMe) => (f.backSize ?? 1) !== 1 || (f.backX ?? 0) !== 0 || (f.backY ?? 0) !== 0 || (f.backRotate ?? 0) !== 0;
 // Where it goes then, in percent of the screen. ratio: its width / height. screen: the screen's. Same as frame_filters in render.py.
 export function frameBackPlace(f: FrameMe, ratio: number, screen: number) {
 	return {
@@ -119,7 +120,7 @@ export function frameBackPlace(f: FrameMe, ratio: number, screen: number) {
 		top: `${50 + (f.backY ?? 0) * 100}%`,
 		width: `${ratio > screen ? (ratio / screen) * 100 : 100}%`,
 		height: `${ratio > screen ? 100 : (screen / ratio) * 100}%`,
-		transform: `translate(-50%, -50%) scale(${f.backSize ?? 1})`,
+		transform: `translate(-50%, -50%) rotate(${f.backRotate ?? 0}deg) scale(${f.backSize ?? 1})`,
 	};
 }
 // The backSize that shows the whole picture or clip (Whole picture), rounded down so no edge is cut.
@@ -242,6 +243,7 @@ export function readFrames(value: unknown): FrameMe[] | null {
 			...(file && f.backSize !== undefined && { backSize: round(num(f.backSize, FRAME.back.size.min, FRAME.back.size.max, 1)) }),
 			...(file && f.backX !== undefined && { backX: round(num(f.backX, -FRAME.back.move, FRAME.back.move, 0)) }),
 			...(file && f.backY !== undefined && { backY: round(num(f.backY, -FRAME.back.move, FRAME.back.move, 0)) }),
+			...(file && Math.round(Number(f.backRotate)) && { backRotate: Math.round(num(f.backRotate, -FRAME.back.rotate, FRAME.back.rotate, 0)) }),
 			...readFades(f),
 			...(typeof f.name === "string" && f.name.trim() && { name: f.name.replace(/[\n\r\t]/g, " ").trim().slice(0, 40) }),
 		});

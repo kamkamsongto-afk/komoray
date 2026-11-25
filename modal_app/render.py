@@ -1098,18 +1098,25 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             done = f"{motion}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
             grow = float(f["backSize"]) if f.get("backSize") is not None else 1.0
             dx, dy = float(f.get("backX") or 0) * W, float(f.get("backY") or 0) * H
+            turn = float(f.get("backRotate") or 0)
             read = f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},"
-            if grow == 1 and dx == 0 and dy == 0:
+            if grow == 1 and dx == 0 and dy == 0 and turn == 0:
                 parts.append(f"{read}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{done}")
             else:
                 # A size or place of its own: the whole picture on backColor, so shrinking shows the edges cover cuts off
                 # (coach 25 Nov). Same as frameBackPlace in frame-me.ts. Only what can land on the screen is kept, around
                 # the picture's middle, before it is resized (as the Cutout pictures, for memory).
                 reach_w, reach_h = (math.ceil((side + 2 * abs(off)) / grow) + 2 for side, off in ((W, dx), (H, dy)))
+                rotate = ""
+                if turn:
+                    # Turned (backRotate): what can land on the screen is then a circle around the picture's middle.
+                    half_w, half_h = W / 2 + abs(dx), H / 2 + abs(dy)
+                    reach_w = reach_h = math.ceil(2 * math.hypot(half_w, half_h) / grow) + 2
+                    rotate = f",rotate={turn}*PI/180:ow={2 * math.ceil(half_w)}:oh={2 * math.ceil(half_h)}:c=none"
                 colour = str(f.get("backColor") or "#000000").lstrip("#")
                 parts.append(
                     f"{read}setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,setsar=1,format=rgba,"
-                    f"crop=w='min(iw,{reach_w})':h='min(ih,{reach_h})':exact=1,scale=iw*{grow}:ih*{grow}[fbp{j}]"
+                    f"crop=w='min(iw,{reach_w})':h='min(ih,{reach_h})':exact=1,scale=iw*{grow}:ih*{grow}{rotate}[fbp{j}]"
                 )
                 parts.append(f"color=c=0x{colour}:s={W}x{H}:r={FPS}:d={d:.3f},format=rgba[fbc{j}]")
                 parts.append(f"[fbc{j}][fbp{j}]overlay=x=(main_w-overlay_w)/2+{dx:.1f}:y=(main_h-overlay_h)/2+{dy:.1f}:shortest=1:format=rgb,{done}")
@@ -1269,9 +1276,22 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
             z = min(3.0, max(1.0, float(l.get("fileZoom") or 1)))
             fx, fy = (min(1.0, max(0.0, float(l.get(k, 0.5)))) for k in ("fileX", "fileY"))
             grow = f"max({ow}/iw,{oh}/ih)*{z:g}"
+            cut = f"crop={ow}:{oh}:x='clip(iw*{fx:g}-{ow / 2:g},0,iw-{ow})':y='clip(ih*{fy:g}-{oh / 2:g},0,ih-{oh})'"
+            turn = float(l.get("fileRotate") or 0)
+            if turn:
+                # Turned around its part's middle (fileRotate, as the preview): a square big enough for any angle is cut
+                # around that middle, from the picture padded with the layout's colour, turned, and its middle kept.
+                side = math.ceil(math.hypot(ow, oh) / 2) * 2 + 2
+                colour = str(l.get("color") or "#000000").lstrip("#")
+                x = f"clip((iw-{2 * side})*{fx:g}-{ow / 2:g},0,iw-{2 * side + ow})+{side + ow / 2 - side / 2:g}"
+                y = f"clip((ih-{2 * side})*{fy:g}-{oh / 2:g},0,ih-{2 * side + oh})+{side + oh / 2 - side / 2:g}"
+                cut = (
+                    f"format=rgba,pad=iw+{2 * side}:ih+{2 * side}:{side}:{side}:color=0x{colour},"
+                    f"crop={side}:{side}:x='{x}':y='{y}':exact=1,rotate={turn}*PI/180:ow={ow}:oh={oh}:c=0x{colour}"
+                )
             parts.append(
                 f"[{inputs[j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale=w='ceil(iw*{grow}/2)*2':h='ceil(ih*{grow}/2)*2',"
-                f"crop={ow}:{oh}:x='clip(iw*{fx:g}-{ow / 2:g},0,iw-{ow})':y='clip(ih*{fy:g}-{oh / 2:g},0,ih-{oh})',setsar=1,"
+                f"{cut},setsar=1,"
                 f"{layout_file_zoom(l, d, (ow, oh))}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[lyf{j}]"
             )
         else:
