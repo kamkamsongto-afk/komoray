@@ -76,7 +76,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 	const update = (id: string, patch: Partial<FrameMe>) => onChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)));
 	// A clip background: quietly on at first, so people hear it plays (coach, 12 Nov). A picture has no sound.
 	// Another file starts filling the screen again, from its beginning.
-	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, clipFrom: undefined, ...(item.file !== f.file && { backSize: undefined, backX: undefined, backY: undefined }), ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
+	const pickFile = (f: FrameMe, item: LibraryItem) => update(f.id, { back: "file", file: item.file, media: item.media, clipFrom: undefined, ...(item.file !== f.file && { backSize: undefined, backX: undefined, backY: undefined, backRotate: undefined }), ...(item.media === "video" && f.volume === undefined && !f.muted ? newClipSound("video") : {}) });
 	// Each file's width / height, learnt from its small picture below.
 	const [ratios, setRatios] = useState<Record<string, number>>({});
 	const seen = (file: string, w: number, h: number) => h && setRatios((all) => (all[file] === w / h ? all : { ...all, [file]: w / h }));
@@ -339,16 +339,17 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 										// The picture or clip's size and place (frameBackPlace): it fills the screen until changed (coach 25 Nov).
 										<>
 											<div className="flex gap-1.5">
-												<button onClick={() => update(f.id, { backSize: wholeBackSize(ratios[f.file!], screen.width / screen.height), backX: 0, backY: 0 })} disabled={!ratios[f.file]} title="Make it small enough to see all of it" className={`${PLAIN_BUTTON} disabled:opacity-40`}>
+												<button onClick={() => update(f.id, { backSize: wholeBackSize(ratios[f.file!], screen.width / screen.height), backX: 0, backY: 0, backRotate: undefined })} disabled={!ratios[f.file]} title="Make it small enough to see all of it" className={`${PLAIN_BUTTON} disabled:opacity-40`}>
 													Whole picture
 												</button>
-												<button onClick={() => update(f.id, { backSize: undefined, backX: undefined, backY: undefined })} disabled={!frameBackMoved(f)} title="Cover the whole screen again (its edges may be cut off)" className={`${PLAIN_BUTTON} disabled:opacity-40`}>
+												<button onClick={() => update(f.id, { backSize: undefined, backX: undefined, backY: undefined, backRotate: undefined })} disabled={!frameBackMoved(f)} title="Cover the whole screen again (its edges may be cut off)" className={`${PLAIN_BUTTON} disabled:opacity-40`}>
 													Fill screen
 												</button>
 											</div>
 											{row("Size", range(f.backSize ?? 1, FRAME.back.size.min, FRAME.back.size.max, 0.01, percent(f.backSize ?? 1), (backSize) => update(f.id, { backSize })), () => update(f.id, { backSize: 1 }))}
 											{row("Left / right", range(f.backX ?? 0, -FRAME.back.move, FRAME.back.move, 0.005, percent(f.backX ?? 0), (backX) => update(f.id, { backX })), () => update(f.id, { backX: 0 }))}
 											{row("Up / down", range(f.backY ?? 0, -FRAME.back.move, FRAME.back.move, 0.005, percent(f.backY ?? 0), (backY) => update(f.id, { backY })), () => update(f.id, { backY: 0 }))}
+											{row("Rotate", range(f.backRotate ?? 0, -FRAME.back.rotate, FRAME.back.rotate, 1, `${f.backRotate ?? 0}°`, (backRotate) => update(f.id, { backRotate: backRotate || undefined })), () => update(f.id, { backRotate: undefined }))}
 											{frameBackMoved(f) && row("Around", swatches(BACK_COLORS, f.backColor, (backColor) => update(f.id, { backColor }), "Color around the picture"))}
 										</>
 									)}

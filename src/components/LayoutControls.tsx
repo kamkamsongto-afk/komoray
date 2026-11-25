@@ -78,7 +78,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 
 	const update = (id: string, patch: Partial<VideoLayout>) => onChange(layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 	// A clip: quietly on at first, so people hear it plays (as Frame Me, coach 12 Nov). A picture has no sound.
-	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, clipFrom: undefined, fileZoom: undefined, fileX: undefined, fileY: undefined, fileMotion: undefined, fileMotionZoom: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
+	const pickFile = (l: VideoLayout, item: LibraryItem) => update(l.id, { file: item.file, media: item.media, clipFrom: undefined, fileZoom: undefined, fileX: undefined, fileY: undefined, fileRotate: undefined, fileMotion: undefined, fileMotionZoom: undefined, ...(item.media === "video" && l.volume === undefined && !l.muted ? newClipSound("video") : {}) });
 	const add = (kind: LayoutKind) => {
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		const layout = NEW_LAYOUT(start, round(Math.min(total, start + LAYOUT.seconds)), kind);
@@ -369,10 +369,11 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									/>
 									{row("Left / right", range(1 - (l.fileX ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileX ?? 0.5)), (v) => update(l.id, { fileX: Math.round((1 - v) * 1000) / 1000 })), () => update(l.id, { fileX: undefined }))}
 									{row("Up / down", range(1 - (l.fileY ?? 0.5), 0, 1, 0.005, percent(1 - (l.fileY ?? 0.5)), (v) => update(l.id, { fileY: Math.round((1 - v) * 1000) / 1000 })), () => update(l.id, { fileY: undefined }))}
+									{row("Rotate", range(l.fileRotate ?? 0, -LAYOUT.fileRotate, LAYOUT.fileRotate, 1, `${l.fileRotate ?? 0}°`, (fileRotate) => update(l.id, { fileRotate: fileRotate || undefined })), () => update(l.id, { fileRotate: undefined }))}
 									<span className="text-[11px] text-foreground/55" title="It always fills its part, so it moves only where it is bigger than the part: make it bigger to move it both ways.">
 										Pause, then drag it. Bigger than the part to move it.
 									</span>
-									<button onClick={() => update(l.id, { fileZoom: undefined, fileX: undefined, fileY: undefined })} className={`self-start ${PLAIN_BUTTON}`}>
+									<button onClick={() => update(l.id, { fileZoom: undefined, fileX: undefined, fileY: undefined, fileRotate: undefined })} className={`self-start ${PLAIN_BUTTON}`}>
 										Fit and center
 									</button>
 								</>

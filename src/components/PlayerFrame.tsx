@@ -383,9 +383,13 @@ function LayoutFileHandle({ l, box, place, scale, onChange }: { l: VideoLayout; 
 				const d = drag.current;
 				if (!d) return;
 				moved.current = true;
-				// Dragging right brings a point further left into the middle; one that can't come further stays put.
+				// Dragging right brings a point further left into the middle; one that can't come further stays put. A turned
+				// picture: the drag is turned back first, so it still follows the pointer.
 				const clamp = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
-				onChange(l.id, { fileX: clamp(d.fileX - (e.clientX - d.x) / (place.w * scale)), fileY: clamp(d.fileY - (e.clientY - d.y) / (place.h * scale)) });
+				const turn = ((l.fileRotate ?? 0) * Math.PI) / 180;
+				const [sx, sy] = [e.clientX - d.x, e.clientY - d.y];
+				const [mx, my] = [sx * Math.cos(turn) + sy * Math.sin(turn), -sx * Math.sin(turn) + sy * Math.cos(turn)];
+				onChange(l.id, { fileX: clamp(d.fileX - mx / (place.w * scale)), fileY: clamp(d.fileY - my / (place.h * scale)) });
 			}}
 			onPointerUp={() => (drag.current = null)}
 			className="absolute cursor-move outline-2 -outline-offset-2 outline-amber-400 outline-dashed"
@@ -816,7 +820,16 @@ mode === "move"
 		const seen = (r: number) => l.file && setRatios((all) => (all[l.file as string] === r ? all : { ...all, [l.file as string]: r }));
 		const place = ratio ? layoutFilePlace(l, box.w, box.h, ratio) : null;
 		const fill: CSSProperties = place
-			? { position: "absolute", maxWidth: "none", left: place.x * scale, top: place.y * scale, width: place.w * scale, height: place.h * scale }
+			? {
+					position: "absolute",
+					maxWidth: "none",
+					left: place.x * scale,
+					top: place.y * scale,
+					width: place.w * scale,
+					height: place.h * scale,
+					// Turned around its part's middle, as layout_filters turns it.
+					...(l.fileRotate && { transform: `rotate(${l.fileRotate}deg)`, transformOrigin: `${(box.w / 2 - place.x) * scale}px ${(box.h / 2 - place.y) * scale}px` }),
+				}
 			: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 		return (
 			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
