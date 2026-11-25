@@ -5,6 +5,7 @@ import { putObject, signedUrl } from "@/lib/r2";
 import { uploadBlocked } from "@/lib/storage";
 import { currentUser } from "@/lib/supabase/server";
 import { uploadLimitReached } from "@/lib/upload-limit";
+import { uploadName } from "@/lib/upload-name";
 
 // Only videos, and not too big, so strangers can't fill the bucket with junk.
 const ALLOWED_TYPES = ["video/mp4", "video/quicktime"];
@@ -36,12 +37,12 @@ export async function POST(request: Request) {
 	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
 
 	// Each upload gets its own folder so two files with the same name never overwrite each other.
-	const safeName = (filename ?? "video").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100);
+	const safeName = uploadName(filename ?? "video", contentType);
 	const id = crypto.randomUUID();
 	const key = `uploads/${id}/${safeName}`;
 
 	// Remember whose video this is, so only they can see it and work on it.
-	const { error } = await supabase.from("projects").insert({ id, video_key: key, filename: filename ?? safeName, size });
+	const { error } = await supabase.from("projects").insert({ id, video_key: key, filename: filename ?? "video", size });
 	if (error) return Response.json({ error: "Could not save your project" }, { status: 500 });
 	await putObject(`uploads/${id}/${OWNER_FILE}`, JSON.stringify({ email: user.email?.toLowerCase() }), "application/json").catch(() => {}); // for the Activity tab, never worth failing an upload
 

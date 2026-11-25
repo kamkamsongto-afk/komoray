@@ -29,6 +29,7 @@ import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
 import { watermarkSeed } from "@/lib/watermark";
 import type { ZoomPart } from "@/lib/zoom";
+import { shownName } from "@/lib/upload-name";
 
 type Cut = { start: number; end: number };
 type Analysis = {
@@ -816,7 +817,7 @@ export default function EditPage() {
 	const fixes = analysis.fixes ?? [];
 	const silentSeconds = cutSeconds(analysis.cuts);
 	const finalSeconds = analysis.duration - cutSeconds(allCuts(analysis));
-	const filename = key.split("/").pop() ?? key;
+	const filename = shownName(key);
 
 	// The subtitles of the final video as a file, same lines and timing as the preview.
 	async function downloadSrt() {

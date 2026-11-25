@@ -7,6 +7,7 @@ import { exists, getJson, putObject, signedUrl } from "@/lib/r2";
 import { GB, roomLeft, storageFull } from "@/lib/storage";
 import { currentUser } from "@/lib/supabase/server";
 import { uploadLimitReached } from "@/lib/upload-limit";
+import { uploadName } from "@/lib/upload-name";
 
 // Upload from a phone without signing in there. The computer (signed in) makes a link with a
 // QR code; the phone can put one video into one new folder with it, for 15 minutes; then the
@@ -83,8 +84,7 @@ export async function POST(request: Request) {
 				return Response.json({ error: "This video doesn't fit in your storage. Delete videos on My projects on your computer, then make a new QR code." }, { status: 413 });
 			}
 			const filename = String(body.filename ?? "video");
-			const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "video";
-			const key = `uploads/${id}/${safeName}`;
+			const key = `uploads/${id}/${uploadName(filename, contentType)}`;
 			await putObject(handoffKey(id), JSON.stringify({ ...handoff, status: "uploading", key, filename, size }), "application/json");
 			return Response.json({ uploadUrl: await signedUrl(key, "PUT", UPLOAD_LINK_SECONDS, contentType, undefined, size) });
 		}

@@ -146,6 +146,8 @@ export async function POST(request: Request) {
 
 	const files = jobFiles(part);
 	const finalKey = siblingKey(key, files.out);
+	// A video uploaded before 25 Nov under the very name the result takes: making it would delete the video itself.
+	if (finalKey === key) return Response.json({ error: `This video's file is called ${files.out}, a name Komoray uses for what it makes. Please rename the file on your computer and upload it again.` }, { status: 409 });
 	const errorKey = siblingKey(key, files.error);
 
 	// Nothing changed since the last video (or this part): hand that one back, at no cost and at once (coach 16 Nov:
@@ -293,10 +295,11 @@ export async function GET(request: Request) {
 	const finalKey = siblingKey(key, files.out);
 	const wholeKey = siblingKey(key, WHOLE_JOB.out);
 	const wholeLinks = async () =>
-		part && (await exists(wholeKey))
+		part && wholeKey !== key && (await exists(wholeKey))
 			? { wholeUrl: await signedUrl(wholeKey, "GET", LINK_SECONDS), wholeDownloadUrl: await signedUrl(wholeKey, "GET", LINK_SECONDS, undefined, "komoray-video.mp4") }
 			: {};
-	if (await exists(finalKey)) {
+	// finalKey === key: the upload itself has that name (see POST), so it is not a finished video.
+	if (finalKey !== key && (await exists(finalKey))) {
 		return Response.json({
 			status: "done",
 			videoUrl: await signedUrl(finalKey, "GET", LINK_SECONDS),

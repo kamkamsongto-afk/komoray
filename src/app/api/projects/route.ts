@@ -54,7 +54,8 @@ export async function POST(request: Request) {
 	const { data: from } = await supabase.from("projects").select("*").eq("video_key", key).maybeSingle<{ filename: string; size: number; created_at: string; folder_id?: string | null }>();
 	if (!from) return Response.json({ error: "Unknown video" }, { status: 404 });
 
-	const files = (await listObjects(siblingKey(key, ""))).filter((file) => !NOT_COPIED.test(file.key.split("/").slice(2).join("/")));
+	// The video itself always comes along, whatever its name matches (one with "-lock-" in it was left behind).
+	const files = (await listObjects(siblingKey(key, ""))).filter((file) => file.key === key || !NOT_COPIED.test(file.key.split("/").slice(2).join("/")));
 	// A copy takes as much storage as what it copies (lib/storage.ts): not over the plan's storage either.
 	const full = await uploadBlocked(supabase, access, files.reduce((sum, f) => sum + f.size, 0));
 	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });

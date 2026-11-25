@@ -2,6 +2,7 @@
 
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
+import { shownName } from "@/lib/upload-name";
 
 const POLL_MS = 2500;
 
@@ -44,7 +45,7 @@ export function PhoneUpload({ onArrived, disabled }: { onArrived: (key: string, 
 			if (data.status === "claimed" && data.key) {
 				clearInterval(timer);
 				setLink(null);
-				onArrived(data.key, data.filename ?? data.key.split("/").pop()!);
+				onArrived(data.key, data.filename ?? shownName(data.key));
 			} else if (data.status === "expired") {
 				clearInterval(timer);
 				setState("expired");

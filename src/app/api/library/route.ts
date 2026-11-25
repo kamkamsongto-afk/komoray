@@ -60,7 +60,8 @@ export async function GET(request: Request) {
 	}
 	for (const i of edit?.cutout?.inserts ?? []) names.set(i.file, i.name ?? "");
 	for (const [file, info] of there) {
-		if (!PROJECT_FILE.test(file) || items.some((i) => i.file === file)) continue;
+		// Never the video itself: one uploaded before 25 Nov as "banner-….mp4" showed here, with a bin that deleted it.
+		if (!PROJECT_FILE.test(file) || siblingKey(key, file) === key || items.some((i) => i.file === file)) continue;
 		items.push({ file, name: names.get(file) || (mediaOf(file) === "video" ? "Clip" : "Picture"), media: mediaOf(file), size: info.size, at: info.lastModified, ...(lengths.get(file) && { seconds: lengths.get(file) }) });
 	}
 	items.sort((a, b) => b.at.localeCompare(a.at));
@@ -129,6 +130,7 @@ export async function DELETE(request: Request) {
 	if (typeof body.file !== "string" || !PROJECT_FILE.test(body.file)) {
 		return Response.json({ error: MY_REF.test(String(body.file)) ? "This one is kept in My files: delete it there." : "Unknown file" }, { status: 400 });
 	}
+	if (siblingKey(key, body.file) === key) return Response.json({ error: "That is your video itself. Delete it on My projects." }, { status: 409 });
 	// Checked on the saved video: a banner or Pic/Clip still showing it would come out empty.
 	if (filesInUse(await getJson<Edit>(siblingKey(key, "edit.json"))).has(body.file)) {
 		return Response.json({ error: "This file is still on your video. Delete it from Banners, Cutout, Frame Me or Layout first." }, { status: 409 });
