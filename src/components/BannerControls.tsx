@@ -319,7 +319,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 
 	const animPick = (b: Banner) => (
 		<select value={b.anim ?? "fade"} onChange={(e) => update(b.id, { anim: e.target.value as BannerAnim })} aria-label="How it arrives" className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-1 py-0.5 text-xs">
-			{(Object.keys(BANNER_ANIMS) as BannerAnim[]).map((a) => (
+			{(Object.keys(BANNER_ANIMS) as BannerAnim[]).filter((a) => b.kind !== "file" || !BANNER_ANIMS[a].roll).map((a) => (
 				<option key={a} value={a}>
 					{BANNER_ANIMS[a].name}
 				</option>
@@ -355,7 +355,11 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 						<option value="bottom">Bottom</option>
 					</select>
 				</div>
-				<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
+				{BANNER_ANIMS[b.anim ?? "fade"].roll ? (
+					<span className="text-[11px] text-foreground/60">Travels from below the screen to above it for as long as it shows. Make it longer to go slower. Rotate and fades don&apos;t apply.</span>
+				) : (
+					<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
+				)}
 				{range(b, "Rotate", b.rotate ?? 0, BANNER_ROTATE.min, BANNER_ROTATE.max, 1, `${Math.round(b.rotate ?? 0)}°`, (n) => update(b.id, { rotate: n || undefined }))}
 			</ToolGroup>
 

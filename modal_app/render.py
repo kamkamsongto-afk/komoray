@@ -393,6 +393,7 @@ BANNER_ANIMS = {
     "slideUp": {"fade_in": True, "slide": (0, 160)},
     "slideSide": {"fade_in": True, "slide": (-300, 0)},
     "pulse": {"fade_in": True},
+    "rollUp": {"fade_in": False},  # travels up the whole screen while it shows (bannerRoll in banners.ts); banner_motion's roll
 }
 SLIDE_MS = 320
 PULSE_MS = 450
@@ -533,8 +534,12 @@ def alpha_fades(start: float, end: float, seconds: float, fades: tuple[bool, boo
     return out + (f"fade=t=out:st={max(start, end - seconds):.3f}:d={seconds:.3f}:alpha=1," if fades[1] else "")
 
 
-def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float, fades: tuple[bool, bool] = (True, True)) -> str:
-    """The tags that make a banner's part arrive at (x, y). factor: its size, 1 = normal. fades: its switches (fades_of)."""
+def banner_motion(anim: str, x: float, y: float, seconds: float, factor: float, fades: tuple[bool, bool] = (True, True), roll: tuple[float, float] | None = None) -> str:
+    """The tags that make a banner's part arrive at (x, y). factor: its size, 1 = normal. fades: its switches (fades_of).
+    roll (Roll up): how far from (x, y) it is at its start and at its end, px down: it moves evenly between them."""
+    if roll:
+        size = f"\\fscx{factor * 100:g}\\fscy{factor * 100:g}" if factor != 1 else ""
+        return f"\\move({x:.1f},{y + roll[0]:.1f},{x:.1f},{y + roll[1]:.1f},0,{int(seconds * 1000)})" + size
     spec = BANNER_ANIMS.get(anim, BANNER_ANIMS["fade"])
     fade = int(BANNER["fade"] * 1000)
     fade_in, fade_out = spec["fade_in"] and fades[0], fades[1]
@@ -684,6 +689,11 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             # A place is where the first row's letters start; the box reaches a little above them.
             centre, top = width / 2, places.get(b.get("place"), places["top"]) * height - pad_y
         box_middle = top + tall / 2
+        # Roll up: the whole box from just below the screen to just above it (bannerRoll). It is not turned: ASS would turn
+        # it round a point that stays put while the words move.
+        roll = (height - top, -tall - top) if b.get("anim") == "rollUp" else None
+        if roll:
+            turn = 0.0
         # Turned (rotate): every part turns round the box's middle. ASS turns anticlockwise, the preview clockwise, hence the minus.
         spin = f"\\org({centre:.1f},{box_middle:.1f})\\frz{-turn:g}" if turn else ""
         middles, at = [], top + pad_y
@@ -708,9 +718,9 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
             events += banner_frames(b, rows, looks, box, fill, ink, centre, box_middle, middles, size, float(b.get("opacity") or 1), layer - 2, shifts, edge, turn)
             continue
         if not b.get("noBox"):
-            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1, fades_of(b))}\\p1}}{box}{{\\p0}}")
+            events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1, fades_of(b), roll)}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
-            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}{edge}\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b))}}}{row_text}")
+            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}{edge}\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b), roll)}}}{row_text}")
     return events
 
 

@@ -3,7 +3,7 @@
 import { Pause, Play, RotateCw } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useContext, useEffect, useRef, useState } from "react";
-import { BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerPad, bannerRows, bannerStrokeShadow } from "@/lib/banners";
+import { BANNER_ANIMS, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerPad, bannerRoll, bannerRows, bannerStrokeShadow, bannerTall } from "@/lib/banners";
 import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, speakerTransform } from "@/lib/behind";
 import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
@@ -991,6 +991,11 @@ const size = (b.scale ?? 1) * bannerFit(b, H);
 const pad = bannerPad(b);
 const padY = (pad / 2) * size;
 						const rows = bannerRows(b);
+						// Roll up: where its box would rest (as banner_events places it), then how far the roll has it from there.
+						const rolling = Boolean(BANNER_ANIMS[b.anim ?? "fade"].roll);
+						const tall = bannerTall(b, size);
+						const restTop = b.x !== undefined && b.y !== undefined ? b.y * H - tall / 2 : Math.round(BANNER_TOP[subtitle.format][b.place] * H) - padY;
+						const rolled = rolling ? bannerRoll(b, outTime, H, restTop, tall) : 0;
 						// One box around all its rows (coach, 11 Nov: two lines were two boxes), as banner_events draws it: rows
 						// row-size tall, lineGap apart, inside the padding; never shorter than its tallest row. It arrives as one
 						// piece, around the box's middle (render.py works that out frame by frame for the growing kinds).
@@ -1003,7 +1008,7 @@ const padY = (pad / 2) * size;
 							background: b.noBox ? "transparent" : `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,
 							borderRadius: (b.radius ?? 0) * size,
 							padding: `${padY}px ${pad * size}px`,
-							transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
+							transform: `translate(${move.x}px, ${move.y + rolled}px) scale(${move.scale})`,
 						};
 						const movable = Boolean(onBannersChange) && !playing;
 						// Dragged somewhere: its middle sits there. Else its first row's letters start at the top of its place.
@@ -1028,7 +1033,7 @@ const padY = (pad / 2) * size;
 									className="relative flex flex-col items-center"
 									onClick={(e) => movable && e.stopPropagation()}
 									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
-									style={{ ...(b.rotate ? { transform: `rotate(${b.rotate}deg)` } : {}), ...(movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : {}) }}
+									style={{ ...(b.rotate && !rolling ? { transform: `rotate(${b.rotate}deg)` } : {}), ...(movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : {}) }}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									<span style={box}>
@@ -1056,7 +1061,7 @@ lineHeight: `${row.size * size}px`,
 											);
 										})}
 									</span>
-									{movable && (
+									{movable && !rolling && (
 										<span
 											onPointerDown={(e) => startBannerDrag(e, b, "rotate")}
 											title="Drag round to turn it"
