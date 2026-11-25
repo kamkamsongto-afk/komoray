@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, FolderInput, ImagePlus, Moon, Plus, Sparkles, Trash2, Type, User } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Droplets, ImagePlus, Moon, Plus, Trash2, Type, User } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BACKDROP, BEHIND, BEHIND_FX, type BehindFx, type BehindSpeed, type BehindText, cleanBehindText, cleanInsertName, covered, type CutoutLayers, INSERT, type Insert, insertName, keptWindows } from "@/lib/behind";
 import { clock, CUTOUT_ON, type CutoutTier, newSeconds, slowSeconds, type Window } from "@/lib/cutout";
@@ -64,9 +64,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
 	// Two lists instead of one long mixed one (coach, 9 Nov).
-	const [tab, setTab] = useState<"text" | "inserts" | "motion">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
-	// Pic/Clip shows one thing at a time (coach 15 Nov): adding from the computer, from Import, or what is on the timeline.
-	const [picView, setPicView] = useState<"add" | "import" | "timeline">(layers.inserts.length ? "timeline" : "add");
+	const [tab, setTab] = useState<"text" | "inserts">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
+	// Pic & Clip shows one thing at a time (coach 15 Nov): what is on the timeline, or the choices to add one (coach 26 Nov).
+	const [picView, setPicView] = useState<"add" | "timeline">("timeline");
 	if (focus !== focused) {
 		setFocused(focus);
 		setOpen(focus);
@@ -84,12 +84,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [changing, setChanging] = useState(false); // once cut out, the three qualities fold away until asked for
 	const [uploading, setUploading] = useState<number | null>(null); // percent sent, null: not uploading
 	const [notice, setNotice] = useState("");
-	const fileRef = useRef<HTMLInputElement>(null);
-	// From My files: asked for again each time the list is opened (one may have just gone in).
+	// The choices to add one: asked for again each time they are opened (a file may have just gone in).
 	const [library, reloadLibrary] = useLibrary();
-	const openLibrary = () => {
-		setPicView("import");
-		reloadLibrary();
+	const toggleAdd = () => {
+		if (picView !== "add") reloadLibrary();
+		setPicView(picView === "add" ? "timeline" : "add");
 	};
 
 	const [choice, setPicked] = useState<CutoutTier>(CUTOUT_ON[0]);
@@ -413,12 +412,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				)}
 			</div>
 
-			<div role="tablist" aria-label="Cutout layers" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
+			<div role="tablist" aria-label="Cutout layers" className="grid grid-cols-2 gap-1 rounded-lg bg-foreground/5 p-0.5">
 				{(
 					[
 						["text", Type, "Text behind", layers.texts.length],
-						["inserts", ImagePlus, "Pic/Clip", layers.inserts.length],
-						["motion", Sparkles, "Motion", 0],
+						["inserts", ImagePlus, "Pic & Clip", layers.inserts.length],
 					] as const
 				).map(([id, Icon, name, count]) => (
 					// A light blue frame says which one is open, in both themes (coach, 10 Nov).
@@ -429,8 +427,6 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				))}
 			</div>
 			{notice && <p className="text-xs text-red-500">{notice}</p>}
-
-			{tab === "motion" && <p className="rounded-lg border border-dashed border-foreground/20 p-3 text-center text-xs text-foreground/60">Motion templates are coming soon.</p>}
 
 			{tab === "text" && (
 				<>
@@ -453,71 +449,41 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			)}
 			{tab === "inserts" && (
 				<>
-					<div className="grid grid-cols-2 gap-1">
-						<button
-							onClick={() => {
-								setPicView("add");
-								fileRef.current?.click();
-							}}
-							aria-pressed={picView === "add"}
-							disabled={uploading !== null || layers.inserts.length >= BEHIND.maxItems}
-							className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "add" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
-						>
-							<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading ${uploading}%` : "Add picture or clip"}
-						</button>
-						<button
-							onClick={openLibrary}
-							disabled={!onPickImported || layers.inserts.length >= BEHIND.maxItems}
-							aria-pressed={picView === "import"}
-							title="Use a picture or clip already in My files"
-							className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "import" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
-						>
-							<FolderInput className="h-3.5 w-3.5" aria-hidden /> From My files
-						</button>
-						<button
-							onClick={() => setPicView("timeline")}
-							aria-pressed={picView === "timeline"}
-							className={`col-span-2 inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm ${picView === "timeline" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
-						>
-							<ImagePlus className="h-3.5 w-3.5" aria-hidden /> Pic or clip on Timeline
-							{layers.inserts.length > 0 && <span className="text-xs text-foreground/50 tabular-nums">{layers.inserts.length}</span>}
-						</button>
-					</div>
-					<input
-						ref={fileRef}
-						type="file"
-						accept={INSERT_ACCEPT}
-						className="hidden"
-						onChange={(e) => {
-							const file = e.target.files?.[0];
-							e.target.value = "";
-							if (file) void addInsert(file);
-						}}
-					/>
+					<button
+						onClick={() => setPicView("timeline")}
+						aria-pressed={picView === "timeline"}
+						className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm ${picView === "timeline" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
+					>
+						<ImagePlus className="h-3.5 w-3.5" aria-hidden /> Pic or clip on Timeline
+						{layers.inserts.length > 0 && <span className="text-xs text-foreground/50 tabular-nums">{layers.inserts.length}</span>}
+					</button>
+					<button
+						onClick={toggleAdd}
+						aria-expanded={picView === "add"}
+						disabled={picView !== "add" && layers.inserts.length >= BEHIND.maxItems}
+						className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "add" ? "border-blue-600 bg-blue-600/10" : "border-dashed border-foreground/30 hover:bg-foreground/5"}`}
+					>
+						<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading ${uploading}%` : "Add picture or clip"}
+					</button>
 					{picView === "add" && (
-						<button onClick={() => fileRef.current?.click()} disabled={uploading !== null || layers.inserts.length >= BEHIND.maxItems} className="relative overflow-hidden rounded-md border border-dashed border-foreground/30 px-2 py-6 text-sm text-foreground/70 hover:bg-foreground/5 disabled:opacity-60">
-							{uploading !== null && <span className="absolute inset-y-0 left-0 bg-blue-600/15 transition-all" style={{ width: `${uploading}%` }} aria-hidden />}
-							<span className="relative">
-								{uploading !== null
-									? `Uploading… ${uploading}%`
-									: `Choose a picture or clip from your computer (JPG, PNG, WebP, GIF up to ${INSERT.maxBytes.image / 1_000_000} MB, MP4, MOV up to ${INSERT.maxBytes.video / 1_000_000} MB)`}
-							</span>
-						</button>
-					)}
-					{picView === "timeline" && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
-					{picView === "timeline" && !layers.inserts.length && <p className="text-xs text-foreground/60">Nothing on the timeline yet. Add a picture or clip, or pick one from My files.</p>}
-					{picView === "import" && onPickImported && (
 						<FilePicker
 							items={library}
 							disabled={layers.inserts.length >= BEHIND.maxItems}
 							onPick={(item) => {
 								setPicView("timeline");
 								setTab("inserts");
-								onPickImported(item);
+								onPickImported?.(item);
 							}}
 							upload={{ accept: INSERT_ACCEPT, busy: uploading ?? false, onFile: (file) => void addInsert(file) }}
+							footer={
+								<span className="text-[11px] text-foreground/55">
+									JPG, PNG, WebP, GIF up to {INSERT.maxBytes.image / 1_000_000} MB · MP4, MOV up to {INSERT.maxBytes.video / 1_000_000} MB
+								</span>
+							}
 						/>
 					)}
+					{picView === "timeline" && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
+					{picView === "timeline" && !layers.inserts.length && <p className="text-xs text-foreground/60">Nothing on the timeline yet.</p>}
 				</>
 			)}
 			</>}
