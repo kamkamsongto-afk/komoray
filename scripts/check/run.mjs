@@ -134,6 +134,19 @@ const cases = {
 		size: pick(SIZES),
 		frame: { id: "f", start: 0, end: 2, shape: "circle", x: 0.5, y: 0.5, size: 0.5, zoom: 0.7, meX: 0.5, meY: 0.4, border: 0, back: "file", backColor: "#000000", file: "p.png", media: "image", ...(k % 5 && { backSize: ms(between(0.1, 3)), backX: ms(between(-1, 1)), backY: ms(between(-1, 1)) }) },
 	})),
+	// A line's words as a cut can leave them: now and then out of order, before the line or after its end. Looked at half
+	// way between frames' edges, never within a frame of one.
+	bounce: many(200, () => {
+		const start = Math.round(between(0, 90));
+		const end = start + Math.round(between(12, 90));
+		let at = start;
+		const starts = many(Math.floor(between(1, 6)), (k) => {
+			const from = k === 0 ? start : (at += Math.round(between(3, 22)));
+			return random() < 0.15 && k ? Math.round(between(start - 8, end + 12)) : from;
+		});
+		const edges = [start, end, ...starts];
+		return { start, end, starts, frames: many(end - start + 24, (k) => start - 8 + k + 0.5).filter((f) => edges.every((e) => Math.abs(f - e) >= 0.5)) };
+	}),
 };
 
 // ---- the final video's side ----
@@ -233,6 +246,13 @@ const web = {
 		return { sum: seen, ffmpeg: seen };
 	},
 	words: (t) => [motion.scaleAt(motion.POP, t), motion.scaleAt(motion.BOUNCE, t)],
+	// As PlayerFrame shows a line: only inside its time, every word once, the last one that has started coloured.
+	bounce: (c) =>
+		c.frames.map((frame) => {
+			const on = frame >= c.start && frame < c.end;
+			const now = c.starts.findLastIndex((from) => from <= frame);
+			return { drawn: c.starts.map(() => (on ? 1 : 0)), lit: on && now >= 0 ? [now] : [] };
+		}),
 	// The preview places the picture from its width / height; the final video scales it to even px, so up to 2 px apart.
 	layout_file: (c) => {
 		const [, , w, h] = box(layout.layoutBoxes(c.layout, ...c.size).other);
@@ -251,7 +271,7 @@ const web = {
 const cs = (t) => Math.round(t * 100) / 100;
 const plain = (lines, look) => lines.map((l) => ({ from: cs(l.from), to: cs(l.to), text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() })).filter((l) => l.to - l.from > 0.005);
 
-const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06 };
+const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06, bounce: 0 };
 let failed = 0;
 for (const name of Object.keys(cases)) {
 	const answer = python[name];
