@@ -65,14 +65,15 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const [focused, setFocused] = useState(focus);
 	// Two lists instead of one long mixed one (coach, 9 Nov).
 	const [tab, setTab] = useState<"text" | "inserts">(layers.inserts.some((i) => i.id === focus) || (!layers.texts.length && layers.inserts.length) ? "inserts" : "text");
-	// Pic & Clip shows one thing at a time (coach 15 Nov): what is on the timeline, or the choices to add one (coach 26 Nov).
-	const [picView, setPicView] = useState<"add" | "timeline">("timeline");
+	// Pic & Clip lists what is on the video, as the other boxes do; the list makes way while the choices to add one are
+	// open (coach 15 Nov: one thing at a time).
+	const [adding, setAdding] = useState(false);
 	if (focus !== focused) {
 		setFocused(focus);
 		setOpen(focus);
 		if (layers.inserts.some((i) => i.id === focus)) {
 			setTab("inserts");
-			setPicView("timeline");
+			setAdding(false);
 		}
 		else if (layers.texts.some((t) => t.id === focus)) setTab("text");
 	}
@@ -87,8 +88,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	// The choices to add one: asked for again each time they are opened (a file may have just gone in).
 	const [library, reloadLibrary] = useLibrary();
 	const toggleAdd = () => {
-		if (picView !== "add") reloadLibrary();
-		setPicView(picView === "add" ? "timeline" : "add");
+		if (!adding) reloadLibrary();
+		setAdding(!adding);
 	};
 
 	const [choice, setPicked] = useState<CutoutTier>(CUTOUT_ON[0]);
@@ -210,7 +211,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		const insert: Insert = { ...newClipSound(done.kind), id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
 		setOpen(insert.id);
 		setTab("inserts");
-		setPicView("timeline");
+		setAdding(false);
 		setInserts([...layers.inserts, insert]);
 		onReveal?.(insert.id, insert.start);
 	}
@@ -450,27 +451,19 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 			{tab === "inserts" && (
 				<>
 					<button
-						onClick={() => setPicView("timeline")}
-						aria-pressed={picView === "timeline"}
-						className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm ${picView === "timeline" ? "border-blue-600 bg-blue-600/10" : "border-foreground/20 hover:bg-foreground/5"}`}
-					>
-						<ImagePlus className="h-3.5 w-3.5" aria-hidden /> Pic or clip on Timeline
-						{layers.inserts.length > 0 && <span className="text-xs text-foreground/50 tabular-nums">{layers.inserts.length}</span>}
-					</button>
-					<button
 						onClick={toggleAdd}
-						aria-expanded={picView === "add"}
-						disabled={picView !== "add" && layers.inserts.length >= BEHIND.maxItems}
-						className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${picView === "add" ? "border-blue-600 bg-blue-600/10" : "border-dashed border-foreground/30 hover:bg-foreground/5"}`}
+						aria-expanded={adding}
+						disabled={!adding && layers.inserts.length >= BEHIND.maxItems}
+						className={`inline-flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm disabled:opacity-40 ${adding ? "border-blue-600 bg-blue-600/10" : "border-dashed border-foreground/30 hover:bg-foreground/5"}`}
 					>
 						<Plus className="h-3.5 w-3.5" aria-hidden /> {uploading !== null ? `Uploading ${uploading}%` : "Add picture or clip"}
 					</button>
-					{picView === "add" && (
+					{adding && (
 						<FilePicker
 							items={library}
 							disabled={layers.inserts.length >= BEHIND.maxItems}
 							onPick={(item) => {
-								setPicView("timeline");
+								setAdding(false);
 								setTab("inserts");
 								onPickImported?.(item);
 							}}
@@ -482,8 +475,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							}
 						/>
 					)}
-					{picView === "timeline" && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
-					{picView === "timeline" && !layers.inserts.length && <p className="text-xs text-foreground/60">Nothing on the timeline yet.</p>}
+					{!adding && layers.inserts.length > 0 && <ViewSwitch view={view} onChange={setView} />}
 				</>
 			)}
 			</>}
@@ -573,7 +565,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 				</div>
 			))}
 
-			{listing && tab === "inserts" && picView === "timeline" && layers.inserts.length > 0 && (
+			{listing && tab === "inserts" && !adding && layers.inserts.length > 0 && (
 				<div className={view === "grid" ? "grid grid-cols-3 gap-1.5" : "flex flex-col gap-1"}>
 					{byTime(layers.inserts).map((i) => {
 						const url = cutout.files[i.file];
