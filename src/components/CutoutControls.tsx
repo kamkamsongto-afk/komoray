@@ -183,8 +183,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	const openInsert = layers.inserts.find((i) => i.id === open && tab === "inserts");
 	const byTime = <T extends { start: number }>(list: T[]) => [...list].sort((a, b) => a.start - b.start);
 
-	const row = (label: React.ReactNode, control: React.ReactNode) => (
-		<label className="flex items-center gap-2 text-xs text-foreground/70">
+	const row = (label: React.ReactNode, control: React.ReactNode, middle?: () => void) => (
+		// Double-click the name: back to the middle (coach 23 Nov), as in Layout and Frame Me.
+		<label onDoubleClick={middle} title={middle ? "Double-click the name: back to the middle" : undefined} className="flex items-center gap-2 text-xs text-foreground/70">
 			<span className="w-16 shrink-0">{label}</span>
 			{control}
 		</label>
@@ -645,8 +646,8 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 										{i.seeThrough ? "Put it in front of me" : "Hide me"}
 									</label>
 									{!i.hidden && !i.seeThrough && row("Your size", range(i.speakerScale, INSERT.scale.min, INSERT.scale.max, 0.05, `${Math.round(i.speakerScale * 100)}%`, (speakerScale) => updateInsert(i.id, { speakerScale })))}
-									{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, INSERT.stand.min, INSERT.stand.max, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })))}
-									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, INSERT.lift.min, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })))}
+									{!i.hidden && !i.seeThrough && row("You stand", range(i.speakerX, INSERT.stand.min, INSERT.stand.max, 0.01, i.speakerX < 0.4 ? "Left" : i.speakerX > 0.6 ? "Right" : "Middle", (speakerX) => updateInsert(i.id, { speakerX })), () => updateInsert(i.id, { speakerX: 0.5 }))}
+									{!i.hidden && !i.seeThrough && row("You rise", range(i.speakerLift ?? 0, INSERT.lift.min, INSERT.lift.max, 0.01, `${Math.round((i.speakerLift ?? 0) * 100)}%`, (speakerLift) => updateInsert(i.id, { speakerLift })), () => updateInsert(i.id, { speakerLift: 0 }))}
 									{!i.hidden && !i.seeThrough && row("Soft edges", range(i.soft ?? INSERT.edgeFade, 0, INSERT.soft.max, 0.01, `${Math.round((i.soft ?? INSERT.edgeFade) * 100)}%`, (soft) => updateInsert(i.id, { soft })))}
 									{!i.hidden && !i.seeThrough && <span className="text-xs text-foreground/60">Or pause the video and drag yourself on it.</span>}
 							</>
@@ -664,9 +665,9 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 								/>
 							)}
 							{row("Size", range(i.picScale ?? 1, INSERT.picture.scale.min, INSERT.picture.scale.max, 0.05, `${Math.round((i.picScale ?? 1) * 100)}%`, (picScale) => updateInsert(i.id, { picScale })))}
-							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })))}
-							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })))}
-							{row("Rotate", range(i.picRotate ?? 0, -INSERT.picture.rotate, INSERT.picture.rotate, 1, `${i.picRotate ?? 0}°`, (picRotate) => updateInsert(i.id, { picRotate })))}
+							{row("Left / right", range(i.picX ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picX ?? 0) * 100)}%`, (picX) => updateInsert(i.id, { picX })), () => updateInsert(i.id, { picX: 0 }))}
+							{row("Up / down", range(i.picY ?? 0, -INSERT.picture.move, INSERT.picture.move, 0.01, `${Math.round((i.picY ?? 0) * 100)}%`, (picY) => updateInsert(i.id, { picY })), () => updateInsert(i.id, { picY: 0 }))}
+							{row("Rotate", range(i.picRotate ?? 0, -INSERT.picture.rotate, INSERT.picture.rotate, 1, `${i.picRotate ?? 0}°`, (picRotate) => updateInsert(i.id, { picRotate })), () => updateInsert(i.id, { picRotate: 0 }))}
 								{/* Not in a <label>: Mute has its own. */}
 								{i.kind === "video" && <div className="flex items-center gap-2 text-xs text-foreground/70"><span className="w-16 shrink-0">Sound</span><ClipSound sound={i} onChange={(patch) => updateInsert(i.id, patch)} /></div>}
 								{i.kind === "video" && <ClipTrim id={i.id} file={i.file} start={i.start} end={i.end} clipFrom={i.clipFrom} total={total} onChange={(patch) => updateInsert(i.id, patch)} />}
