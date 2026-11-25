@@ -6,6 +6,8 @@ import { mediaUrl } from "@/lib/proxy";
 import { copyObject, deleteObject, exists, getJson, putIfAbsent, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { projectFileKey } from "@/lib/project-files";
+import { CUTOUT_WRITES } from "@/lib/upload-name";
+const OWN_NAME = "This video's file has a name Komoray uses for what it makes. Please rename the file on your computer and upload it again.";
 
 // Cut the speaker out of the background for some windows of a video (lib/cutout.ts).
 //   POST { key, windows: [[start, end], ...], tier }   only people with Cutout on, see /admin
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
 	const key = await readKey(body.key);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const tier: CutoutTier = isTier(body.tier) ? body.tier : "best";
+	if (CUTOUT_WRITES.test(key.split("/")[2])) return Response.json({ error: OWN_NAME }, { status: 409 });
 
 	// Checked here, not just by hiding the button: Best is paid GPU time.
 	const { user } = await currentUser();

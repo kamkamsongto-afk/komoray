@@ -8,5 +8,9 @@ export function uploadName(filename: string, contentType: string) {
 	return `src-${/\.(mp4|mov)$/i.test(safe) ? safe : `${safe}${contentType === "video/quicktime" ? ".mov" : ".mp4"}`}`;
 }
 
+// An upload from before 25 Nov may still carry a name Cutout writes its own files under: cutting it out would write over
+// the video.
+export const CUTOUT_WRITES = /^(proxy-(cutout|fast|balanced|slow)|matte(-(fast|balanced|slow))?)\.mp4$/;
+
 // The file name to show for a stored key: without the "src-" uploadName put in front.
 export const shownName = (key: string) => (key.split("/").pop() ?? key).replace(/^src-/, "");
