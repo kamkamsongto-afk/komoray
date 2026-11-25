@@ -267,9 +267,10 @@ const web = {
 };
 
 // Both sides' text without what only changes how it is drawn: letter case (the Big look) and where Two lines breaks.
-// Times as the final video writes them (hundredths of a second), then lines too short to exist are left out of both.
+// Times as the final video writes them (hundredths of a second). A line a hundredth long is at most one frame and
+// comes from rounding: left out of both sides.
 const cs = (t) => Math.round(t * 100) / 100;
-const plain = (lines, look) => lines.map((l) => ({ from: cs(l.from), to: cs(l.to), text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() })).filter((l) => l.to - l.from > 0.005);
+const plain = (lines, look) => lines.map((l) => ({ from: cs(l.from), to: cs(l.to), text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() })).filter((l) => l.to - l.from > 0.015);
 
 const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06, bounce: 0 };
 let failed = 0;
