@@ -10,6 +10,7 @@ import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
+import { SubtitlesCard, type SubtitlesHere } from "./SubtitlesCard";
 import { PICKED, TabGroup, ToolGroup } from "./ToolGroup";
 import { addToLibrary, clipLength, type LibraryItem } from "@/lib/media-library";
 import { FilePicker, PickedFile, useLibrary } from "./FilePicker";
@@ -26,6 +27,7 @@ type Props = {
 	videoKey?: string; // the video, for uploading a banner of your own next to it
 	onUseFile?: (item: LibraryItem) => void; // a picture or clip uploaded before (Import's list): a banner again
 	onReveal?: (id: string, start: number) => void; // show it: the blue line to its start, its strip picked on the timeline
+	subtitles?: SubtitlesHere; // the subtitles' height while a banner shows (SubtitlesCard)
 };
 
 // Two tabs (coach 23 Nov): Text (any words: Call to action, a price, a title; old Price and Follow banners show here too) and
@@ -50,7 +52,7 @@ const BANNER_ANIM_BUTTONS: Record<BannerAnim, { name: string; note: string }> = 
 
 // The editor's Banners box: add a price tag, a call to action or "follow me" at the spot the
 // preview is at, then change its words, place and when it shows.
-export function BannerControls({ banners, onChange, now, total, brand, focus, videoKey, onUseFile, onReveal }: Props) {
+export function BannerControls({ banners, onChange, now, total, brand, focus, videoKey, onUseFile, onReveal, subtitles }: Props) {
 	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
 	const [open, setOpen] = useState<string | null>(focus);
 	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "cta"));
@@ -398,6 +400,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, vi
 				{!b.noBox && range(b, "Corners", b.radius ?? 0, BANNER_RADIUS.min, BANNER_RADIUS.max, 2, String(b.radius ?? 0), (n) => update(b.id, { radius: n }))}
 				{!b.noBox && range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
 			</ToolGroup>
+			{subtitles && <SubtitlesCard item={b} subtitles={subtitles} tone={1} />}
 		</div>
 	);
 
@@ -419,6 +422,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, vi
 				{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}
 				{range(b, "Rotate", b.rotate ?? 0, BANNER_ROTATE.min, BANNER_ROTATE.max, 1, `${Math.round(b.rotate ?? 0)}°`, (n) => update(b.id, { rotate: n || undefined }))}
 			</ToolGroup>
+			{subtitles && <SubtitlesCard item={b} subtitles={subtitles} tone={1} />}
 		</div>
 	);
 

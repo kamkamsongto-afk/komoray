@@ -13,6 +13,7 @@ import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
+import { SubtitlesCard, type SubtitlesHere } from "./SubtitlesCard";
 import { FontField } from "./FontField";
 import { fontChoice, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { newClipSound } from "@/lib/clip-sound";
@@ -37,6 +38,7 @@ type Props = {
 	ruler?: Clock; // the timeline ruler's clock, for the times shown here
 	onPickImported?: (item: LibraryItem) => void; // a file already in Import, into Pic/Clip without uploading it again (coach 15 Nov)
 	onUploading?: (busy: boolean, added?: boolean) => void; // the Import button's dot (ScriptView), as the Import box's uploads
+	subtitles?: SubtitlesHere; // the subtitles' height while a text or picture shows (SubtitlesCard)
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -59,7 +61,7 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
-export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal, onPickImported, onUploading, ruler = FINAL_CLOCK }: Props) {
+export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal, onPickImported, onUploading, ruler = FINAL_CLOCK, subtitles }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
@@ -568,6 +570,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							{row("Darken", range(t.dim ?? 0, 0, BACKDROP.dim.max, 0.05, `${Math.round((t.dim ?? 0) * 100)}%`, (dim) => updateText(t.id, { dim: dim || undefined })))}
 							{row("Blur", range(t.blur ?? 0, 0, BACKDROP.blur.max, 1, `${t.blur ?? 0}px`, (blur) => updateText(t.id, { blur: blur || undefined })))}
 						</ToolGroup>
+						{subtitles && <SubtitlesCard item={t} subtitles={subtitles} tone={1} />}
 				</div>
 			))}
 
@@ -690,6 +693,7 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 							</>
 						)}
 						</TabGroup>
+						{subtitles && <SubtitlesCard item={i} subtitles={subtitles} tone={2} />}
 						</div>
 					))}
 
