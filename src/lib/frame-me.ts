@@ -76,7 +76,7 @@ export const FRAME = {
 	// shape with the background showing under the waist, so the shape works as a crop. Where the picture doesn't reach, the
 	// background shows (frame_filters in render.py has no limit of its own).
 	meRange: { min: -0.5, max: 1.5 },
-	back: { size: { min: 0.1, max: 3 }, move: 1, rotate: 180 }, // the background picture or clip: backSize, backX / backY, backRotate
+	back: { size: { min: 0.02, max: 3 }, move: 1, rotate: 180 }, // the background picture or clip: backSize, backX / backY, backRotate
 };
 
 export const BORDER_COLORS = ["#FFFFFF", "#000000", "#FFE600", "#FF3B30", "#FF2D95", "#34C759", "#0A84FF"];
@@ -125,6 +125,20 @@ export function frameBackPlace(f: FrameMe, ratio: number, screen: number) {
 }
 // The backSize that shows the whole picture or clip (Whole picture), rounded down so no edge is cut.
 export const wholeBackSize = (ratio: number, screen: number) => Math.max(FRAME.back.size.min, Math.floor(Math.min(ratio / screen, screen / ratio) * 1000) / 1000);
+
+// The Size slider counts from the whole picture (coach 26 Nov): 1 = all of it, just fitting the screen. Counted from
+// filling the screen, shrinking a wide picture kept its sides off screen for most of the slider and looked cropped.
+// Saved and drawn as before (backSize 1 = filling the screen), so only the slider counts this way. A frame never sized
+// shows Fill, and the first touch of the slider takes the whole picture to that size.
+export const backSizeFor = (shown: number, ratio: number, screen: number) =>
+	Math.round(Math.min(FRAME.back.size.max, Math.max(FRAME.back.size.min, shown * wholeBackSize(ratio, screen))) * 1000) / 1000;
+// The slider's ends, and where this frame stands on it. max: well past filling the screen, as far as can be saved.
+export function backSizeSlider(backSize: number | undefined, ratio: number, screen: number) {
+	const whole = wholeBackSize(ratio, screen);
+	const max = Math.round(Math.min(FRAME.back.size.max / whole, Math.max(2, 1.5 / whole)) * 100) / 100;
+	const shown = backSize === undefined ? 1 : Math.round((backSize / whole) * 100) / 100;
+	return { min: 0.1, max: Math.max(max, shown), value: shown, fill: backSize === undefined };
+}
 
 // The window the background picture or clip is looked through at final-video second t. Same as frame_filters in render.py.
 export const frameBackWindow = (f: FrameMe, t: number) => (f.back === "file" && f.file && f.backMotion ? bgWindow(f.backMotion, f.backAmount, f.backSpeed, t, f.start, f.end) : bgWindow(undefined, undefined, undefined, t, f.start, f.end));

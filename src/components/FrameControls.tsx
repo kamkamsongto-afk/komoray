@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Copy, Image as ImageIcon, Trash2, User } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BACK_COLORS, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameBackMoved, frameName, FRAME_SHAPES, type FrameShape, NEW_FRAME, shapePolygon, wholeBackSize } from "@/lib/frame-me";
+import { BACK_COLORS, backSizeFor, backSizeSlider, BORDER_COLORS, FRAME, type FrameBack, type FrameMe, frameBackMoved, frameName, FRAME_SHAPES, type FrameShape, NEW_FRAME, shapePolygon, wholeBackSize } from "@/lib/frame-me";
 import { type Format, outputSize } from "@/lib/subtitle-style";
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { addToLibrary, LIBRARY_ACCEPT, type LibraryItem } from "@/lib/media-library";
@@ -325,7 +325,8 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 									)}
 									</div>
 									{f.back === "file" && f.file && (
-										// The picture or clip's size and place (frameBackPlace): it fills the screen until changed (coach 25 Nov).
+										// The picture or clip's size and place (frameBackPlace): it fills the screen until changed (coach 25 Nov); Size
+									// shrinks the whole picture, never a cropped one (coach 26 Nov).
 										<>
 											<div className="flex gap-1.5">
 												<button onClick={() => update(f.id, { backSize: wholeBackSize(ratios[f.file!], screen.width / screen.height), backX: 0, backY: 0, backRotate: undefined })} disabled={!ratios[f.file]} title="Make it small enough to see all of it" className={`${PLAIN_BUTTON} disabled:opacity-40`}>
@@ -335,7 +336,18 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 													Fill screen
 												</button>
 											</div>
-											{row("Size", range(f.backSize ?? 1, FRAME.back.size.min, FRAME.back.size.max, 0.01, percent(f.backSize ?? 1), (backSize) => update(f.id, { backSize })), () => update(f.id, { backSize: 1 }))}
+											{(() => {
+												// Of the whole picture (backSizeSlider). Until its shape is known the slider waits.
+												const ratio = ratios[f.file!];
+												if (!ratio) return row("Size", <span className="flex-1 text-foreground/50">Loading…</span>);
+												const shape = screen.width / screen.height;
+												const size = backSizeSlider(f.backSize, ratio, shape);
+												return row(
+													"Size",
+													range(size.value, size.min, size.max, 0.01, size.fill ? "Fill" : percent(size.value), (v) => update(f.id, { backSize: backSizeFor(v, ratio, shape) })),
+													() => update(f.id, { backSize: backSizeFor(1, ratio, shape) }),
+												);
+											})()}
 											{row("Left / right", range(f.backX ?? 0, -FRAME.back.move, FRAME.back.move, 0.005, percent(f.backX ?? 0), (backX) => update(f.id, { backX })), () => update(f.id, { backX: 0 }))}
 											{row("Up / down", range(f.backY ?? 0, -FRAME.back.move, FRAME.back.move, 0.005, percent(f.backY ?? 0), (backY) => update(f.id, { backY })), () => update(f.id, { backY: 0 }))}
 											{row("Rotate", range(f.backRotate ?? 0, -FRAME.back.rotate, FRAME.back.rotate, 1, `${f.backRotate ?? 0}°`, (backRotate) => update(f.id, { backRotate: backRotate || undefined })), () => update(f.id, { backRotate: undefined }))}
