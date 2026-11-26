@@ -1217,8 +1217,10 @@ lineHeight: `${row.size * size}px`,
 					</span>
 				)}
 				{busy ? (
-					<span className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center">
+					<span className="pointer-events-none absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2">
 						<span className="h-10 w-10 animate-spin rounded-full border-4 border-white/30 border-t-white" />
+						{/* Said in words: a still picture with a spinner alone looked broken (coach 26 Nov). */}
+						<span className="rounded-full bg-black/70 px-3 py-1 text-xs text-white">Getting the video ready…</span>
 					</span>
 				) : (
 					!playing &&
