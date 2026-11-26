@@ -15,6 +15,12 @@ export const WORD_SECONDS_PER_LETTER = 0.05;
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
 
+// Nothing is cut between two numbers said close together (coach 24 Nov: "59" | cut | "0", which was 590). Speech-to-text
+// gives a number in pieces, and trimStretchedWords shortens digits said slowly, which looks like a pause. A longer pause
+// than this is two numbers, and is cut as usual. Same reach as NUMBER_GAP in thai-words.ts.
+const NUMBER_PAUSE = 1;
+const insideNumber = (before = "", after = "", pause: number) => pause <= NUMBER_PAUSE && /\d[,.]?$/.test(before) && /^\d/.test(after);
+
 export function trimStretchedWords(words: Word[]): Word[] {
 	return words.map((w) => {
 		const letters = w.text.replace(/[^\p{L}\p{N}]/gu, "").length || 1;
@@ -38,13 +44,13 @@ export function findSilences({ duration, words }: Transcript, pace: Pace = "natu
 	const { minSilence, padding } = PACES[pace];
 
 	// Treat the start and end of the clip as "words" so leading/trailing silence is caught too.
-	const edges = [{ end: 0 }, ...words, { start: duration }] as { start?: number; end?: number }[];
+	const edges = [{ end: 0 }, ...words, { start: duration }] as { text?: string; start?: number; end?: number }[];
 	const cuts: Cut[] = [];
 
 	for (let i = 0; i < edges.length - 1; i++) {
 		const gapStart = edges[i].end!;
 		const gapEnd = edges[i + 1].start!;
-		if (gapEnd - gapStart <= minSilence) continue;
+		if (gapEnd - gapStart <= minSilence || insideNumber(edges[i].text, edges[i + 1].text, gapEnd - gapStart)) continue;
 
 		// No padding at the very start/end of the clip: there is no word there to protect.
 		const start = i === 0 ? 0 : gapStart + padding;
