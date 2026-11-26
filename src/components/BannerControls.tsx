@@ -2,10 +2,10 @@
 
 import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, RefreshCw, Star, Trash2, Type, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, canBeBanner, cleanBannerText, keepBannerFile } from "@/lib/banners";
+import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, type Banner, type BannerAnim, type BannerKind, bannerInk, canBeBanner, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import { fontChoice, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { FontField } from "./FontField";
-import { EDGE_COLORS, type Format } from "@/lib/subtitle-style";
+import { EDGE_COLORS } from "@/lib/subtitle-style";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
@@ -23,7 +23,6 @@ type Props = {
 	total: number; // length of the final video, seconds
 	brand: string; // the Brand Kit's colour: a banner's background until one is picked
 	focus: string | null; // the banner just clicked on the timeline: open it here
-	format: Format; // the video's shape: where a banner sits before it is dragged
 	videoKey?: string; // the video, for uploading a banner of your own next to it
 	onUseFile?: (item: LibraryItem) => void; // a picture or clip uploaded before (Import's list): a banner again
 	onReveal?: (id: string, start: number) => void; // show it: the blue line to its start, its strip picked on the timeline
@@ -38,9 +37,20 @@ const FILE_TYPES = "image/jpeg,image/png,image/webp,image/gif,video/mp4";
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
+// The Transition buttons: short names, the whole story in the tooltip.
+const BANNER_ANIM_BUTTONS: Record<BannerAnim, { name: string; note: string }> = {
+	fade: { name: "Plain", note: "No movement: the switches below fade it in and out" },
+	pop: { name: "Pop", note: "Pops up to its size" },
+	bounce: { name: "Bounce", note: "Bounces up to its size" },
+	slideUp: { name: "Slide up", note: "Slides up into place" },
+	slideSide: { name: "Side", note: "Slides in from the side" },
+	pulse: { name: "Pulse", note: "Beats while it shows" },
+	rollUp: { name: "Roll up", note: "Travels up the whole screen, like film credits" },
+};
+
 // The editor's Banners box: add a price tag, a call to action or "follow me" at the spot the
 // preview is at, then change its words, place and when it shows.
-export function BannerControls({ banners, onChange, now, total, brand, focus, format, videoKey, onUseFile, onReveal }: Props) {
+export function BannerControls({ banners, onChange, now, total, brand, focus, videoKey, onUseFile, onReveal }: Props) {
 	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
 	const [open, setOpen] = useState<string | null>(focus);
 	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "cta"));
@@ -120,16 +130,6 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		};
 	});
 
-	// Where each banner was dragged to, so picking Top and then "Where you dragged it" brings it back (coach, 6 Nov).
-	const [dragged, setDragged] = useState<Record<string, { x: number; y: number }>>({});
-	const moved = banners.filter((b) => b.x !== undefined && b.y !== undefined && (dragged[b.id]?.x !== b.x || dragged[b.id]?.y !== b.y));
-	if (moved.length) setDragged({ ...dragged, ...Object.fromEntries(moved.map((b) => [b.id, { x: b.x as number, y: b.y as number }])) });
-	function placeBanner(b: Banner, value: string) {
-		if (value !== "dragged") return update(b.id, { place: value as BannerPlace, x: undefined, y: undefined });
-		// Never dragged yet: start from the middle of where it sits now, ready to be dragged on the video.
-		const spot = dragged[b.id] ?? { x: 0.5, y: Math.round((BANNER_TOP[format][b.place] + 0.04) * 1000) / 1000 };
-		update(b.id, spot);
-	}
 	// The saved banner waiting for "yes, delete it", so a slip of the mouse never loses one.
 	const [forgetting, setForgetting] = useState<string | null>(null);
 
@@ -286,15 +286,40 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		);
 	};
 
-	const animPick = (b: Banner) => (
-		<select value={b.anim ?? "fade"} onChange={(e) => update(b.id, { anim: e.target.value as BannerAnim })} aria-label="How it arrives" className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-1 py-0.5 text-xs">
-			{(Object.keys(BANNER_ANIMS) as BannerAnim[]).filter((a) => b.kind !== "file" || !BANNER_ANIMS[a].roll).map((a) => (
-				<option key={a} value={a}>
-					{BANNER_ANIMS[a].name}
-				</option>
-			))}
-		</select>
-	);
+	// How it arrives, as buttons with the fade switches under them (coach 26 Nov: a Transition card, like Layout's).
+	// "fade" is the plain arrival: what it does is the switches, so it is not called Fade in twice.
+	const transition = (b: Banner) => {
+		const anim = b.anim ?? "fade";
+		const now = BANNER_ANIMS[anim];
+		return (
+			<ToolGroup tone={2} title="Transition">
+				<div role="radiogroup" aria-label="How it arrives" className="grid grid-cols-3 gap-1 rounded-lg bg-foreground/5 p-0.5">
+					{(Object.keys(BANNER_ANIMS) as BannerAnim[])
+						.filter((a) => b.kind !== "file" || !BANNER_ANIMS[a].roll)
+						.map((a) => (
+							<button
+								key={a}
+								role="radio"
+								aria-checked={anim === a}
+								onClick={() => update(b.id, { anim: a })}
+								title={BANNER_ANIM_BUTTONS[a].note}
+								className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap ${anim === a ? PICKED : "text-foreground/70 hover:text-foreground"}`}
+							>
+								{BANNER_ANIM_BUTTONS[a].name}
+							</button>
+						))}
+				</div>
+				{now.roll ? (
+					<span className="text-[11px] text-foreground/60">Travels from below the screen to above it for as long as it shows. Make it longer to go slower. Rotate and fades don&apos;t apply.</span>
+				) : (
+					<>
+						<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
+						{!now.fadeIn && <span className="text-[11px] text-foreground/60">{BANNER_ANIM_BUTTONS[anim].name} arrives its own way, so Fade in doesn&apos;t change it.</span>}
+					</>
+				)}
+			</ToolGroup>
+		);
+	};
 
 	// A text banner's settings, in cards (coach 23 Nov): its words, how it shows, its font, its letters, its box.
 	const textCards = (b: Banner) => (
@@ -314,23 +339,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 				)}
 			</ToolGroup>
 
-			<ToolGroup tone={2} title="Show">
-				<div className="flex items-center gap-2">
-					{animPick(b)}
-					<select value={b.x !== undefined ? "dragged" : b.place} onChange={(e) => placeBanner(b, e.target.value)} aria-label="Where on the video" className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-1 py-0.5 text-xs">
-						<option value="dragged">{dragged[b.id] ? "Position" : "Anywhere (drag it on the video)"}</option>
-						<option value="top">Top</option>
-						<option value="middle">Middle</option>
-						<option value="bottom">Bottom</option>
-					</select>
-				</div>
-				{BANNER_ANIMS[b.anim ?? "fade"].roll ? (
-					<span className="text-[11px] text-foreground/60">Travels from below the screen to above it for as long as it shows. Make it longer to go slower. Rotate and fades don&apos;t apply.</span>
-				) : (
-					<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
-				)}
-				{range(b, "Rotate", b.rotate ?? 0, BANNER_ROTATE.min, BANNER_ROTATE.max, 1, `${Math.round(b.rotate ?? 0)}°`, (n) => update(b.id, { rotate: n || undefined }))}
-			</ToolGroup>
+			{transition(b)}
 
 			<ToolGroup tone={3} title="Font">
 				<FontField
@@ -349,6 +358,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 				{swatches(b, "Text", "ink", b.ink ?? bannerInk(b.color ?? brand))}
 				{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 				{range(b, "Line gap", b.lineGap ?? 0, BANNER_LINE_GAP.min, BANNER_LINE_GAP.max, 2, String(b.lineGap ?? 0), (n) => update(b.id, { lineGap: n }))}
+				{!BANNER_ANIMS[b.anim ?? "fade"].roll && range(b, "Rotate", b.rotate ?? 0, BANNER_ROTATE.min, BANNER_ROTATE.max, 1, `${Math.round(b.rotate ?? 0)}°`, (n) => update(b.id, { rotate: n || undefined }))}
 				<div className="flex items-center gap-2 text-xs text-foreground/70">
 					<span className="w-16 shrink-0">Align</span>
 					{(
@@ -403,10 +413,7 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 				{b.media === "video" && <ClipSound sound={b} onChange={(patch) => update(b.id, patch)} />}
 				{b.media === "video" && b.file && <ClipTrim id={b.id} file={b.file} start={b.start} end={b.end} clipFrom={b.clipFrom} total={total} onChange={(patch) => update(b.id, patch)} />}
 			</ToolGroup>
-			<ToolGroup tone={2} title="Show">
-				<div className="flex items-center gap-2">{animPick(b)}</div>
-				<FadeSwitches item={b} onChange={(patch) => update(b.id, patch)} />
-			</ToolGroup>
+			{transition(b)}
 			<ToolGroup tone={3} title="Size">
 				{range(b, "Size", b.scale ?? 1, BANNER_SCALE.min, BANNER_SCALE.max, 0.05, `${Math.round((b.scale ?? 1) * 100)}%`, (n) => update(b.id, { scale: n }))}
 				{range(b, "Opacity", b.opacity ?? 1, BANNER_OPACITY.min, BANNER_OPACITY.max, 0.05, `${Math.round((b.opacity ?? 1) * 100)}%`, (n) => update(b.id, { opacity: n }))}

@@ -1608,7 +1608,6 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							total={totalFrames(segments) / FPS}
 							brand={subtitle.color}
 							focus={focusBanner}
-							format={subtitle.format}
 							onUseFile={putAsBanner}
 							onReveal={reveal}
 						/>

@@ -1238,20 +1238,28 @@ def layout_joins(l: dict, layouts: list[dict]) -> tuple[bool, bool]:
     )
 
 
+def layout_edges(l: dict) -> tuple[str, str]:
+    """How its start and its end come and go: its Transition, or a fade where that end's switch is on (inFade, outFade).
+    Same as layoutEdges in layout.ts."""
+    enter = l.get("enter", "slide")
+    return ("fade" if l.get("inFade") else enter, "fade" if l.get("outFade") else enter)
+
+
 def layout_ease_expr(l: dict, layouts: list[dict], t: str = "t") -> str:
     """How far it is split at the frame's time t, as an FFmpeg expression: 0 = all speaker, 1 = split. Only Slide moves,
     eased in and out, and not at an edge another layout covers (layout_joins); one shorter than its slides slides over
     its time shared between them. layouts: all of them, l among them. t: the expression for the time (`perspective` has
     no t, only a frame count). Same as layoutProgress."""
-    if l.get("enter", "slide") != "slide":
-        return "1"
+    first, last = layout_edges(l)
     a, b = float(l["start"]), float(l["end"])
     join_start, join_end = layout_joins(l, layouts)
-    slides = (0 if join_start else 1) + (0 if join_end else 1)
+    # An end that doesn't slide, or that another layout covers, stays put.
+    hold_start, hold_end = join_start or first != "slide", join_end or last != "slide"
+    slides = (0 if hold_start else 1) + (0 if hold_end else 1)
     if not slides:
         return "1"
     d = min(LAYOUT_SLIDE, (b - a) / slides)
-    sides = ([] if join_start else [f"({t}-{a:.3f})/{d:.4f}"]) + ([] if join_end else [f"({b:.3f}-{t})/{d:.4f}"])
+    sides = ([] if hold_start else [f"({t}-{a:.3f})/{d:.4f}"]) + ([] if hold_end else [f"({b:.3f}-{t})/{d:.4f}"])
     u = f"clip({sides[0] if len(sides) == 1 else f'min({sides[0]},{sides[1]})'},0,1)"
     return f"if(lt({u},0.5),4*pow({u},3),1-pow(2-2*{u},3)/2)"
 
@@ -1337,11 +1345,12 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
         y = f"{oy}+{sign * oh}*(1-({e}))" if stack else f"{oy}"
         parts.append(f"[lyv{j}][lyf{j}]overlay=x='{x}':y='{y}':eof_action=repeat[lyo{j}]")
         shown = f"[lyo{j}]"
-        if l.get("enter") == "fade":
-            # The split screen fades in and out over the picture under it, not at an edge another layout covers
-            # (layoutAlpha). Timestamps are the whole video's here.
+        first, last = layout_edges(l)
+        if "fade" in (first, last):
+            # The split screen fades in or out over the picture under it, at the ends set to fade and not at an edge
+            # another layout covers (layoutAlpha). Timestamps are the whole video's here.
             join_start, join_end = layout_joins(l, every or layouts)
-            fade = alpha_fades(a, b, min(LAYOUT_FADE, d / 2), (not join_start, not join_end))
+            fade = alpha_fades(a, b, min(LAYOUT_FADE, d / 2), (first == "fade" and not join_start, last == "fade" and not join_end))
             if fade:
                 parts.append(f"{shown}format=yuva420p,{fade.rstrip(',')}[lyz{j}]")
                 shown = f"[lyz{j}]"
@@ -1351,8 +1360,8 @@ def layout_filters(parts: list[str], base: str, size: tuple[int, int], layouts: 
 
 
 def layout_flash_windows(layouts: list[dict]) -> list[float]:
-    """The edges of the Flash layouts, seconds of the final video: a white flash peaks at each one (layoutFlash)."""
-    return [float(l[k]) for l in layouts if l.get("enter") == "flash" for k in ("start", "end")]
+    """The layouts' flashing ends, seconds of the final video: a white flash peaks at each one (layoutFlash)."""
+    return [float(l[k]) for l in layouts for k, how in zip(("start", "end"), layout_edges(l)) if how == "flash"]
 
 
 def layout_flashes(parts: list[str], base: str, edges: list[float]) -> str:

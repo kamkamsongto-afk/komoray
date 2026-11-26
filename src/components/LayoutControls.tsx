@@ -13,6 +13,7 @@ import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { Switch } from "./FadeSwitches";
 import { MAIN_BUTTON, mainStyle, PICKED, PLAIN_BUTTON, TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
 
@@ -82,6 +83,14 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 		onReveal?.(l.id, l.start);
 	};
 	// A copy right after it, opened (coach, 14 Nov: the same in every box).
+	// Fade in / Fade out (coach 26 Nov): that end fades, whatever the Transition does at the other. Under "Fade" both are
+	// on; switching one off leaves the other end fading and this one cut. Both on over "Cut" is "Fade".
+	const setFade = (l: VideoLayout, end: "in" | "out", on: boolean) => {
+		const now = { in: l.enter === "fade" || Boolean(l.inFade), out: l.enter === "fade" || Boolean(l.outFade), [end]: on };
+		const plain = l.enter === "fade" || l.enter === "cut";
+		if (plain && now.in && now.out) return update(l.id, { enter: "fade", inFade: undefined, outFade: undefined });
+		update(l.id, { ...(plain && { enter: "cut" as const }), inFade: now.in || undefined, outFade: now.out || undefined });
+	};
 	const duplicate = (l: VideoLayout) => {
 		const copy = duplicateOf(l, total);
 		onChange([...layouts, copy]);
@@ -336,7 +345,7 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 										key={e.id}
 										role="radio"
 										aria-checked={l.enter === e.id}
-										onClick={() => update(l.id, { enter: e.id })}
+										onClick={() => update(l.id, e.id === "fade" ? { enter: e.id, inFade: undefined, outFade: undefined } : { enter: e.id })}
 										title={`${e.note}, at the start and the end`}
 										className={`rounded-md px-1.5 py-1 text-xs whitespace-nowrap ${l.enter === e.id ? PICKED : "text-foreground/70 hover:text-foreground"}`}
 									>
@@ -344,7 +353,11 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 									</button>
 								))}
 							</div>
-						</ToolGroup>
+							<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-foreground/70" title="On: that end fades instead">
+									<Switch on={l.enter === "fade" || Boolean(l.inFade)} label="Fade in" onChange={(on) => setFade(l, "in", on)} />
+									<Switch on={l.enter === "fade" || Boolean(l.outFade)} label="Fade out" onChange={(on) => setFade(l, "out", on)} />
+								</div>
+							</ToolGroup>
 
 						{subtitles && (() => {
 							// Subtitles here (coach 20 Nov): top / bottom put them over a face or over what is shown. Their own height for
