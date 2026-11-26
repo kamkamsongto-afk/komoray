@@ -28,6 +28,8 @@ const AUDIO_RATE = 24000; // samples per second in proxy-audio.pcm (PROXY_AUDIO_
 const FADE_SAMPLES = 72; // 3 ms fade at every cut, so cuts don't click
 const AUDIO_AHEAD = 2.5; // seconds of sound queued ahead
 const AUDIO_SLICE = 2; // seconds per queued piece of sound
+const AUDIO_PRIME = 3; // seconds of sound loaded before the clock may start: the first piece and a little more
+const AUDIO_PREFETCH = 15; // seconds of sound asked for beyond what is queued, so reading never waits for the network
 const FRAMES_AHEAD = 30; // decoded frames kept ready (~1 s)
 const DECODE_QUEUE = 6;
 const START_FRAMES = 4; // frames ready before starting (or restarting after running dry)
@@ -68,6 +70,8 @@ export class StudioEngine {
 	// Audio optimization: the sound as recorded and the optimized one play together, each through its own
 	// volume, so the slider is heard right away instead of after the sound already queued.
 	private clean: RangeSource | null = null;
+	private cleanComing = false; // the optimized sound is being fetched (setCleanAudio)
+	private soundUntil = 0; // final-video time whose sound has really been handed to the speakers
 	private recorded: GainNode | null = null;
 	private optimized: GainNode | null = null;
 	private blend = 0; // 0 = as recorded .. 1 = fully optimized
@@ -98,12 +102,24 @@ export class StudioEngine {
 
 	// The optimized sound, once Modal has made it: the preview plays before it now (coach 16 Nov, the wave and the speed
 	// waited for it). The sound already queued has none of it, so the clock starts again from here, as setRate does.
+	// Its first piece is loaded before it takes over: switched at once, the preview played on in silence until it arrived
+	// (coach 26 Nov).
 	setCleanAudio(url: string) {
-		if (this.clean || this.destroyed) return;
-		this.clean = new RangeSource(url, (info) => this.events.log("fetch", { kind: "clean", ...info }));
-		this.stopClock();
-		this.applySound();
-		this.emitState();
+		if (this.clean || this.cleanComing || this.destroyed) return;
+		this.cleanComing = true;
+		const source = new RangeSource(url, (info) => this.events.log("fetch", { kind: "clean", ...info }));
+		const at = Math.round(this.toSource(this.running ? this.now() : this.position) * AUDIO_RATE);
+		source
+			.read(at * 2, AUDIO_RATE * 2 * AUDIO_PRIME)
+			.then(() => {
+				if (this.destroyed) return;
+				this.stopClock();
+				this.clean = source;
+				this.applySound();
+				this.emitState();
+			})
+			.catch((err: Error) => this.events.log("cleanFailed", { message: err.message })) // stays on the sound as recorded
+			.finally(() => (this.cleanComing = false));
 	}
 
 	// Same mix as polish_sound in render.py.
@@ -363,7 +379,8 @@ export class StudioEngine {
 
 	// ---- sound ----
 
-	// Load the first second of sound at `out` before the clock may start, else its start is skipped.
+	// Load the sound at `out`, as recorded and optimized, before the clock may start: the picture ran on in silence while
+	// the optimized sound was still arriving (coach 26 Nov: it looked broken).
 	private audioPrimed = false;
 	private primeAudio(out: number) {
 		this.audioPrimed = false;
@@ -374,10 +391,21 @@ export class StudioEngine {
 			return;
 		}
 		const a0 = Math.round((p.start + out - p.out) * AUDIO_RATE);
-		this.audio
-			.read(a0 * 2, AUDIO_RATE * 2)
+		Promise.all([this.audio.read(a0 * 2, AUDIO_RATE * 2 * AUDIO_PRIME), this.readClean(a0 * 2, AUDIO_RATE * 2 * AUDIO_PRIME)])
 			.then(() => generation === this.generation && (this.audioPrimed = true))
 			.catch((err: Error) => generation === this.generation && this.events.onError(err));
+	}
+
+	// The optimized sound is an extra: if it can't be read, play on with the sound as recorded.
+	private readClean(offset: number, length: number): Promise<Uint8Array | null> {
+		return (
+			this.clean?.read(offset, length).catch((err: Error) => {
+				this.events.log("cleanFailed", { message: err.message });
+				this.clean = null;
+				this.applySound();
+				return null;
+			}) ?? Promise.resolve(null)
+		);
 	}
 
 	private playSlice(ctx: AudioContext, raw: Uint8Array, into: AudioNode, { out, sliceEnd, pieceStart, pieceEnd }: { out: number; sliceEnd: number; pieceStart: number; pieceEnd: number }) {
@@ -423,18 +451,15 @@ export class StudioEngine {
 				const a0 = Math.round((p.start + out - p.out) * AUDIO_RATE);
 				const a1 = Math.round((p.start + sliceEnd - p.out) * AUDIO_RATE);
 				this.queuedUntil = sliceEnd;
-				if (a1 <= a0) continue;
-				const [raw, cleaned] = await Promise.all([
-					this.audio.read(a0 * 2, (a1 - a0) * 2),
-					// The optimized sound is an extra: if it can't be read, play on with the sound as recorded.
-					this.clean?.read(a0 * 2, (a1 - a0) * 2).catch((err: Error) => {
-						this.events.log("cleanFailed", { message: err.message });
-						this.clean = null;
-						this.applySound();
-						return null;
-					}),
-				]);
+				if (a1 <= a0) {
+					this.soundUntil = sliceEnd;
+					continue;
+				}
+				this.audio.prefetch(a1 * 2, AUDIO_RATE * 2 * AUDIO_PREFETCH);
+				this.clean?.prefetch(a1 * 2, AUDIO_RATE * 2 * AUDIO_PREFETCH);
+				const [raw, cleaned] = await Promise.all([this.audio.read(a0 * 2, (a1 - a0) * 2), this.readClean(a0 * 2, (a1 - a0) * 2)]);
 				if (generation !== this.generation || !this.running) break;
+				this.soundUntil = sliceEnd;
 				const place = { out, sliceEnd, pieceStart: p.out, pieceEnd };
 				this.playSlice(ctx, raw, this.recorded ?? ctx.destination, place);
 				if (cleaned && this.optimized) this.playSlice(ctx, cleaned, this.optimized, place);
@@ -484,6 +509,12 @@ export class StudioEngine {
 				this.stopClock();
 				this.events.log("end");
 				this.emitState();
+			} else if (this.queueing && out - this.soundUntil > 0.25) {
+				// The sound can't keep up: stop the clock and wait for it, as for the picture, never play on without it.
+				this.events.log("soundStall", { at: round(out) });
+				this.stopClock();
+				this.primeAudio(this.position);
+				this.emitState();
 			} else if (!this.ready.length && (this.feed || this.pending.length) && out - this.lastShownOut > 0.15 * this.rate) {
 				// The picture can't keep up (slow network): stop the clock and wait for it.
 				this.events.log("stall", { at: round(out), pending: this.pending.length, queue: this.decoder?.decodeQueueSize });
@@ -502,6 +533,7 @@ export class StudioEngine {
 		this.startCtx = this.ctx.currentTime + START_DELAY;
 		this.startOut = this.position;
 		this.queuedUntil = this.position;
+		this.soundUntil = this.position;
 		this.lastShownOut = this.position;
 		this.running = true;
 		this.events.log("start", { at: round(this.position), ready: this.ready.length });
