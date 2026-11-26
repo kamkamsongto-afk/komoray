@@ -1686,6 +1686,11 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
                 best, best_score = k, score
         return best
 
+    # A long number takes longer to say than a line may last ("38990" runs 2 s), so "บาท" after it began the next line
+    # (coach 26 Nov). Alone with its number it stays, as long as the line is wide enough. unitStays in timeline.ts.
+    def unit_stays(run: list[dict], w: dict) -> bool:
+        return len(run) == 1 and bool(re.search(r"\d[,.]?$", run[0]["text"])) and w["text"] in THAI_NO_START and letters_of(run + [w]) <= max_letters
+
     lines, current = [], []
     for w in placed:
         crosses_split = bool(current) and any(current[-1]["start"] < b <= w["start"] + 0.01 for b in (breaks or []))
@@ -1701,7 +1706,7 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
             if not carry or len(current) > 1:  # a lone such word just waits for the next
                 lines.append(current[:-1] if carry else current)
             current = [last] if carry else []
-        elif current and not fits(current + [w]):
+        elif current and not fits(current + [w]) and not (thai and unit_stays(current, w)):
             k = best_break(current, w) if thai else english_break(current, w)
             lines.append(current[:k])
             current = current[k:]
