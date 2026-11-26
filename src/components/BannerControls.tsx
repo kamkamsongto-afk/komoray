@@ -1,7 +1,7 @@
 "use client";
 
 import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, ImagePlus, Plus, RefreshCw, Star, Trash2, Type, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BANNER, BANNER_ANIMS, BANNER_FILE, BANNER_KINDS, BANNER_LINE_GAP, BANNER_OPACITY, BANNER_PADDING, BANNER_RADIUS, BANNER_ROTATE, BANNER_SCALE, BANNER_STROKE, BANNER_TOP, type Banner, type BannerAnim, type BannerKind, type BannerPlace, bannerInk, canBeBanner, cleanBannerText, keepBannerFile } from "@/lib/banners";
 import { fontChoice, ownValue, useMyFonts } from "@/lib/use-my-fonts";
 import { FontField } from "./FontField";
@@ -89,12 +89,17 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 		keepBannerFile(data.file, URL.createObjectURL(file));
 		reloadLibrary();
 		setPicking(null);
-		if (replaceId) return changeFile(replaceId, sent.item);
+		latest.current?.(sent.item, file.name, clip, replaceId);
+	}
+	// A file just uploaded: into the banner whose picture it replaces, or a new banner where the preview is.
+	function placeFile(item: LibraryItem, fileName: string, clip: number | null, replaceId?: string) {
+		if (replaceId) return changeFile(replaceId, item);
+		if (banners.length >= BANNER.maxBanners) return setFileNote(`That's the most banners one video can have. ${fileName} is in My files.`);
 		const start = round(Math.min(now(), Math.max(0, total - 1)));
 		// A clip shows for as long as it plays; a picture for a few seconds, as a word banner.
 		const seconds = Math.max(0.5, Math.min(clip ?? BANNER.seconds, total - start));
-		const name = cleanBannerText(file.name.replace(/\.[^.]+$/, "")) || BANNER_KINDS.file.text;
-		addBanner({ id: crypto.randomUUID(), kind: "file", text: name, sub: "", start, end: round(start + seconds), place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: data.file, media: data.media, ...newClipSound(data.media) });
+		const name = cleanBannerText(fileName.replace(/\.[^.]+$/, "")) || BANNER_KINDS.file.text;
+		addBanner({ id: crypto.randomUUID(), kind: "file", text: name, sub: "", start, end: round(start + seconds), place: "top", x: BANNER_FILE.x, y: BANNER_FILE.y, file: item.file, media: item.media, ...newClipSound(item.media) });
 	}
 	// A banner shows another picture or clip: its sound starts as for a new one, and a clip's Trim starts again.
 	function changeFile(id: string, item: LibraryItem) {
@@ -105,6 +110,15 @@ export function BannerControls({ banners, onChange, now, total, brand, focus, fo
 	// again (coach 11 Nov).
 	const [library, reloadLibrary] = useLibrary();
 	const update = (id: string, patch: Partial<Banner>) => onChange(banners.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+	// An upload takes a while, so it goes into the banners as they are by then (else edits made meanwhile are lost);
+	// with the box closed meanwhile it only goes into My files. As in CutoutControls.
+	const latest = useRef<typeof placeFile | null>(null);
+	useEffect(() => {
+		latest.current = placeFile;
+		return () => {
+			latest.current = null;
+		};
+	});
 
 	// Where each banner was dragged to, so picking Top and then "Where you dragged it" brings it back (coach, 6 Nov).
 	const [dragged, setDragged] = useState<Record<string, { x: number; y: number }>>({});
