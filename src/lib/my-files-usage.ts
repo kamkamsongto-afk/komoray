@@ -3,12 +3,13 @@ import type { SubtitleStyle } from "./subtitle-style";
 import { readKits } from "./brand-kits";
 import { type MyFile, myFilesPrefix, myIncomingPrefix, myRefOf, refId } from "./my-files";
 import { getJson, listObjects } from "./r2";
+import { rawTemplatesOf } from "./templates-store";
 
-// Where each of a person's My files is used (the My files page, and before a delete or Replace): the Brand Kits by name,
-// how many saved banners (My banners) and how many projects. Read from the kits, the banners and every project's
-// edit.json each time, never kept, so it can't go stale. When unsure, keep (agent review 21 Nov, as the storage
+// Where each of a person's My files is used (the My files page, and before a delete or Replace): the Brand Kits and
+// templates by name, how many saved banners (My banners) and how many projects. Read from the kits, the banners, the
+// templates and every project's edit.json each time, never kept, so it can't go stale. When unsure, keep (agent review 21 Nov, as the storage
 // clean-up, docs/bugs.md): every read must work or this throws, so nothing is deleted on a failed read. Server only.
-export type FileUse = { kits: string[]; banners: number; projects: number };
+export type FileUse = { kits: string[]; templates: string[]; banners: number; projects: number };
 
 export type Pins = {
 	style?: Partial<SubtitleStyle> | null;
@@ -64,10 +65,12 @@ export const bannersKey = (userId: string) => `brand/${userId}-banners.json`;
 
 export async function filesUse(userId: string, projectIds: string[]): Promise<Map<string, FileUse>> {
 	const use = new Map<string, FileUse>();
-	const at = (id: string) => use.get(id) ?? (use.set(id, { kits: [], banners: 0, projects: 0 }), use.get(id)!);
-	const [{ kits }, saved] = await Promise.all([readKits(`brand/${userId}.json`), getJson<{ templates?: Pins["banners"] }>(bannersKey(userId))]);
+	const at = (id: string) => use.get(id) ?? (use.set(id, { kits: [], templates: [], banners: 0, projects: 0 }), use.get(id)!);
+	const [{ kits }, saved, templates] = await Promise.all([readKits(`brand/${userId}.json`), getJson<{ templates?: Pins["banners"] }>(bannersKey(userId)), rawTemplatesOf(userId)]);
 	for (const kit of kits) for (const id of new Set(idsIn({ style: kit.style }))) at(id).kits.push(kit.name);
 	for (const banner of saved?.templates ?? []) for (const id of idsIn({ banners: [banner] })) at(id).banners += 1;
+	// A template keeps what it points at, as a project does: its logo, fonts, pictures and clips can't be deleted unseen.
+	for (const template of templates) for (const id of new Set(idsIn(template.look))) at(id).templates.push(template.name);
 	// A missing edit.json is a project with nothing in it yet (null); any other failed read throws (getJson).
 	const edits = await Promise.all(projectIds.map((id) => getJson<Pins>(`uploads/${id}/edit.json`)));
 	for (const edit of edits) for (const id of new Set(idsIn(edit))) at(id).projects += 1;

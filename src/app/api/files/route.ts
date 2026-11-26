@@ -63,8 +63,8 @@ async function whereAllUsed(userId: string) {
 	const { supabase } = await currentUser();
 	return filesUse(userId, await projectIdsOf(supabase));
 }
-const whereUsed = async (userId: string, id: string) => (await whereAllUsed(userId)).get(id) ?? { kits: [], banners: 0, projects: 0 };
-const inUse = (u: { kits: string[]; banners: number; projects: number }) => u.kits.length > 0 || u.banners > 0 || u.projects > 0;
+const whereUsed = async (userId: string, id: string) => (await whereAllUsed(userId)).get(id) ?? { kits: [], templates: [], banners: 0, projects: 0 };
+const inUse = (u: { kits: string[]; templates: string[]; banners: number; projects: number }) => u.kits.length > 0 || u.templates.length > 0 || u.banners > 0 || u.projects > 0;
 const UNSURE = "Could not check where it is used. Nothing was deleted: please try again.";
 // How many of each My files keeps (fonts: the plan, below). Storage is the real limit; these keep the lists quick to read.
 const MAX_COUNT: Partial<Record<MyFileKind, number>> = { logo: 100, image: 300, video: 200 };
