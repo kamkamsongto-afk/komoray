@@ -812,7 +812,9 @@ def build_behind(texts: list[dict], shape: str = "9:16", style: dict | None = No
         else:
             rows = text.split("\n")
         # Each row is its own event: subtitles have no line spacing of their own. Rows sit around the text's middle.
-        row_step = float(b["size"]) + float(b.get("lineGap") or 0)
+        # Never past each other: a gap bigger than the letters stacks the rows, as the preview's line height (which can't
+        # go below 0) does.
+        row_step = max(0.0, float(b["size"]) + float(b.get("lineGap") or 0))
         font = FONTS.get(b.get("font"), FONTS["kanit"])
         # Its own font, by the name its copy here goes by (as a banner's); not here: Kanit, as the preview falls back.
         own = b.get("ownFont")
