@@ -464,7 +464,8 @@ export function PlayerFrame({
 
 	// Move a banner (its middle follows the pointer) or resize it (by how far the pointer is from its
 	// middle, compared with where the drag started). Changes are sent while dragging.
-	function startBannerDrag(e: ReactPointerEvent<HTMLElement>, banner: Banner, mode: "move" | "size" | "rotate") {
+	// rolled: how far Roll up has the banner from where it rests, as a share of the video's height; a drag changes the resting place.
+	function startBannerDrag(e: ReactPointerEvent<HTMLElement>, banner: Banner, mode: "move" | "size" | "rotate", rolled = 0) {
 		const box = boxRef.current;
 		const target = (mode === "size" || mode === "rotate" ? e.currentTarget.parentElement : e.currentTarget) as HTMLElement | null;
 		if (!box || !target || !onBannersChange) return;
@@ -473,7 +474,7 @@ export function PlayerFrame({
 		const frame = box.getBoundingClientRect();
 		const rect = target.getBoundingClientRect();
 		const middle = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-		const from = { x: (middle.x - frame.left) / frame.width, y: (middle.y - frame.top) / frame.height };
+		const from = { x: (middle.x - frame.left) / frame.width, y: (middle.y - frame.top) / frame.height - rolled };
 		const start = { x: e.clientX, y: e.clientY, reach: Math.max(8, Math.hypot(e.clientX - middle.x, e.clientY - middle.y)) };
 		const scale0 = banner.scale ?? 1;
 		const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
@@ -1027,7 +1028,7 @@ const padY = (pad / 2) * size;
 							background: b.noBox ? "transparent" : `${b.color ?? subtitle.color}${solid(b.opacity ?? 1)}`,
 							borderRadius: (b.radius ?? 0) * size,
 							padding: `${padY}px ${pad * size}px`,
-							transform: `translate(${move.x}px, ${move.y + rolled}px) scale(${move.scale})`,
+							transform: `translate(${move.x}px, ${move.y}px) scale(${move.scale})`,
 						};
 						const movable = Boolean(onBannersChange) && !playing;
 						// Dragged somewhere: its middle sits there. Else its first row's letters start at the top of its place.
@@ -1051,8 +1052,9 @@ const padY = (pad / 2) * size;
 								<span
 									className="relative flex flex-col items-center"
 									onClick={(e) => movable && e.stopPropagation()}
-									onPointerDown={(e) => movable && startBannerDrag(e, b, "move")}
-									style={{ ...(b.rotate && !rolling ? { transform: `rotate(${b.rotate}deg)` } : {}), ...(movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : {}) }}
+									onPointerDown={(e) => movable && startBannerDrag(e, b, "move", rolled / H)}
+									// Roll up moves the whole frame, so the box you grab goes where the letters are.
+									style={{ ...(rolling ? { transform: `translateY(${rolled}px)` } : b.rotate ? { transform: `rotate(${b.rotate}deg)` } : {}), ...(movable ? { pointerEvents: "auto", cursor: "move", touchAction: "none", outline: "4px dashed rgba(255,255,255,0.8)", outlineOffset: 8 } : {}) }}
 									title={movable ? "Drag to move. Drag the corner to make it bigger or smaller." : undefined}
 								>
 									<span style={box}>
@@ -1093,7 +1095,7 @@ lineHeight: `${row.size * size}px`,
 									)}
 									{movable && (
 										<span
-											onPointerDown={(e) => startBannerDrag(e, b, "size")}
+											onPointerDown={(e) => startBannerDrag(e, b, "size", rolled / H)}
 											className="absolute rounded-full border-4 border-black bg-white"
 											style={{ width: 44, height: 44, right: -30, bottom: -30, cursor: "nwse-resize" }}
 										/>
