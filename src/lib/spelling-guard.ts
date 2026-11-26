@@ -4,7 +4,8 @@
 // No AI and no network here: the same answer always gets the same verdict, and every rule is tested on its own.
 //   negation:  a word that turns the meaning around (ไม่, อย่า, not, no, nicht ...) may never be added or removed.
 //              Thai heard loosely: a ไม่ / อย่า whose tone mark the speech-to-text dropped (ไม, อยา) can get it back.
-//   number:    the digits stay the same (50 → 5 is a different price).
+//   number:    the digits stay the same (50 → 5 is a different price). A Thai number word is never guessed from letters
+//              that could be another one ("ห ร้อย" is not ห้าร้อย: it could be หกร้อย).
 //   shape:     the fix keeps most of what was heard (dropped letters come back; a whole other word doesn't) and isn't
 //              far longer.
 //   made-up:   Thai words that were all real words never become a word that isn't (the AI inventing a name or a word).
@@ -68,6 +69,29 @@ function negationChanged(heard: string, fixed: string) {
 // ---- number ----
 const digits = (text: string) => arabic(text).replace(/[^0-9]/g, "");
 
+// A Thai number said in words: the AI may finish a digit only from letters that can be no other digit. Heard "ห ร้อย"
+// (the person said หกร้อย, 600) came back "ห้าร้อย", 500 (coach's clip, 26 Nov): "ห" starts หก, ห้า and หนึ่ง alike.
+const DIGIT_WORDS = ["ศูนย์", "หนึ่ง", "เอ็ด", "สอง", "ยี่", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];
+const UNITS = "สิบ|ร้อย|พัน|หมื่น|แสน|ล้าน";
+const marks = /[็-์]/g; // tone and shortening marks, which the speech-to-text drops
+const toneless = (text: string) => squash(text).replace(marks, "");
+const occurs = (text: string, part: string) => text.split(part).length - 1;
+function guessedDigit(heard: string, fixed: string) {
+	const said = toneless(heard);
+	const written = squash(fixed);
+	const bare = DIGIT_WORDS.map((d) => d.replace(marks, ""));
+	// What is left of the heard text once whole digits and units are taken out: the loose pieces.
+	const rest = [...bare, ...UNITS.split("|").map((u) => u.replace(marks, ""))].reduce((text, word) => text.split(word).join(" "), said);
+	return DIGIT_WORDS.some((digit, i) => {
+		// Only where it reads as a number: beside a unit ("หา" and "สี" are ordinary words elsewhere).
+		const asNumber = written.match(new RegExp(`${digit}(?=${UNITS})|(?<=${UNITS})${digit}`, "g"))?.length ?? 0;
+		if (asNumber <= occurs(said, bare[i])) return false;
+		let n = 1;
+		while (n < bare[i].length && bare.some((other, k) => k !== i && other.startsWith(bare[i].slice(0, n)))) n++;
+		return !rest.includes(bare[i].slice(0, n));
+	});
+}
+
 // ---- shape ----
 // The longest common subsequence of two short texts (a fix is a few words), for "most of what was heard stays".
 function common(a: string, b: string) {
@@ -115,7 +139,7 @@ export function isRepair(heard: string, fixed: string, w: GuardWords) {
 // The verdict on one fix: null if it may go on, else why not.
 export function checkFix(heard: string, fixed: string, w: GuardWords = {}): GuardReason | null {
 	if (negationChanged(heard, fixed)) return "negation";
-	if (digits(heard) !== digits(fixed)) return "number";
+	if (digits(heard) !== digits(fixed) || guessedDigit(heard, fixed)) return "number";
 	if (shapeOff(heard, fixed)) return "shape";
 	if (madeUp(heard, fixed, w)) return "made-up";
 	return null;
