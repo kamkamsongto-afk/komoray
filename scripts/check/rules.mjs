@@ -67,7 +67,7 @@ survives("Frame Me", "src/lib/frame-me.ts", "FrameMe", {
 }, (x) => frame.readFrames([x])?.[0]);
 
 survives("Layout", "src/lib/layout.ts", "VideoLayout", {
-	id: "a", start: 1, end: 4, kind: "side", meFirst: false, split: 0.4, meX: 0.3, meY: 0.6, meZoom: 1.4, color: "#34C759", enter: "flash", file: "media-abc.mp4", media: "video", ...CLIP,
+	id: "a", start: 1, end: 4, kind: "side", meFirst: false, split: 0.4, meX: 0.3, meY: 0.6, meZoom: 1.4, color: "#34C759", enter: "flash", inFade: true, outFade: true, file: "media-abc.mp4", media: "video", ...CLIP,
 	fileZoom: 1.5, fileX: 0.3, fileY: 0.7, ...(layout.LAYOUT.fileRotate && { fileRotate: -40 }), fileMotion: "in", fileMotionZoom: 0.3, fileMotionSpeed: 3, name: "Mine",
 }, (x) => layout.readLayouts([x])?.[0]);
 
