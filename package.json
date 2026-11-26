@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint src",
+    "check": "node scripts/check/all.mjs",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "deploy:staging": "node scripts/deploy-staging.mjs",
     "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
