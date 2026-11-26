@@ -5,7 +5,7 @@ import { signedCallbackUrl } from "@/lib/callback";
 import { isLanguage } from "@/lib/languages";
 import { CLEAN_SOUND, facesFor, mediaUrl, previewFiles, previewPercent, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import type { Faces } from "@/lib/framing";
-import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { copyObject, deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
 import { AUDIO_FILE, continueAudioFirst, needsAudioFirst, startAudio } from "@/lib/audio-first";
 import { startTranscription } from "@/lib/transcribe";
@@ -41,7 +41,11 @@ export async function POST(request: Request) {
 		const options = readOptions(asked) ?? readOptions((await getJson<{ options?: unknown }>(siblingKey(key, "analyze.json")))?.options);
 		// A video over Deepgram's 2 GB goes to it as its sound alone (lib/audio-first.ts).
 const big = await needsAudioFirst(key);
-await Promise.all([deleteObject(siblingKey(key, "edit.json")), deleteObject(siblingKey(key, "analyze-error.json")), deleteObject(siblingKey(key, "deepgram-started.json"))]);
+// Listening again writes a new script over the work on this video: a copy is kept first (edit-before.json), so a
+// listen that fails, or a wrong press, does not lose it for good.
+const editKey = siblingKey(key, "edit.json");
+if (await exists(editKey)) await copyObject(editKey, siblingKey(key, "edit-before.json"));
+await Promise.all([deleteObject(editKey), deleteObject(siblingKey(key, "analyze-error.json")), deleteObject(siblingKey(key, "deepgram-started.json"))]);
 		// usageKey: lets the callback give the minutes back if the job fails. language: what was listened for, so the
 		// admin's Accuracy tab can score each language (13 Nov; older videos are guessed from their letters).
 		await putObject(
