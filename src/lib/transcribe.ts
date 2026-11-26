@@ -32,6 +32,8 @@ export function readTranscript(data: unknown): Transcript {
 	const words = dg.results.channels[0]?.alternatives[0]?.words ?? [];
 	return {
 		duration: dg.metadata.duration,
-		words: words.map((w) => ({ text: w.punctuated_word ?? w.word, start: w.start, end: w.end })),
+		// In time order: Deepgram's Thai has put a word's last piece ahead of seconds of speech that came before it, which
+		// scrambled the script and cut that speech out as a silence (26 Nov). Everything after reads them in this order.
+		words: words.map((w) => ({ text: w.punctuated_word ?? w.word, start: w.start, end: w.end })).sort((a, b) => a.start - b.start),
 	};
 }

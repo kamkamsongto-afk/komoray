@@ -38,11 +38,15 @@ export function findSilences({ duration, words }: Transcript, pace: Pace = "natu
 	const { minSilence, padding } = PACES[pace];
 
 	// Treat the start and end of the clip as "words" so leading/trailing silence is caught too.
-	const edges = [{ end: 0 }, ...words, { start: duration }] as { start?: number; end?: number }[];
+	// In time order, and a silence starts after the furthest any word so far reaches: speech-to-text can hand one word
+	// out of order, and the gap up to it then swallowed the words spoken in between (coach's clip, 26 Nov).
+	const inTime = [...words].sort((a, b) => a.start - b.start);
+	const edges = [{ end: 0 }, ...inTime, { start: duration }] as { start?: number; end?: number }[];
 	const cuts: Cut[] = [];
 
+	let gapStart = 0;
 	for (let i = 0; i < edges.length - 1; i++) {
-		const gapStart = edges[i].end!;
+		gapStart = Math.max(gapStart, edges[i].end!);
 		const gapEnd = edges[i + 1].start!;
 		if (gapEnd - gapStart <= minSilence) continue;
 
