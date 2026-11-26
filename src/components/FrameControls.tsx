@@ -13,6 +13,7 @@ import { BgMotionControl } from "./BgMotionControl";
 import { ClipSound } from "./ClipSound";
 import { ClipTrim } from "./ClipTrim";
 import { FadeSwitches } from "./FadeSwitches";
+import { SubtitlesCard, type SubtitlesHere } from "./SubtitlesCard";
 import { ConfirmDelete } from "./ConfirmDelete";
 import { PICKED, PLAIN_BUTTON, TabGroup, ToolGroup } from "./ToolGroup";
 import { type Clock, FINAL_CLOCK, ON_TIMELINE, rangeText, TimeRange } from "./TimeField";
@@ -26,6 +27,7 @@ type Props = {
 	onReveal?: (id: string, start: number) => void; // the blue line to its start
 	ruler?: Clock; // the timeline ruler's clock, for the times shown here
 	format?: Format; // the video's shape, for Whole picture
+	subtitles?: SubtitlesHere; // the subtitles' height while a frame shows (SubtitlesCard)
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -50,7 +52,7 @@ function ShapeIcon({ shape, size = 22 }: { shape: FrameShape; size?: number }) {
 
 // The editor's Frame Me box (coach, 12 Nov): for a stretch of the video, you show inside a shape over a background,
 // like an alpha mask in OBS. Nothing is cut out, so it shows at once. Drawn by PlayerFrame, made by frame_filters.
-export function FrameControls({ frames, onChange, now, total, focus, onReveal, ruler = FINAL_CLOCK, format }: Props) {
+export function FrameControls({ frames, onChange, now, total, focus, onReveal, ruler = FINAL_CLOCK, format, subtitles }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	const [focused, setFocused] = useState(focus);
 	if (focus !== focused) {
@@ -383,6 +385,7 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 							{row("Width", range(f.border, 0, FRAME.border.max, 1, `${f.border}px`, (border) => update(f.id, { border })))}
 							{f.border > 0 && row("Color", swatches(BORDER_COLORS, f.borderColor, (borderColor) => update(f.id, { borderColor }), "Border color"))}
 						</ToolGroup>
+						{subtitles && <SubtitlesCard item={f} subtitles={subtitles} tone={3} />}
 						<ToolGroup tone={1} title="When">
 							{row(ON_TIMELINE, <TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />)}
 						</ToolGroup>

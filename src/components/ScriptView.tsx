@@ -23,6 +23,7 @@ import { CutoutControls } from "./CutoutControls";
 import { FrameControls } from "./FrameControls";
 import type { FrameMe } from "@/lib/frame-me";
 import { LayoutControls } from "./LayoutControls";
+import type { SubtitlesHere } from "./SubtitlesCard";
 import { LAYOUT, type LayoutDrop, NEW_LAYOUT, type VideoLayout } from "@/lib/layout";
 import type { RenderPart } from "@/lib/render-part";
 import { newClipSound } from "@/lib/clip-sound";
@@ -1005,6 +1006,16 @@ export function ScriptView({
 	}
 	useEffect(() => setBrandSaved((s) => (s === "saved" ? null : s)), [subtitle]);
 
+	// The subtitles' height while one thing shows, for the Layout, Frame Me, Cutout and Banners boxes (SubtitlesCard).
+	// None to move while subtitles are off.
+	const subtitlesHere: SubtitlesHere | undefined = subtitle.subtitles
+		? {
+				at: (item) => stretchPlace(subtitle.spots, item.start, segments),
+				normal: subtitle.position,
+				set: (item, position) => onSubtitleChange({ ...subtitle, ...placeStretch(subtitle, item.start, item.end, segments, position) }),
+			}
+		: undefined;
+
 	// Drag the bar between the script and the video to give either one more room.
 	const [previewWidth, setPreviewWidth] = useState(PREVIEW_WIDTH.start);
 	useEffect(() => {
@@ -1543,6 +1554,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 					)}
 					{panel === "cutout" && (
 						<CutoutControls
+							subtitles={subtitlesHere}
 							layers={cutoutLayers}
 							onChange={onCutoutChange}
 							cutout={{ ...cutout, files: cutoutFiles }}
@@ -1563,6 +1575,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 					)}
 					{panel === "frame" && (
 						<FrameControls
+							subtitles={subtitlesHere}
 							frames={frames}
 							onChange={onFramesChange}
 							now={() => toOutSeconds(timeRef.current, segments)}
@@ -1585,11 +1598,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							note={layoutNote}
 							libraryVersion={libraryVersion}
 							onImportFile={(file, id) => void dropOnLayout({ file }, id)}
-							subtitles={{
-								at: (l) => stretchPlace(subtitle.spots, l.start, segments),
-								normal: subtitle.position,
-								set: (l, position) => onSubtitleChange({ ...subtitle, ...placeStretch(subtitle, l.start, l.end, segments, position) }),
-							}}
+							subtitles={subtitlesHere}
 						/>
 					)}
 					{panel === "import" && (
@@ -1602,6 +1611,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 					)}
 					{panel === "banners" && (
 						<BannerControls
+							subtitles={subtitlesHere}
 							banners={banners}
 							onChange={onBannersChange}
 							now={() => toOutSeconds(timeRef.current, segments)}

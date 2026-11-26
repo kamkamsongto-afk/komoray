@@ -7,6 +7,7 @@ import { LAYOUT, LAYOUT_COLORS, LAYOUT_DRAG, LAYOUT_ENTERS, LAYOUT_KINDS, type L
 import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 import { LIBRARY_ACCEPT, type LibraryItem } from "@/lib/media-library";
 import { FilePicker, PickedFile, useLibrary } from "./FilePicker";
+import { SubtitlesCard, type SubtitlesHere } from "./SubtitlesCard";
 import { newClipSound } from "@/lib/clip-sound";
 import { startMotion } from "@/lib/bg-motion";
 import { BgMotionControl } from "./BgMotionControl";
@@ -29,7 +30,7 @@ type Props = {
 	libraryVersion?: number; // goes up when Import got a new file: the pictures here are asked for again
 	onImportFile?: (file: File, id: string) => void; // a file from the computer: into Import, then into this layout's other part
 	// Subtitles while it shows (coach 20 Nov, placeStretch in lib/timeline.ts): their own height, or null = the rest's.
-	subtitles?: { at: (l: VideoLayout) => number | null; normal: number; set: (l: VideoLayout, position: number | null) => void };
+	subtitles?: SubtitlesHere;
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -359,29 +360,16 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 								</div>
 							</ToolGroup>
 
-						{subtitles && (() => {
-							// Subtitles here (coach 20 Nov): top / bottom put them over a face or over what is shown. Their own height for
-							// this layout's time only, in one step; the timeline shows it as its own piece.
-							const own = subtitles.at(l);
-							const seam = l.meFirst ? 1 - l.split : l.split; // the line between the two parts, from the bottom
-							return (
-								<ToolGroup tone={2} title="Subtitles here">
-									{row("Height", range(own ?? subtitles.normal, LIMITS.position.min, LIMITS.position.max, 0.01, own === null ? "As the rest" : percent(own), (v) => subtitles.set(l, Math.round(v * 1000) / 1000)))}
-									<div className="flex flex-wrap gap-1" title="Only while this layout shows. Or pause on it and drag the subtitles. If you move the layout later, set this again.">
-										{l.kind === "stack" && (
-											<button onClick={() => subtitles.set(l, Math.min(LIMITS.position.max, Math.max(LIMITS.position.min, Math.round((seam - 0.03) * 1000) / 1000)))} className={PLAIN_BUTTON}>
-												On the line between
-											</button>
-										)}
-										{own !== null && (
-											<button onClick={() => subtitles.set(l, null)} className={PLAIN_BUTTON}>
-												Same as the rest
-											</button>
-										)}
-									</div>
-								</ToolGroup>
-							);
-						})()}
+						{subtitles && (
+							<SubtitlesCard item={l} subtitles={subtitles} tone={2}>
+								{l.kind === "stack" && (
+									// The line between the two parts, from the bottom.
+									<button onClick={() => subtitles.set(l, Math.min(LIMITS.position.max, Math.max(LIMITS.position.min, Math.round(((l.meFirst ? 1 - l.split : l.split) - 0.03) * 1000) / 1000)))} className={PLAIN_BUTTON}>
+										On the line between
+									</button>
+								)}
+							</SubtitlesCard>
+						)}
 						<ToolGroup tone={1} title="When">
 							{row(ON_TIMELINE, <TimeRange id={l.id} start={l.start} end={l.end} total={total} clock={ruler} onChange={(patch) => update(l.id, patch)} />)}
 						</ToolGroup>
