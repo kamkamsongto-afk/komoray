@@ -307,6 +307,10 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		return best;
 	};
 
+	// A long number takes longer to say than a line may last ("38990" runs 2 s), so "บาท" after it began the next line
+	// (coach 26 Nov). Alone with its number it stays, as long as the line is wide enough. Same in group_lines (render.py).
+	const unitStays = (run: Placed[], w: Placed) => run.length === 1 && /\d[,.]?$/.test(run[0].text) && THAI_NO_START.has(w.text) && lettersOf([...run, w]) <= maxLetters;
+
 	const groups: Placed[][] = [];
 	let current: Placed[] = [];
 	for (const w of placed) {
@@ -319,7 +323,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 			const carry = !thai && !crossesSplit && !w.br && w.start - last.end <= EN_CARRY_PAUSE * FPS && !EN_PUNCT.test(last.text) && EN_NO_END.has(enWord(last.text));
 			if (!carry || current.length > 1) groups.push(carry ? current.slice(0, -1) : current); // a lone such word just waits for the next
 			current = carry ? [last] : [];
-		} else if (current.length && !fits([...current, w])) {
+		} else if (current.length && !fits([...current, w]) && !(thai && unitStays(current, w))) {
 			const k = thai ? bestBreak(current, w) : englishBreak(current, w);
 			groups.push(current.slice(0, k));
 			current = current.slice(k);
