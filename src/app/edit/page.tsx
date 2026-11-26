@@ -25,7 +25,7 @@ import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpan
 import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
 import { LANGUAGES, NOT_A_TRANSLATION, TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
-import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle, withVideoZoom } from "@/lib/subtitle-style";
+import { DEFAULT_STYLE, fontMetrics, FORMATS, readStyle, type SubtitleStyle, withVideoZoom } from "@/lib/subtitle-style";
 import { fitLook, leftOutText, type LeftOut, type TemplateLook } from "@/lib/templates";
 import { FPS, keepSegments, subtitleLines, toSrt, totalFrames } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
@@ -621,19 +621,26 @@ export default function EditPage() {
 		[save, remember],
 	);
 	// from: how long the video the template came from runs, so what sat at its end goes to this one's end (fitLook).
-	function applyTemplate(name: string, look: TemplateLook, from: number, left: LeftOut) {
+	// withStyle false ("Keep all same with logo" unticked): this video's subtitle style and logo stay; the template
+	// still brings its shape, zoom and sound setting with its items.
+	function applyTemplate(name: string, look: TemplateLook, from: number, left: LeftOut, withStyle: boolean) {
 		if (!analysis) return;
 		const length = totalFrames(keepSegments(analysis.duration, allCuts(analysis))) / FPS;
 		const fitted = fitLook(look, from, length);
 		// This video's own subtitle stretches stay (they follow its words). English-only fonts have no Thai letters.
 		const thai = analysis.words.some((w) => /[฀-๿]/.test(w.text));
-		const style: SubtitleStyle = { ...fitted.look.style, ...(subtitle.splits && { splits: subtitle.splits }), ...(subtitle.spots && { spots: subtitle.spots }) };
-		if (thai && !fontMetrics(style).thai) Object.assign(style, { font: DEFAULT_STYLE.font, ownFont: undefined });
+		const theirs = fitted.look.style;
+		const style: SubtitleStyle = withStyle
+			? { ...theirs, ...(subtitle.splits && { splits: subtitle.splits }), ...(subtitle.spots && { spots: subtitle.spots }) }
+			: // A new shape puts subtitles at that shape's usual height, as picking it in the shape box does.
+				{ ...withVideoZoom(subtitle, theirs), format: theirs.format, position: theirs.format === subtitle.format ? subtitle.position : FORMATS[theirs.format].position, audio: theirs.audio, audioAmount: theirs.audioAmount };
+		if (withStyle && thai && !fontMetrics(style).thai) Object.assign(style, { font: DEFAULT_STYLE.font, ownFont: undefined });
 		// Ids of their own, so the timeline takes them as new items.
 		const fresh = <T extends { id: string }>(items: T[]) => items.map((item) => ({ ...item, id: crypto.randomUUID() }));
 		const before: TemplateLook = { style: subtitle, banners: analysis.banners ?? [], frames: analysis.frames ?? [], layouts: analysis.layouts ?? [] };
 		putLook({ style, banners: fresh(fitted.look.banners), frames: fresh(fitted.look.frames), layouts: fresh(fitted.look.layouts) });
-		setTemplateUsed({ note: `Template "${name}" is on this video. ${leftOutText(left, fitted.dropped)}`.trim(), before });
+		const missed = withStyle ? left : { ...left, logo: false };
+		setTemplateUsed({ note: `Template "${name}" is on this video. ${leftOutText(missed, fitted.dropped)}`.trim(), before });
 	}
 
 	// Cutout layers: typed into and dragged like banners, so saved a moment after the last change. Then the
