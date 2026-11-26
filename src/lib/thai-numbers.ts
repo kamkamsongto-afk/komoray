@@ -80,11 +80,30 @@ function parseBelowMillion(tokens: string[]): number | null {
 	return total;
 }
 
+// The one exception to "as heard" (coach 26 Nov): "แป" beside a unit is แปด with its last sound dropped ("สองล้านแปแสน").
+// Thai has no other word a speaker says there. Before a unit, or ending a number before บาท; nowhere else.
+const EIGHT_BEFORE_UNIT = /แป(?=สิบ|ร้อย|พัน|หมื่น|แสน|ล้าน)/g;
+function mendEight<W extends Word>(words: W[]): W[] {
+	const near = (a: Word | undefined, b: Word | undefined) => !!a && !!b && Math.abs(b.start - a.end) <= NUMBER_GAP;
+	return words.map((w, i) => {
+		if (w.text === "แป") {
+			const [before, after] = [words[i - 1], words[i + 1]];
+			const beforeUnit = near(w, after) && /^(สิบ|ร้อย|พัน|หมื่น|แสน|ล้าน)/.test(after.text) && piecesOf(after.text) !== null;
+			const ending = near(before, w) && /(สิบ|ร้อย|พัน|หมื่น|แสน|ล้าน)$/.test(before.text) && near(w, after) && after.text === "บาท";
+			return beforeUnit || ending ? { ...w, text: "แปด" } : w;
+		}
+		// Joined to the unit already ("แปแสน"): only when the whole word is then number words.
+		const mended = w.text.replace(EIGHT_BEFORE_UNIT, "แปด");
+		return mended !== w.text && piecesOf(mended) ? { ...w, text: mended } : w;
+	});
+}
+
 // A list of words with number words said in a row turned into one word each, in digits ("2,990" style is left to the
 // writer: digits come joined, 1767, as the script writes them). Times: from the first piece's start to the last one's end.
-export function mergeThaiNumbers<W extends Word>(words: W[]): W[] {
-	const thai = words.length > 0 && words.filter((w) => /[฀-๿]/.test(w.text)).length / words.length >= 0.3;
-	if (!thai) return words;
+export function mergeThaiNumbers<W extends Word>(heard: W[]): W[] {
+	const thai = heard.length > 0 && heard.filter((w) => /[฀-๿]/.test(w.text)).length / heard.length >= 0.3;
+	if (!thai) return heard;
+	const words = mendEight(heard);
 	// Each word as its number pieces (one piece for a plain number word, null for a word that is not a number word).
 	const pieces = words.map((w) => piecesOf(w.text));
 	const out: W[] = [];
