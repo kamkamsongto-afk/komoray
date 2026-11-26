@@ -13,8 +13,8 @@ export { asOwnFont };
 export type FontClash = { file: File; conflict: MyFile };
 
 // Where a file is used, as words ("2 Brand Kits, 1 saved banner and 3 projects"), or null when nothing uses it.
-export function describeUse(use?: { kits?: string[]; banners?: number; projects?: number }) {
-	const parts = [use?.kits?.length ? `${use.kits.length} Brand Kit${use.kits.length > 1 ? "s" : ""}` : "", use?.banners ? `${use.banners} saved banner${use.banners > 1 ? "s" : ""}` : "", use?.projects ? `${use.projects} project${use.projects > 1 ? "s" : ""}` : ""].filter(Boolean);
+export function describeUse(use?: { kits?: string[]; templates?: string[]; banners?: number; projects?: number }) {
+	const parts = [use?.kits?.length ? `${use.kits.length} Brand Kit${use.kits.length > 1 ? "s" : ""}` : "", use?.templates?.length ? `${use.templates.length} template${use.templates.length > 1 ? "s" : ""}` : "", use?.banners ? `${use.banners} saved banner${use.banners > 1 ? "s" : ""}` : "", use?.projects ? `${use.projects} project${use.projects > 1 ? "s" : ""}` : ""].filter(Boolean);
 	return parts.length ? parts.join(", ").replace(/, ([^,]*)$/, " and $1") : null;
 }
 
@@ -68,7 +68,7 @@ export function useMyFonts() {
 	// Where a font is used now (My files page's list), as words, or null: for the red line before it is deleted (coach 23 Nov).
 	async function usage(id: string): Promise<string | null> {
 		const res = await fetch("/api/files?all=1").catch(() => null);
-		const data = (await res?.json().catch(() => ({}))) as { use?: Record<string, { kits?: string[]; banners?: number; projects?: number }> };
+		const data = (await res?.json().catch(() => ({}))) as { use?: Record<string, { kits?: string[]; templates?: string[]; banners?: number; projects?: number }> };
 		return describeUse(data.use?.[id]);
 	}
 

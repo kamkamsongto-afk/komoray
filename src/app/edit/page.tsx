@@ -8,6 +8,7 @@ import { SignInCard, useUser } from "@/components/Account";
 import type { BadTake } from "@/lib/bad-takes";
 import { HeaderMenu } from "@/components/HeaderMenu";
 import { ScriptView } from "@/components/ScriptView";
+import { TemplatesButton } from "@/components/TemplatesBox";
 import { VideoReady } from "@/components/VideoReady";
 import { WatermarkSeed } from "@/components/WatermarkContext";
 import type { StudioMedia } from "@/components/StudioPlayer";
@@ -25,7 +26,8 @@ import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
 import { TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle, withVideoZoom } from "@/lib/subtitle-style";
-import { keepSegments, subtitleLines, toSrt } from "@/lib/timeline";
+import { fitLook, leftOutText, type LeftOut, type TemplateLook } from "@/lib/templates";
+import { FPS, keepSegments, subtitleLines, toSrt, totalFrames } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
 import { watermarkSeed } from "@/lib/watermark";
 import type { ZoomPart } from "@/lib/zoom";
@@ -605,6 +607,35 @@ export default function EditPage() {
 		[save],
 	);
 
+	// A whole look put on the video at once (a template, or taking one back off): the subtitle style, banners, Frame Me
+	// and Layout, saved in one go. Changes still waiting to be saved would put the old ones back, so they are dropped.
+	const [templateUsed, setTemplateUsed] = useState<{ note: string; before: TemplateLook } | null>(null);
+	const putLook = useCallback(
+		({ style, banners, frames, layouts }: TemplateLook) => {
+			remember();
+			for (const timer of [styleTimer, bannersTimer, framesTimer, layoutsTimer]) if (timer.current) clearTimeout(timer.current);
+			setSubtitle(style);
+			setAnalysis((a) => (a ? { ...a, banners, frames, layouts } : a));
+			save({ style, banners, frames, layouts });
+		},
+		[save, remember],
+	);
+	// from: how long the video the template came from runs, so what sat at its end goes to this one's end (fitLook).
+	function applyTemplate(name: string, look: TemplateLook, from: number, left: LeftOut) {
+		if (!analysis) return;
+		const length = totalFrames(keepSegments(analysis.duration, allCuts(analysis))) / FPS;
+		const fitted = fitLook(look, from, length);
+		// This video's own subtitle stretches stay (they follow its words). English-only fonts have no Thai letters.
+		const thai = analysis.words.some((w) => /[฀-๿]/.test(w.text));
+		const style: SubtitleStyle = { ...fitted.look.style, ...(subtitle.splits && { splits: subtitle.splits }), ...(subtitle.spots && { spots: subtitle.spots }) };
+		if (thai && !fontMetrics(style).thai) Object.assign(style, { font: DEFAULT_STYLE.font, ownFont: undefined });
+		// Ids of their own, so the timeline takes them as new items.
+		const fresh = <T extends { id: string }>(items: T[]) => items.map((item) => ({ ...item, id: crypto.randomUUID() }));
+		const before: TemplateLook = { style: subtitle, banners: analysis.banners ?? [], frames: analysis.frames ?? [], layouts: analysis.layouts ?? [] };
+		putLook({ style, banners: fresh(fitted.look.banners), frames: fresh(fitted.look.frames), layouts: fresh(fitted.look.layouts) });
+		setTemplateUsed({ note: `Template "${name}" is on this video. ${leftOutText(left, fitted.dropped)}`.trim(), before });
+	}
+
 	// Cutout layers: typed into and dragged like banners, so saved a moment after the last change. Then the
 	// links to their pictures and clips are fetched again (a new one is shown from this computer meanwhile).
 	const refreshCutout = cutout.refresh;
@@ -910,6 +941,12 @@ export default function EditPage() {
 							<Redo2 className="h-3.5 w-3.5" aria-hidden />
 						</button>
 					</div>
+					<TemplatesButton
+						look={{ style: subtitle, banners: analysis.banners ?? [], frames: analysis.frames ?? [], layouts: analysis.layouts ?? [] }}
+						seconds={totalFrames(keepSegments(analysis.duration, allCuts(analysis))) / FPS}
+						checkingTakes={readTakes && badTakes.status === "checking"}
+						onUse={applyTemplate}
+					/>
 					<HeaderMenu
 						icon={Scissors}
 						label="Cuts"
@@ -1008,6 +1045,23 @@ export default function EditPage() {
 				</p>
 			)}
 			{saveError && <p className="text-sm text-red-500">{saveError}</p>}
+			{templateUsed && (
+				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
+					<span>{templateUsed.note}</span>
+					<button
+						onClick={() => {
+							putLook(templateUsed.before);
+							setTemplateUsed(null);
+						}}
+						className="rounded-lg border border-foreground/20 px-3 py-1 hover:bg-foreground/5"
+					>
+						Undo
+					</button>
+					<button onClick={() => setTemplateUsed(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
+						<X className="h-4 w-4" aria-hidden />
+					</button>
+				</div>
+			)}
 			{dictionaryFixed && (
 				<div className="flex flex-wrap items-center gap-3 rounded-xl border border-green-600/30 bg-green-600/5 p-3 text-sm">
 					<span>
