@@ -24,6 +24,8 @@ export const LANGUAGES = [
 ] as const;
 
 export const isLanguage = (code: unknown): code is string => LANGUAGES.some((l) => l.code === code);
+// Picking a language says what is spoken; people took it for a translation (coach 26 Nov, who asked for the Thai too).
+export const NOT_A_TRANSLATION = "This turns the speech into subtitles. It does not translate. นี่คือการถอดเสียงพูดมาเป็นซับ ไม่ใช่การแปลภาษา";
 
 // The languages subtitles can be translated into, for .srt files (lib/translate.ts). Wider than the spoken
 // list: nothing here needs Deepgram, line breaks or our fonts. `english` is what Claude is asked for.

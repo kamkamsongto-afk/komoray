@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountBar, SignInCard, useUser } from "@/components/Account";
 import { BetaWelcome } from "@/components/BetaWelcome";
+import { Confirm } from "@/components/ConfirmDelete";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import { PhoneUpload } from "@/components/PhoneUpload";
 import { UploadOptions } from "@/components/UploadOptions";
 import { UploadWorking } from "@/components/UploadWorking";
 import { WaitingForInvite } from "@/components/WaitingForInvite";
 import type { AccessStatus } from "@/lib/access";
-import { browserLanguage, isLanguage } from "@/lib/languages";
+import { browserLanguage, isLanguage, LANGUAGES, NOT_A_TRANSLATION } from "@/lib/languages";
 import { MAX_FILE_GB } from "@/lib/limits";
 import { shortDate } from "@/lib/plans";
 import { takePending } from "@/lib/pending-upload";
@@ -142,6 +143,7 @@ export default function UploadPage() {
 	const [analysisError, setAnalysisError] = useState("");
 	const [dragging, setDragging] = useState(false);
 	const [again, setAgain] = useState(false); // from the editor: listen to this video again, in another language
+	const [askAgain, setAskAgain] = useState(false); // asking before the script is written over (coach 26 Nov)
 	const [access, setAccess] = useState<Access | null>(null);
 
 	const loadAccess = useCallback(async () => {
@@ -216,6 +218,7 @@ export default function UploadPage() {
 
 	async function handleFile(file: File) {
 		wakeSound();
+		setAgain(false);
 		setStatus("uploading");
 		setProgress(0);
 		setMessage(file.name);
@@ -266,6 +269,7 @@ export default function UploadPage() {
 
 	// A video sent from the phone (QR code) is ready: same as an upload made here.
 	const phoneArrived = useCallback((videoKey: string, filename: string) => {
+		setAgain(false);
 		setStatus("done");
 		setProgress(100);
 		setMessage(filename);
@@ -428,7 +432,8 @@ export default function UploadPage() {
 
 			{!key && <PhoneUpload onArrived={phoneArrived} disabled={busy} />}
 
-			{status !== "idle" && (
+			{/* Not on Listen again: a full blue bar there looked like something already running (coach 26 Nov). */}
+			{status !== "idle" && !again && (
 				<div className="flex flex-col gap-2">
 					<div className="h-3 w-full overflow-hidden rounded-full bg-foreground/10">
 						<div
@@ -446,11 +451,17 @@ export default function UploadPage() {
 
 			{key && (
 				<div className="flex flex-col gap-4 rounded-2xl border border-foreground/15 p-6">
+					{again && (
+						<div className="flex flex-col gap-1">
+							<p className="font-medium break-all">{message}</p>
+							<p className="text-sm text-foreground/70">Pick the language spoken in the video. {NOT_A_TRANSLATION}</p>
+						</div>
+					)}
 					<div className="flex flex-wrap items-center gap-3">
 						<span className="text-sm text-foreground/70">Spoken language</span>
 						<LanguagePicker value={language} onChange={setLanguage} defaultCode={defaultLanguage} onSetDefault={setDefaultLanguage} disabled={analyzing} />
 						<button
-							onClick={() => void findSilences()}
+							onClick={() => (again ? setAskAgain(true) : void findSilences())}
 							disabled={analyzing}
 							className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
 						>
@@ -473,6 +484,22 @@ export default function UploadPage() {
 					)}
 
 					{analysisError && <p className="text-sm text-red-500">{analysisError}</p>}
+
+					{askAgain && (
+						<Confirm
+							title={`Listen again in ${LANGUAGES.find((l) => l.code === language)?.english ?? "this language"}?`}
+							body={NOT_A_TRANSLATION}
+							// A copy keeps the script as it is now; it is this video that can be listened to again (api/projects: a copy has used its listens).
+							warning="Your script, fixes, cuts and subtitle settings on this video will be replaced. To keep them, press Cancel, Duplicate this video in My projects, then come back and listen again here."
+							action="Replace and listen"
+							danger
+							onCancel={() => setAskAgain(false)}
+							onConfirm={() => {
+								setAskAgain(false);
+								void findSilences();
+							}}
+						/>
+					)}
 
 				</div>
 			)}
