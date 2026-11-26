@@ -164,11 +164,23 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		else if (old.kind !== "video") Object.assign(next, newClipSound("video"));
 		put(list.map((i) => (i.id === id ? next : i)));
 	}
+	// A file just uploaded, added to the video where the preview is.
+	function placeInsert(item: LibraryItem, clipSeconds: number | null, seeThrough: boolean, fileName: string) {
+		if (layers.inserts.length >= BEHIND.maxItems) return setNotice(`That's the most pictures and clips one video can have. ${fileName} is in My files.`);
+		const start = startAt();
+		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
+		const insert: Insert = { ...newClipSound(item.media), id: crypto.randomUUID(), kind: item.media, file: item.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(fileName.replace(/\.[^.]+$/, "")) || undefined };
+		setOpen(insert.id);
+		setTab("inserts");
+		setAdding(false);
+		setInserts([...layers.inserts, insert]);
+		onReveal?.(insert.id, insert.start);
+	}
 	// An upload takes a while, so it goes into the pictures as they are by then; with the box closed meanwhile it only goes
-	// into My files.
-	const latest = useRef<{ list: Insert[]; put: (inserts: Insert[]) => void; change: typeof changeFile } | null>(null);
+	// into My files. Both ways of uploading (a new one, and Change) go through here, else edits made meanwhile are lost.
+	const latest = useRef<{ list: Insert[]; put: (inserts: Insert[]) => void; change: typeof changeFile; add: typeof placeInsert } | null>(null);
 	useEffect(() => {
-		latest.current = { list: layers.inserts, put: (inserts) => onChange({ ...layers, inserts }), change: changeFile };
+		latest.current = { list: layers.inserts, put: (inserts) => onChange({ ...layers, inserts }), change: changeFile, add: placeInsert };
 		return () => {
 			latest.current = null;
 		};
@@ -203,19 +215,11 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 		const seeThrough = await hasClearParts(file);
 		// Into My files, shown from there by reference (coach 21 Nov: every new file is kept once, in one place).
 		const sent = await addToLibrary(new URLSearchParams(window.location.search).get("key") ?? "", file, (percent) => setUploading(percent)); // the % as it goes up (agent review 22 Nov)
-		const done = "error" in sent ? sent : { file: sent.item.file, kind: sent.item.media };
 		setUploading(null);
-		onUploading?.(false, !("error" in done));
-		if ("error" in done) return setNotice(done.error);
+		onUploading?.(false, !("error" in sent));
+		if ("error" in sent) return setNotice(sent.error);
 		reloadLibrary(); // so Change lists it too (review 26 Nov)
-		const start = startAt();
-		const seconds = Math.min(clipSeconds ?? BEHIND.seconds, total - start);
-		const insert: Insert = { ...newClipSound(done.kind), id: crypto.randomUUID(), kind: done.kind, file: done.file, start, end: round(start + Math.max(0.5, seconds)), speakerScale: seeThrough ? 1 : INSERT.scale.start, speakerX: seeThrough ? 0.5 : 0.25, hidden: false, seeThrough, name: cleanInsertName(file.name.replace(/\.[^.]+$/, "")) || undefined };
-		setOpen(insert.id);
-		setTab("inserts");
-		setAdding(false);
-		setInserts([...layers.inserts, insert]);
-		onReveal?.(insert.id, insert.start);
+		latest.current?.add(sent.item, clipSeconds, seeThrough, file.name);
 	}
 
 	// One thing at a time: the list, or the one picked with only its settings (coach, 12 Nov: with texts and pictures
