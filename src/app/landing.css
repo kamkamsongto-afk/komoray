@@ -144,8 +144,9 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 .k-tilt:hover { transform: perspective(900px) rotateY(calc(var(--tx, 0) * 9deg)) rotateX(calc(var(--ty, 0) * -9deg)) translateY(-4px); }
 .k-stage { background: #101114; border: 1px solid rgba(244,243,239,.18); }
 .k-stage > img, .k-stage > canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-/* Cutout: the person at full size over the picture and the words (coach 20 Nov: not shrunk). */
-.k-stage > .k-cutme { object-position: 50% 30%; }
+/* Cutout: the person at full size over the picture and the words (coach 20 Nov: not shrunk). The room behind is from
+   the same clip, so it is placed exactly as the person is. */
+.k-stage > .k-cutme, .k-stage > .k-cutroom { object-position: 50% 30%; }
 .k-frameback { filter: blur(9px) brightness(.55); transform: scale(1.15); }
 .k-frameme { position: absolute; left: 12%; top: 50%; width: 76%; max-height: 90%; transform: translateY(-50%); animation: k-framein .55s cubic-bezier(.3,1.25,.5,1); }
 .k-frameclip { position: absolute; inset: 0; }
@@ -153,7 +154,7 @@ body:has(.k-root) > div:has(> button[role="switch"]) { display: none; }
 .k-frameme svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 @keyframes k-framein { from { transform: translateY(-50%) scale(.6); opacity: 0; } to { transform: translateY(-50%) scale(1); opacity: 1; } }
 .k-behind { position: absolute; left: 0; right: 0; top: 9%; color: #B9F36A; font-weight: 800; letter-spacing: -.03em; line-height: 1; text-align: center; white-space: nowrap; }
-.k-behind-run { right: auto; font-size: 44px; animation: k-run 7s linear infinite; }
+.k-behind-run { right: auto; font-size: 44px; animation: k-run 10s linear infinite; }
 .k-behind-slam { font-size: 84px; animation: k-slam 4.2s cubic-bezier(.2,.9,.3,1.2) both; }
 .k-behind-heartbeat { font-size: 84px; animation: k-heart 1.1s ease-in-out infinite; }
 @keyframes k-run { from { transform: translateX(0); } to { transform: translateX(-33.333%); } }
