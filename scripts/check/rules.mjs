@@ -87,7 +87,19 @@ survives("Cutout picture or clip", "src/lib/behind.ts", "Insert", {
 
 survives("Cutout text", "src/lib/behind.ts", "BehindText", {
 	id: "a", text: "WOW", start: 1, end: 4, font: "kanit", size: 200, color: "#FFE600", stroke: 6, strokeColor: "#FF3B30", fx: "pulse", speed: "fast", y: 0.4, lineGap: 10, dim: 0.3, blur: 8, ...FADES,
-}, (x) => behind.readCutout({ texts: [x], inserts: [] })?.texts[0]);
+}, (x) => behind.readCutout({ texts: [x], inserts: [] })?.texts[0], ["ownFont"]);
+
+// A text with a font of one's own (from 25 Nov, once the type has the field).
+if (fieldsOf("src/lib/behind.ts", "BehindText").includes("ownFont")) {
+	const file = "a".repeat(64);
+	const mine = { id: "a", text: "WOW", start: 1, end: 4, font: "own", ownFont: { family: "My Font", height: 1.4, version: 0, file } };
+	check("Cutout text: an own font survives saving, and counts as used in My files", () => {
+		const out = behind.readCutout({ texts: [mine], inserts: [] })?.texts[0];
+		if (!isDeepStrictEqual([out?.font, out?.ownFont], [mine.font, mine.ownFont])) return JSON.stringify(out);
+		const { idsIn } = lib("src/lib/my-files-usage");
+		return idsIn({ cutout: { texts: [out], inserts: [] } }).includes(file) ? null : "My files would let it be deleted without a warning";
+	});
+}
 
 survives("Zoom part", "src/lib/zoom.ts", "ZoomPart", { start: 1, end: 4, zoom: "out", amount: 1.2, whole: true }, (x) => zoom.readZoomParts([x], 100)?.[0]);
 
