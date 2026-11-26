@@ -1349,9 +1349,14 @@ def layout_flashes(parts: list[str], base: str, edges: list[float]) -> str:
     base = "[lfm]"
     for k, e in enumerate(edges):
         a, b = max(0.0, e - F), e + F
+        # fade takes no start before 0, so a flash under F into the video is faded on a clock 1 s later and moved
+        # back (a whole second is exact on any timebase). Else Make video fails (26 Nov).
+        late = 1 if e < F else 0
         parts.append(
             f"[lfs{k}]trim=start={a:.3f}:end={b:.3f},drawbox=c=white:t=fill,format=yuva420p,"
-            f"fade=t=in:st={e - F:.3f}:d={F}:alpha=1,fade=t=out:st={e:.3f}:d={F}:alpha=1[lfw{k}]"
+            f"{f'setpts=PTS+{late}/TB,' if late else ''}"
+            f"fade=t=in:st={e - F + late:.3f}:d={F}:alpha=1,fade=t=out:st={e + late:.3f}:d={F}:alpha=1"
+            f"{f',setpts=PTS-{late}/TB' if late else ''}[lfw{k}]"
         )
         parts.append(f"{base}[lfw{k}]overlay=eof_action=pass:enable='between(t,{a:.3f},{b:.3f})'[lfo{k}]")
         base = f"[lfo{k}]"
