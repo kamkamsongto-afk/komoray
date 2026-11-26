@@ -12,7 +12,7 @@ const FILES: Record<string, string> = {
 	cutout: "site/home-cutout-v1.mp4",
 	layout: "site/home-layout-v1.mp4",
 	zoo: "site/home-zoo-v1.mp4",
-	zoom: "site/home-zoom-v1.mp4",
+	zoom: "site/home-zoom-v2.mp4",
 	banner: "site/home-banner-v1.mp4",
 };
 
