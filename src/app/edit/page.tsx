@@ -23,7 +23,7 @@ import { type Pace, PACES, PADDING } from "@/lib/silences";
 import { ding } from "@/lib/ding";
 import { allCuts, cutSeconds, type Fix, fixedWords, type HandEdits, subtractSpans, type WordFix } from "@/lib/edit";
 import { fixesNeedThaiCut, loadThaiCut } from "@/lib/thai-cut";
-import { TRANSLATIONS } from "@/lib/languages";
+import { LANGUAGES, NOT_A_TRANSLATION, TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, readStyle, type SubtitleStyle, withVideoZoom } from "@/lib/subtitle-style";
 import { fitLook, leftOutText, type LeftOut, type TemplateLook } from "@/lib/templates";
@@ -1060,6 +1060,21 @@ export default function EditPage() {
 					<button onClick={() => setTemplateUsed(null)} className="text-foreground/50 hover:text-foreground" aria-label="Close">
 						<X className="h-4 w-4" aria-hidden />
 					</button>
+				</div>
+			)}
+			{/* Nothing heard, usually the wrong language picked: no script, subtitles or key moments, so say why (coach 26 Nov). */}
+			{analysis.words.length === 0 && (
+				<div className="flex flex-col gap-1 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+					<p className="font-medium">
+						No words were heard{analysis.language ? ` in ${LANGUAGES.find((l) => l.code === analysis.language)?.english ?? analysis.language}` : ""}, so there are no subtitles or key moments.
+					</p>
+					<p>
+						If the video is in another language,{" "}
+						<Link href={`/upload?key=${encodeURIComponent(key)}&again=1`} className="underline">
+							listen again
+						</Link>{" "}
+						and pick the language spoken in it. {NOT_A_TRANSLATION}
+					</p>
 				</div>
 			)}
 			{dictionaryFixed && (
