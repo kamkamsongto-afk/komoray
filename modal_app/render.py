@@ -860,12 +860,14 @@ BG_SPEED = (0.5, 20.0)  # BG_MOTION.speed
 BG_MOTIONS = ("in", "out", "panLeft", "panRight", "tiltUp", "tiltDown")
 
 
-def bg_motion_filter(motion: str | None, amount: float, speed: float, seconds: float, size: tuple[int, int]) -> str:
+def bg_motion_filter(motion: str | None, amount: float, speed: float, seconds: float, size: tuple[int, int], around: str = "black@0") -> str:
     """ffmpeg: a picture or clip that zooms in or out, pans left / right or tilts up / down while it shows, over `size` (coach 23 Nov).
     Same maths as bgWindow in src/lib/bg-motion.ts: the picture is looked at through a window of 1/s of it, s = 1 + amount (a pan or
     tilt: all the time; zoom: growing or shrinking), slid by the share p of what is left over (p = time shown x speed, at most 1).
     Scale and crop only move in whole pixels, which shakes a slow move, so `perspective` places the window (smooth_filter). The
-    window's corners are the picture's own points that land on the output's corners. Returns "" for no motion."""
+    window's corners are the picture's own points that land on the output's corners. Returns "" for no motion.
+    around: what shows where a negative zoom makes the picture smaller than its space, as the preview shows it (a colour,
+    or clear). `perspective` repeats the picture's edge there, so a 2 px border of that is put round it first."""
     if motion not in BG_MOTIONS:
         return ""
     W, H = size
@@ -879,17 +881,26 @@ def bg_motion_filter(motion: str | None, amount: float, speed: float, seconds: f
     fy = p if motion == "tiltDown" else f"(1-{p})" if motion == "tiltUp" else "0.5"
     x, y = f"({W}*{room}*{fx})", f"({H}*{room}*{fy})"
     w, h = f"({W}/{s})", f"({H}/{s})"
+    if motion in ("in", "out") and a < 0:
+        # The canvas is 2 px bigger all round: its corners (-2 and W + 2 of the output) look at these points of it.
+        x0, x1 = f"({x}+2-2/{s})", f"({x}+2+({W}+2)/{s})"
+        y0, y1 = f"({y}+2-2/{s})", f"({y}+2+({H}+2)/{s})"
+        return (
+            f"format=rgba,pad=iw+4:ih+4:2:2:color={around},format=yuva420p,"
+            f"perspective=x0='{x0}':y0='{y0}':x1='{x1}':y1='{y0}':x2='{x0}':y2='{y1}':x3='{x1}':y3='{y1}'"
+            f":interpolation=linear:eval=frame,crop={W}:{H}:2:2,"
+        )
     return (
         f"format=yuva420p,perspective=x0='{x}':y0='{y}':x1='{x}+{w}':y1='{y}':x2='{x}':y2='{y}+{h}':x3='{x}+{w}':y3='{y}+{h}'"
         ":interpolation=linear:eval=frame,"
     )
 
 
-def picture_zoom(ins: dict, seconds: float, size: tuple[int, int]) -> str:
+def picture_zoom(ins: dict, seconds: float, size: tuple[int, int], around: str = "black@0") -> str:
     """ffmpeg: a Cutout picture's zoom, pan or tilt while it shows, over the whole screen (pictures only). Same as pictureWindow in behind.ts."""
     if ins.get("kind") == "video":
         return ""
-    return bg_motion_filter(ins.get("picMotion"), ins.get("picZoom", INSERT_ZOOM) if ins.get("picZoom") is not None else INSERT_ZOOM, ins.get("picSpeed") if ins.get("picSpeed") is not None else 1.0, seconds, size)
+    return bg_motion_filter(ins.get("picMotion"), ins.get("picZoom", INSERT_ZOOM) if ins.get("picZoom") is not None else INSERT_ZOOM, ins.get("picSpeed") if ins.get("picSpeed") is not None else 1.0, seconds, size, around)
 
 
 def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
@@ -897,7 +908,8 @@ def layout_file_zoom(l: dict, seconds: float, size: tuple[int, int]) -> str:
     Same as layoutFileWindow in layout.ts."""
     if not l.get("file"):
         return ""
-    return bg_motion_filter(l.get("fileMotion"), l.get("fileMotionZoom") if l.get("fileMotionZoom") is not None else INSERT_ZOOM, l.get("fileMotionSpeed") if l.get("fileMotionSpeed") is not None else 1.0, seconds, size)
+    colour = str(l.get("color") or "#000000").lstrip("#")  # the part's colour shows round a picture made smaller
+    return bg_motion_filter(l.get("fileMotion"), l.get("fileMotionZoom") if l.get("fileMotionZoom") is not None else INSERT_ZOOM, l.get("fileMotionSpeed") if l.get("fileMotionSpeed") is not None else 1.0, seconds, size, f"0x{colour}")
 
 
 def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: dict, inputs: dict) -> str:
@@ -941,9 +953,12 @@ def cutout_filters(parts: list[str], base: str, size: tuple[int, int], cutout: d
         # A clip or a GIF that ends early stays on its last frame, as a browser shows it.
         hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if ins.get("kind") == "video" or str(ins.get("file", "")).endswith(".gif") else ""
         fades = f"format=yuva420p,{alpha_fades(0.0, d, INSERT_FADE, fades_of(ins))}setpts=PTS-STARTPTS+{a:.3f}/TB[ins{j}]"
-        zoom = picture_zoom(ins, d, size)
         grow, turn = float(ins.get("picScale", 1)), float(ins.get("picRotate", 0))
         dx, dy = float(ins.get("picX", 0)) * W, float(ins.get("picY", 0)) * H
+        # Round a picture zoomed smaller than the screen: black where the preview has its black backing (a moved picture
+        # without clear parts), else the video under it.
+        moved = not (grow == 1 and turn == 0 and dx == 0 and dy == 0)
+        zoom = picture_zoom(ins, d, size, "black" if moved and not ins.get("seeThrough") else "black@0")
         if grow == 1 and turn == 0 and dx == 0 and dy == 0:
             parts.append(f"[{inputs['inserts'][j]}:v]fps={FPS},{hold}trim=duration={d:.3f},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{zoom}{fades}")
         else:
@@ -1108,11 +1123,13 @@ def frame_filters(parts: list[str], base: str, size: tuple[int, int], frames: li
             # Fills the screen (cover), as the preview's object-fit: cover. A clip or GIF that ends early stays on its last frame.
             moving = f.get("media") == "video" or str(f.get("file", "")).endswith(".gif")
             hold = f"tpad=stop_mode=clone:stop_duration={d:.3f}," if moving else ""
-            motion = bg_motion_filter(f.get("backMotion"), f.get("backAmount") if f.get("backAmount") is not None else INSERT_ZOOM, f.get("backSpeed") if f.get("backSpeed") is not None else 1.0, d, size)
-            done = f"{motion}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
             grow = float(f["backSize"]) if f.get("backSize") is not None else 1.0
             dx, dy = float(f.get("backX") or 0) * W, float(f.get("backY") or 0) * H
             turn = float(f.get("backRotate") or 0)
+            # Round a picture zoomed smaller than the screen: black, or backColor once it has a size or place of its own.
+            around = "black" if grow == 1 and dx == 0 and dy == 0 and turn == 0 else f"0x{str(f.get('backColor') or '#000000').lstrip('#')}"
+            motion = bg_motion_filter(f.get("backMotion"), f.get("backAmount") if f.get("backAmount") is not None else INSERT_ZOOM, f.get("backSpeed") if f.get("backSpeed") is not None else 1.0, d, size, around)
+            done = f"{motion}format=yuv420p,setpts=PTS-STARTPTS+{a:.3f}/TB[fbf{j}]"
             read = f"[{src['file']}:v]fps={FPS},{hold}trim=duration={d:.3f},"
             if grow == 1 and dx == 0 and dy == 0 and turn == 0:
                 parts.append(f"{read}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,{done}")

@@ -726,7 +726,7 @@ mode === "move"
 					const fill: CSSProperties = moved && ratio ? { position: "absolute", maxWidth: "none", objectFit: "fill", ...picturePlace(i, ratio, W / H) } : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 					return (
 						<div key={i.id} className="absolute inset-0 overflow-hidden" style={{ opacity: show, zIndex: 1, background: moved && !i.seeThrough ? "#000" : undefined }}>
-							<div className="absolute inset-0" style={bgStyle(pictureWindow(i, outTime))}>
+							<div className="absolute inset-0 overflow-hidden" style={bgStyle(pictureWindow(i, outTime))}>
 								{i.kind === "video" ? (
 									<InsertClip src={src} at={Math.max(0, outTime - i.start)} from={i.clipFrom} playing={playing && outTime >= i.start} style={fill} onRatio={seen} volume={soundOf(i)} length={i.end - i.start} />
 								) : (
@@ -794,6 +794,8 @@ mode === "move"
 		const p = framePicture(f, W, H);
 		return { transformOrigin: "0 0", transform: `translate(${p.x * scale}px, ${p.y * scale}px) scale(${p.scale})` };
 	};
+	// The wrapper a background moves in (bgStyle) clips what hangs over it, as the final video cuts the picture to the
+	// screen or part before it zooms: shrunk by a negative Amount, a bigger picture showed its hidden edges here only.
 	function frameBack(f: FrameMe) {
 		const src = f.back === "file" && f.file ? projectFileSrc(f.file) : "";
 		// Its own size and place (frameBackPlace, once its shape is known), with backColor around; else it fills the screen.
@@ -805,7 +807,7 @@ mode === "move"
 			<div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ background: f.back === "color" || moved ? f.backColor : "#000" }}>
 				{f.back === "blur" && <BlurBack source={pictureRef} blur={f.blur * scale} dim={f.dim} ratio={W / H} />}
 				{src && (
-<div className="absolute inset-0" style={bgStyle(frameBackWindow(f, outTime))}>
+<div className="absolute inset-0 overflow-hidden" style={bgStyle(frameBackWindow(f, outTime))}>
 {f.media === "video" ? (
 <InsertClip src={src} at={outTime - f.start} from={f.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(f)} length={f.end - f.start} />
 ) : (
@@ -874,7 +876,7 @@ mode === "move"
 		return (
 			<div className="pointer-events-none overflow-hidden" style={{ ...at(box), background: l.color }}>
 				{/* Zoom, pan or tilt (layoutFileWindow, lib/bg-motion.ts), as layout_file_zoom in render.py. */}
-<div className="absolute inset-0" style={bgStyle(layoutFileWindow(l, outTime))}>
+<div className="absolute inset-0 overflow-hidden" style={bgStyle(layoutFileWindow(l, outTime))}>
 					{src &&
 						(l.media === "video" ? (
 							<InsertClip src={src} at={outTime - l.start} from={l.clipFrom} playing={playing} style={fill} onRatio={seen} volume={soundOf(l)} length={l.end - l.start} />
