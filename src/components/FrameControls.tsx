@@ -363,13 +363,16 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 							)}
 						</TabGroup>
 
+						{/* Coach 26 Nov: the fades in their own card, before Border, as Layout and Banners have it. */}
+						<ToolGroup tone={2} title="Transition">
+							<FadeSwitches item={f} onChange={(patch) => update(f.id, patch)} />
+						</ToolGroup>
 						<ToolGroup tone={1} title="Border">
 							{row("Width", range(f.border, 0, FRAME.border.max, 1, `${f.border}px`, (border) => update(f.id, { border })))}
 							{f.border > 0 && row("Color", swatches(BORDER_COLORS, f.borderColor, (borderColor) => update(f.id, { borderColor }), "Border color"))}
 						</ToolGroup>
 						<ToolGroup tone={1} title="When">
 							{row(ON_TIMELINE, <TimeRange id={f.id} start={f.start} end={f.end} total={total} clock={ruler} onChange={(patch) => update(f.id, patch)} />)}
-							<FadeSwitches item={f} onChange={(patch) => update(f.id, patch)} />
 						</ToolGroup>
 
 					</div>

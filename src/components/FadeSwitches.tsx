@@ -3,7 +3,7 @@
 import { type Fades, fadesOn } from "@/lib/fades";
 
 // One on / off switch, like an iPhone's.
-function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: (on: boolean) => void }) {
+export function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: (on: boolean) => void }) {
 	return (
 		<label className="inline-flex cursor-pointer items-center gap-1.5 select-none">
 			<button

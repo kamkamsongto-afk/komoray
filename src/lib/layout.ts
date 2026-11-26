@@ -35,6 +35,8 @@ export type VideoLayout = {
 	meZoom?: number;
 	color: string;
 	enter: LayoutEnter;
+	inFade?: true; // the Fade in switch (coach 26 Nov): the start fades instead of what `enter` does (layoutEdges)
+	outFade?: true; // the Fade out switch, the same for the end
 	file?: string;
 	media?: "image" | "video";
 	volume?: number; // a clip's own sound (lib/clip-sound.ts)
@@ -117,27 +119,37 @@ export function layoutJoins(l: VideoLayout, layouts: VideoLayout[] | undefined) 
 	};
 }
 
+// How each end comes and goes (coach 26 Nov: slide in, fade out): its Transition, or a fade where that end's switch is
+// on. Same as layout_edges in render.py.
+export const layoutEdges = (l: Pick<VideoLayout, "enter" | "inFade" | "outFade">): { start: LayoutEnter; end: LayoutEnter } => ({
+	start: l.inFade ? "fade" : l.enter,
+	end: l.outFade ? "fade" : l.enter,
+});
+
 // How far it is split at final-video second t: 0 = the whole screen is the speaker, 1 = split. Only Slide moves, and
 // not at an edge another layout covers (layoutJoins); a layout shorter than its slides slides over its time shared
 // between them. layouts: all of them, l among them. Same as layout_ease_expr in render.py.
 export function layoutProgress(l: VideoLayout, t: number, layouts: VideoLayout[] | undefined) {
 	if (t < l.start || t >= l.end) return 0;
-	if (l.enter !== "slide") return 1;
+	const edges = layoutEdges(l);
 	const join = layoutJoins(l, layouts);
-	const slides = (join.start ? 0 : 1) + (join.end ? 0 : 1);
+	// An end that doesn't slide, or that another layout covers, stays put.
+	const holds = { start: join.start || edges.start !== "slide", end: join.end || edges.end !== "slide" };
+	const slides = (holds.start ? 0 : 1) + (holds.end ? 0 : 1);
 	if (!slides) return 1;
 	const d = Math.min(LAYOUT.slide, (l.end - l.start) / slides);
-	return ease(Math.max(0, Math.min(1, join.start ? 1 : (t - l.start) / d, join.end ? 1 : (l.end - t) / d)));
+	return ease(Math.max(0, Math.min(1, holds.start ? 1 : (t - l.start) / d, holds.end ? 1 : (l.end - t) / d)));
 }
 
-// How solid a Fade layout is at final-video second t, 0..1, over the whole screen: it fades in at its start and out at
+// How solid a layout with a fading end is at final-video second t, 0..1, over the whole screen: it fades in at its start and out at
 // its end, but not at an edge another layout covers (layoutJoins), so the whole speaker never shows between two. A layout
 // shorter than both fades fades over half its time each way. The others are always solid. Same as layout_filters.
 export function layoutAlpha(l: VideoLayout, t: number, layouts: VideoLayout[] | undefined) {
-	if (l.enter !== "fade") return 1;
+	const edges = layoutEdges(l);
+	if (edges.start !== "fade" && edges.end !== "fade") return 1;
 	const join = layoutJoins(l, layouts);
 	const d = Math.min(LAYOUT.fade, (l.end - l.start) / 2);
-	return Math.max(0, Math.min(1, join.start ? 1 : (t - l.start) / d, join.end ? 1 : (l.end - t) / d));
+	return Math.max(0, Math.min(1, join.start || edges.start !== "fade" ? 1 : (t - l.start) / d, join.end || edges.end !== "fade" ? 1 : (l.end - t) / d));
 }
 
 // The white flash over the picture at final-video second t, 0..1: up to full at each edge of a Flash layout, from
@@ -146,8 +158,10 @@ export function layoutAlpha(l: VideoLayout, t: number, layouts: VideoLayout[] | 
 export function layoutFlash(layouts: VideoLayout[] | undefined, t: number) {
 	let through = 1;
 	for (const l of layouts ?? []) {
-		if (l.enter !== "flash") continue;
-		for (const edge of [l.start, l.end]) through *= 1 - Math.max(0, 1 - Math.abs(t - edge) / LAYOUT.flash);
+		const edges = layoutEdges(l);
+		for (const [how, edge] of [[edges.start, l.start], [edges.end, l.end]] as const) {
+			if (how === "flash") through *= 1 - Math.max(0, 1 - Math.abs(t - edge) / LAYOUT.flash);
+		}
 	}
 	return 1 - through;
 }
@@ -237,6 +251,8 @@ export function readLayouts(value: unknown): VideoLayout[] | null {
 			...(l.meZoom !== undefined && { meZoom: round(num(l.meZoom, LAYOUT.meZoom.min, LAYOUT.meZoom.max, LAYOUT.meZoom.start), 100) }),
 			color: typeof l.color === "string" && HEX.test(l.color) ? l.color.toUpperCase() : "#000000",
 			enter: LAYOUT_ENTERS.some((e) => e.id === l.enter) ? (l.enter as LayoutEnter) : "slide",
+			...(l.inFade === true && l.enter !== "fade" && { inFade: true as const }),
+			...(l.outFade === true && l.enter !== "fade" && { outFade: true as const }),
 			...(file && { file, media: clip ? ("video" as const) : ("image" as const) }),
 			...readClipSound(l, clip),
 			...(file && Number(l.fileZoom) > LAYOUT.fileZoom.min && { fileZoom: round(num(l.fileZoom, LAYOUT.fileZoom.min, LAYOUT.fileZoom.max, 1), 100) }),
