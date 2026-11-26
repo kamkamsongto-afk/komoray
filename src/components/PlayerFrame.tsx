@@ -15,6 +15,7 @@ import { myFileUrl } from "@/lib/my-files";
 import { LOGO_MOTION, logoLook } from "@/lib/logo-motion";
 import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
+import { FONT_CHANGED, type FontChange } from "@/lib/use-my-fonts";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
 import { FPS, type Line, setSpot, ZOOM_ORIGIN } from "@/lib/timeline";
 import { WATERMARK, watermarkAt } from "@/lib/watermark";
@@ -88,27 +89,67 @@ const FONT_FACES: Record<FontId, { family: string; weight: number }> = {
 const ownName = (font: OwnFont) => (font.file ? `komoray-own-${font.file.slice(0, 16)}` : `komoray-own-${font.version}`);
 const ownSource = (font: OwnFont) => (font.file ? myFileUrl(font.file) : `/api/font?file=1&v=${font.version}`);
 const ownFamily = (font: OwnFont) => `"${ownName(font)}", ${kanit.style.fontFamily}`;
-const ownLoaded = new Set<string>();
+// An own font is drawn only once it has loaded and while My files still has it: a deleted one stays in the browser's
+// cache. Until then, and after, it is Kanit at Kanit's size, as the final video draws it (api/render, own_font_path).
+const ownLoads = new Map<string, Promise<boolean>>();
+const ownReady = new Set<string>();
+const ownGone = new Set<string>(); // My files ids
+// Returns how to draw an own font now: its family, weight, and height in ems (see FONTS[].height).
 function useOwnFonts(fonts: (OwnFont | undefined)[]) {
-	const [, setReady] = useState(0);
+	const [, setSeen] = useState(0);
 	const wanted = fonts.filter((f): f is OwnFont => !!f);
 	const names = [...new Set(wanted.map(ownName))].join(" ");
 	useEffect(() => {
-		if (typeof FontFace === "undefined") return;
-		for (const font of wanted) {
-			const name = ownName(font);
-			if (ownLoaded.has(name)) continue;
-			ownLoaded.add(name);
-			new FontFace(name, `url(${ownSource(font)})`)
-				.load()
-				.then((loaded) => {
-					document.fonts.add(loaded);
-					setReady((n) => n + 1);
-				})
-				.catch(() => ownLoaded.delete(name));
+		const redraw = () => setSeen((n) => n + 1);
+		const changed = (e: Event) => {
+			const { id, gone } = (e as CustomEvent<FontChange>).detail;
+			if (gone) ownGone.add(id);
+			else ownGone.delete(id);
+			redraw();
+		};
+		window.addEventListener(FONT_CHANGED, changed);
+		if (typeof FontFace !== "undefined") {
+			for (const font of wanted) {
+				const name = ownName(font);
+				let load = ownLoads.get(name);
+				if (!load) {
+					load = new FontFace(name, `url(${ownSource(font)})`).load().then(
+						(loaded) => {
+							document.fonts.add(loaded);
+							ownReady.add(name);
+							return true;
+						},
+						() => {
+							ownLoads.delete(name); // asked for again next time
+							return false;
+						},
+					);
+					ownLoads.set(name, load);
+				}
+				void load.then((ok) => ok && redraw());
+			}
 		}
+		// Which of these My files still has. No answer: nothing changes (not sure is not deleted).
+		const kept = wanted.flatMap((f) => (f.file ? [f.file] : []));
+		if (kept.length) {
+			void fetch("/api/files?kind=font", { cache: "no-store" })
+				.then(async (res) => (res.ok ? ((await res.json()) as { files?: { id: string }[] }).files : undefined))
+				.then((files) => {
+					if (!files) return;
+					const there = new Set(files.map((f) => f.id));
+					for (const id of kept) {
+						if (there.has(id)) ownGone.delete(id);
+						else ownGone.add(id);
+					}
+					redraw();
+				})
+				.catch(() => {});
+		}
+		return () => window.removeEventListener(FONT_CHANGED, changed);
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- names says which fonts these are
 	}, [names]);
+	return (font: OwnFont | undefined) =>
+		font && ownReady.has(ownName(font)) && !(font.file && ownGone.has(font.file)) ? { family: ownFamily(font), weight: 400, em: font.height } : { ...FONT_FACES.kanit, em: FONTS.kanit.height };
 }
 
 const SIDE_MARGIN = 80;
@@ -536,17 +577,15 @@ mode === "move"
 		return () => observer.disconnect();
 	}, []);
 
-	useOwnFonts([subtitle.font === "own" ? subtitle.ownFont : undefined, ...banners.map((b) => (b.font === "own" ? b.ownFont : undefined)), ...(cutout?.layers.texts ?? []).map((t) => (t.font === "own" ? t.ownFont : undefined))]);
+	const ownLook = useOwnFonts([subtitle.font === "own" ? subtitle.ownFont : undefined, ...banners.map((b) => (b.font === "own" ? b.ownFont : undefined)), ...(cutout?.layers.texts ?? []).map((t) => (t.font === "own" ? t.ownFont : undefined))]);
 	// How the logo comes and goes at this moment of the final video (lib/logo-motion.ts, the same sums as render.py),
 	// grown or shrunk from its own corner.
 	const logoNow = logoLook(logoTime ?? outTime, subtitle.logoEffect, subtitle.logoSpeed, subtitle.logoEvery);
 	const logoOrigin = `${subtitle.logoAt.startsWith("bottom") ? "bottom" : "top"} ${subtitle.logoAt.endsWith("right") ? "right" : "left"}`;
-	const face =
-		subtitle.font === "own" && subtitle.ownFont
-			? { family: ownFamily(subtitle.ownFont), weight: 400 }
-			: (FONT_FACES[subtitle.font as FontId] ?? FONT_FACES.kanit);
+	const mine = subtitle.font === "own" ? ownLook(subtitle.ownFont) : null;
+	const face = mine ?? FONT_FACES[subtitle.font as FontId] ?? FONT_FACES.kanit;
 	// Letters as big as the final video draws them (see FONTS[].height), rows as far apart.
-	const ownEm = fontMetrics(subtitle).height;
+	const ownEm = mine ? mine.em : fontMetrics(subtitle).height;
 	// Text in Russian and the like uses a font that has its letters, as the final video does (font_tag in render.py).
 	const textFace = (value: string) =>
 		subtitle.font !== "own" && hasCyrillic(value)
@@ -556,7 +595,7 @@ mode === "move"
 	// except in the user's own font. Its own font that isn't there falls back to Kanit, on both sides.
 	const bannerFace = (b: Banner, value: string) => {
 		if (!b.font) return textFace(value);
-		if (b.font === "own") return b.ownFont ? { family: ownFamily(b.ownFont), weight: 400, em: b.ownFont.height } : { ...FONT_FACES.kanit, em: FONTS.kanit.height };
+		if (b.font === "own") return ownLook(b.ownFont);
 		if (hasCyrillic(value)) return { family: fira.style.fontFamily, weight: 500, em: CYRILLIC_FONT.height };
 		return { ...(FONT_FACES[b.font] ?? FONT_FACES.kanit), em: (FONTS[b.font] ?? FONTS.kanit).height };
 	};
@@ -647,9 +686,9 @@ mode === "move"
 				<div className="pointer-events-none absolute top-0 left-0" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top left", zIndex: 1 }}>
 					{layers.texts.flatMap((t) => {
 						// Its own font (build_behind in render.py), falling back to Kanit when it can't load, as there.
-						const own = t.font === "own" ? t.ownFont : undefined;
-						const face = own ? { family: ownFamily(own), weight: 400 } : (FONT_FACES[t.font as FontId] ?? FONT_FACES.kanit);
-						const em = own ? own.height : (FONTS[t.font as FontId]?.height ?? FONTS.kanit.height);
+						const own = t.font === "own" ? ownLook(t.ownFont) : null;
+						const face = own ?? FONT_FACES[t.font as FontId] ?? FONT_FACES.kanit;
+						const em = own ? own.em : (FONTS[t.font as FontId]?.height ?? FONTS.kanit.height);
 						const words = t.fx === "runLeft" || t.fx === "runRight" ? runText(t, W) : t.text;
 						return behindMotion(t, outTime, W, H).map((pose, k) => (
 							<div
