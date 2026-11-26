@@ -77,6 +77,46 @@ export async function putIfAbsent(key: string, body: string | Uint8Array<ArrayBu
 	return true;
 }
 
+// A JSON file with the mark (ETag) of the bytes read, for writeIfSame. Not there: both null.
+export async function readMarked<T>(key: string): Promise<{ value: T | null; mark: string | null }> {
+	const { client, objectUrl } = r2();
+	const res = await client.fetch(objectUrl(key), { headers: { "Accept-Encoding": "identity" } });
+	if (res.status === 404) return { value: null, mark: null };
+	if (!res.ok) throw new Error(`R2 read failed (${res.status})`);
+	const mark = res.headers.get("etag")?.replace(/^W\//, "");
+	if (!mark) throw new Error("R2 read failed (no ETag)");
+	return { value: (await res.json()) as T, mark };
+}
+
+// Write only if the file is still the one read (mark), or still not there (null). false: someone else wrote first.
+export async function writeIfSame(key: string, body: string, mark: string | null) {
+	const { client, objectUrl } = r2();
+	const bytes = new TextEncoder().encode(body);
+	const signed = await client.sign(objectUrl(key), {
+		method: "PUT",
+		body: bytes,
+		headers: { "Content-Type": "application/json", ...(mark ? { "If-Match": mark } : { "If-None-Match": "*" }) },
+	});
+	const res = await fetch(signed.url, { method: "PUT", headers: signed.headers, body: bytes });
+	// 409 / 429: R2 turning away writes of one file that land together; the same answer, try again.
+	if (res.status === 412 || res.status === 409 || res.status === 429) return false;
+	if (!res.ok) throw new Error(`R2 write failed (${res.status})`);
+	return true;
+}
+
+// Change a JSON file so requests at the same moment can't undo each other (counts that cost money, 26 Nov: 100 requests at
+// once all read the old number and all passed). decide sees the newest value and answers what to write (next, or nothing)
+// and what to tell the caller; it runs again if someone else wrote meanwhile. null: too busy to get a turn, so refuse.
+export async function updateJson<T, R>(key: string, decide: (value: T | null) => Promise<{ next?: T; result: R }> | { next?: T; result: R }, tries = 8): Promise<{ result: R } | null> {
+	for (let turn = 0; turn < tries; turn++) {
+		const { value, mark } = await readMarked<T>(key);
+		const { next, result } = await decide(value);
+		if (next === undefined || (await writeIfSame(key, JSON.stringify(next), mark))) return { result };
+		await new Promise((resolve) => setTimeout(resolve, 50 + Math.random() * 150 * (turn + 1)));
+	}
+	return null;
+}
+
 export async function getJson<T>(key: string): Promise<T | null> {
 	const { client, objectUrl } = r2();
 	const res = await client.fetch(objectUrl(key));
