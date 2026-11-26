@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL, shareCard } from "@/lib/page-meta";
 import { IS_STAGING } from "@/lib/supabase/config";
 import "./globals.css";
 
@@ -15,8 +16,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-	title: "Komoray — AI Studio for Talking Heads",
-	description: "You shoot. Komoray makes you shine. The AI studio for talking-head creators: your raw take in, a clean cut with your script, subtitles and brand out.",
+	metadataBase: new URL(SITE_URL),
+	title: SITE_TITLE,
+	description: SITE_DESCRIPTION,
+	...shareCard(SITE_TITLE, SITE_DESCRIPTION),
 };
 
 export default function RootLayout({
@@ -30,6 +33,7 @@ export default function RootLayout({
 			<head>
 				<script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem("komoray.theme");if(t)document.documentElement.dataset.theme=t}catch(e){}` }} />
 				<link rel="icon" href="/favicon.svg" type="image/svg+xml"></link>
+				<link rel="apple-touch-icon" href="/apple-touch-icon.png"></link>
 			</head>
 			<body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
 				{IS_STAGING && (

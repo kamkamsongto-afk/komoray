@@ -1,8 +1,10 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { AfterVideo, HeroDrop, LoopVideo } from "@/components/HomeMedia";
 import { CutoutCard, FrameCard, HelloWord, LayoutCard, LooksCard, PaceCard, ScriptDemo, ShapeCard, WordsDemo } from "@/components/LandingDemos";
 import { WaitlistForm } from "@/components/WaitlistForm";
+import { SITE_DESCRIPTION, SITE_TITLE, shareCard } from "@/lib/page-meta";
 import "./landing.css";
 
 const STEPS: [string, string, string][] = [
@@ -10,6 +12,9 @@ const STEPS: [string, string, string][] = [
 	["02", "Review", "Silences and repeated takes are marked. Your script and subtitles are ready. Undo anything."],
 	["03", "Make video", "Preview it, press Make video, and download the file. You make the final call."],
 ];
+
+// The home page's own address, so its copies (www, the workers.dev one) count as one page.
+export const metadata: Metadata = { alternates: { canonical: "/" }, ...shareCard(SITE_TITLE, SITE_DESCRIPTION, "/") };
 
 // Only what the product really does today: no numbers until they are measured with real creators.
 // Every picture and clip here was filmed by the coach (20 Nov, for Paddle's review: no AI-made pictures).
