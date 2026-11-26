@@ -17,7 +17,7 @@ import type { Window } from "@/lib/cutout";
 import { FPS, keepSegments, totalFrames } from "@/lib/timeline";
 import { jobFiles, PART_JOB, PART_RENDER, readRenderPart, type RenderPart, WHOLE_JOB } from "@/lib/render-part";
 import { readStyle } from "@/lib/subtitle-style";
-import { countRender, renderLimitReached } from "@/lib/render-limit";
+import { takeRender } from "@/lib/render-limit";
 import { deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { WATERMARK } from "@/lib/watermark";
 import { watermarkOn } from "@/lib/watermark-on";
@@ -170,8 +170,11 @@ export async function POST(request: Request) {
 	});
 	const before = await getJson<{ fingerprint?: string; stoppedAt?: string }>(siblingKey(key, files.job)).catch(() => null);
 	if (!again && before?.fingerprint === fingerprint && !before.stoppedAt && (await exists(finalKey))) return Response.json({ status: "done", unchanged: true });
-	const limited = await renderLimitReached(email);
-	if (limited) return Response.json({ error: limited }, { status: 429 });
+	// The place is taken (and counted) before anything is started: presses sent together get one each, up to the limits.
+	// A part counts as its share of the video.
+	const total = totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS;
+	const place = await takeRender(email, key, part && total ? (part.end - part.start) / total : 1);
+	if ("error" in place) return Response.json({ error: place.error }, { status: place.status });
 	// Clear the previous attempt so the status check can't pick up an old result.
 	const progressKey = siblingKey(key, files.progress);
 	await Promise.all([deleteObject(finalKey), deleteObject(errorKey), deleteObject(progressKey)]);
@@ -237,18 +240,16 @@ export async function POST(request: Request) {
 			errorUrl: await signedUrl(errorKey, "PUT", LINK_SECONDS, "application/json"),
 			progressUrl: await signedUrl(progressKey, "PUT", LINK_SECONDS, "application/json"),
 		}),
-	});
-	const data = (await res.json().catch(() => ({}))) as { callId?: string; error?: string };
-	if (!res.ok || !data.callId) {
-		const error = data.error ?? `Could not start the render (${res.status})`;
+	}).catch(() => null);
+	const data = (await res?.json().catch(() => ({}))) as { callId?: string; error?: string } | undefined;
+	if (!res?.ok || !data?.callId) {
+		const error = data?.error ?? `Could not start the render (${res?.status ?? "no answer"})`;
 		await putObject(errorKey, JSON.stringify({ error, at: new Date().toISOString() }), "application/json");
+		await place.release(); // never started: not counted
 		return Response.json({ error }, { status: 502 });
 	}
 	// Its Modal job, so Stop can end it (DELETE). Written again: the status check only reads startedAt and part.
 	await putObject(siblingKey(key, files.job), JSON.stringify({ ...job, callId: data.callId }), "application/json");
-	// A part counts as its share of the video. Never stops the video it is counting: a hiccup here only misses one.
-	const total = totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS;
-	await countRender(email, part && total ? (part.end - part.start) / total : 1).catch(() => null);
 	return Response.json({ status: "processing" });
 }
 

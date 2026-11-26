@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, siblingKey } from "@/lib/r2";
+import { deleteObject, exists, getJson, listObjects, putIfAbsent, putObject, readMarked, siblingKey, updateJson, writeIfSame } from "@/lib/r2";
 import { justClaimed } from "@/lib/listen-state";
 import { isAdmin } from "@/lib/supabase/server";
 import { ALL_FEATURES, type Features, NO_FEATURES, readFeatures } from "@/lib/features";
@@ -185,6 +185,21 @@ export async function removePerson(email: string) {
 	await deleteObject(await personKey(email));
 }
 
+// One request at a time for an account while its minutes are checked and taken: sent together, ten videos each saw the
+// same minutes left and all were listened to (26 Nov). A lock left by a request that died is free again after LOCK_MS.
+const LOCK_MS = 30_000;
+async function lockMinutes(email: string) {
+	const file = `access/locks/minutes/${await hashEmail(email)}.json`;
+	const id = crypto.randomUUID();
+	type Lock = { id?: string; at?: number };
+	for (let turn = 0; turn < 5; turn++) {
+		const got = await updateJson<Lock, boolean>(file, (lock) => (lock?.id && Date.now() - (lock.at ?? 0) < LOCK_MS ? { result: false } : { next: { id, at: Date.now() }, result: true }));
+		if (got?.result) return async () => void (await updateJson<Lock, null>(file, (lock) => (lock?.id === id ? { next: {}, result: null } : { result: null })).catch(() => null));
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+	return null;
+}
+
 // May this video be listened to now? Takes the minutes the first time. On success, usageKey says what a failed job gives back.
 export async function startListening(key: string, email?: string | null): Promise<{ error: string; status: number } | { usageKey?: string }> {
 	const status = await accessFor(email);
@@ -200,11 +215,17 @@ export async function startListening(key: string, email?: string | null): Promis
 	if (status.unlimited) return {};
 
 	const recordKey = siblingKey(key, "access.json");
-	const record = await getJson<{ listens: number; at?: string }>(recordKey);
+	const { value: record, mark } = await readMarked<{ listens: number; at?: string }>(recordKey);
 	if (record) {
-		if (justClaimed(record.at, Boolean(started?.startedAt), done || failed, Date.now())) return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
+		// A claim newer than the last job means that listen is still being started (the files left are the one before's).
+		const written = Boolean(started?.startedAt && started.startedAt >= (record.at ?? ""));
+		if (justClaimed(record.at, written, written && (done || failed), Date.now())) return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
 		if (record.listens >= LISTENS_PER_VIDEO) return { error: `This video has been listened to ${LISTENS_PER_VIDEO} times. Please email hello@komoray.com for more.`, status: 429 };
-		await putObject(recordKey, JSON.stringify({ listens: record.listens + 1, at: new Date().toISOString() }), "application/json");
+		// Only one of the requests that read this record gets to write it: sent together, each paid for speech-to-text and
+		// the record went up by one (26 Nov).
+		if (!(await writeIfSame(recordKey, JSON.stringify({ listens: record.listens + 1, at: new Date().toISOString() }), mark))) {
+			return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
+		}
 		return {};
 	}
 
@@ -217,12 +238,21 @@ export async function startListening(key: string, email?: string | null): Promis
 	}
 	if (minutes > status.left) return { error: outOfMinutes(status, minutes), status: 429 };
 
-	// The same video sent twice at once: only one request gets past here, so speech-to-text is paid for once.
-	if (!(await putIfAbsent(recordKey, JSON.stringify({ listens: 1, at: new Date().toISOString() }), "application/json"))) {
-		return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
+	const unlock = await lockMinutes(email);
+	if (!unlock) return { error: "Another of your videos is just starting. Please try again in a moment.", status: 429 };
+	try {
+		// Read again now that it is this video's turn: what is left after any listen taken a moment ago.
+		const now = await accessFor(email);
+		if (minutes > now.left) return { error: outOfMinutes(now, minutes), status: 429 };
+		// The same video sent twice at once: only one request gets past here, so speech-to-text is paid for once.
+		if (!(await putIfAbsent(recordKey, JSON.stringify({ listens: 1, at: new Date().toISOString() }), "application/json"))) {
+			return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
+		}
+		const taken = await takeMinutes(email, key.split("/")[1], minutes, now);
+		return { usageKey: taken?.usageKey };
+	} finally {
+		await unlock();
 	}
-	const taken = await takeMinutes(email, key.split("/")[1], minutes, status);
-	return { usageKey: taken?.usageKey };
 }
 
 // A job that never reported back has died: say so and give the minutes back. true = it had died.

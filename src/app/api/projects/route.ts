@@ -1,6 +1,6 @@
 import { accessFor, hashEmail, LISTENS_PER_VIDEO, NO_INVITE } from "@/lib/access";
 import { OWNER_FILE } from "@/lib/admin-activity";
-import { copyObject, deleteObject, exists, getJson, listObjects, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
+import { copyObject, deleteObject, exists, getJson, listObjects, putObject, siblingKey, updateJson, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { uploadBlocked } from "@/lib/storage";
 import { uploadLimitReached } from "@/lib/upload-limit";
@@ -44,10 +44,6 @@ export async function POST(request: Request) {
 	if (!ready) return Response.json({ error: "This video isn't ready yet. Please wait until its script is done." }, { status: 409 });
 	if (cutoutJob && !cutoutDone && !cutoutFailed && !cutoutJob.settled) return Response.json({ error: "Cutout is still working on this video. Please try again when it's done." }, { status: 409 });
 
-	const countKey = `access/duplicates/${await hashEmail(user.email)}/${new Date().toISOString().slice(0, 10)}.json`;
-	const today = (await getJson<{ count: number }>(countKey))?.count ?? 0;
-	if (today >= DUPLICATES_PER_DAY) return Response.json({ error: `You've made ${DUPLICATES_PER_DAY} copies today. Please try again tomorrow.` }, { status: 429 });
-
 	const id = crypto.randomUUID();
 	const name = key.split("/")[2];
 	const newKey = `uploads/${id}/${name}`;
@@ -59,6 +55,11 @@ export async function POST(request: Request) {
 	// A copy takes as much storage as what it copies (lib/storage.ts): not over the plan's storage either.
 	const full = await uploadBlocked(supabase, access, files.reduce((sum, f) => sum + f.size, 0));
 	if (full) return Response.json({ error: full, storageFull: true }, { status: 413 });
+	// One of the day's copies is taken before copying: counted afterwards, 100 asked together were all made (26 Nov).
+	const countKey = `access/duplicates/${await hashEmail(user.email)}/${new Date().toISOString().slice(0, 10)}.json`;
+	const turn = await updateJson<{ count: number }, boolean>(countKey, (c) => ((c?.count ?? 0) >= DUPLICATES_PER_DAY ? { result: false } : { next: { count: (c?.count ?? 0) + 1 }, result: true }));
+	if (!turn) return Response.json({ error: "Komoray is busy with your account right now. Please try again in a moment." }, { status: 429 });
+	if (!turn.result) return Response.json({ error: `You've made ${DUPLICATES_PER_DAY} copies today. Please try again tomorrow.` }, { status: 429 });
 	const copied: string[] = [];
 	// allSettled: every copy has finished (or failed) before any clean-up, so none lands after it.
 	const results = await Promise.allSettled(
@@ -79,12 +80,13 @@ export async function POST(request: Request) {
 		const row = { id, video_key: newKey, filename: `${from.filename} (copy)`, size: from.size, created_at: from.created_at, ...(from.folder_id ? { folder_id: from.folder_id } : {}) };
 		const { error } = await supabase.from("projects").insert(row);
 		if (error) throw new Error(error.message);
-		await putObject(countKey, JSON.stringify({ count: today + 1 }), "application/json").catch(() => {});
 		await putObject(`uploads/${id}/${OWNER_FILE}`, JSON.stringify({ email: user.email.toLowerCase() }), "application/json").catch(() => {}); // for the Activity tab
 		return Response.json({ project: { ...row, folder_id: from.folder_id ?? null } });
 	} catch (error) {
 		console.error("Duplicate failed:", error);
 		await Promise.all(copied.map((file) => deleteObject(file).catch(() => {}))); // no half copy left in R2
+		// Nothing was made: the day's count is given back.
+		await updateJson<{ count: number }, null>(countKey, (c) => ({ next: { count: Math.max(0, (c?.count ?? 1) - 1) }, result: null })).catch(() => null);
 		return Response.json({ error: "Could not duplicate this video. Please try again." }, { status: 500 });
 	}
 }
