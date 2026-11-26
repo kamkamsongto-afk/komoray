@@ -11,7 +11,7 @@ type Props = {
 	seconds: number; // how long it runs once cut
 	checkingTakes: boolean; // bad takes are still being looked for, so the end may move
 	// Puts a template's look (as sent by the server, not yet fitted to this video) on this video.
-	onUse: (name: string, look: TemplateLook, seconds: number, left: LeftOut) => void;
+	onUse: (name: string, look: TemplateLook, seconds: number, left: LeftOut, withStyle: boolean) => void;
 };
 type Answer = { templates?: TemplateCard[]; limit?: number; template?: { name: string; seconds: number; look: TemplateLook }; left?: LeftOut; error?: string };
 type Asking = { kind: "use" | "update" | "delete"; card: TemplateCard };
@@ -42,6 +42,9 @@ function TemplatesBox({ look, seconds, checkingTakes, onUse, onClose }: Props & 
 	const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
 	const [asking, setAsking] = useState<Asking | null>(null);
 	const stopAsking = useCallback(() => setAsking(null), []);
+	// "Keep all same with logo" (coach 26 Nov): ticked every time Use is pressed; unticked, this video's own subtitle
+	// style and logo stay and the rest of the template comes.
+	const [withStyle, setWithStyle] = useState(true);
 	const [busy, setBusy] = useState(false);
 	const [note, setNote] = useState("");
 	const [error, setError] = useState("");
@@ -111,7 +114,7 @@ function TemplatesBox({ look, seconds, checkingTakes, onUse, onClose }: Props & 
 		} else {
 			const data = await ask(`/api/templates?id=${encodeURIComponent(card.id)}`);
 			if (!data?.template || !data.left) return;
-			onUse(data.template.name, data.template.look, data.template.seconds, data.left);
+			onUse(data.template.name, data.template.look, data.template.seconds, data.left, withStyle);
 			onClose();
 		}
 	}
@@ -122,7 +125,13 @@ function TemplatesBox({ look, seconds, checkingTakes, onUse, onClose }: Props & 
 
 	const full = cards !== null && cards.length >= limit;
 	const question: Record<Asking["kind"], { title: (n: string) => string; body: string; action: string; danger?: boolean }> = {
-		use: { title: (n) => `Use "${n}" on this video?`, body: "It replaces this video's subtitle style, shape, logo, zoom, Banners, Frame Me and Layout. Your script, cuts and Cutout stay. You can undo it right after.", action: "Use template" },
+		use: {
+			title: (n) => `Use "${n}" on this video?`,
+			body: withStyle
+				? "It replaces this video's subtitle style, shape, logo, zoom, Banners, Frame Me and Layout. Your script, cuts and Cutout stay. You can undo it right after."
+				: "It replaces this video's shape, zoom, Banners, Frame Me and Layout. Your subtitle style, logo, script, cuts and Cutout stay. You can undo it right after.",
+			action: "Use template",
+		},
 		update: { title: (n) => `Update "${n}"?`, body: "The template takes this video's look in place of its own. Videos made with it before don't change.", action: "Update" },
 		delete: { title: (n) => `Delete "${n}"?`, body: "The template goes. Videos made with it and your files stay.", action: "Delete", danger: true },
 	};
@@ -199,7 +208,7 @@ function TemplatesBox({ look, seconds, checkingTakes, onUse, onClose }: Props & 
 								<p className="text-[11px] text-foreground/50">Everything on it is included, except Cutout.</p>
 								{c.locked && <p className="text-xs text-(--warn)">Over your plan&apos;s count. Upgrade to use it again.</p>}
 								<div className="mt-auto flex flex-wrap gap-2 text-xs">
-									<button onClick={() => setAsking({ kind: "use", card: c })} disabled={busy || c.locked} className="rounded-md bg-blue-600 px-3 py-1 font-medium text-white hover:bg-blue-700 disabled:opacity-40">
+									<button onClick={() => { setWithStyle(true); setAsking({ kind: "use", card: c }); }} disabled={busy || c.locked} className="rounded-md bg-blue-600 px-3 py-1 font-medium text-white hover:bg-blue-700 disabled:opacity-40">
 										Use
 									</button>
 									<button onClick={() => setAsking({ kind: "update", card: c })} disabled={busy || c.locked} title="Put this video's look into this template" className={action}>
@@ -222,7 +231,17 @@ function TemplatesBox({ look, seconds, checkingTakes, onUse, onClose }: Props & 
 			{asking && (
 				// Its own clicks stay its own: the question is drawn on the page, but React still hands them up to this box.
 				<span onClick={(e) => e.stopPropagation()}>
-					<Confirm title={question[asking.kind].title(asking.card.name)} body={question[asking.kind].body} action={question[asking.kind].action} danger={question[asking.kind].danger} onCancel={stopAsking} onConfirm={() => void confirmed(asking)} />
+					<Confirm title={question[asking.kind].title(asking.card.name)} body={question[asking.kind].body} action={question[asking.kind].action} danger={question[asking.kind].danger} onCancel={stopAsking} onConfirm={() => void confirmed(asking)}>
+						{asking.kind === "use" && (
+							<label className="flex items-start gap-2 text-sm">
+								<input type="checkbox" checked={withStyle} onChange={(e) => setWithStyle(e.target.checked)} className="mt-0.5 accent-blue-600" />
+								<span className="flex flex-col">
+									Keep all same with logo
+									<span className="text-[11px] text-foreground/60">Untick to keep this video&apos;s own subtitle style and logo.</span>
+								</span>
+							</label>
+						)}
+					</Confirm>
 				</span>
 			)}
 		</div>,

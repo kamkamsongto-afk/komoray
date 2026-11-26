@@ -3,10 +3,10 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
-type ConfirmProps = { title: string; body: string; warning?: string; action: string; danger?: boolean; onCancel: () => void; onConfirm: () => void }; // warning: a line in red under the question (what else it will change)
+type ConfirmProps = { title: string; body: string; warning?: string; action: string; danger?: boolean; onCancel: () => void; onConfirm: () => void; children?: React.ReactNode }; // warning: a line in red under the question (what else it will change); children: a choice to tick before answering
 
 // Asks once before something that is easy to do by mistake and costly to undo (coach, 9 Nov).
-export function Confirm({ title, body, warning, action, danger, onCancel, onConfirm }: ConfirmProps) {
+export function Confirm({ title, body, warning, action, danger, onCancel, onConfirm, children }: ConfirmProps) {
 	const box = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		// While it asks, keys belong to it: Esc closes this question only, not the box behind it, and Delete or
@@ -16,9 +16,9 @@ export function Confirm({ title, body, warning, action, danger, onCancel, onConf
 			e.stopPropagation();
 			if (e.key === "Escape") onCancel();
 			if (e.key !== "Tab") return;
-			// Tab goes round its two buttons, never to a button behind it (Codex review 11 Nov).
-			const buttons = [...(box.current?.querySelectorAll("button") ?? [])];
-			const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+			// Tab goes round its own tick box and buttons, never to a button behind it (Codex review 11 Nov).
+			const buttons = [...(box.current?.querySelectorAll<HTMLElement>("input, button") ?? [])];
+			const at = buttons.indexOf(document.activeElement as HTMLElement);
 			e.preventDefault();
 			buttons[(at + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
 		};
@@ -33,6 +33,7 @@ export function Confirm({ title, body, warning, action, danger, onCancel, onConf
 			<div ref={box} role="alertdialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="flex w-full max-w-sm flex-col gap-3 rounded-xl border border-foreground/15 bg-background p-4 text-foreground shadow-2xl">
 				<p className="text-sm font-medium break-words">{title}</p>
 				<p className="text-xs text-foreground/60">{body}</p>
+				{children}
 				{warning && <p className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-xs font-medium text-red-600 dark:text-red-400">{warning}</p>}
 				<div className="flex justify-end gap-2">
 					<button autoFocus onClick={onCancel} className="rounded-md border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
