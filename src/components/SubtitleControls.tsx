@@ -4,7 +4,9 @@ import { type ReactNode, useEffect, useState } from "react";
 import { MY_FILE_KINDS, type MyFile } from "@/lib/my-files";
 import { LOGO_EFFECTS, LOGO_MOTION, type LogoEffect } from "@/lib/logo-motion";
 import { asOwnFont, ownValue, useMyFonts } from "@/lib/use-my-fonts";
-import { ClashNote, OwnFontOptions } from "./MyFilePickers";
+import { FontField } from "./FontField";
+import { ClashNote } from "./MyFilePickers";
+import { ToolGroup } from "./ToolGroup";
 import { type Motion, MOTIONS } from "@/lib/motion";
 import {
 	COLORS,
@@ -84,10 +86,6 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 		onChange({ ...style, logoImage: { file: added.id } });
 	}
 
-	async function uploadFont(file: File, then?: "use" | "keep") {
-		const font = await myFonts.upload(file, then);
-		if (font) onChange({ ...style, font: "own", ownFont: font });
-	}
 	function pickFont(value: string) {
 		const mine = value.startsWith("own:") ? myFonts.fonts.find((f) => f.id === value.slice(4)) : undefined;
 		if (mine) return onChange({ ...style, font: "own", ownFont: asOwnFont(mine) });
@@ -224,43 +222,18 @@ export function SubtitleControls({ style, onChange, thai, footer, top, section, 
 				</div>
 			</div>
 			<p className="text-xs text-foreground/60">{MOTIONS[style.motion].hint}</p>
-			<label className="flex items-center gap-3 text-sm text-foreground/70">
-				<span className="w-24 shrink-0">Font</span>
-				<select
+			{/* The same Font card as a banner's (coach 26 Nov): the list beside Upload your font. */}
+			<ToolGroup tone={3} title="Font">
+				<FontField
+					label="Subtitle font"
 					value={style.font === "own" ? ownValue(style.ownFont) : style.font}
-					onChange={(e) => pickFont(e.target.value)}
-					className="min-w-0 flex-1 rounded-md border border-foreground/20 bg-background px-2 py-1 text-foreground"
-				>
-					<OwnFontOptions current={style.font === "own" ? style.ownFont : undefined} myFonts={myFonts} />
-					{(Object.keys(FONTS) as FontId[])
-						.filter((id) => FONTS[id].thai || !thai || id === style.font)
-						.map((id) => (
-							<option key={id} value={id}>
-								{FONTS[id].name}
-								{FONTS[id].thai ? "" : " (English only)"}
-							</option>
-						))}
-				</select>
-			</label>
-			<div className="flex items-center gap-3 text-xs text-foreground/60">
-				<span className="w-24 shrink-0" />
-				<label className={`cursor-pointer underline hover:text-foreground ${myFonts.busy ? "opacity-50" : ""}`}>
-					{myFonts.busy ? "Uploading…" : myFonts.fonts.length || myFonts.older ? "Upload another font (.ttf, .otf)" : "Upload your own font (.ttf, .otf)"}
-					<input
-						type="file"
-						accept=".ttf,.otf,font/ttf,font/otf"
-						className="hidden"
-						disabled={myFonts.busy}
-						onChange={(e) => {
-							const file = e.target.files?.[0];
-							if (file) void uploadFont(file);
-							e.target.value = "";
-						}}
-					/>
-				</label>
-				{myFonts.error && <span className="text-red-600">{myFonts.error}</span>}
-				{myFonts.clash && <ClashNote clash={myFonts.clash} what="font" onUse={() => void uploadFont(myFonts.clash!.file, "use")} onKeep={() => void uploadFont(myFonts.clash!.file, "keep")} onCancel={myFonts.dismiss} />}
-			</div>
+					current={style.font === "own" ? style.ownFont : undefined}
+					builtins={(Object.keys(FONTS) as FontId[]).filter((id) => FONTS[id].thai || !thai || id === style.font)}
+					myFonts={myFonts}
+					onPick={pickFont}
+					onUploaded={(font) => onChange({ ...style, font: "own", ownFont: font })}
+				/>
+			</ToolGroup>
 			{slider("Text size", "size")}
 			{style.look !== "box" && slider("Outline", "outline")}
 			{slider("Letter spacing", "letterSpacing")}
