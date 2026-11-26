@@ -705,7 +705,7 @@ mode === "move"
 									fontFamily: face.family,
 									fontWeight: face.weight,
 									fontSize: t.size / em,
-									lineHeight: `${t.size + (t.lineGap ?? 0)}px`, // rows as far apart as build_behind in render.py puts them
+									lineHeight: `${Math.max(0, t.size + (t.lineGap ?? 0))}px`, // rows as far apart as build_behind in render.py puts them (never past each other)
 									color: t.color,
 									textShadow: roundOutline(t.stroke, t.strokeColor),
 									opacity: pose.opacity,

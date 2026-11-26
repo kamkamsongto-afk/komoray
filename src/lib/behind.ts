@@ -93,7 +93,7 @@ export type Insert = {
 export type CutoutLayers = { texts: BehindText[]; inserts: Insert[] };
 export const NO_LAYERS: CutoutLayers = { texts: [], inserts: [] };
 
-export const BEHIND = { size: { min: 80, max: 1600, start: 420 }, stroke: { max: 24 }, maxText: 40, maxLines: 3, lineGap: { min: -60, max: 160 }, maxName: 40, maxItems: 10, seconds: 3, fade: 0.25, y: 0.13 };
+export const BEHIND = { size: { min: 80, max: 1600, start: 420 }, stroke: { max: 24 }, maxText: 200, maxLines: 5, lineGap: { min: -200, max: 160 }, maxName: 40, maxItems: 10, seconds: 3, fade: 0.25, y: 0.13 };
 // edgeFade: how much a smaller speaker's edges melt away when the customer hasn't chosen (Soft edges, Insert.soft).
 // 0 since 10 Nov: Yoshi saw the fade eat the shoulders (VID20261028143211 at 0:23) and wants a sharp cut, with a
 // slider for anyone who likes it soft. The price of 0: if the camera cut a shoulder off at the frame's side, it
