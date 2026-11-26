@@ -2,6 +2,8 @@
 
 import { FolderHeart, Film, ImageIcon, Layers, Plus, Tag, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { canBeBanner } from "@/lib/banners";
+import { canBeInsert } from "@/lib/behind";
 import { itemOfMyFile, knownLibrary, loadLibrary, type LibraryItem, projectFileSrc } from "@/lib/media-library";
 import { PICTURES_CLIPS_ACCEPT, uploadToMyFiles } from "@/lib/my-files-upload";
 import { ClashNote } from "./MyFilePickers";
@@ -88,6 +90,7 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 	}
 
 	const isUsed = (item: LibraryItem) => usedNow.has(item.file) || !!item.used;
+	// A use button shows only where the save keeps that file (canBeBanner, canBeInsert): some old project files fit one only.
 	const deleteButton = (item: LibraryItem, small: string) =>
 		// Only a picture or clip kept in this project before can go from here; My files' own are deleted on the My files page.
 		item.mine ? null : (
@@ -120,10 +123,12 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 					{item.media === "video" && item.seconds ? `${Math.round(item.seconds)}s` : size(item.size)}
 				</span>
 			</span>
-			<button onClick={() => onUseAsBanner(item)} title="Put it over you as a banner, where the video is now" aria-label={`Use ${item.name} as a banner`} className="rounded border border-foreground/20 p-1 hover:bg-foreground/5">
-				<Tag className="h-3 w-3" aria-hidden />
-			</button>
-			{onUseInPicClip && (
+			{canBeBanner(item.file) && (
+				<button onClick={() => onUseAsBanner(item)} title="Put it over you as a banner, where the video is now" aria-label={`Use ${item.name} as a banner`} className="rounded border border-foreground/20 p-1 hover:bg-foreground/5">
+					<Tag className="h-3 w-3" aria-hidden />
+				</button>
+			)}
+			{onUseInPicClip && canBeInsert(item.file) && (
 				<button onClick={() => onUseInPicClip(item)} title="Put it behind you (Cutout → Pic & Clip), where the video is now" aria-label={`Use ${item.name} in Pic & Clip`} className="rounded border border-foreground/20 p-1 hover:bg-foreground/5">
 					<Layers className="h-3 w-3" aria-hidden />
 				</button>
@@ -152,10 +157,12 @@ export function ImportControls({ onUseAsBanner, onUseInPicClip, usedNow, onUploa
 				{deleteButton(item, "p-0.5")}
 			</div>
 			<div className="flex gap-1 p-1.5">
-				<button onClick={() => onUseAsBanner(item)} title="Put it over you as a banner, where the video is now" className="inline-flex flex-1 items-center justify-center gap-0.5 rounded border border-foreground/20 px-1 py-0.5 hover:bg-foreground/5">
-					<Tag className="h-3 w-3" aria-hidden /> Banner
-				</button>
-				{onUseInPicClip && (
+				{canBeBanner(item.file) && (
+					<button onClick={() => onUseAsBanner(item)} title="Put it over you as a banner, where the video is now" className="inline-flex flex-1 items-center justify-center gap-0.5 rounded border border-foreground/20 px-1 py-0.5 hover:bg-foreground/5">
+						<Tag className="h-3 w-3" aria-hidden /> Banner
+					</button>
+				)}
+				{onUseInPicClip && canBeInsert(item.file) && (
 					<button onClick={() => onUseInPicClip(item)} title="Put it behind you (Cutout → Pic & Clip), where the video is now" className="inline-flex flex-1 items-center justify-center gap-0.5 rounded border border-foreground/20 px-1 py-0.5 hover:bg-foreground/5">
 						<Layers className="h-3 w-3 shrink-0" aria-hidden /> <span className="whitespace-nowrap">Pic & Clip</span>
 					</button>
