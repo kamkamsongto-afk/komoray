@@ -33,7 +33,7 @@ export function Confirm({ title, body, warning, action, danger, onCancel, onConf
 			<div ref={box} role="alertdialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="flex w-full max-w-sm flex-col gap-3 rounded-xl border border-foreground/15 bg-background p-4 text-foreground shadow-2xl">
 				<p className="text-sm font-medium break-words">{title}</p>
 				<p className="text-xs text-foreground/60">{body}</p>
-				{warning && <p className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-xs font-medium text-red-600 dark:text-red-400">{warning}</p>}
+				{warning && <p className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-xs font-medium text-(--bad)">{warning}</p>}
 				<div className="flex justify-end gap-2">
 					<button autoFocus onClick={onCancel} className="rounded-md border border-foreground/20 px-3 py-1.5 text-sm hover:bg-foreground/5">
 						Cancel
