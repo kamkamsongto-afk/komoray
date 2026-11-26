@@ -18,6 +18,12 @@ export function describeUse(use?: { kits?: string[]; banners?: number; projects?
 	return parts.length ? parts.join(", ").replace(/, ([^,]*)$/, " and $1") : null;
 }
 
+// Told to the page when a font is deleted or uploaded here, so the preview follows at once (PlayerFrame): a deleted one
+// stops being drawn, and the same file uploaded again (the same id) is drawn again.
+export const FONT_CHANGED = "komoray:font-changed";
+export type FontChange = { id: string; gone: boolean };
+const tellFont = (change: FontChange) => window.dispatchEvent(new CustomEvent(FONT_CHANGED, { detail: change }));
+
 export function useMyFonts() {
 	const [fonts, setFonts] = useState<MyFile[]>([]);
 	const [limit, setLimit] = useState<number | null>(null);
@@ -61,6 +67,7 @@ export function useMyFonts() {
 			return null;
 		}
 		const added = data.file;
+		tellFont({ id: added.id, gone: false });
 		setFonts((list) => [added, ...list.filter((f) => f.id !== added.id)]);
 		return asOwnFont(added);
 	}
@@ -78,6 +85,7 @@ export function useMyFonts() {
 		const res = await fetch(`/api/files?id=${encodeURIComponent(id)}&force=1`, { method: "DELETE" }).catch(() => null);
 		if (res?.ok) {
 			setFonts((list) => list.filter((f) => f.id !== id));
+			tellFont({ id, gone: true });
 			return null;
 		}
 		const data = (await res?.json().catch(() => ({}))) as { error?: string };
