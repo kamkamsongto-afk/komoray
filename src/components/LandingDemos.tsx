@@ -295,9 +295,10 @@ export function CutoutCard() {
 		<TiltCard>
 			<div className="k-vis">
 				<div className="k-frame k-stage">
-					<Image src="/landing/cutout-bg.webp" alt="" width={720} height={1080} unoptimized />
+					{/* The clip's own room, dimmed and blurred (coach 26 Nov; the star picture before it looked AI-made). */}
+					<Image className="k-cutroom" src="/landing/cutout-room.webp" alt="" width={480} height={854} unoptimized />
 					<div key={motion} className={`k-behind k-behind-${motion}`} aria-hidden>
-						{motion === "run" ? "NEW DROP · NEW DROP · NEW DROP · " : "WOW"}
+						{motion === "run" ? "KOMORAY · WOW · ".repeat(3) : "WOW"}
 					</div>
 					<CutoutVideo className="k-cutme" />
 				</div>
