@@ -3,7 +3,7 @@
 // and subtitles work on words. Not Intl.Segmenter: it cut spoken Thai too small ("วัน|นี้", "ผู้|หญิง").
 // Pieces are only ever joined, never split, and each word keeps its first piece's start and last piece's end.
 
-import { cutThaiWords } from "./newmm";
+import { cutThaiWords, isThaiWord } from "./newmm";
 
 type Word = { text: string; start: number; end: number };
 
@@ -11,6 +11,16 @@ const THAI = /[฀-๿]/;
 const RUN_GAP = 0.3; // pieces further apart than this (seconds) are never one word
 const THAI_MARK_FIRST = /^[ัำ-ฺ็-๎]/; // a vowel or tone mark that can't begin a word
 const NUMBER_START = /^(?:\d[,.]?|19|20)$/; // one digit (or one with a comma or point after it): the start of a number said digit by digit
+// A piece that is no word of its own ("ป", "ไม", "สร") followed by the rest of its word, after a pause longer than RUN_GAP
+// (Deepgram sometimes breaks one word with a pause: "ป" ... "กติ" for ปกติ, the pause was cut as silence, coach 22 Nov).
+// Joined only if the two together are one dictionary word, and within FRAGMENT_GAP seconds.
+const FRAGMENT_GAP = 1.2;
+const FRAGMENT_MAX = 3; // letters: a fragment is short, a whole word is not
+const oneWord = (text: string) => {
+	const parts = cutThaiWords(text);
+	return parts.length === 1 && isThaiWord(parts[0]);
+};
+const isFragment = (text: string) => text.length <= FRAGMENT_MAX && THAI.test(text) && !isThaiWord(text);
 const NUMBER_GAP = 1; // seconds: digits said further apart than this are not one number
 
 const fixThai = (text: string) => text.replace(/ํา/g, "ำ");
@@ -62,7 +72,14 @@ export function thaiWordGroups(words: Word[]): number[][] {
 		if (THAI.test(words[i].text)) {
 			// A piece that starts with a vowel or tone mark ("ส" "่วน") belongs to the one before it, however long the gap:
 			// alone it can't be read, and the gap was cut as silence (VID20261112093656, 13 Nov).
-			while (j + 1 < words.length && THAI.test(words[j + 1].text) && (words[j + 1].start - words[j].end <= RUN_GAP || THAI_MARK_FIRST.test(words[j + 1].text))) j++;
+			while (
+				j + 1 < words.length &&
+				THAI.test(words[j + 1].text) &&
+				(words[j + 1].start - words[j].end <= RUN_GAP ||
+					THAI_MARK_FIRST.test(words[j + 1].text) ||
+					(words[j + 1].start - words[j].end <= FRAGMENT_GAP && isFragment(words[j].text) && oneWord(words[j].text + words[j + 1].text)))
+			)
+				j++;
 		}
 		if (j === i) {
 			groups.push([i++]);
@@ -96,7 +113,11 @@ export function joinGroup<W extends Word>(words: W[], group: number[]): W {
 	return { ...first, text: fixThai(group.map((k) => words[k].text).join("")), end: words[group[group.length - 1]].end };
 }
 
-export const mergeThaiWords = <W extends Word>(words: W[]): W[] => thaiWordGroups(words).map((g) => joinGroup(words, g));
+// heard: the pieces as speech-to-text timed them, which decide what belongs together. timed: the same pieces with the
+// times to keep (a stretched tail cut off, lib/silences.ts trimStretchedWords). Judged on the shortened times, a piece
+// said without any pause looked paused from the next one: the word stayed in two and the false pause was cut as silence
+// (coach's clip, 27 Nov: "ยึ" | "ด"). Only the last piece of a word can then shorten it.
+export const mergeThaiWords = <W extends Word>(heard: W[], timed: W[] = heard): W[] => thaiWordGroups(heard).map((g) => joinGroup(timed, g));
 
 // An edit.json made before words were joined: join them now and move the deleted words and fixes
 // (which point at positions in the word list) onto the new positions. Null if nothing changes.
