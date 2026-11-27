@@ -149,5 +149,23 @@ if (bugs.includes("`uploadName`")) {
 	});
 }
 
+if (bugs.includes("`wordUse`, `thaiSpoken`")) {
+	check("Word pairs: a heard side of one or two Thai letters is never fixed everywhere by itself (28 Nov)", () => {
+		const { wordUse } = lib("src/lib/word-rules");
+		const dictionary = lib("src/lib/word-check").thaiWords;
+		const short = [["จ", "จา"], ["พ่", "พ่น"], ["อิ", "อิฐ"], ["โค้", "โค้ช"]].map(([h, f]) => `${h} ${wordUse(h, f, { ...dictionary, shared: true })}`);
+		return same([...short, wordUse("ผูหญิง", "ผู้หญิง", { ...dictionary, shared: true })], ["จ ai", "พ่ ai", "อิ ai", "โค้ ai", "always"]);
+	});
+}
+if (bugs.includes("`wordEdges`")) {
+	check("Word pairs: never cut down to part of a word the creator typed (28 Nov)", () => {
+		const { learnFromFix } = lib("src/lib/word-rules");
+		const { cutThaiWords } = lib("src/lib/newmm");
+		const learned = [[["คอม", "พิเตอร์"], "คอมพิวเตอร์"], [["โปร", "แกม"], "โปรแกรม"], [["ที่", "คอม", "พิเตอร์", "เลย"], "ที่คอมพิวเตอร์เลย"], [["ทีละ", "กอน"], "ทีละ ก้อน"]].map(([pieces, typed]) =>
+			learnFromFix(pieces, typed, cutThaiWords).pairs.map((p) => `${p.heard}>${p.fixed}`).join());
+		return same(learned, ["คอมพิเตอร์>คอมพิวเตอร์", "โปรแกม>โปรแกรม", "คอมพิเตอร์>คอมพิวเตอร์", "กอน>ก้อน"]);
+	});
+}
+
 console.log(failed ? `\n${failed} rule check(s) failed.` : "\nAll rule checks pass.");
 process.exit(failed ? 1 : 0);
