@@ -134,7 +134,7 @@ export default function PrivacyPage() {
 				<li>On the Free plan, up to 5 GB, deleted if you don&apos;t open Komoray while signed in for 30 days in a row. We email you 7 days before.</li>
 				<li>On a paid plan, up to your plan&apos;s storage (Starter 200 GB, Pro 800 GB), for as long as your plan is active. We never delete them while you pay.</li>
 				<li>When a plan ends, for 90 days after the end of the period you paid for, then deleted. We show a countdown and email you from 20 days before.</li>
-				<li>What Polar tells us about your plan and payments is kept for as long as the law asks us to keep records of sales.</li>
+				<li>What Polar tells us about your plan and payments, and the email address we keep with it, are kept for as long as the law asks us to keep records of sales.</li>
 				<li>You can delete a video and everything made from it at any time on the My projects page.</li>
 				<li>Error reports and troubleshooting recordings are deleted after 90 days.</li>
 				<li>
