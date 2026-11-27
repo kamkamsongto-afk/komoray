@@ -34,7 +34,7 @@ export type SubRecord = {
 	occurredAt: string; // of the seller's event this came from
 	paidUntil?: string; // Polar: how far money has actually come in (its own file, added by planFor)
 };
-export type PaidRecord = { until: string; orderId: string; at: string };
+export type PaidRecord = { until: string; orderId: string; orderedAt: string; at: string }; // orderedAt: when the seller made the bill
 export type ExtraRecord = { transactionId: string; minutes: number; at: string; until: string };
 
 // The parts of Paddle's payloads used here (developer.paddle.com/webhooks).
@@ -118,8 +118,9 @@ export async function keepSubscription(record: SubRecord, claim: Record<string, 
 }
 
 // A period of a plan was paid for (Polar's order.paid): keep how far it is paid, in its own file, as the payment can
-// arrive before the plan's own events. Only ever moves forward. Polar calls a renewed plan "active" before it has taken
-// the money (review 27 Nov), so this, not the status, opens a new period's minutes.
+// arrive before the plan's own events. The newest bill wins, even when it pays to an earlier date (yearly switched to
+// monthly); an older one delivered late changes nothing. Polar calls a renewed plan "active" before it has taken the
+// money (review 27 Nov), so this, not the status, opens a new period's minutes.
 export async function keepPaid(paid: PaidRecord & { subscriptionId: string; customerId: string }, claim: Record<string, unknown> | null | undefined, event: string, raw: unknown) {
 	const { subscriptionId, customerId, ...record } = paid;
 	if (!SAFE_ID.test(subscriptionId)) return "not ours";
@@ -129,7 +130,7 @@ export async function keepPaid(paid: PaidRecord & { subscriptionId: string; cust
 		return "unmatched";
 	}
 	const kept = await updateJson<PaidRecord, string>(`${userRoot(user)}paid/${subscriptionId}.json`, (old) =>
-		old && old.until >= record.until ? { result: "older" } : { next: record, result: "saved" },
+		old && (old.orderedAt ?? "") > record.orderedAt ? { result: "older" } : { next: record, result: "saved" },
 	);
 	if (!kept) throw new Error("billing: the payment's file is too busy"); // a 500: the seller sends it again
 	if (kept.result === "saved") await remember(user, customerId, subscriptionId);
