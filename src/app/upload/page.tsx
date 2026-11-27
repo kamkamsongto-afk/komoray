@@ -370,6 +370,7 @@ export default function UploadPage() {
 					options={options}
 					onOptionsChange={changeOptions}
 					kits={kits}
+					canCut={access?.features.cutout.on === true}
 					language={language}
 					onLanguageChange={setLanguage}
 					defaultLanguage={defaultLanguage}

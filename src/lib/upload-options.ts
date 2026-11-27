@@ -6,12 +6,14 @@
 //   zoom       Auto zoom on (the Brand Kit's kind, else "in") or off
 //   subtitles  subtitles drawn on the video, or none
 //   audio      Audio optimization on (polish_sound in render.py) or off
+//   cutout     Cut person: cut the speaker out (Fast, on their own computer) when the studio first opens. Off unless
+//              ticked, and only for plans with Cutout (not Free; coach 27 Nov)
 //   kit        which Brand Kit the subtitles start from (api/brand), when the creator has more than one; none: the starred one
-export type UploadOptions = { silences: boolean; badTakes: boolean; zoom: boolean; subtitles: boolean; audio: boolean; kit?: string };
+export type UploadOptions = { silences: boolean; badTakes: boolean; zoom: boolean; subtitles: boolean; audio: boolean; cutout: boolean; kit?: string };
 
 export type UploadToggle = Exclude<keyof UploadOptions, "kit">;
 
-export const DEFAULT_OPTIONS: UploadOptions = { silences: true, badTakes: true, zoom: true, subtitles: true, audio: true };
+export const DEFAULT_OPTIONS: UploadOptions = { silences: true, badTakes: true, zoom: true, subtitles: true, audio: true, cutout: false };
 
 // Anything that isn't a yes or no takes the default, field by field.
 export function readOptions(value: unknown): UploadOptions | null {
@@ -25,6 +27,7 @@ export function readOptions(value: unknown): UploadOptions | null {
 		zoom: pick("zoom"),
 		subtitles: pick("subtitles"),
 		audio: pick("audio"),
+		cutout: pick("cutout"),
 		...(typeof kit === "string" && /^[a-z0-9-]{1,40}$/.test(kit) && { kit }),
 	};
 }
