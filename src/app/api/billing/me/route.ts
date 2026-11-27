@@ -1,6 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { currentUser } from "@/lib/supabase/server";
-import { planFor } from "@/lib/billing-store";
+import { behindOnPayment, planFor } from "@/lib/billing-store";
 import { accessFor } from "@/lib/access";
 import { type PolarEnv, polarSetup, polarSync } from "@/lib/payments/polar";
 
@@ -11,7 +11,7 @@ export async function GET() {
 	let now = await planFor(user.email);
 	// Our copy says a Polar plan stopped, went unpaid or is still waiting for its payment: ask Polar, in case a webhook
 	// was missed (review 27 Nov).
-	if ((now.unsure || now.pastDue) && now.latest?.provider === "polar") {
+	if ((now.unsure || now.pastDue || behindOnPayment(now.sub)) && now.latest?.provider === "polar") {
 		const setup = polarSetup(getCloudflareContext().env as unknown as PolarEnv);
 		if (setup && (await polarSync(setup, user.email).catch(() => null))) now = await planFor(user.email);
 	}

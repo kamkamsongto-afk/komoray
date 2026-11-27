@@ -36,7 +36,7 @@ export type AccessStatus = {
 	used: number;
 	limit: number;
 	left: number;
-	monthly: { used: number; limit: number; left: number; resetsAt: string; last?: boolean } | null; // last: the plan ends by resetsAt, no new minutes then
+	monthly: { used: number; limit: number; left: number; resetsAt: string; last?: boolean; waiting?: boolean } | null; // last: the plan ends by resetsAt, no new minutes then · waiting: the next month opens once its payment is seen
 	extra: { left: number; until: string | null } | null;
 	perVideo: number;
 	maxGb: number;
@@ -115,14 +115,15 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	// then they stay in the last paid month, with what is left of it. 4 days: a month-end billing day can start a cycle
 	// up to 3 days before the date paid to.
 	const paidUntil = paid ? bought?.sub?.paidUntil : undefined;
+	let waiting = false;
 	if (paidUntil) {
 		const lastPaid = new Date(new Date(paidUntil).getTime() - 4 * 24 * 60 * 60 * 1000);
-		if (cycle.start >= lastPaid) cycle = cycleAround(anchor, lastPaid);
+		waiting = cycle.start >= lastPaid;
+		if (waiting) cycle = cycleAround(anchor, lastPaid);
 	}
 	// Free's bigger first month is for someone new: not for anyone who has had a plan (unpaid or ended, 27 Nov). A first
 	// purchase still waiting for its payment doesn't count as one.
-	const hadPlan = Boolean(bought?.latest) && bought?.latest !== bought?.pending;
-	const first = !paid && !hadPlan && cycle.start.getTime() <= new Date(anchor).getTime();
+	const first = !paid && !bought?.everHad && cycle.start.getTime() <= new Date(anchor).getTime();
 	const limit = first && rules.firstMonth !== null ? rules.firstMonth : rules.monthly;
 	const start = cycle.start.toISOString();
 	const used = usage.filter((u) => u.at >= start).reduce((sum, u) => sum + Math.max(0, u.minutes - u.extra), 0);
@@ -138,7 +139,7 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 		limit,
 		used,
 		left: monthlyLeft + extra.minutes,
-		monthly: { used, limit, left: monthlyLeft, resetsAt: cycle.end.toISOString(), ...(last && { last }) },
+		monthly: { used, limit, left: monthlyLeft, resetsAt: cycle.end.toISOString(), ...(last && { last }), ...(waiting && { waiting }) },
 		extra: extra.minutes || bought?.extras.length ? { left: extra.minutes, until: extra.until } : null,
 	};
 }
@@ -148,7 +149,8 @@ export function outOfMinutes(status: AccessStatus, needs?: number) {
 	if (status.plan === "beta" || !status.monthly) {
 		return needs ? `This video needs ${needs} minutes and you have ${status.left} of your beta minutes left. Need more? Email hello@komoray.com.` : OUT_OF_MINUTES;
 	}
-	const resets = status.monthly.last ? `Your plan ends ${shortDate(status.monthly.resetsAt)}.` : `Your minutes reset ${shortDate(status.monthly.resetsAt)}.`;
+	const { last, waiting, resetsAt } = status.monthly;
+	const resets = last ? `Your plan ends ${shortDate(resetsAt)}.` : waiting ? "Your new minutes open once your payment is confirmed." : `Your minutes reset ${shortDate(resetsAt)}.`;
 	const head = needs ? `This needs ${needs} minutes. You have ${status.left} left.` : "You've used all your minutes for now.";
 	// Extra minutes aren't sold for now (lib/plans.ts), and Pro has nothing above it yet (Max is "coming soon").
 	const more = status.perks.extraMinutes ? "Add Extra minutes on the Pricing page, or upgrade." : status.plan === "pro" ? "" : "Upgrade on the Pricing page for more.";

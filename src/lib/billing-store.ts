@@ -171,13 +171,17 @@ export async function recordTransaction(txn: PaddleTransaction, event: string) {
 // there (lib/storage.ts). null: they never had one, or one is active.
 // latest: their newest plan whatever its status (cancelled or paused too), only for Manage billing, so past receipts
 // stay reachable after a plan ends (agent review 18 Nov). Never for access: that is `sub`.
-// pending: bought at Polar, but no payment seen yet (a card takes seconds; a bank payment may take longer).
-export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; pastDue: SubRecord | null; pending: SubRecord | null; latest: SubRecord | null; unsure: boolean; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
+// pending: running at Polar but giving nothing, as no payment has been seen for it: a first purchase, or a renewal not
+// confirmed within SILENT_DAYS (a card takes seconds; a bank payment may take longer). everHad: they have had a plan.
+export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; pastDue: SubRecord | null; pending: SubRecord | null; latest: SubRecord | null; everHad: boolean; unsure: boolean; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
 const GIVES_ACCESS: SubStatus[] = ["active", "trialing"];
 export const SILENT_DAYS = 3;
 const RANK: Record<PaidPlan, number> = { starter: 1, pro: 2 };
 // Polar calls a new plan "active" before it says the money arrived: nothing is given until it does (coach, 27 Nov).
 const awaitingPayment = (s: SubRecord) => s.provider === "polar" && s.status === "active" && !s.paidUntil;
+// A Polar plan whose newest period has no payment seen for it (a day's slack: the two dates come from different events).
+export const behindOnPayment = (s: SubRecord | null) =>
+	Boolean(s && s.provider === "polar" && s.status === "active" && (!s.paidUntil || (s.periodEnds && Date.parse(s.periodEnds) - Date.parse(s.paidUntil) > 24 * 60 * 60 * 1000)));
 export function givesAccess(s: SubRecord, now = Date.now()) {
 	const end = s.status === "active" ? (s.paidUntil ?? s.periodEnds) : s.periodEnds;
 	return GIVES_ACCESS.includes(s.status) && !awaitingPayment(s) && !(end && new Date(end).getTime() + SILENT_DAYS * 24 * 60 * 60 * 1000 < now);
@@ -207,9 +211,10 @@ export async function planFor(email: string, strict = false): Promise<PlanNow> {
 	const endedAt = ends.length ? ends.sort().at(-1)! : null;
 	const newest = (list: SubRecord[]) => [...list].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)).at(-1) ?? null;
 	const pastDue = best ? null : newest(subs.filter((s) => s.status === "past_due"));
-	const pending = best || pastDue ? null : newest(subs.filter(awaitingPayment));
+	const pending = best || pastDue ? null : newest(subs.filter((s) => behindOnPayment(s) && !givesAccess(s)));
 	// An unpaid plan first (its card is waiting to be fixed), then one waiting for its payment, then a paused one before a
 	// cancelled one (it can still be resumed there, agent review 19 Nov), then the newest.
 	const latest = best ?? pastDue ?? pending ?? newest(subs.filter((s) => s.status === "paused")) ?? newest(subs);
-	return { plan: best?.plan ?? "free", sub: best, pastDue, pending, latest, unsure, extraMinutes, extras, endedAt };
+	const everHad = subs.some((s) => !awaitingPayment(s));
+	return { plan: best?.plan ?? "free", sub: best, pastDue, pending, latest, everHad, unsure, extraMinutes, extras, endedAt };
 }

@@ -187,20 +187,22 @@ export type PolarOrder = {
 	customer_id: string;
 	metadata?: Record<string, unknown> | null;
 	customer?: { external_id?: string | null } | null;
-	subscription?: { current_period_end?: string | null; metadata?: Record<string, unknown> | null } | null;
+	subscription?: { current_period_start?: string | null; current_period_end?: string | null; metadata?: Record<string, unknown> | null } | null;
 	items?: { end_timestamp?: string | null; proration?: boolean; amount?: number }[];
 	created_at?: string;
 };
 
 // How far a paid order pays a plan up to, or null (not paid, or not for a period of a plan). From the period its lines
-// cover; a first or renewal bill without one: the plan's period as Polar has it now. A plan change is billed in
+// cover; a first or renewal bill without one: the plan's period as Polar has it now, but only if that period had begun
+// when the bill was made (asked later, an old bill comes with the newest period, which may be unpaid: review 27 Nov). A plan change is billed in
 // "proration" lines only (seen in the sandbox, 27 Nov): the one that charges is the new plan's period; the one that
 // gives back (a negative amount) is the old plan's, and says nothing about what is paid.
 export function paidThrough(order: PolarOrder): string | null {
 	const renewal = order.billing_reason === "subscription_create" || order.billing_reason === "subscription_cycle";
 	if (!order.paid || !order.subscription_id || !(renewal || order.billing_reason === "subscription_update")) return null;
 	const ends = (order.items ?? []).flatMap((item) => ((!item.proration || (item.amount ?? 0) > 0) && item.end_timestamp ? [new Date(item.end_timestamp).getTime()] : []));
-	const end = ends.length ? Math.max(...ends) : renewal ? new Date(order.subscription?.current_period_end ?? "").getTime() : NaN;
+	const itsPeriod = Date.parse(order.subscription?.current_period_start ?? "") <= Date.parse(order.created_at ?? "") + 60 * 60 * 1000;
+	const end = ends.length ? Math.max(...ends) : renewal && itsPeriod ? Date.parse(order.subscription?.current_period_end ?? "") : NaN;
 	return Number.isNaN(end) ? null : new Date(end).toISOString();
 }
 

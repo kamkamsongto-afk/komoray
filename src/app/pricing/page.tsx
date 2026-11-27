@@ -35,7 +35,7 @@ type Config =
 	| { ready: false }
 	| { ready: true; seller: "polar"; environment: PaddleEnv }
 	| { ready: true; seller: "paddle"; token: string; environment: PaddleEnv; prices: PricesView };
-type MyPlan = { plan: "free" | "starter" | "pro"; hadPlan?: boolean; pastDue?: "starter" | "pro" | null; pending?: "starter" | "pro" | null; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string; last?: boolean } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
+type MyPlan = { plan: "free" | "starter" | "pro"; hadPlan?: boolean; pastDue?: "starter" | "pro" | null; pending?: "starter" | "pro" | null; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string; last?: boolean; waiting?: boolean } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
 // In English like the rest of the page (coach, 17 Nov: a Thai computer showed "17 พ.ย. 2570").
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 
@@ -92,7 +92,11 @@ export default function PricingPage() {
 			.then((c) => {
 				setConfig(c);
 				// Back from Polar's checkout (its success address). Only for what the page says: the webhook gives the plan.
-				if (new URLSearchParams(window.location.search).has("paid")) setThanks(true);
+				// Taken out of the address once read: a reload or a bookmark of it must not thank again or hold the buttons.
+				if (new URLSearchParams(window.location.search).has("paid")) {
+					setThanks(true);
+					window.history.replaceState(null, "", window.location.pathname);
+				}
 			})
 			.catch(() => setConfig({ ready: false }));
 	}, []);
@@ -179,7 +183,7 @@ export default function PricingPage() {
 		<button
 			onClick={() => void buy({ plan: id })}
 			// thanks: just paid, the plan is on its way: not a second purchase meanwhile.
-			disabled={!open || buying || thanks || Boolean(paid) || Boolean(owing) || Boolean(waiting)}
+			disabled={!open || buying || (thanks && Boolean(user)) || Boolean(paid) || Boolean(owing) || Boolean(waiting)}
 			title={paid && paid !== id ? "Changing plans is coming soon" : owing ? "Update your card with Manage billing" : waiting ? "Waiting for your payment" : undefined}
 			className="mt-auto rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-40"
 		>
@@ -216,7 +220,7 @@ export default function PricingPage() {
 					{mine.every ? ` (${mine.every === "year" ? "yearly" : "monthly"})` : ""}.{" "}
 					{mine.cancelsAt ? `It ends on ${day(mine.cancelsAt)}.` : mine.periodEnds ? `Next bill on ${day(mine.periodEnds)}.` : ""}
 					{mine.status === "past_due" ? " Your last payment didn't go through: please update your card." : ""}
-					{mine.monthly ? ` ${mine.monthly.left} of ${mine.monthly.limit} minutes left${mine.monthly.last ? "" : ` · resets ${shortDate(mine.monthly.resetsAt)}`}.` : ""}
+					{mine.monthly ? ` ${mine.monthly.left} of ${mine.monthly.limit} minutes left${mine.monthly.last ? "" : mine.monthly.waiting ? " · new minutes open once your payment is confirmed" : ` · resets ${shortDate(mine.monthly.resetsAt)}`}.` : ""}
 					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}{" "}
 					{/* The seller's own page: cancel, change card, invoices (api/billing/portal; money promise 5). */}
 					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-(--link) underline hover:opacity-80 disabled:opacity-60">
