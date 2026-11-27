@@ -2,6 +2,7 @@
 
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { Fragment, type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { AdminSuggestions } from "@/components/AdminSuggestions";
 import { LANGUAGES } from "@/lib/languages";
 import type { WordRow } from "@/lib/shared-words";
 import type { WordUse } from "@/lib/word-rules";
@@ -170,6 +171,8 @@ export function AdminWords() {
 					</button>
 				))}
 			</div>
+
+			<AdminSuggestions added={() => void load()} />
 
 			<details className="rounded-xl border border-foreground/15 p-3">
 				<summary className="cursor-pointer text-sm font-medium">Add pairs to {listName(list)}</summary>

@@ -133,7 +133,9 @@ export type CuratedPair = { heard: string; fixed: string; at: string; uses?: num
 export type WordList = string; // "th", "latin", or a language code
 const MAX_CURATED = 20_000;
 const curatedKey = (list: WordList) => `shared-words/curated-${list}.json`;
-export const readCurated = async (list: WordList) => (await getJson<{ pairs: CuratedPair[] }>(curatedKey(list)).catch(() => null))?.pairs ?? [];
+// strict: throws when R2 can't be read, for work that must not take a hiccup for an empty list.
+export const readCuratedStrict = async (list: WordList) => (await getJson<{ pairs: CuratedPair[] }>(curatedKey(list)))?.pairs ?? [];
+export const readCurated = (list: WordList) => readCuratedStrict(list).catch((): CuratedPair[] => []);
 const tidy = (text: string) => text.trim().replace(/\s+/g, " ");
 export const isWordList = (list: unknown): list is WordList => typeof list === "string" && /^(th|latin|[a-z]{2})$/.test(list);
 // Where a pair goes: Thai to "th", others to their video's language when known, else "latin".
