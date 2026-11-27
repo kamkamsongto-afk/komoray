@@ -31,7 +31,7 @@ const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
 const SELL_EXTRA = false;
 
 type Config = { ready: false } | { ready: true; token: string; environment: PaddleEnv; prices: PricesView };
-type MyPlan = { plan: "free" | "starter" | "pro"; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
+type MyPlan = { plan: "free" | "starter" | "pro"; hadPlan?: boolean; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
 // In English like the rest of the page (coach, 17 Nov: a Thai computer showed "17 พ.ย. 2570").
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 
@@ -181,6 +181,15 @@ export default function PricingPage() {
 					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}{" "}
 					{/* Paddle's own page: cancel, change card, invoices (api/billing/portal; money promise 5). */}
 					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-(--link) underline hover:opacity-80 disabled:opacity-60">
+						{opening ? "Opening…" : "Manage billing"}
+					</button>
+				</p>
+			)}
+			{/* A plan that ended (cancelled or paused): its receipts are still on Paddle's page. */}
+			{mine && mine.plan === "free" && mine.hadPlan && !thanks && (
+				<p className="rounded-xl border border-foreground/15 p-4 text-center text-sm">
+					Your plan has ended. Receipts and past payments:{" "}
+					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-blue-600 underline hover:text-blue-700 disabled:opacity-60 dark:text-blue-400">
 						{opening ? "Opening…" : "Manage billing"}
 					</button>
 				</p>
