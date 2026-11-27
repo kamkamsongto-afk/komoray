@@ -1,10 +1,11 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { type PolarEnv, polarSigned, type PolarSubscription, recordPolarSubscription } from "@/lib/payments/polar";
+import { type PolarEnv, type PolarOrder, polarSigned, type PolarSubscription, recordPolarOrder, recordPolarSubscription } from "@/lib/payments/polar";
 
 // Polar tells us here when someone buys, renews, fails to pay, changes or cancels (its webhook endpoint points at this
 // URL, format Raw). Only a 2xx counts as delivered; anything else is sent again, up to 10 times, and Polar switches the
 // endpoint off after 10 events in a row fail (re-enable it there, then redeliver). So a failure answers 500 and the work
 // is safe to repeat (lib/billing-store.ts).
+// The endpoint must send every subscription.* event AND order.paid (what opens a new period's minutes).
 type PolarEvent = { type?: string; timestamp?: string; data?: unknown };
 
 export async function POST(request: Request) {
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
 		let result = "not handled";
 		// Every subscription.* event carries the whole subscription as it is now.
 		if (type.startsWith("subscription.")) result = await recordPolarSubscription(event.data as PolarSubscription, event.timestamp ?? new Date().toISOString(), type);
+		else if (type === "order.paid") result = await recordPolarOrder(event.data as PolarOrder, type);
 		console.log(`billing webhook (Polar): ${type} ${request.headers.get("webhook-id") ?? ""} ${result}`);
 		return Response.json({ received: true });
 	} catch (e) {

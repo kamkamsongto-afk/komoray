@@ -110,7 +110,15 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	}
 	// A paid plan's month runs from its own billing day (Paddle's period end), Free's from the day it began.
 	const anchor = paid ? (bought?.sub?.periodEnds ?? bought?.sub?.occurredAt ?? "") : await freeSince(email);
-	const cycle = cycleAround(anchor);
+	let cycle = cycleAround(anchor);
+	// A new month opens only once it is paid for (Polar says "active" before it takes the money, review 27 Nov): until
+	// then they stay in the last paid month, with what is left of it. 4 days: a month-end billing day can start a cycle
+	// up to 3 days before the date paid to.
+	const paidUntil = paid ? bought?.sub?.paidUntil : undefined;
+	if (paidUntil) {
+		const lastPaid = new Date(new Date(paidUntil).getTime() - 4 * 24 * 60 * 60 * 1000);
+		if (cycle.start >= lastPaid) cycle = cycleAround(anchor, lastPaid);
+	}
 	// Free's bigger first month is for someone new: not for anyone who has had a plan (unpaid or ended, 27 Nov).
 	const first = !paid && !bought?.latest && cycle.start.getTime() <= new Date(anchor).getTime();
 	const limit = first && rules.firstMonth !== null ? rules.firstMonth : rules.monthly;

@@ -1,6 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { planFor } from "@/lib/billing-store";
-import { polarCheckout, polarSetup } from "@/lib/payments/polar";
+import { polarCheckout, polarSetup, polarSync } from "@/lib/payments/polar";
 import { openSeller, type SellerSettings } from "@/lib/payments/seller";
 import { currentUser } from "@/lib/supabase/server";
 
@@ -19,12 +19,17 @@ export async function POST(request: Request) {
 	const setup = polarSetup(env);
 	if (openSeller(env) !== "polar" || !setup) return Response.json({ error: "Buying isn't open yet." }, { status: 503 });
 
-	// A plan is never bought twice (coach, 17 Nov), and an unpaid one is fixed rather than bought again.
+	// A plan is never bought twice (coach, 17 Nov), and an unpaid one is fixed rather than bought again. Polar is asked
+	// first, as our own copy can be behind (just paid, a second tab, a missed webhook: review 27 Nov).
+	const refuse = (error: string, status = 409) => Response.json({ error }, { status });
+	const unchecked = () => refuse("Couldn't check your plan just now. Please try again.", 502);
+	const there = await polarSync(setup, user.email).catch(() => null);
 	const now = await planFor(user.email, true).catch(() => null);
-	if (!now) return Response.json({ error: "Couldn't check your plan just now. Please try again." }, { status: 502 });
-	if (now.sub) return Response.json({ error: "You already have a plan. Changing plans is coming soon." }, { status: 409 });
-	if (now.pastDue) return Response.json({ error: "Your last payment didn't go through. Update your card with Manage billing instead." }, { status: 409 });
+	if (!there || !now) return unchecked();
+	if (now.pastDue || there.includes("past_due")) return refuse("Your last payment didn't go through. Update your card with Manage billing instead.");
+	if (there.includes("paused")) return refuse("Your plan is paused. Open Manage billing to resume it.");
+	if (now.sub || there.some((s) => s === "active" || s === "trialing")) return refuse("You already have a plan. Changing plans is coming soon.");
 
-	const made = await polarCheckout(setup, user.email, plan, every, new URL(request.url).origin);
+	const made = await polarCheckout(setup, user.email, plan, every, new URL(request.url).origin, request.headers.get("cf-connecting-ip"));
 	return "url" in made ? Response.json(made) : Response.json({ error: made.error }, { status: made.status });
 }

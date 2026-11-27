@@ -32,7 +32,9 @@ export type SubRecord = {
 	periodEnds: string | null; // when this paid period ends (the next bill, unless it is cancelled)
 	scheduled: { action: string; at: string } | null; // e.g. cancel at the end of the period
 	occurredAt: string; // of the seller's event this came from
+	paidUntil?: string; // Polar: how far money has actually come in (its own file, added by planFor)
 };
+export type PaidRecord = { until: string; orderId: string; at: string };
 export type ExtraRecord = { transactionId: string; minutes: number; at: string; until: string };
 
 // The parts of Paddle's payloads used here (developer.paddle.com/webhooks).
@@ -115,6 +117,25 @@ export async function keepSubscription(record: SubRecord, claim: Record<string, 
 	return kept.result;
 }
 
+// A period of a plan was paid for (Polar's order.paid): keep how far it is paid, in its own file, as the payment can
+// arrive before the plan's own events. Only ever moves forward. Polar calls a renewed plan "active" before it has taken
+// the money (review 27 Nov), so this, not the status, opens a new period's minutes.
+export async function keepPaid(paid: PaidRecord & { subscriptionId: string; customerId: string }, claim: Record<string, unknown> | null | undefined, event: string, raw: unknown) {
+	const { subscriptionId, customerId, ...record } = paid;
+	if (!SAFE_ID.test(subscriptionId)) return "not ours";
+	const user = await ownerOf(claim, customerId, subscriptionId);
+	if (!user) {
+		await unmatched(record.orderId, event, raw);
+		return "unmatched";
+	}
+	const kept = await updateJson<PaidRecord, string>(`${userRoot(user)}paid/${subscriptionId}.json`, (old) =>
+		old && old.until >= record.until ? { result: "older" } : { next: record, result: "saved" },
+	);
+	if (!kept) throw new Error("billing: the payment's file is too busy"); // a 500: the seller sends it again
+	if (kept.result === "saved") await remember(user, customerId, subscriptionId);
+	return kept.result;
+}
+
 // transaction.completed: a pack of extra minutes was paid for (plans come through the subscription events).
 // Keyed by the transaction, so a second delivery writes the same file.
 export async function recordTransaction(txn: PaddleTransaction, event: string) {
@@ -141,18 +162,22 @@ export async function recordTransaction(txn: PaddleTransaction, event: string) {
 // What this person has now: their best plan that still gives access, and the extra minutes not yet run out.
 // Free when nothing is bought. past_due (a renewal payment failed) gives nothing, at once (coach, 27 Nov): a new month's
 // minutes would otherwise be used unpaid, again and again. It shows as pastDue, so the page can ask for a new card.
-// A paid period that ran out SILENT_DAYS ago with no word (the seller's webhooks stopped) stops giving access too.
+// A paid period that ran out SILENT_DAYS ago with no word (the seller's webhooks stopped, or Polar saw no payment for
+// the new one) stops giving access too. unsure: the seller last said the plan was running, so we may simply have missed
+// something: their files are never given a deletion date on that (lib/storage.ts).
 // extras: every pack still good, for lib/access.ts to take minutes from (extraMinutes is their total before any was used).
 // endedAt: when their last plan stopped giving access (none active now): the 90 days of keeping their files count from
 // there (lib/storage.ts). null: they never had one, or one is active.
 // latest: their newest plan whatever its status (cancelled or paused too), only for Manage billing, so past receipts
 // stay reachable after a plan ends (agent review 18 Nov). Never for access: that is `sub`.
-export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; pastDue: SubRecord | null; latest: SubRecord | null; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
+export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; pastDue: SubRecord | null; latest: SubRecord | null; unsure: boolean; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
 const GIVES_ACCESS: SubStatus[] = ["active", "trialing"];
 export const SILENT_DAYS = 3;
 const RANK: Record<PaidPlan, number> = { starter: 1, pro: 2 };
-export const givesAccess = (s: SubRecord, now = Date.now()) =>
-	GIVES_ACCESS.includes(s.status) && !(s.periodEnds && new Date(s.periodEnds).getTime() + SILENT_DAYS * 24 * 60 * 60 * 1000 < now);
+export function givesAccess(s: SubRecord, now = Date.now()) {
+	const end = s.status === "active" ? (s.paidUntil ?? s.periodEnds) : s.periodEnds;
+	return GIVES_ACCESS.includes(s.status) && !(end && new Date(end).getTime() + SILENT_DAYS * 24 * 60 * 60 * 1000 < now);
+}
 
 // strict: a file that can't be read throws instead of being left out (the storage clean-up: when unsure, keep; agent
 // review 19 Nov: one failed read made a paying person look Free and their files due).
@@ -160,18 +185,26 @@ export async function planFor(email: string, strict = false): Promise<PlanNow> {
 	const soft = <T>(p: Promise<T | null>) => (strict ? p : p.catch(() => null));
 	const root = userRoot(await hashEmail(email));
 	const [subFiles, extraFiles] = await Promise.all([listObjects(`${root}subs/`), listObjects(`${root}extra/`)]);
-	const subs = (await Promise.all(subFiles.map((f) => soft(getJson<SubRecord>(f.key))))).filter((s): s is SubRecord => Boolean(s));
+	const kept = (await Promise.all(subFiles.map((f) => soft(getJson<SubRecord>(f.key))))).filter((s): s is SubRecord => Boolean(s));
+	const subs = await Promise.all(
+		kept.map(async (s) => {
+			if (s.provider !== "polar") return s;
+			const paid = await soft(getJson<PaidRecord>(`${root}paid/${s.subscriptionId}.json`));
+			return paid ? { ...s, paidUntil: paid.until } : s;
+		}),
+	);
 	const best = subs.filter((s) => givesAccess(s)).sort((a, b) => RANK[b.plan] - RANK[a.plan])[0] ?? null;
 	const now = new Date().toISOString();
 	const extras = (await Promise.all(extraFiles.map((f) => soft(getJson<ExtraRecord>(f.key))))).filter((x): x is ExtraRecord => Boolean(x));
 	const extraMinutes = extras.reduce((sum, x) => sum + (x.until > now ? x.minutes : 0), 0);
 	// The end of the period they paid for: a scheduled cancel's date, else the period's end, else when the seller said so.
-	const ends = best ? [] : subs.map((s) => (s.scheduled?.action === "cancel" ? s.scheduled.at : null) ?? s.periodEnds ?? s.occurredAt).filter(Boolean);
+	const unsure = !best && subs.some((s) => GIVES_ACCESS.includes(s.status));
+	const ends = best || unsure ? [] : subs.map((s) => (s.scheduled?.action === "cancel" ? s.scheduled.at : null) ?? s.periodEnds ?? s.occurredAt).filter(Boolean);
 	const endedAt = ends.length ? ends.sort().at(-1)! : null;
 	const newest = (list: SubRecord[]) => [...list].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)).at(-1) ?? null;
 	const pastDue = best ? null : newest(subs.filter((s) => s.status === "past_due"));
 	// An unpaid plan first (its card is waiting to be fixed), then a paused one before a cancelled one (it can still be
 	// resumed there, agent review 19 Nov), then the newest.
 	const latest = best ?? pastDue ?? newest(subs.filter((s) => s.status === "paused")) ?? newest(subs);
-	return { plan: best?.plan ?? "free", sub: best, pastDue, latest, extraMinutes, extras, endedAt };
+	return { plan: best?.plan ?? "free", sub: best, pastDue, latest, unsure, extraMinutes, extras, endedAt };
 }

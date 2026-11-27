@@ -1,12 +1,20 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { currentUser } from "@/lib/supabase/server";
 import { planFor } from "@/lib/billing-store";
 import { accessFor } from "@/lib/access";
+import { type PolarEnv, polarSetup, polarSync } from "@/lib/payments/polar";
 
 // The signed-in person's plan, from our own copy of what the seller sent (lib/billing-store.ts), for the pricing page.
 export async function GET() {
 	const { user } = await currentUser();
 	if (!user?.email) return Response.json({ plan: null }, { status: 401 });
-	const [now, access] = await Promise.all([planFor(user.email), accessFor(user.email)]);
+	let now = await planFor(user.email);
+	// Our copy says a Polar plan stopped or went unpaid: ask Polar, in case a webhook was missed (review 27 Nov).
+	if ((now.unsure || now.pastDue) && now.latest?.provider === "polar") {
+		const setup = polarSetup(getCloudflareContext().env as unknown as PolarEnv);
+		if (setup && (await polarSync(setup, user.email).catch(() => null))) now = await planFor(user.email);
+	}
+	const access = await accessFor(user.email);
 	const sub = now.sub;
 	return Response.json({
 		plan: now.plan,

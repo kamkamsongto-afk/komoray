@@ -8,7 +8,7 @@
 // Who is who: our name for a person is the hash of their signed-in email. It is Polar's external_id for their customer,
 // and travels on the checkout as metadata.email_hash. Both are set here on the server, never by the browser.
 import { polarProducts, productMeaning, type PaidPlan, type SellerEnv } from "@/lib/billing";
-import { keepSubscription, SAFE_ID, type SubRecord, type SubStatus } from "@/lib/billing-store";
+import { keepPaid, keepSubscription, SAFE_ID, type SubRecord, type SubStatus } from "@/lib/billing-store";
 import { hashEmail } from "@/lib/email-hash";
 
 export type PolarEnv = { POLAR_ACCESS_TOKEN?: string; POLAR_SANDBOX_ACCESS_TOKEN?: string; POLAR_WEBHOOK_SECRET?: string; POLAR_SANDBOX_WEBHOOK_SECRET?: string };
@@ -53,8 +53,9 @@ async function ensureCustomer(setup: PolarSetup, email: string, hash: string): P
 	return (await call<Customer>(setup, "PATCH", `/customers/${old.id}`, { external_id: hash })).data ? "ok" : null;
 }
 
-// A checkout page at Polar for one plan. site: our own address, where the buyer comes back to.
-export async function polarCheckout(setup: PolarSetup, email: string, plan: PaidPlan, every: "month" | "year", site: string): Promise<{ url: string } | { error: string; status: number }> {
+// A checkout page at Polar for one plan. site: our own address, where the buyer comes back to. ip: the buyer's, which
+// Polar picks the billing country (and so the tax) from; without it Polar sees our server's.
+export async function polarCheckout(setup: PolarSetup, email: string, plan: PaidPlan, every: "month" | "year", site: string, ip?: string | null): Promise<{ url: string } | { error: string; status: number }> {
 	const productId = polarProducts(setup.environment)?.[plan][every];
 	if (!productId) return { error: "Buying isn't open yet.", status: 503 };
 	const failed = { error: "Couldn't open the checkout just now. Please try again.", status: 502 };
@@ -68,6 +69,7 @@ export async function polarCheckout(setup: PolarSetup, email: string, plan: Paid
 		customer_email: email,
 		metadata: { email_hash: hash },
 		allow_trial: false,
+		...(ip && { customer_ip_address: ip }),
 		success_url: `${site}/pricing?paid=1`,
 		return_url: `${site}/pricing`,
 	});
@@ -174,6 +176,53 @@ export function polarRecord(sub: PolarSubscription, occurredAt: string): SubReco
 		scheduled: cancelAt ? { action: "cancel", at: cancelAt } : null,
 		occurredAt: new Date(occurredAt).toISOString(),
 	};
+}
+
+// The parts of Polar's order used here (a bill: the first payment, or a renewal).
+export type PolarOrder = {
+	id: string;
+	paid?: boolean;
+	billing_reason?: string;
+	subscription_id?: string | null;
+	customer_id: string;
+	metadata?: Record<string, unknown> | null;
+	customer?: { external_id?: string | null } | null;
+	subscription?: { current_period_end?: string | null; metadata?: Record<string, unknown> | null } | null;
+	items?: { end_timestamp?: string | null; proration?: boolean }[];
+};
+
+// How far a paid order pays a plan up to, or null (not paid, or not for a period of a plan). From the period its lines
+// cover; a first or renewal bill without one: the plan's period as Polar has it now.
+export function paidThrough(order: PolarOrder): string | null {
+	const renewal = order.billing_reason === "subscription_create" || order.billing_reason === "subscription_cycle";
+	if (!order.paid || !order.subscription_id || !(renewal || order.billing_reason === "subscription_update")) return null;
+	const ends = (order.items ?? []).flatMap((item) => (!item.proration && item.end_timestamp ? [new Date(item.end_timestamp).getTime()] : []));
+	const end = ends.length ? Math.max(...ends) : renewal ? new Date(order.subscription?.current_period_end ?? "").getTime() : NaN;
+	return Number.isNaN(end) ? null : new Date(end).toISOString();
+}
+
+export async function recordPolarOrder(order: PolarOrder, event: string) {
+	const until = paidThrough(order);
+	if (!until || !SAFE_ID.test(order.id)) return "nothing to keep";
+	const claimed = order.metadata?.email_hash ?? order.subscription?.metadata?.email_hash ?? order.customer?.external_id;
+	return keepPaid({ subscriptionId: order.subscription_id!, customerId: order.customer_id, orderId: order.id, until, at: new Date().toISOString() }, { email_hash: claimed }, event, order);
+}
+
+// Ask Polar what this person really has, and keep it: for before a checkout, and when our copy says a plan stopped or
+// went unpaid (a webhook may have been missed). Returns the statuses of their plans there; null: couldn't ask.
+export async function polarSync(setup: PolarSetup, email: string): Promise<string[] | null> {
+	const hash = await hashEmail(email);
+	const asked = new Date().toISOString(); // before asking: an event from later than this is newer than the answer
+	const [subs, orders] = await Promise.all([
+		call<{ items?: PolarSubscription[] }>(setup, "GET", `/subscriptions/?external_customer_id=${hash}&limit=100`),
+		call<{ items?: PolarOrder[] }>(setup, "GET", `/orders/?external_customer_id=${hash}&limit=100&sorting=-created_at`),
+	]);
+	if (!subs.data?.items || !orders.data?.items) return null;
+	// Only theirs, whatever the filter did.
+	const theirs = <T extends { customer?: { external_id?: string | null } | null }>(list: T[]) => list.filter((x) => x.customer?.external_id === hash);
+	for (const order of theirs(orders.data.items)) await recordPolarOrder(order, "sync");
+	for (const sub of theirs(subs.data.items)) await recordPolarSubscription(sub, asked, "sync");
+	return theirs(subs.data.items).map((sub) => sub.status);
 }
 
 // A subscription.* event: keep the newest state of this plan.

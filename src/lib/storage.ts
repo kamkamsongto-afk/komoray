@@ -69,7 +69,8 @@ export type Deletion = { at: string; why: "plan ended" | "not used"; countdown: 
 export async function deletionFor(email: string, access: Pick<AccessStatus, "storageGb" | "plan">, now = Date.now(), newest: string | null = null, strict = false): Promise<Deletion> {
 	if (access.storageGb === null || access.plan !== "free") return null; // paid: kept while the plan is active
 	const cleaned = getJson<{ endedAt: string }>(`access/storage-cleaned/${await hashEmail(email)}.json`);
-	const [{ endedAt }, active, done] = await Promise.all([planFor(email, strict), lastActive(email, strict), strict ? cleaned : cleaned.catch(() => null)]);
+	const [{ endedAt, unsure }, active, done] = await Promise.all([planFor(email, strict), lastActive(email, strict), strict ? cleaned : cleaned.catch(() => null)]);
+	if (unsure) return null; // their seller last said the plan was running: when unsure, keep (lib/billing-store.ts)
 	// A plan that ended and whose 90 days haven't been used up yet (done: its files were already deleted for that end).
 	if (endedAt && done?.endedAt !== endedAt) {
 		const at = new Date(new Date(endedAt).getTime() + STORAGE.keepAfterPlanDays * DAY);

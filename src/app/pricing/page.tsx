@@ -176,7 +176,8 @@ export default function PricingPage() {
 	const button = (id: "starter" | "pro") => (
 		<button
 			onClick={() => void buy({ plan: id })}
-			disabled={!open || buying || Boolean(paid) || Boolean(owing)}
+			// thanks: just paid, the plan is on its way: not a second purchase meanwhile.
+			disabled={!open || buying || thanks || Boolean(paid) || Boolean(owing)}
 			title={paid && paid !== id ? "Changing plans is coming soon" : owing ? "Update your card with Manage billing" : undefined}
 			className="mt-auto rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-40"
 		>
