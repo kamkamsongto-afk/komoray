@@ -118,8 +118,9 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	let waiting = false;
 	if (paidUntil) {
 		const lastPaid = new Date(new Date(paidUntil).getTime() - 4 * 24 * 60 * 60 * 1000);
-		waiting = cycle.start >= lastPaid;
-		if (waiting) cycle = cycleAround(anchor, lastPaid);
+		const unpaid = cycle.start >= lastPaid;
+		if (unpaid) cycle = cycleAround(anchor, lastPaid);
+		waiting = unpaid && bought?.sub?.status === "active"; // a trial owes nothing: no "waiting for payment" (review 27 Nov)
 	}
 	// Free's bigger first month is for someone new: not for anyone who has had a plan (unpaid or ended, 27 Nov). A first
 	// purchase still waiting for its payment doesn't count as one.
@@ -153,7 +154,7 @@ export function outOfMinutes(status: AccessStatus, needs?: number) {
 	const resets = last ? `Your plan ends ${shortDate(resetsAt)}.` : waiting ? "Your new minutes open once your payment is confirmed." : `Your minutes reset ${shortDate(resetsAt)}.`;
 	const head = needs ? `This needs ${needs} minutes. You have ${status.left} left.` : "You've used all your minutes for now.";
 	// Extra minutes aren't sold for now (lib/plans.ts), and Pro has nothing above it yet (Max is "coming soon").
-	const more = status.perks.extraMinutes ? "Add Extra minutes on the Pricing page, or upgrade." : status.plan === "pro" ? "" : "Upgrade on the Pricing page for more.";
+	const more = status.monthly.waiting ? "" : status.perks.extraMinutes ? "Add Extra minutes on the Pricing page, or upgrade." : status.plan === "pro" ? "" : "Upgrade on the Pricing page for more.";
 	return `${head} ${resets}${more && ` ${more}`}`;
 }
 
