@@ -28,9 +28,10 @@ import { readZoomParts, type ZoomPart } from "@/lib/zoom";
 //   pace    tight / natural / relaxed: finds the silences again (answers with the new cuts)
 //   badTakesApplied  the AI's bad takes were cut once, as asked when uploading (never again by themselves)
 //   spellingApplied  the AI's spelling fixes were put on once (api/spelling)
+//   cutoutApplied  Cut person, ticked when uploading, was started once (never again by itself)
 // Any of them can be sent on its own.
 export async function PUT(request: Request) {
-	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, spellingApplied, style, banners, pace, manual, keep, noZoom, zoomParts, zoomMomentsApplied, cutout, frames, layouts } = (await request.json()) as {
+	const { key, deleted, fixes, dictionaryApplied, takesApplied, badTakesApplied, spellingApplied, style, banners, pace, manual, keep, noZoom, zoomParts, zoomMomentsApplied, cutoutApplied, cutout, frames, layouts } = (await request.json()) as {
 		key?: string;
 		pace?: unknown;
 		deleted?: unknown;
@@ -46,6 +47,7 @@ export async function PUT(request: Request) {
 		noZoom?: unknown;
 		zoomParts?: unknown;
 		zoomMomentsApplied?: unknown;
+		cutoutApplied?: unknown;
 		cutout?: unknown;
 		frames?: unknown;
 		layouts?: unknown;
@@ -71,6 +73,7 @@ export async function PUT(request: Request) {
 		noZoom?: { start: number; end: number }[];
 		zoomParts?: ZoomPart[];
 		zoomMomentsApplied?: boolean;
+		cutoutApplied?: boolean;
 		cutout?: CutoutLayers;
 		frames?: FrameMe[];
 		layouts?: VideoLayout[];
@@ -104,6 +107,7 @@ export async function PUT(request: Request) {
 	if (badTakesApplied === true) edit.badTakesApplied = true;
 	if (spellingApplied === true) edit.spellingApplied = true;
 	if (zoomMomentsApplied === true) edit.zoomMomentsApplied = true;
+	if (cutoutApplied === true) edit.cutoutApplied = true;
 	if (zoomParts !== undefined) {
 		const checked = readZoomParts(zoomParts, edit.duration);
 		if (!checked) return Response.json({ error: "Bad zoom parts" }, { status: 400 });
