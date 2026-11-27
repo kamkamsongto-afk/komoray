@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { currentUser } from "@/lib/supabase/server";
-import { behindOnPayment, planFor } from "@/lib/billing-store";
+import { behindOnPayment, planFor, rememberContact } from "@/lib/billing-store";
+import { hashEmail } from "@/lib/email-hash";
 import { accessFor } from "@/lib/access";
 import { type PolarEnv, polarSetup, polarSync } from "@/lib/payments/polar";
 
@@ -15,6 +16,8 @@ export async function GET() {
 		const setup = polarSetup(getCloudflareContext().env as unknown as PolarEnv);
 		if (setup && (await polarSync(setup, user.email).catch(() => null))) now = await planFor(user.email);
 	}
+	// Whoever has a plan, from either seller: keep the signed-in address for our customer list.
+	if (now.latest) await rememberContact(await hashEmail(user.email), user.email);
 	const access = await accessFor(user.email);
 	const sub = now.sub;
 	return Response.json({

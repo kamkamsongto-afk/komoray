@@ -71,8 +71,9 @@ export default function PrivacyPage() {
 					<strong>Your plan and payments:</strong> if you buy a plan, Polar (below) takes the payment. To open the checkout we give
 					Polar your email address, a scrambled code made from it, and your internet (IP) address, which helps it work out your
 					country and its tax. From Polar we get which plan you bought, whether it is monthly or yearly, when it renews or ends,
-					whether a payment went through, and the IDs Polar gives your purchase. We keep this with the same scrambled code, so we
-					know which plan is yours. We never see or keep your card or bank details.
+					whether a payment went through, and the IDs Polar gives your purchase. We keep this with the same scrambled code and your
+					email address, so we know which plan is yours and can reach you about it, even if the payment service stops. We never
+					see or keep your card or bank details.
 				</li>
 				<li>
 					<strong>How you use Komoray:</strong> we link your email address to your videos and keep track of how far each one got, how many words you fixed and any errors you saw, to help you and to improve Komoray. We also keep how many minutes you used each month. The link to each video is deleted with the video.

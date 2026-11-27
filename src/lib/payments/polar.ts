@@ -145,7 +145,7 @@ export type PolarSubscription = {
 	ended_at?: string | null;
 	past_due_at?: string | null;
 	metadata?: Record<string, unknown> | null;
-	customer?: { external_id?: string | null } | null;
+	customer?: { external_id?: string | null; email?: string | null } | null;
 };
 
 // Polar's statuses as ours. unpaid (every retry failed) and trial_ended give nothing and may buy again; a status not
@@ -236,5 +236,5 @@ export async function recordPolarSubscription(sub: PolarSubscription, occurredAt
 	const record = polarRecord(sub, occurredAt);
 	if (!record) return "not ours"; // a product we don't sell, or not paid yet
 	const claimed = sub.metadata?.email_hash ?? sub.customer?.external_id;
-	return keepSubscription(record, { email_hash: claimed }, event, sub);
+	return keepSubscription(record, { email_hash: claimed }, event, sub, sub.customer?.email);
 }

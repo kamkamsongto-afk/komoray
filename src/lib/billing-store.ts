@@ -7,6 +7,7 @@ import { hashEmail } from "@/lib/email-hash";
 // their email:
 //   access/billing/users/<hash>/subs/<subscription id>.json   one plan: SubRecord, the newest the seller sent
 //   access/billing/users/<hash>/extra/<transaction id>.json   a pack of extra minutes: ExtraRecord (Paddle)
+//   access/billing/users/<hash>/contact.json                  { email }: so we can reach them without the seller
 //   access/billing/customers/<customer id>.json              { user: <hash> }: whose this customer is
 //   access/billing/subs/<subscription id>.json               { user: <hash> }: whose this subscription is
 //   access/billing/unmatched/<id>.json                       an event we could not tie to anyone, to look at by hand
@@ -71,6 +72,13 @@ async function remember(user: string, customerId?: string | null, subscriptionId
 	if (subscriptionId && SAFE_ID.test(subscriptionId)) await putIfAbsent(`access/billing/subs/${subscriptionId}.json`, note, "application/json");
 }
 
+// Their address, kept beside their plan, so our own customer list (lib/customer-list.ts) can reach them if the seller
+// stops (coach, 27 Nov). Only the address the hash was made from. Never stops a payment being recorded.
+export async function rememberContact(user: string, email: string | null | undefined) {
+	if (!email || (await hashEmail(email)) !== user) return;
+	await putIfAbsent(`${userRoot(user)}contact.json`, JSON.stringify({ email: email.trim().toLowerCase() }), "application/json").catch(() => false);
+}
+
 async function unmatched(id: string, event: string, body: unknown) {
 	if (SAFE_ID.test(id)) await putObject(`access/billing/unmatched/${id}.json`, JSON.stringify({ event, at: new Date().toISOString(), body }), "application/json");
 }
@@ -103,7 +111,7 @@ export async function recordSubscription(sub: PaddleSubscription, occurredAt: st
 // Keep one plan's newest state, whoever sold it. claim: what the checkout carried ({ email_hash }); raw: the seller's own
 // data, kept aside when nobody can be told. The newest is decided on the file itself (updateJson): two events landing
 // together can't leave the older one on top (a "past_due" overwritten by an "active" would keep a plan unpaid).
-export async function keepSubscription(record: SubRecord, claim: Record<string, unknown> | null | undefined, event: string, raw: unknown) {
+export async function keepSubscription(record: SubRecord, claim: Record<string, unknown> | null | undefined, event: string, raw: unknown, email?: string | null) {
 	const user = await ownerOf(claim, record.customerId, record.subscriptionId);
 	if (!user) {
 		await unmatched(record.subscriptionId, event, raw);
@@ -114,6 +122,7 @@ export async function keepSubscription(record: SubRecord, claim: Record<string, 
 	);
 	if (!kept) throw new Error("billing: the plan's file is too busy"); // a 500: the seller sends it again
 	if (kept.result === "saved") await remember(user, record.customerId, record.subscriptionId);
+	await rememberContact(user, email);
 	return kept.result;
 }
 

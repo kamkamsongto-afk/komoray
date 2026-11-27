@@ -256,6 +256,17 @@ export default function AdminPage() {
 						</ul>
 					</section>
 
+					{/* Our own copy of who pays what, to keep outside the payment service (coach, 27 Nov). */}
+					<section className="flex flex-col gap-2">
+						<div className="flex flex-wrap items-center justify-between gap-2">
+							<h2 className="text-lg font-semibold">Paying customers</h2>
+							<a href="/api/admin/customers" download className="text-sm underline">
+								Download (CSV)
+							</a>
+						</div>
+						<p className="text-sm text-foreground/60">Everyone who has bought a plan: email, plan, dates and which seller. Download it now and then and keep it somewhere safe.</p>
+					</section>
+
 					<section className="flex flex-col gap-3">
 						<div className="flex flex-wrap items-center justify-between gap-2">
 							<h2 className="text-lg font-semibold">Early access list ({waitlist.length})</h2>
