@@ -35,7 +35,7 @@ type Config =
 	| { ready: false }
 	| { ready: true; seller: "polar"; environment: PaddleEnv }
 	| { ready: true; seller: "paddle"; token: string; environment: PaddleEnv; prices: PricesView };
-type MyPlan = { plan: "free" | "starter" | "pro"; hadPlan?: boolean; pastDue?: "starter" | "pro" | null; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
+type MyPlan = { plan: "free" | "starter" | "pro"; hadPlan?: boolean; pastDue?: "starter" | "pro" | null; pending?: "starter" | "pro" | null; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string; last?: boolean } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
 // In English like the rest of the page (coach, 17 Nov: a Thai computer showed "17 พ.ย. 2570").
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 
@@ -77,7 +77,7 @@ export default function PricingPage() {
 				.then((p) => {
 					if (gone || !p) return;
 					setMine(p);
-					if (thanks && p.plan === "free" && tries++ < 6) setTimeout(ask, 2500);
+					if (thanks && p.plan === "free" && tries++ < 12) setTimeout(ask, 2500);
 				})
 				.catch(() => {});
 		void ask();
@@ -143,6 +143,7 @@ export default function PricingPage() {
 		setMine(now);
 		if ("plan" in item && now.plan !== "free") return setNote(`You're already on ${PLANS[now.plan].name}. Changing plans is coming soon.`);
 		if ("plan" in item && now.pastDue) return setNote("Your last payment didn't go through. Update your card with Manage billing instead.");
+		if ("plan" in item && now.pending) return setNote("We're still waiting for your payment to be confirmed. No need to buy again.");
 		if ("extra" in item && now.plan === "free") return setNote("Extra minutes are for paid plans: pick Starter or Pro first.");
 		if (config.seller === "polar") {
 			if (!("plan" in item)) return; // Polar sells plans only
@@ -173,12 +174,13 @@ export default function PricingPage() {
 	const open = Boolean(config?.ready) && (config?.ready && config.seller === "paddle" ? ready || !user : true);
 	const paid = mine && mine.plan !== "free" ? mine.plan : null;
 	const owing = mine && mine.plan === "free" ? (mine.pastDue ?? null) : null;
+	const waiting = mine && mine.plan === "free" ? (mine.pending ?? null) : null;
 	const button = (id: "starter" | "pro") => (
 		<button
 			onClick={() => void buy({ plan: id })}
 			// thanks: just paid, the plan is on its way: not a second purchase meanwhile.
-			disabled={!open || buying || thanks || Boolean(paid) || Boolean(owing)}
-			title={paid && paid !== id ? "Changing plans is coming soon" : owing ? "Update your card with Manage billing" : undefined}
+			disabled={!open || buying || thanks || Boolean(paid) || Boolean(owing) || Boolean(waiting)}
+			title={paid && paid !== id ? "Changing plans is coming soon" : owing ? "Update your card with Manage billing" : waiting ? "Waiting for your payment" : undefined}
 			className="mt-auto rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-40"
 		>
 			{user === null ? "Sign in to choose" : paid === id ? "Your plan" : paid ? "Change plan (soon)" : `Choose ${PLANS[id].name}`}
@@ -214,7 +216,7 @@ export default function PricingPage() {
 					{mine.every ? ` (${mine.every === "year" ? "yearly" : "monthly"})` : ""}.{" "}
 					{mine.cancelsAt ? `It ends on ${day(mine.cancelsAt)}.` : mine.periodEnds ? `Next bill on ${day(mine.periodEnds)}.` : ""}
 					{mine.status === "past_due" ? " Your last payment didn't go through: please update your card." : ""}
-					{mine.monthly ? ` ${mine.monthly.left} of ${mine.monthly.limit} minutes left · resets ${shortDate(mine.monthly.resetsAt)}.` : ""}
+					{mine.monthly ? ` ${mine.monthly.left} of ${mine.monthly.limit} minutes left${mine.monthly.last ? "" : ` · resets ${shortDate(mine.monthly.resetsAt)}`}.` : ""}
 					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}{" "}
 					{/* The seller's own page: cancel, change card, invoices (api/billing/portal; money promise 5). */}
 					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-(--link) underline hover:opacity-80 disabled:opacity-60">
@@ -231,8 +233,17 @@ export default function PricingPage() {
 					</button>
 				</p>
 			)}
+			{/* Bought, the money not confirmed yet: say so, rather than showing Free without a word (coach, 27 Nov). */}
+			{waiting && (
+				<p role="status" className="rounded-xl border border-blue-600/30 bg-blue-600/10 p-4 text-center text-sm">
+					We&apos;re waiting for your payment to be confirmed. A card usually takes a few seconds; a bank payment can take a few business days. Your <span className="font-semibold">{PLANS[waiting].name}</span> features start as soon as it arrives.{" "}
+					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-(--link) underline hover:opacity-80 disabled:opacity-60">
+						{opening ? "Opening…" : "Manage billing"}
+					</button>
+				</p>
+			)}
 			{/* A plan that ended (cancelled or paused): its receipts are still on the seller's page. */}
-			{mine && mine.plan === "free" && mine.hadPlan && !owing && !thanks && (
+			{mine && mine.plan === "free" && mine.hadPlan && !owing && !waiting && !thanks && (
 				<p className="rounded-xl border border-foreground/15 p-4 text-center text-sm">
 					Your plan has ended. Receipts and past payments:{" "}
 					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-blue-600 underline hover:text-blue-700 disabled:opacity-60 dark:text-blue-400">

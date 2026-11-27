@@ -358,7 +358,7 @@ export default function UploadPage() {
 					<span className="mt-1 block font-medium text-foreground">
 						{/* A plan's minutes bar (pricing doc 8.): "212 of 300 minutes left · resets Dec 14", Extra minutes beside it. */}
 						{access.monthly
-							? `${access.monthly.left} of ${access.monthly.limit} minutes left · resets ${shortDate(access.monthly.resetsAt)}${access.extra?.left ? ` · ${access.extra.left} Extra minutes` : ""}`
+							? `${access.monthly.left} of ${access.monthly.limit} minutes left${access.monthly.last ? "" : ` · resets ${shortDate(access.monthly.resetsAt)}`}${access.extra?.left ? ` · ${access.extra.left} Extra minutes` : ""}`
 							: `${access.left} of ${access.limit} beta minutes left`}
 					</span>
 				)}
