@@ -10,7 +10,8 @@
 //   rewrite   many words: this video only
 //   spelling  letters wrong inside words ("ดึงงติ" → "ดึงสติ"): learned, only the words that changed, no spaces
 // And a learned pair is used one of three ways (wordUse):
-//   always    the heard side is no real word (ผูหญิง): put on every match, it can't be right as it was
+//   always    the heard side is no real word (ผูหญิง): put on every match, it can't be right as it was. Never a heard
+//             side under MIN_HEARD letters: a scrap (จ, พ่) is what is left of many different words
 //   ai        both sides are real words (สวน → ส่วน, กด → กฎ): only the spelling AI may put it on, reading the sentence
 //   off       not a spelling fix: kept, never used
 // The heard side counts as a real word when the Thai dictionary (lib/newmm.ts, server only) has every part of it.
@@ -32,18 +33,25 @@ const STYLE = /[^฀-๿\s]/;
 const thaiLetters = (text: string) => [...text.replace(/ํา/g, "ำ").replace(/\s+/g, "").replace(TRAIL, "")];
 const noSpace = (text: string) => text.replace(/\s+/g, "");
 
+// Letters a Thai text is said with: marks above and below a letter don't count.
+export const thaiSpoken = (text: string) => [...text.replace(/ํา/g, "ำ").replace(/\s+/g, "")].filter((c) => !/[ัิ-ฺ็-๎]/.test(c)).length;
+
+// The Thai dictionary's word cutter (lib/newmm.ts, loaded only when wanted: lib/thai-cut.ts).
+type Cut = (thai: string) => string[];
+
 // pieces: the speech-to-text's words the fix covers, as it wrote them. typed: what the creator typed for them.
-export function learnFromFix(pieces: string[], typed: string): { kind: FixKind; pairs: Pair[] } {
+// cut: given, a Thai pair is never cut down to part of a word the creator typed.
+export function learnFromFix(pieces: string[], typed: string, cut?: Cut): { kind: FixKind; pairs: Pair[] } {
 	const original = pieces.join(THAI.test(pieces.join("")) ? "" : " ");
 	if (typed.trim() === original.trim()) return { kind: "same", pairs: [] };
 	if (noSpace(typed) === noSpace(original)) return { kind: "spacing", pairs: [] };
-	return THAI.test(original + typed) ? thaiFix(pieces, typed) : wordFix(pieces, typed);
+	return THAI.test(original + typed) ? thaiFix(pieces, typed, cut) : wordFix(pieces, typed);
 }
 
 // Each word the creator typed (split at their spaces) is lined up with the speech-to-text's letters, letter by letter,
 // and a word that reads differently is learned as a pair: the pieces under it, whole, and what was typed for them,
 // without spaces. Lining up per typed word keeps a pair to the word that changed ("ทีละ ก้อน": กอน → ก้อน, not กอ → ก้อ).
-function thaiFix(pieces: string[], typed: string): { kind: FixKind; pairs: Pair[] } {
+function thaiFix(pieces: string[], typed: string, cut?: Cut): { kind: FixKind; pairs: Pair[] } {
 	const parts = pieces.map(thaiLetters);
 	const A = parts.flat();
 	const B = thaiLetters(typed);
@@ -88,10 +96,24 @@ function thaiFix(pieces: string[], typed: string): { kind: FixKind; pairs: Pair[
 	const unchanged = (k: number) => parts[k].length >= 3 && parts[k].join("") === B.slice(bAt[spans[k][0]], bAt[spans[k][1]]).join("");
 	// And what is left keeps at least MIN_HEARD letters: "ผู|ชาย" stays ผูชาย → ผู้ชาย, as ผู alone would be ผู้ here and
 	// ผูก in ผู|พัน → ผูกพัน.
-	const spoken = (first: number, last: number) => parts.slice(first, last + 1).flat().filter((l) => !/[ัิ-ฺ็-๎]/.test(l)).length;
+	const spoken = (first: number, last: number) => thaiSpoken(parts.slice(first, last + 1).flat().join(""));
+	// Nor is the cut made inside a word the creator typed: "คอม|พิเตอร์" → คอมพิวเตอร์ learned พิเตอร์ → พิวเตอร์, half a
+	// word that Word Hub refused, and "โปร|แกม" → โปรแกรม learned แกม → แกรม, two real words (coach 28 Nov).
+	const edges = cut ? wordEdges(typed, cut) : null;
+	// May the pair start (or end) where piece k starts?
+	const between = (k: number, inWords: Set<number> | null) => !inWords || inWords.has(bAt[spans[k][0]]);
+	const trim = (span: { first: number; last: number }, inWords: Set<number> | null) => {
+		while (span.first < span.last && unchanged(span.first) && spoken(span.first + 1, span.last) >= MIN_HEARD && between(span.first + 1, inWords)) span.first++;
+		while (span.last > span.first && unchanged(span.last) && spoken(span.first, span.last - 1) >= MIN_HEARD && between(span.last, inWords)) span.last--;
+	};
 	for (const span of found) {
-		while (span.first < span.last && unchanged(span.first) && spoken(span.first + 1, span.last) >= MIN_HEARD) span.first++;
-		while (span.last > span.first && unchanged(span.last) && spoken(span.first, span.last - 1) >= MIN_HEARD) span.last--;
+		const { first, last } = span;
+		trim(span, edges);
+		// Kept whole it is too long to be a pair: cut down as without the dictionary, rather than learn nothing.
+		if (edges && span.last - span.first + 1 > MAX_PIECES) {
+			Object.assign(span, { first, last });
+			trim(span, null);
+		}
 	}
 	for (const { first, last, a0, a1, b0, b1 } of found) {
 		const heard = parts.slice(first, last + 1).flat();
@@ -118,6 +140,19 @@ function thaiFix(pieces: string[], typed: string): { kind: FixKind; pairs: Pair[
 	}
 	if (pairs.length) return { kind: "spelling", pairs };
 	return { kind: added ? "added" : removed ? "removed" : "rewrite", pairs: [] };
+}
+
+// Where the dictionary's words start and end in what was typed, counted in letters as thaiLetters counts them.
+function wordEdges(typed: string, cut: Cut) {
+	const edges = new Set([0]);
+	let at = 0;
+	for (const chunk of typed.trim().split(/\s+/)) {
+		const letters = thaiLetters(chunk);
+		let inside = at;
+		for (const word of cut(letters.join(""))) edges.add((inside += [...word].length));
+		edges.add((at += letters.length));
+	}
+	return edges;
 }
 
 const count = (letters: string[], c: string) => letters.filter((l) => l === c).length;
@@ -181,15 +216,15 @@ function wordFix(pieces: string[], typed: string): { kind: FixKind; pairs: Pair[
 // A Thai heard side that is no ONE word of the dictionary, yet reads as real because its parts are ("เมื่อวน" = เมื่อ + วน,
 // meant เมื่อวาน; "ทะเละ" = ทะเล + ะ, meant ทะเลาะ), and sits a letter or two from a fixed side made of real words, is a
 // misspelling that is never right as heard: "always" (coach 22 Nov: known mistakes kept coming back for every user because
-// only a heard side with NO real part counted). Heard of fewer than 3 letters stays with the AI ("ถา" is inside many words).
+// only a heard side with NO real part counted). Heard of fewer than 3 letters stays with the AI ("ถา" is inside many words);
+// wordUse holds that for a heard side with no real part too.
 function oneWordSlip(heard: string, fixed: string, options: { realWords?: (thai: string) => boolean; oneWord?: (thai: string) => boolean }) {
 	if (!options.oneWord || !options.realWords) return false;
 	const h = heard.replace(/\s+/g, "");
 	const f = fixed.replace(/\s+/g, "");
 	if (!/^[\u0E00-\u0E7F]+$/.test(h) || !/^[\u0E00-\u0E7F]+$/.test(f) || h.includes("ๆ") || f.includes("ๆ")) return false;
-	const letters = (t: string) => [...t.replace(/ํา/g, "ำ")].filter((c) => !/[ัิ-ฺ็-๎]/.test(c)).length;
-	if (letters(h) < MIN_HEARD || options.oneWord(h) || !options.realWords(f)) return false;
-	return editDistance(h, f) <= Math.max(1, Math.floor(letters(f) * 0.3));
+	if (thaiSpoken(h) < MIN_HEARD || options.oneWord(h) || !options.realWords(f)) return false;
+	return editDistance(h, f) <= Math.max(1, Math.floor(thaiSpoken(f) * 0.3));
 }
 
 function editDistance(a: string, b: string) {
@@ -212,6 +247,9 @@ export function wordUse(heard: string, fixed: string, options: { realWords?: (th
 	// creator's own words in front of it (Codex review 13 Nov).
 	if (!thai) return !options.shared && /\p{L}\p{Lu}|[0-9]/u.test(fixed) && heard.replace(/[^\p{L}0-9]/gu, "").length >= 3 ? "always" : "ai";
 	if (!options.realWords) return "ai";
+	// A scrap of one or two letters is never put on by itself, a dictionary word or not: one clip had จ for จา, จบ and
+	// จน, and Word Hub had จ → จา as Always on every creator's video (coach 28 Nov).
+	if (thaiSpoken(heard) < MIN_HEARD) return "ai";
 	if (!options.realWords(heard.replace(/\s+/g, ""))) return "always";
 	return oneWordSlip(heard, fixed, options) ? "always" : "ai";
 }
