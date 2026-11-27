@@ -30,6 +30,9 @@ const USE: { id: WordUse; name: string; tip: string }[] = [
 	{ id: "off", name: "Off", tip: "Never used" },
 ];
 const NEW_DAYS = 7;
+// Suggestions is built but not shown (coach, 28 Nov: much time and effort for little result; clear misspellings fixed in
+// the AI studio come into Word Hub by themselves). true shows the box again.
+const SHOW_SUGGESTIONS: boolean = false;
 const listName = (list: string) => (list === "th" ? "Thai" : list === "latin" ? "Other (before 13 Nov)" : (LANGUAGES.find((l) => l.code === list)?.english ?? list));
 const keyOf = (r: WordRow) => `${r.source}:${r.heard}`;
 // Waiting for the team: anything not looked at that the rules aren't sure of, creators' pairs, and new ones.
@@ -172,7 +175,7 @@ export function AdminWords() {
 				))}
 			</div>
 
-			<AdminSuggestions added={() => void load()} />
+			{SHOW_SUGGESTIONS && <AdminSuggestions added={() => void load()} />}
 
 			<details className="rounded-xl border border-foreground/15 p-3">
 				<summary className="cursor-pointer text-sm font-medium">Add pairs to {listName(list)}</summary>
