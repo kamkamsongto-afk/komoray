@@ -7,8 +7,7 @@ import { learnFromFix, thaiSpoken } from "./word-rules";
 
 type Fix = { from: number; to: number; text: string };
 export type Clip = { words: { text: string }[]; fixes: Fix[]; ai: Fix[]; language?: string };
-// left: places in those videos that read `heard` and don't read `fixed` in the finished script: a rule would change
-// them. safe: the heard side can't be right as it is (the route says, with the dictionary).
+// left: places in those videos that read `heard` where a rule would not give what the finished script reads. safe: the heard side can't be right as it is (the route says, with the dictionary).
 export type Variant = { with: "none" | "before" | "after"; heard: string; fixed: string; seen: number; left: number; safe: boolean };
 export type Suggestion = { id: string; times: number; language?: string; variants: Variant[]; pick: number };
 
@@ -24,7 +23,7 @@ const tidy = (text: string) => fixThai(text).trim().replace(/\s+/g, " ");
 const join = (a: string, b: string) => (THAI.test(a.slice(-1)) && THAI.test(b.slice(0, 1)) ? a + b : `${a} ${b}`);
 
 // The parts of one hand fix that could be a rule: the words it covers (i..j) and what they should read.
-function candidates(clip: Clip, f: Fix, cut: (thai: string) => string[]) {
+function candidates(clip: Clip, f: Fix, cut: (thai: string) => string[], oneWord: (thai: string) => boolean) {
 	const pieces = clip.words.slice(f.from, f.to + 1).map((w) => fixThai(w.text));
 	const lesson = learnFromFix(pieces, f.text, cut);
 	if (lesson.kind === "spelling") {
@@ -34,13 +33,14 @@ function candidates(clip: Clip, f: Fix, cut: (thai: string) => string[]) {
 			return [];
 		});
 	}
-	// "ฉ" → "ฉะนั้น" counts as words added, yet it is a word the speech-to-text cut short. A whole word typed before or
-	// after what was heard (ใช่ → ไม่ใช่) is not: that was missed at that moment only.
-	if (lesson.kind !== "added") return [];
+	// Thai "ฉ" → "ฉะนั้น" counts as words added, yet it is a word the speech-to-text cut short, and so is โปร แก ร เม →
+	// โปรแกรมเมอร์ (one dictionary word). Words typed before, after or between what was heard (ใช่ → ไม่ใช่, ผม ไป →
+	// ผมจะไม่ได้ไป) were missed at that moment only.
+	if (lesson.kind !== "added" || !THAI.test(pieces.join(""))) return [];
 	const heard = bare(pieces.join(""));
 	const fixed = bare(f.text);
-	const extra = fixed.startsWith(heard) ? fixed.slice(heard.length) : fixed.endsWith(heard) ? fixed.slice(0, -heard.length) : "";
-	if (/^[ก-ฮเ-ไa-z]/.test(extra)) return [];
+	const extra = fixed.startsWith(heard) ? fixed.slice(heard.length) : fixed.endsWith(heard) ? fixed.slice(0, -heard.length) : null;
+	if (extra === null ? !oneWord(fixed) : /^[ก-ฮเ-ไa-z]/.test(extra)) return [];
 	return [{ i: f.from, j: f.to, fixed: f.text }];
 }
 
@@ -55,12 +55,24 @@ function reads(clip: Clip, i: number, j: number) {
 	return text;
 }
 
-// clips: newest first. cut: the Thai dictionary. allowed: may this pair go into a list (curatable). known: is this
+// Whether a rule putting `fixed` on words i..j would give what the finished script reads there, taking in the whole of
+// any fix that reaches into them. "The script has the fixed words somewhere" is not enough: เพราะ ฉ → เพราะฉะนั้น over
+// "เพราะ ฉ นั้น" says นั้น twice, and ยาย → ยา would change every ยาย said right (review 28 Nov).
+function agrees(clip: Clip, i: number, j: number, fixed: string) {
+	const covering = (k: number) => clip.fixes.find((f) => f.from <= k && f.to >= k);
+	const lo = covering(i)?.from ?? i;
+	const hi = covering(j)?.to ?? j;
+	const raw = (a: number, b: number) => clip.words.slice(a, b).map((w) => w.text).join("");
+	return bare(raw(lo, i) + fixed + raw(j + 1, hi + 1)) === bare(reads(clip, lo, hi));
+}
+
+// clips: newest first. cut: the Thai dictionary. oneWord: is this one word of it. allowed: may this pair go into a list (curatable). known: is this
 // heard side already in a list. done: was this suggestion already added or skipped.
 export function suggestWords(
 	clips: Clip[],
 	options: {
 		cut: (thai: string) => string[];
+		oneWord: (thai: string) => boolean;
 		allowed: (heard: string, fixed: string) => boolean;
 		known: (heard: string) => boolean;
 		done: (id: string) => boolean;
@@ -73,7 +85,7 @@ export function suggestWords(
 		const under = (k: number) => clip.fixes.some((f) => f.from <= k && f.to >= k);
 		for (const f of clip.fixes) {
 			if (byAi.has(`${f.from}|${f.to}|${squash(f.text)}`) || f.to >= clip.words.length) continue;
-			for (const c of candidates(clip, f, options.cut)) {
+			for (const c of candidates(clip, f, options.cut, options.oneWord)) {
 				const heard = tidy(clip.words.slice(c.i, c.j + 1).map((w) => w.text).join(" "));
 				const fixed = tidy(c.fixed);
 				const id = `${squash(heard)}>${squash(fixed)}`;
@@ -109,7 +121,7 @@ export function suggestWords(
 				said += squash(clip.words[j].text);
 				for (const v of wanted.get(said) ?? []) {
 					v.seen++;
-					if (!squash(reads(clip, i, j)).includes(squash(v.fixed))) v.left++;
+					if (!agrees(clip, i, j, v.fixed)) v.left++;
 				}
 			}
 		}

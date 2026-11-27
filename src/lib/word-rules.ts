@@ -254,6 +254,12 @@ export function wordUse(heard: string, fixed: string, options: { realWords?: (th
 	return oneWordSlip(heard, fixed, options) ? "always" : "ai";
 }
 
+// A scrap wordUse keeps from "always" only for being short and no word (พ่ → พ่น): still worth showing the AI.
+export function shortScrap(heard: string, fixed: string, realWords: (thai: string) => boolean) {
+	const bare = heard.replace(/\s+/g, "");
+	return THAI.test(bare) && thaiSpoken(bare) < MIN_HEARD && learnFromFix([bare], fixed).kind === "spelling" && !realWords(bare);
+}
+
 // What the edit box says about a fix before it is saved.
 export const KIND_NOTE: Record<Exclude<FixKind, "spelling" | "same">, string> = {
 	spacing: "Only the spacing changed, so this stays in this video.",
