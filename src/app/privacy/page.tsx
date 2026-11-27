@@ -7,7 +7,7 @@ const CONTACT = "hello@komoray.com";
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" updated="November 18, 2026">
+		<LegalPage title="Privacy Policy" updated="November 27, 2026">
 			<p>
 				Komoray is an AI studio for talking-head creators. You upload a video, we cut the silences, add subtitles and give you
 				back a finished video. This page explains what we collect to do that, who helps us, and how long we keep it.
@@ -18,7 +18,7 @@ export default function PrivacyPage() {
 				<li>Your videos are yours. We use them only to make your edits.</li>
 				<li>We never sell your data, and we never use your videos to train AI models.</li>
 				<li>Sharing the words you fix with other creators is off unless you turn it on, and it never includes who you are.</li>
-				<li>Payments go through Paddle. We never see or keep your card number.</li>
+				<li>Payments go through Polar. We never see or keep your card number.</li>
 				{/* Until launch (coach 19 Nov). Take this line out when paid plans open. */}
 				<li>Until paid plans open, Komoray is in beta: beta videos are deleted automatically after 14 days.</li>
 				<li>Paid plans keep your files for as long as you pay, up to your storage. Free files are deleted after 30 days without use, and files of a plan that ended after 90 days. We email you first.</li>
@@ -68,10 +68,11 @@ export default function PrivacyPage() {
 					file you upload, if any, so your next videos start with it. Only your videos use your font.
 				</li>
 				<li>
-					<strong>Your plan and payments:</strong> if you buy a plan, Paddle (below) takes the payment. From Paddle we get which
-					plan you bought, whether it is monthly or yearly, when it renews or ends, whether a payment went through, and the IDs Paddle
-					gives your purchase. We keep this with a scrambled code made from your email address, so we know which plan is yours.
-					We never see or keep your card or bank details.
+					<strong>Your plan and payments:</strong> if you buy a plan, Polar (below) takes the payment. To open the checkout we give
+					Polar your email address, a scrambled code made from it, and your internet (IP) address, which helps it work out your
+					country and its tax. From Polar we get which plan you bought, whether it is monthly or yearly, when it renews or ends,
+					whether a payment went through, and the IDs Polar gives your purchase. We keep this with the same scrambled code, so we
+					know which plan is yours. We never see or keep your card or bank details.
 				</li>
 				<li>
 					<strong>How you use Komoray:</strong> we link your email address to your videos and keep track of how far each one got, how many words you fixed and any errors you saw, to help you and to improve Komoray. We also keep how many minutes you used each month. The link to each video is deleted with the video.
@@ -111,13 +112,13 @@ export default function PrivacyPage() {
 					<strong>Supabase</strong> handles sign-in and stores your account details.
 				</li>
 				<li>
-					<strong>Paddle</strong> sells our plans as the Merchant of Record: it takes your payment, adds the right tax, sends your
-					receipts and lets you manage or cancel your plan. Paddle handles your payment details under its own{" "}
-					<a href="https://www.paddle.com/legal/privacy">privacy policy</a>.
+					<strong>Polar</strong> sells our plans as the Merchant of Record: it takes your payment (using the payment company
+					Stripe), adds the right tax, sends your receipts and the reminder before a yearly plan renews, and lets you manage or
+					cancel your plan. Polar handles your payment details under its own{" "}
+					<a href="https://polar.sh/legal/privacy-policy">privacy policy</a>.
 				</li>
 				<li>
-					<strong>Brevo</strong> sends our emails to you, such as an invite, a reminder before a yearly plan renews, or a warning
-					before an original video is deleted. It gets your email address and the message.
+					<strong>Brevo</strong> sends our emails to you, such as an invite or a warning before an original video is deleted. It gets your email address and the message.
 				</li>
 				<li>
 					<strong>Google</strong> lets you sign in with your Google account.
@@ -132,7 +133,7 @@ export default function PrivacyPage() {
 				<li>On the Free plan, up to 5 GB, deleted if you don&apos;t open Komoray while signed in for 30 days in a row. We email you 7 days before.</li>
 				<li>On a paid plan, up to your plan&apos;s storage (Starter 200 GB, Pro 800 GB), for as long as your plan is active. We never delete them while you pay.</li>
 				<li>When a plan ends, for 90 days after the end of the period you paid for, then deleted. We show a countdown and email you from 20 days before.</li>
-				<li>What Paddle tells us about your plan and payments is kept for as long as the law asks us to keep records of sales.</li>
+				<li>What Polar tells us about your plan and payments is kept for as long as the law asks us to keep records of sales.</li>
 				<li>You can delete a video and everything made from it at any time on the My projects page.</li>
 				<li>Error reports and troubleshooting recordings are deleted after 90 days.</li>
 				<li>

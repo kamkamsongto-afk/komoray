@@ -299,6 +299,12 @@ export default function PricingPage() {
 					<p className="text-sm">For studios and teams. Coming soon.</p>
 				</div>
 			</section>
+			{/* Said beside the buttons, before anyone pays (US auto-renewal laws, and Polar's terms 9.5; coach 27 Nov): it
+			    renews until cancelled, how to cancel, refunds, and who sells. The same promises as the Terms: change together. */}
+			<p className="-mt-4 text-center text-sm text-foreground/75">
+				Paid plans are billed in advance and renew automatically every month or year until you cancel. Cancel online any time with Manage billing on this page; your plan runs to the end of the period you paid for. Not happy? Email{" "}
+				<a href="mailto:hello@komoray.com" className="underline">hello@komoray.com</a> within 14 days of a payment for a full refund. Sold by {config?.ready && config.seller === "paddle" ? "Paddle" : "Polar"}, our online reseller and Merchant of Record.
+			</p>
 			{/* Prices are before tax (coach 18 Nov): the seller adds VAT or sales tax for the buyer's country at checkout
 			    (Polar products' tax_behavior "exclusive", Paddle prices' tax_mode "external"), and a business can add its tax
 			    number there. */}

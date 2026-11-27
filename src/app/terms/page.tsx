@@ -5,14 +5,16 @@ import { LegalPage } from "@/components/LegalPage";
 export const metadata: Metadata = { title: "Terms of Service · Komoray" };
 
 const CONTACT = "hello@komoray.com";
-// Who runs Komoray, as Paddle's seller check needs to see it: the name the Paddle account is in (coach, 18 Nov).
+// Who runs Komoray, as a seller's check needs to see it: the name the seller account is in (coach, 18 Nov).
 const OPERATOR = "Kampon Ulanwiriyo, Thailand";
 
 // Paid plans (coach 18 Nov; the money promises in the decided pricing doc). Approved by the coach on staging, 18 Nov,
 // with the 14-day refund as written (a lawyer may read it later: pricing doc, promise 7).
+// The seller named here is Polar (coach, 27 Nov). Selling through another (lib/payments/seller.ts) means changing this
+// page, the Privacy and Refund pages and the Pricing page's small print first.
 export default function TermsPage() {
 	return (
-		<LegalPage title="Terms of Service" updated="November 18, 2026">
+		<LegalPage title="Terms of Service" updated="November 27, 2026">
 			<p>
 				By using Komoray, you agree to these terms. They are short on purpose. Komoray is run by {OPERATOR}{" "}
 				(&ldquo;we&rdquo;).
@@ -45,17 +47,23 @@ export default function TermsPage() {
 			{/* The refund and cancel lines are repeated on app/refund/page.tsx: change both together. */}
 			<h2>Payments</h2>
 			<p>
-				Our order process is conducted by our online reseller Paddle.com. Paddle.com is the Merchant of Record for all our
-				orders. Paddle provides all customer service inquiries and handles returns.
+				Our order process is conducted by our online reseller Polar (Polar Software, Inc.). Polar is the Merchant of Record for
+				all our orders: it takes your payment, adds the right tax, sends your receipts and handles billing questions and
+				returns. Polar&apos;s <a href="https://polar.sh/legal/checkout-buyer-terms">Checkout Buyer Terms</a> also apply to your
+				purchase.
 			</p>
 			<ul>
 				<li>Prices are in US dollars. Sales tax or VAT for your country is added at checkout.</li>
 				<li>
-					Paid plans are billed in advance, monthly or yearly, and renew automatically until you cancel. For yearly plans, we email
-					you 7 days before the renewal.
+					Paid plans are billed in advance, monthly or yearly, and renew automatically, with a new charge each time, until you
+					cancel. For yearly plans, you get an email 7 days before the renewal.
 				</li>
 				<li>
-					You can cancel at any time, in one click, with Manage billing on the Pricing page. No reason needed. Your plan keeps working
+					Paid features start once your payment is received. If a renewal payment fails, they pause until it goes through; your
+					files are kept as described under Storage below.
+				</li>
+				<li>
+					You can cancel online at any time with Manage billing on the Pricing page. No reason needed. Your plan keeps working
 					until the end of the period you paid for.
 				</li>
 				<li>
