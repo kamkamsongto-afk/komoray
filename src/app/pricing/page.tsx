@@ -30,13 +30,18 @@ declare global {
 const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
 const SELL_EXTRA = false;
 
-type Config = { ready: false } | { ready: true; token: string; environment: PaddleEnv; prices: PricesView };
-type MyPlan = { plan: "free" | "starter" | "pro"; hadPlan?: boolean; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
+// Which seller is open (api/billing/config). Polar: its own checkout page; Paddle: its checkout inside this page.
+type Config =
+	| { ready: false }
+	| { ready: true; seller: "polar"; environment: PaddleEnv }
+	| { ready: true; seller: "paddle"; token: string; environment: PaddleEnv; prices: PricesView };
+type MyPlan = { plan: "free" | "starter" | "pro"; hadPlan?: boolean; pastDue?: "starter" | "pro" | null; extraMinutes: number; monthly?: { left: number; limit: number; resetsAt: string } | null; status?: string; every?: "month" | "year"; periodEnds?: string | null; cancelsAt?: string | null };
 // In English like the rest of the page (coach, 17 Nov: a Thai computer showed "17 พ.ย. 2570").
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 
-// Plans and the checkout (coach 16 Nov: Paddle in the sandbox first, on staging). What is sold is the decided pricing doc.
-// Buying needs signing in: the user's id goes with the payment (customData), so the webhook knows whose plan it is.
+// Plans and the checkout (sandbox first, on staging). What is sold is the decided pricing doc.
+// Buying needs signing in, so the webhook knows whose plan it is. With Polar the server makes the checkout; with Paddle
+// the user's id goes with the payment from here (customData).
 export default function PricingPage() {
 	const user = useUser();
 	const [config, setConfig] = useState<Config | null>(null);
@@ -47,6 +52,7 @@ export default function PricingPage() {
 	const [note, setNote] = useState("");
 	const started = useRef(false);
 	const [opening, setOpening] = useState(false);
+	const [buying, setBuying] = useState(false); // on the way to Polar's checkout
 
 	// A fresh link every press: Paddle's portal links work once and run out.
 	async function manage() {
@@ -59,7 +65,7 @@ export default function PricingPage() {
 		setNote(data?.error ?? "Couldn't open billing just now. Please try again.");
 	}
 
-	// The plan we have on record (from Paddle's webhook). After a purchase it is asked again a few times: the webhook
+	// The plan we have on record (from the seller's webhook). After a purchase it is asked again a few times: the webhook
 	// usually lands within seconds of the checkout closing.
 	useEffect(() => {
 		if (!user) return;
@@ -83,13 +89,27 @@ export default function PricingPage() {
 	useEffect(() => {
 		void fetch("/api/billing/config")
 			.then((r) => r.json() as Promise<Config>)
-			.then(setConfig)
+			.then((c) => {
+				setConfig(c);
+				// Back from Polar's checkout (its success address). Only for what the page says: the webhook gives the plan.
+				if (new URLSearchParams(window.location.search).has("paid")) setThanks(true);
+			})
 			.catch(() => setConfig({ ready: false }));
 	}, []);
 
-	// Load Paddle.js once the token is known, and set it up for its own environment.
+	// Coming back with the browser's Back button can show this page as it was left, with a button still "Opening…".
 	useEffect(() => {
-		if (!config?.ready || started.current) return;
+		const back = () => {
+			setOpening(false);
+			setBuying(false);
+		};
+		window.addEventListener("pageshow", back);
+		return () => window.removeEventListener("pageshow", back);
+	}, []);
+
+	// Paddle only: load Paddle.js once the token is known, and set it up for its own environment.
+	useEffect(() => {
+		if (!config?.ready || config.seller !== "paddle" || started.current) return;
 		started.current = true;
 		const setUp = () => {
 			const paddle = window.Paddle;
@@ -112,17 +132,33 @@ export default function PricingPage() {
 
 	// plan: a plan is never bought twice (coach, 17 Nov: Choose Pro again would start a second plan and charge again).
 	// Asked again right before the checkout opens, in case this page was left open while buying in another tab.
-	async function buy(priceId: string, what: "plan" | "extra") {
+	async function buy(item: { plan: "starter" | "pro" } | { extra: "extra60" | "extra200" }) {
 		if (!user) return void signInWithGoogle();
-		if (!ready || !window.Paddle || !user.email) return;
+		if (!config?.ready || !user.email) return;
 		setNote("");
 		const now = await fetch("/api/billing/me")
 			.then((r) => (r.ok ? (r.json() as Promise<MyPlan>) : null))
 			.catch(() => null);
 		if (!now) return setNote("Couldn't check your plan just now. Please try again.");
 		setMine(now);
-		if (what === "plan" && now.plan !== "free") return setNote(`You're already on ${PLANS[now.plan].name}. Changing plans is coming soon.`);
-		if (what === "extra" && now.plan === "free") return setNote("Extra minutes are for paid plans: pick Starter or Pro first.");
+		if ("plan" in item && now.plan !== "free") return setNote(`You're already on ${PLANS[now.plan].name}. Changing plans is coming soon.`);
+		if ("plan" in item && now.pastDue) return setNote("Your last payment didn't go through. Update your card with Manage billing instead.");
+		if ("extra" in item && now.plan === "free") return setNote("Extra minutes are for paid plans: pick Starter or Pro first.");
+		if (config.seller === "polar") {
+			if (!("plan" in item)) return; // Polar sells plans only
+			setBuying(true);
+			const res = await fetch("/api/billing/checkout", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ plan: item.plan, every: yearly ? "year" : "month" }),
+			}).catch(() => null);
+			const data = (await res?.json().catch(() => null)) as { url?: string; error?: string } | null;
+			if (res?.ok && data?.url) return void (window.location.href = data.url);
+			setBuying(false);
+			return setNote(data?.error ?? "Couldn't open the checkout just now. Please try again.");
+		}
+		if (!ready || !window.Paddle) return;
+		const priceId = "plan" in item ? config.prices[item.plan][yearly ? "year" : "month"] : config.prices[item.extra];
 		// Whose purchase it is, for the webhook: the same name as their files in R2 (lib/billing-store.ts).
 		const emailHash = await hashEmail(user.email);
 		const dark = document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -134,14 +170,14 @@ export default function PricingPage() {
 		});
 	}
 
-	const prices = config?.ready ? config.prices : null;
-	const open = Boolean(prices) && (ready || !user);
+	const open = Boolean(config?.ready) && (config?.ready && config.seller === "paddle" ? ready || !user : true);
 	const paid = mine && mine.plan !== "free" ? mine.plan : null;
-	const button = (id: "starter" | "pro", priceId: string | undefined) => (
+	const owing = mine && mine.plan === "free" ? (mine.pastDue ?? null) : null;
+	const button = (id: "starter" | "pro") => (
 		<button
-			onClick={() => priceId && void buy(priceId, "plan")}
-			disabled={!open || !priceId || Boolean(paid)}
-			title={paid && paid !== id ? "Changing plans is coming soon" : undefined}
+			onClick={() => void buy({ plan: id })}
+			disabled={!open || buying || Boolean(paid) || Boolean(owing)}
+			title={paid && paid !== id ? "Changing plans is coming soon" : owing ? "Update your card with Manage billing" : undefined}
 			className="mt-auto rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-40"
 		>
 			{user === null ? "Sign in to choose" : paid === id ? "Your plan" : paid ? "Change plan (soon)" : `Choose ${PLANS[id].name}`}
@@ -179,14 +215,23 @@ export default function PricingPage() {
 					{mine.status === "past_due" ? " Your last payment didn't go through: please update your card." : ""}
 					{mine.monthly ? ` ${mine.monthly.left} of ${mine.monthly.limit} minutes left · resets ${shortDate(mine.monthly.resetsAt)}.` : ""}
 					{mine.extraMinutes ? ` Extra minutes: ${mine.extraMinutes}.` : ""}{" "}
-					{/* Paddle's own page: cancel, change card, invoices (api/billing/portal; money promise 5). */}
+					{/* The seller's own page: cancel, change card, invoices (api/billing/portal; money promise 5). */}
 					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-(--link) underline hover:opacity-80 disabled:opacity-60">
 						{opening ? "Opening…" : "Manage billing"}
 					</button>
 				</p>
 			)}
-			{/* A plan that ended (cancelled or paused): its receipts are still on Paddle's page. */}
-			{mine && mine.plan === "free" && mine.hadPlan && !thanks && (
+			{/* A renewal that wasn't paid: paid features are off until the card is fixed (coach, 27 Nov). */}
+			{owing && (
+				<p role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-center text-sm">
+					Your last payment didn&apos;t go through, so your <span className="font-semibold">{PLANS[owing].name}</span> features are paused. Your videos are safe. Update your card and they come back.{" "}
+					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-(--link) underline hover:opacity-80 disabled:opacity-60">
+						{opening ? "Opening…" : "Manage billing"}
+					</button>
+				</p>
+			)}
+			{/* A plan that ended (cancelled or paused): its receipts are still on the seller's page. */}
+			{mine && mine.plan === "free" && mine.hadPlan && !owing && !thanks && (
 				<p className="rounded-xl border border-foreground/15 p-4 text-center text-sm">
 					Your plan has ended. Receipts and past payments:{" "}
 					<button onClick={() => void manage()} disabled={opening} className="ml-1 font-medium text-blue-600 underline hover:text-blue-700 disabled:opacity-60 dark:text-blue-400">
@@ -228,7 +273,7 @@ export default function PricingPage() {
 									Start free
 								</Link>
 							) : (
-								button(id, prices?.[id][yearly ? "year" : "month"])
+								button(id)
 							)}
 						</div>
 					);
@@ -238,8 +283,9 @@ export default function PricingPage() {
 					<p className="text-sm">For studios and teams. Coming soon.</p>
 				</div>
 			</section>
-			{/* Prices are before tax (coach 18 Nov): Paddle adds VAT or sales tax for the buyer's country at checkout (prices'
-			    tax_mode "external"), and a business can add its tax number there. */}
+			{/* Prices are before tax (coach 18 Nov): the seller adds VAT or sales tax for the buyer's country at checkout
+			    (Polar products' tax_behavior "exclusive", Paddle prices' tax_mode "external"), and a business can add its tax
+			    number there. */}
 			<p className="-mt-4 text-center text-xs text-foreground/60">
 				Prices in US dollars, plus applicable VAT or sales tax for your country, added at checkout. Buying for a business? Add your VAT or tax number at checkout.{" "}
 				<Link href="/refund" className="underline">Refund Policy</Link> · <Link href="/terms" className="underline">Terms</Link>
@@ -254,7 +300,7 @@ export default function PricingPage() {
 						{EXTRA_PACKS.map((pack) => (
 							<button
 								key={pack.id}
-								onClick={() => prices && void buy(prices[pack.id], "extra")}
+								onClick={() => void buy({ extra: pack.id })}
 								disabled={!open || (Boolean(mine) && !paid)}
 								className="rounded-lg border border-foreground/20 px-4 py-2 font-medium hover:bg-foreground/5 disabled:opacity-40"
 							>

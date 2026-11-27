@@ -111,7 +111,8 @@ export async function accessFor(email?: string | null): Promise<AccessStatus> {
 	// A paid plan's month runs from its own billing day (Paddle's period end), Free's from the day it began.
 	const anchor = paid ? (bought?.sub?.periodEnds ?? bought?.sub?.occurredAt ?? "") : await freeSince(email);
 	const cycle = cycleAround(anchor);
-	const first = !paid && cycle.start.getTime() <= new Date(anchor).getTime();
+	// Free's bigger first month is for someone new: not for anyone who has had a plan (unpaid or ended, 27 Nov).
+	const first = !paid && !bought?.latest && cycle.start.getTime() <= new Date(anchor).getTime();
 	const limit = first && rules.firstMonth !== null ? rules.firstMonth : rules.monthly;
 	const start = cycle.start.toISOString();
 	const used = usage.filter((u) => u.at >= start).reduce((sum, u) => sum + Math.max(0, u.minutes - u.extra), 0);

@@ -1,28 +1,36 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { planFor } from "@/lib/billing-store";
 import { hashEmail } from "@/lib/email-hash";
+import { type PolarEnv, polarPortal, polarSetup } from "@/lib/payments/polar";
 import { currentUser } from "@/lib/supabase/server";
 
-// "Manage billing" (coach 18 Nov; money promise 5: cancel in one click): a fresh link to Paddle's own customer portal,
-// where the buyer cancels, changes their card and gets their invoices. Paddle's API is called with fetch (no SDK in
-// this project). The customer is ALWAYS the signed-in person's own, from what Paddle's webhooks told us
-// (lib/billing-store.ts): nothing from the browser chooses whose portal it is. Only the link goes back, never the session.
+// "Manage billing" (coach 18 Nov; money promise 5: cancel in one click): a fresh link to the customer portal of whoever
+// sold the plan (Polar: lib/payments/polar.ts; Paddle: below), where the buyer cancels, changes their card and gets
+// their invoices. Called with fetch (no SDK in this project). The customer is ALWAYS the signed-in person's own, from
+// what the seller's webhooks told us (lib/billing-store.ts): nothing from the browser chooses whose portal it is. Only
+// the link goes back, never the session.
 // The link works once and runs out, so one is made on every press. The secret API key is a Worker secret:
 // PADDLE_API_KEY on the live site, PADDLE_SANDBOX_API_KEY in the sandbox (staging and this computer).
 type PortalEnv = { PADDLE_API_KEY?: string; PADDLE_SANDBOX_API_KEY?: string };
 const PADDLE_ID = /^[a-z]{3}_[0-9a-z]{26}$/;
 
-export async function POST() {
+export async function POST(request: Request) {
 	const { user } = await currentUser();
 	if (!user?.email) return Response.json({ error: "Please sign in first" }, { status: 401 });
 
-	// latest, not sub: a cancelled or paused plan still opens the portal, for its receipts (and to resume a paused one).
+	// latest, not sub: a cancelled, paused or unpaid plan still opens the portal, for its receipts (and to fix the card).
 	const { latest: sub } = await planFor(user.email);
-	if (!sub ||!PADDLE_ID.test(sub.customerId) || !PADDLE_ID.test(sub.subscriptionId)) {
-		return Response.json({ error: "There's no plan to manage on this account yet." }, { status: 404 });
+	const none = () => Response.json({ error: "There's no plan to manage on this account yet." }, { status: 404 });
+	if (!sub) return none();
+	const env = getCloudflareContext().env as unknown as PortalEnv & PolarEnv;
+	if (sub.provider === "polar") {
+		const setup = polarSetup(env);
+		if (!setup) return Response.json({ error: "Managing billing isn't set up yet. Please email hello@komoray.com." }, { status: 503 });
+		const made = await polarPortal(setup, sub, user.email, new URL(request.url).origin);
+		return "url" in made ? Response.json(made) : Response.json({ error: made.error }, { status: made.status });
 	}
+	if (!PADDLE_ID.test(sub.customerId) || !PADDLE_ID.test(sub.subscriptionId)) return none();
 
-	const env = getCloudflareContext().env as unknown as PortalEnv;
 	const key = env.PADDLE_API_KEY || env.PADDLE_SANDBOX_API_KEY || "";
 	if (!key) return Response.json({ error: "Managing billing isn't set up yet. Please email hello@komoray.com." }, { status: 503 });
 	const api = key.includes("_sdbx_") ? "https://sandbox-api.paddle.com" : "https://api.paddle.com";

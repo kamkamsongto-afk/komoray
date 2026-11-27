@@ -1,24 +1,28 @@
-import { getJson, listObjects, putIfAbsent, putObject } from "@/lib/r2";
-import { EXTRA_MONTHS, type PaidPlan, priceMeaning } from "@/lib/billing";
+import { getJson, listObjects, putIfAbsent, putObject, updateJson } from "@/lib/r2";
+import { EXTRA_MONTHS, type PaidPlan, priceMeaning, type Seller } from "@/lib/billing";
 import { hashEmail } from "@/lib/email-hash";
 
-// What each person has bought, mirrored from Paddle's webhooks into R2 next to the rest of access/ (lib/access.ts),
-// so the app reads its own copy and never asks Paddle while someone works. All keyed by the hash of their email:
-//   access/billing/users/<hash>/subs/<subscription id>.json   one plan: SubRecord, the newest Paddle sent
-//   access/billing/users/<hash>/extra/<transaction id>.json   a pack of extra minutes: ExtraRecord
-//   access/billing/customers/<customer id>.json              { user: <hash> }: whose this Paddle customer is
+// What each person has bought, mirrored from the seller's webhooks (Polar or Paddle) into R2 next to the rest of access/
+// (lib/access.ts), so the app reads its own copy and never asks the seller while someone works. Keyed by the hash of
+// their email:
+//   access/billing/users/<hash>/subs/<subscription id>.json   one plan: SubRecord, the newest the seller sent
+//   access/billing/users/<hash>/extra/<transaction id>.json   a pack of extra minutes: ExtraRecord (Paddle)
+//   access/billing/customers/<customer id>.json              { user: <hash> }: whose this customer is
 //   access/billing/subs/<subscription id>.json               { user: <hash> }: whose this subscription is
 //   access/billing/unmatched/<id>.json                       an event we could not tie to anyone, to look at by hand
-// Who it is comes from the checkout's custom_data (email_hash, set by the pricing page from the signed-in email,
-// which is also the email the checkout is locked to). What was bought comes from the price ID (lib/billing.ts).
-// Paddle sends at least once and in no set order: writing the same thing twice is harmless, and an event older than
+// Who it is comes from what was put on the checkout (email_hash: Polar's is set by our server, lib/payments/polar.ts;
+// Paddle's by the pricing page). What was bought comes from the price or product ID (lib/billing.ts).
+// Sellers send at least once and in no set order: writing the same thing twice is harmless, and an event older than
 // what is kept (occurred_at) is left out.
 
 const HASH = /^[0-9a-f]{64}$/;
-const PADDLE_ID = /^[a-z]{3}_[0-9a-z]{26}$/; // sub_…, ctm_…, txn_…: safe as a file name
+const PADDLE_ID = /^[a-z]{3}_[0-9a-z]{26}$/; // sub_…, ctm_…, txn_…
+// Paddle's IDs or Polar's (a UUID): both safe as a file name.
+export const SAFE_ID = /^([a-z]{3}_[0-9a-z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
 export type SubStatus = "active" | "trialing" | "past_due" | "paused" | "canceled";
 export type SubRecord = {
+	provider?: Seller; // not there: Paddle (kept before Polar)
 	subscriptionId: string;
 	customerId: string;
 	status: SubStatus;
@@ -27,7 +31,7 @@ export type SubRecord = {
 	priceId: string;
 	periodEnds: string | null; // when this paid period ends (the next bill, unless it is cancelled)
 	scheduled: { action: string; at: string } | null; // e.g. cancel at the end of the period
-	occurredAt: string; // of the Paddle event this came from
+	occurredAt: string; // of the seller's event this came from
 };
 export type ExtraRecord = { transactionId: string; minutes: number; at: string; until: string };
 
@@ -51,7 +55,7 @@ async function ownerOf(customData: Record<string, unknown> | null | undefined, c
 	const said = typeof customData?.email_hash === "string" ? customData.email_hash : "";
 	if (HASH.test(said)) return said;
 	for (const [kind, id] of [["customers", customerId], ["subs", subscriptionId]] as const) {
-		if (id && PADDLE_ID.test(id)) {
+		if (id && SAFE_ID.test(id)) {
 			const known = await getJson<{ user: string }>(`access/billing/${kind}/${id}.json`);
 			if (known && HASH.test(known.user)) return known.user;
 		}
@@ -61,12 +65,12 @@ async function ownerOf(customData: Record<string, unknown> | null | undefined, c
 
 async function remember(user: string, customerId?: string | null, subscriptionId?: string | null) {
 	const note = JSON.stringify({ user });
-	if (customerId && PADDLE_ID.test(customerId)) await putIfAbsent(`access/billing/customers/${customerId}.json`, note, "application/json");
-	if (subscriptionId && PADDLE_ID.test(subscriptionId)) await putIfAbsent(`access/billing/subs/${subscriptionId}.json`, note, "application/json");
+	if (customerId && SAFE_ID.test(customerId)) await putIfAbsent(`access/billing/customers/${customerId}.json`, note, "application/json");
+	if (subscriptionId && SAFE_ID.test(subscriptionId)) await putIfAbsent(`access/billing/subs/${subscriptionId}.json`, note, "application/json");
 }
 
 async function unmatched(id: string, event: string, body: unknown) {
-	if (PADDLE_ID.test(id)) await putObject(`access/billing/unmatched/${id}.json`, JSON.stringify({ event, at: new Date().toISOString(), body }), "application/json");
+	if (SAFE_ID.test(id)) await putObject(`access/billing/unmatched/${id}.json`, JSON.stringify({ event, at: new Date().toISOString(), body }), "application/json");
 }
 
 const STATUSES: SubStatus[] = ["active", "trialing", "past_due", "paused", "canceled"];
@@ -77,17 +81,10 @@ export async function recordSubscription(sub: PaddleSubscription, occurredAt: st
 	const priceId = sub.items?.[0]?.price?.id ?? "";
 	const meaning = priceMeaning(priceId);
 	if (!meaning || !("plan" in meaning)) return "not ours"; // a price we don't sell as a plan
-	const user = await ownerOf(sub.custom_data, sub.customer_id, sub.id);
-	if (!user) {
-		await unmatched(sub.id, event, sub);
-		return "unmatched";
-	}
-	const key = `${userRoot(user)}subs/${sub.id}.json`;
-	const kept = await getJson<SubRecord>(key);
-	if (kept && kept.occurredAt > occurredAt) return "older";
 	const status = STATUSES.includes(sub.status as SubStatus) ? (sub.status as SubStatus) : "canceled"; // unknown: no access
 	const change = sub.scheduled_change;
 	const record: SubRecord = {
+		provider: "paddle",
 		subscriptionId: sub.id,
 		customerId: sub.customer_id,
 		status,
@@ -98,9 +95,24 @@ export async function recordSubscription(sub: PaddleSubscription, occurredAt: st
 		scheduled: change?.action && change.effective_at ? { action: change.action, at: change.effective_at } : null,
 		occurredAt,
 	};
-	await putObject(key, JSON.stringify(record), "application/json");
-	await remember(user, sub.customer_id, sub.id);
-	return "saved";
+	return keepSubscription(record, sub.custom_data, event, sub);
+}
+
+// Keep one plan's newest state, whoever sold it. claim: what the checkout carried ({ email_hash }); raw: the seller's own
+// data, kept aside when nobody can be told. The newest is decided on the file itself (updateJson): two events landing
+// together can't leave the older one on top (a "past_due" overwritten by an "active" would keep a plan unpaid).
+export async function keepSubscription(record: SubRecord, claim: Record<string, unknown> | null | undefined, event: string, raw: unknown) {
+	const user = await ownerOf(claim, record.customerId, record.subscriptionId);
+	if (!user) {
+		await unmatched(record.subscriptionId, event, raw);
+		return "unmatched";
+	}
+	const kept = await updateJson<SubRecord, string>(`${userRoot(user)}subs/${record.subscriptionId}.json`, (old) =>
+		old && old.occurredAt > record.occurredAt ? { result: "older" } : { next: record, result: "saved" },
+	);
+	if (!kept) throw new Error("billing: the plan's file is too busy"); // a 500: the seller sends it again
+	if (kept.result === "saved") await remember(user, record.customerId, record.subscriptionId);
+	return kept.result;
 }
 
 // transaction.completed: a pack of extra minutes was paid for (plans come through the subscription events).
@@ -127,15 +139,20 @@ export async function recordTransaction(txn: PaddleTransaction, event: string) {
 }
 
 // What this person has now: their best plan that still gives access, and the extra minutes not yet run out.
-// Free when nothing is bought. past_due keeps the plan while Paddle retries the card (Paddle's advice).
+// Free when nothing is bought. past_due (a renewal payment failed) gives nothing, at once (coach, 27 Nov): a new month's
+// minutes would otherwise be used unpaid, again and again. It shows as pastDue, so the page can ask for a new card.
+// A paid period that ran out SILENT_DAYS ago with no word (the seller's webhooks stopped) stops giving access too.
 // extras: every pack still good, for lib/access.ts to take minutes from (extraMinutes is their total before any was used).
 // endedAt: when their last plan stopped giving access (none active now): the 90 days of keeping their files count from
 // there (lib/storage.ts). null: they never had one, or one is active.
 // latest: their newest plan whatever its status (cancelled or paused too), only for Manage billing, so past receipts
 // stay reachable after a plan ends (agent review 18 Nov). Never for access: that is `sub`.
-export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; latest: SubRecord | null; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
-const GIVES_ACCESS: SubStatus[] = ["active", "trialing", "past_due"];
+export type PlanNow = { plan: "free" | PaidPlan; sub: SubRecord | null; pastDue: SubRecord | null; latest: SubRecord | null; extraMinutes: number; extras: ExtraRecord[]; endedAt: string | null };
+const GIVES_ACCESS: SubStatus[] = ["active", "trialing"];
+export const SILENT_DAYS = 3;
 const RANK: Record<PaidPlan, number> = { starter: 1, pro: 2 };
+export const givesAccess = (s: SubRecord, now = Date.now()) =>
+	GIVES_ACCESS.includes(s.status) && !(s.periodEnds && new Date(s.periodEnds).getTime() + SILENT_DAYS * 24 * 60 * 60 * 1000 < now);
 
 // strict: a file that can't be read throws instead of being left out (the storage clean-up: when unsure, keep; agent
 // review 19 Nov: one failed read made a paying person look Free and their files due).
@@ -144,15 +161,17 @@ export async function planFor(email: string, strict = false): Promise<PlanNow> {
 	const root = userRoot(await hashEmail(email));
 	const [subFiles, extraFiles] = await Promise.all([listObjects(`${root}subs/`), listObjects(`${root}extra/`)]);
 	const subs = (await Promise.all(subFiles.map((f) => soft(getJson<SubRecord>(f.key))))).filter((s): s is SubRecord => Boolean(s));
-	const best = subs.filter((s) => GIVES_ACCESS.includes(s.status)).sort((a, b) => RANK[b.plan] - RANK[a.plan])[0] ?? null;
+	const best = subs.filter((s) => givesAccess(s)).sort((a, b) => RANK[b.plan] - RANK[a.plan])[0] ?? null;
 	const now = new Date().toISOString();
 	const extras = (await Promise.all(extraFiles.map((f) => soft(getJson<ExtraRecord>(f.key))))).filter((x): x is ExtraRecord => Boolean(x));
 	const extraMinutes = extras.reduce((sum, x) => sum + (x.until > now ? x.minutes : 0), 0);
-	// The end of the period they paid for: a scheduled cancel's date, else the period's end, else when Paddle said so.
+	// The end of the period they paid for: a scheduled cancel's date, else the period's end, else when the seller said so.
 	const ends = best ? [] : subs.map((s) => (s.scheduled?.action === "cancel" ? s.scheduled.at : null) ?? s.periodEnds ?? s.occurredAt).filter(Boolean);
 	const endedAt = ends.length ? ends.sort().at(-1)! : null;
-	// A paused plan before a cancelled one (it can still be resumed there), then the newest (agent review 19 Nov).
-	const paused = (s: SubRecord) => (s.status === "paused" ? 1 : 0);
-	const latest = best ?? [...subs].sort((a, b) => paused(a) - paused(b) || a.occurredAt.localeCompare(b.occurredAt)).at(-1) ?? null;
-	return { plan: best?.plan ?? "free", sub: best, latest, extraMinutes, extras, endedAt };
+	const newest = (list: SubRecord[]) => [...list].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)).at(-1) ?? null;
+	const pastDue = best ? null : newest(subs.filter((s) => s.status === "past_due"));
+	// An unpaid plan first (its card is waiting to be fixed), then a paused one before a cancelled one (it can still be
+	// resumed there, agent review 19 Nov), then the newest.
+	const latest = best ?? pastDue ?? newest(subs.filter((s) => s.status === "paused")) ?? newest(subs);
+	return { plan: best?.plan ?? "free", sub: best, pastDue, latest, extraMinutes, extras, endedAt };
 }
