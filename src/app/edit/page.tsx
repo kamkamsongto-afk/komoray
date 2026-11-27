@@ -32,6 +32,7 @@ import type { UploadOptions } from "@/lib/upload-options";
 import { watermarkSeed } from "@/lib/watermark";
 import type { ZoomPart } from "@/lib/zoom";
 import { shownName } from "@/lib/upload-name";
+import { supabaseBrowser } from "@/lib/supabase/browser";
 
 type Cut = { start: number; end: number };
 type Analysis = {
@@ -249,6 +250,19 @@ export default function EditPage() {
 			})
 			.catch(() => {});
 	}, [userId]);
+
+	// The name given in My projects (Rename, projects.filename). The key keeps the file's first name, so the title showed
+	// the old one (coach, 27 Nov). Not found (someone else's video, as the admin): the key's name.
+	const [named, setNamed] = useState<{ key: string; name: string } | null>(null);
+	useEffect(() => {
+		if (!userId || !key) return;
+		void supabaseBrowser()
+			.from("projects")
+			.select("filename")
+			.eq("video_key", key)
+			.maybeSingle<{ filename: string }>()
+			.then(({ data }) => data?.filename && setNamed({ key, name: data.filename }));
+	}, [userId, key]);
 
 	// The preview copy (or where the face is) is still being worked out: play the original / frame the
 	// middle until it is ready, then switch.
@@ -855,7 +869,7 @@ export default function EditPage() {
 	const fixes = analysis.fixes ?? [];
 	const silentSeconds = cutSeconds(analysis.cuts);
 	const finalSeconds = analysis.duration - cutSeconds(allCuts(analysis));
-	const filename = shownName(key);
+	const filename = named?.key === key ? named.name : shownName(key);
 
 	// The subtitles of the final video as a file, same lines and timing as the preview.
 	async function downloadSrt() {
@@ -869,7 +883,7 @@ export default function EditPage() {
 	function saveSrt(srt: string, suffix: string) {
 		const link = document.createElement("a");
 		link.href = URL.createObjectURL(new Blob([srt], { type: "application/x-subrip;charset=utf-8" }));
-		link.download = filename.replace(/\.[^.]+$/, "") + suffix + ".srt";
+		link.download = filename.replace(/\.(mp4|mov)$/i, "") + suffix + ".srt"; // a name typed in may have dots of its own ("Ver 2.5")
 		link.click();
 		URL.revokeObjectURL(link.href);
 	}
