@@ -113,7 +113,11 @@ export function joinGroup<W extends Word>(words: W[], group: number[]): W {
 	return { ...first, text: fixThai(group.map((k) => words[k].text).join("")), end: words[group[group.length - 1]].end };
 }
 
-export const mergeThaiWords = <W extends Word>(words: W[]): W[] => thaiWordGroups(words).map((g) => joinGroup(words, g));
+// heard: the pieces as speech-to-text timed them, which decide what belongs together. timed: the same pieces with the
+// times to keep (a stretched tail cut off, lib/silences.ts trimStretchedWords). Judged on the shortened times, a piece
+// said without any pause looked paused from the next one: the word stayed in two and the false pause was cut as silence
+// (coach's clip, 27 Nov: "ยึ" | "ด"). Only the last piece of a word can then shorten it.
+export const mergeThaiWords = <W extends Word>(heard: W[], timed: W[] = heard): W[] => thaiWordGroups(heard).map((g) => joinGroup(timed, g));
 
 // An edit.json made before words were joined: join them now and move the deleted words and fixes
 // (which point at positions in the word list) onto the new positions. Null if nothing changes.

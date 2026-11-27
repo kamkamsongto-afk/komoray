@@ -32,7 +32,8 @@ export async function POST(request: Request) {
 		// Deepgram's Thai comes in pieces of words; the script works on whole words. Silences are found between whole
 		// words, so a word is never cut through (a piece "่วน" after a pause is still part of "ส่วน", lib/thai-words.ts).
 		// Numbers said in words ("สามสิบ") become digits (lib/thai-numbers.ts), after the pieces are whole words.
-		const words = mergeThaiNumbers(mergeThaiWords(trimStretchedWords(transcript.words)));
+		// Which pieces are one word is judged on the times as heard; the shortened times are what is kept (lib/thai-words.ts).
+		const words = mergeThaiNumbers(mergeThaiWords(transcript.words, trimStretchedWords(transcript.words)));
 		// What the creator asked for when uploading (none on videos from before): the editor uses it once.
 		const asked = await getJson<{ options?: unknown; language?: unknown }>(siblingKey(key, "analyze.json")).catch(() => null);
 		const options = readOptions(asked?.options);
