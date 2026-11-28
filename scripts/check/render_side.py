@@ -271,7 +271,9 @@ def wraps(cases):
             kind = "Banner"
             events = r.banner_events([{"text": long + "\nsecond row", "start": 0, "end": 3, "anim": c["anim"], "place": "top", "scale": 3}])
         lines = [e for e in events if e.startswith("Dialogue:") and e.split(",", 9)[3] == kind and "\\p1" not in e]
-        out.append({"drawn": bool(lines), "mayWrap": [e[-90:] for e in lines if "\\q2" not in e]})
+        # inside the line's own first {...}: anywhere else the tag would be drawn as letters, or not count
+        kept = [e.split(",", 9)[9] for e in lines]
+        out.append({"drawn": bool(lines), "mayWrap": [t[:90] for t in kept if not (t.startswith("{") and "\\q2" in t[: t.find("}")])]})
     return out
 
 

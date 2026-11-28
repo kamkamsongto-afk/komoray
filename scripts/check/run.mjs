@@ -2,6 +2,7 @@
 // Both sides' real functions get the same made-up cases, and their answers are compared. No video is made, nothing is
 // sent anywhere, nothing costs money. Needs Python (render_side.py). Exit code 1 when anything differs.
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { lib, repo } from "./lib.mjs";
 
@@ -247,8 +248,13 @@ const web = {
 		return { sum: seen, ffmpeg: seen };
 	},
 	words: (t) => [motion.scaleAt(motion.POP, t), motion.scaleAt(motion.BOUNCE, t)],
-	// PlayerFrame draws a banner row `pre` and the channel name `nowrap`: neither ever breaks by itself.
-	wraps: () => ({ drawn: true, mayWrap: [] }),
+	// PlayerFrame draws a banner row `pre` and the channel name `nowrap`: neither ever breaks by itself. Read from its
+	// source, so taking either out fails here too.
+	wraps: (c) => {
+		const preview = readFileSync(join(repo, "src/components/PlayerFrame.tsx"), "utf8");
+		const kept = c.logo ? /whiteSpace: "nowrap",(?:(?!whiteSpace)[\s\S]){0,400}?\{subtitle\.logo\}\s*<\/div>/ : /key=\{r\}(?:(?!<\/span>)[\s\S]){0,200}?whiteSpace: "pre",/;
+		return { drawn: true, mayWrap: kept.test(preview) ? [] : ["the preview no longer forbids wrapping here"] };
+	},
 	// As PlayerFrame shows a line: only inside its time, every word once, the last one that has started coloured.
 	bounce: (c) =>
 		c.frames.map((frame) => {
