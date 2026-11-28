@@ -1192,7 +1192,7 @@ lineHeight: `${row.size * size}px`,
 								WebkitTextStroke: `${LOGO.outline * 2}px ${logoNow.glow > 0 ? `rgb(${Math.round(255 * logoNow.glow)},${Math.round(255 * logoNow.glow)},${Math.round(255 * logoNow.glow)})` : "black"}`,
 								textShadow: logoNow.glow > 0 ? `0 0 ${LOGO_MOTION.glow * 2 * logoNow.glow}px white` : undefined,
 								paintOrder: "stroke fill",
-								whiteSpace: "nowrap",
+								whiteSpace: "pre", // one line, its spaces as typed, as the final video draws it (NO_WRAP in render.py)
 								opacity: logoNow.opacity,
 								transform: `scale(${logoNow.scale})`,
 								transformOrigin: logoOrigin,

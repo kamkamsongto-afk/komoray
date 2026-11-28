@@ -277,7 +277,19 @@ def wraps(cases):
     return out
 
 
-SECTIONS = {f.__name__: f for f in (bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
+def two_rows(cases):
+    """Two lines with a Line spacing below 0: each row's own event, and whether libass is left to place it (it then
+    pushes the rows apart, in the wrong order: the review of 28 Nov)."""
+    out = []
+    words = [{"text": f"word{k:02d}", "start": 0.2 * k, "end": 0.2 * k + 0.18} for k in range(6)]
+    for c in cases:
+        style = {**r.DEFAULT_STYLE, "format": "9:16", "look": "two", "motion": c["motion"], "lineSpacing": c["spacing"], "size": 100}
+        rows = [e.split(",", 9) for e in r.build_subtitles(words, [(0.0, 5.0)], style, []).splitlines() if e.startswith("Dialogue:")]
+        out.append({"drawn": bool(rows), "leftToLibass": [row[9][:90] for row in rows if not (row[9].startswith("{") and "\\pos(" in row[9][: row[9].find("}")])]})
+    return out
+
+
+SECTIONS = {f.__name__: f for f in (two_rows, bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
 
 if __name__ == "__main__":
     asked = json.loads(sys.stdin.buffer.read().decode("utf-8"))

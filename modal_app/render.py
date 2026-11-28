@@ -2006,7 +2006,10 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             step = size + int(style.get("lineSpacing") or 0)
             rows = [("".join(parts[:row2]), step), (parts[row2].removeprefix("\\N") + "".join(parts[row2 + 1:]), 0)]
             for row, lift in rows:
-                events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin + lift},,{line_font}{pop_tags(motion, 0)}{row}")
+                # Placed with \pos (its bottom middle, where a margin would put it): left to a margin, libass moves two
+                # overlapping events apart and put the second row above the first (review, 28 Nov).
+                place = f"{{\\an2\\pos({video_w / 2:.0f},{video_h - line_margin - lift})}}"
+                events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{place}{line_font}{pop_tags(motion, 0)}{row}")
             continue
         if look != "highlight":
             events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
