@@ -2008,13 +2008,14 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     # A Split inside a cut part breaks where the video picks up again, or the pieces on either side would join.
     breaks = [f for f in (break_frame(float(s), segments) for s in (style.get("splits") or [])) if f is not None]
     spots = style.get("spots") or []
-    if plan is None:
+    shapes: list = []
+    if style.get("subtitles") is False:  # turned off: same as the preview (PlayerFrame shows no line), no plan to match
+        lines = []
+    elif plan is None:
         lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames, breaks)
-        shapes: list = [None] * len(lines)
+        shapes = [None] * len(lines)
     else:
         lines, shapes = planned_lines(placed, plan)
-    if style.get("subtitles") is False:  # turned off: same as the preview (PlayerFrame shows no line)
-        lines = []
 
     brand = style.get("color", "#FFE600")
     highlight = ass_colour(brand)
@@ -2054,11 +2055,13 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < gap_frames:
             end = lines[i + 1][0]["start"]
         plain = [ass_text(p) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
-        parts = [spaced_marks(p, spacing) for p in plain]
         shape = shapes[i]
-        # One word wider than a whole row is drawn smaller (`shrink`), as the preview draws it; every other line is `size`.
+        # One word wider than a whole row is drawn smaller (`shrink`), letter spacing and all, as the preview draws it;
+        # every other line is `size`.
         small = min(1.0, max(0.1, float((shape or {}).get("shrink") or 1)))
         line_size = round(size * small, 2) if small < 1 else size
+        line_spacing = round(spacing * small, 2) if small < 1 else spacing
+        parts = [spaced_marks(p, line_spacing) for p in plain]
         row2 = second_row(plain) if look == "two" else None
         if shape is not None and look == "two":
             row2 = shape.get("row2") if 0 < int(shape.get("row2") or 0) < len(plain) else None
@@ -2067,6 +2070,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         letters_height = line_size * CYRILLIC_SCALE if cyrillic_line else line_size  # libass makes a font's full height its size
         if small < 1 and not cyrillic_line:
             line_font = f"\\fs{line_size:g}"
+        if small < 1 and spacing:
+            line_font += f"\\fsp{line_spacing:g}"
         if shape is not None:  # a line of the preview's: libass never breaks it (NO_WRAP)
             line_font = NO_WRAP + line_font
         # The letters moved up to where the preview draws them; the box stays where the line is.
@@ -2091,7 +2096,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 below = BOX_PAD_Y if r == len(rows) - 1 else 0
                 row_height = line_size + above + below
                 middle = row_bottom - line_size + (below - above + line_size) / 2
-                box_width = text_width(row, style, line_size, spacing, cyrillic_line) + 2 * BOX_PADDING
+                box_width = text_width(row, style, line_size, line_spacing, cyrillic_line) + 2 * BOX_PADDING
                 if motion == "bounce":  # the room kept between its words (word_places)
                     row_words = len(plain) if row2 is None else row2 if r == 0 else len(plain) - row2
                     box_width += (row_words - 1) * line_size * BOUNCE_WORD_GAP
@@ -2100,8 +2105,8 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{head}\\p1}}{pop_tags(motion, 0)}{box}{{\\p0}}")
         if motion == "bounce":
             row_step = line_size + int(style.get("lineSpacing") or 0)
-            places = word_places(plain, row2, style, line_size, spacing, video_w, video_h - line_margin - lift, row_step, letters_height, cyrillic_line, wrap=shape is None)
-            words = [spaced_marks(p.strip(), spacing) for p in plain]
+            places = word_places(plain, row2, style, line_size, line_spacing, video_w, video_h - line_margin - lift, row_step, letters_height, cyrillic_line, wrap=shape is None)
+            words = [spaced_marks(p.strip(), line_spacing) for p in plain]
             events += bounce_events(line, start, end, words, places, line_font, text_layer, highlight if look == "highlight" else None)
             continue
         line_font = f"{{{line_font}}}" if line_font else ""

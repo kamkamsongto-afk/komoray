@@ -68,7 +68,8 @@ export type Line = { from: number; to: number; text: string; parts: { text: stri
 // the very font (useSubtitleFit in PlayerFrame). With it a line holds only what fits on its row at the set size, and
 // breaks where the language reads well (coach 28 Nov: browser and libass wrapped a long line at different places).
 // wordGap: room kept between words (Bounce).
-export type Fit = { measure: (text: string) => number; room: number; wordGap: number };
+// measure(text, line): line = all the words of the line it is in (one font is picked for a whole line).
+export type Fit = { measure: (text: string, line?: string) => number; room: number; wordGap: number };
 
 // What the final video is told about each line, so it draws the preview's lines and never breaks one itself
 // (planned_lines in render.py): its first frame, how many words, where its second row starts, how much smaller.
@@ -261,6 +262,30 @@ function joinThai(words: { text: string; start: number; end: number; space?: boo
 	});
 }
 
+// Every word that is still in the video, on its timeline (frames), as the subtitles are made from them.
+function placedWords(words: Word[], segments: Segment[]) {
+	const placed: { text: string; start: number; end: number; space?: boolean; glue?: boolean; br?: boolean }[] = [];
+	for (const w of words) {
+		const at = placeWord(w.start, w.end, segments, w.gone);
+		if (!at) continue;
+		const { mid, half } = at;
+		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half, space: w.space, glue: w.glue, br: w.br });
+	}
+	return placed;
+}
+
+// Whether a plan sent to Make video is over these very words (planned_lines in render.py): asked by the website before
+// anything is counted or started, so a page that is behind is told at once and for free.
+export function planFits(words: Word[], segments: Segment[], plan: LinePlan[]) {
+	const placed = placedWords(words, segments);
+	let at = 0;
+	for (const line of plan) {
+		if (at + line.n > placed.length || Math.abs(placed[at].start - line.from) > 2) return false;
+		at += line.n;
+	}
+	return at === placed.length;
+}
+
 // Short subtitle lines on the output timeline, grouped the same way as the final video.
 export function subtitleLines(words: Word[], segments: Segment[], look = "clean", size = 100, spacing = 0, splits: number[] = [], spots: SubtitleSpot[] = [], fit?: Fit): Line[] {
 	const thai = words.some((w) => isThai(w.text));
@@ -276,13 +301,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	const maxFrames = (thai ? limits.thaiSeconds : limits.seconds) * FPS;
 	const gapFrames = LINE_BREAK_GAP * FPS;
 
-	const placed: { text: string; start: number; end: number; space?: boolean; glue?: boolean; br?: boolean }[] = [];
-	for (const w of words) {
-		const at = placeWord(w.start, w.end, segments, w.gone);
-		if (!at) continue;
-		const { mid, half } = at;
-		placed.push({ text: fixThai(w.text), start: Math.max(0, mid - half), end: mid + half, space: w.space, glue: w.glue, br: w.br });
-	}
+	const placed = placedWords(words, segments);
 
 	type Placed = (typeof placed)[number];
 	const lettersOf = (run: Placed[]) => run.reduce((sum, w) => sum + thaiLetters(w.text), 0);
@@ -301,7 +320,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 		if (!fit) return 0;
 		const { texts, row2 } = shown(run);
 		const rows = row2 === undefined ? [texts] : [texts.slice(0, row2), texts.slice(row2)];
-		return Math.max(...rows.map((row) => fit.measure(row.join("").trim()) + fit.wordGap * (row.length - 1)));
+		return Math.max(...rows.map((row) => fit.measure(row.join("").trim(), texts.join("")) + fit.wordGap * (row.length - 1)));
 	};
 	const narrow = (run: Placed[]) => !fit || widest(run) <= fit.room;
 	const fits = (run: Placed[]) =>

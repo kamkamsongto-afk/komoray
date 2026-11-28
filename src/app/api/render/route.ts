@@ -14,7 +14,7 @@ import type { Banner } from "@/lib/banners";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
 import type { Window } from "@/lib/cutout";
-import { FPS, keepSegments, readLinePlan, totalFrames } from "@/lib/timeline";
+import { FPS, keepSegments, planFits, readLinePlan, totalFrames } from "@/lib/timeline";
 import { jobFiles, PART_JOB, PART_RENDER, readRenderPart, type RenderPart, WHOLE_JOB } from "@/lib/render-part";
 import { readStyle } from "@/lib/subtitle-style";
 import { takeRender } from "@/lib/render-limit";
@@ -75,6 +75,11 @@ export async function POST(request: Request) {
 		siblingKey(key, "edit.json"),
 	);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
+	// A plan over other words than the saved ones (a page that is behind): said here, before anything is counted or
+	// started. With subtitles off there are no lines to match.
+	if (lines && readStyle(edit.style).subtitles && !planFits(fixedWords(edit.words, edit.fixes, cutThaiWords, edit.deleted), keepSegments(edit.duration, allCuts(edit)), lines)) {
+		return Response.json({ error: "The subtitles changed while the video was being sent. Please refresh the page and press Make video again." }, { status: 409 });
+	}
 	const part = rawPart === undefined ? null : readRenderPart(rawPart, totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS);
 	if (rawPart !== undefined && !part) return Response.json({ error: `Pick at least ${PART_RENDER.minSeconds} seconds of the video to make.` }, { status: 400 });
 

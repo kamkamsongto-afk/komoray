@@ -55,9 +55,20 @@ function wordsFor(thai) {
 }
 
 const planFit = (c) => ({ measure: (text) => [...text].length * c.size * 0.5, room: c.room, wordGap: c.motion === "bounce" ? c.size * 0.14 : 0 });
+// The browser's cuts: the silences and the hand cuts as dragged (allCuts, lib/edit.ts).
+const browserCuts = (c) => (c.hand ? lib("src/lib/edit").allCuts({ duration: c.duration, words: c.words, cuts: c.cuts, manual: c.hand }) : c.cuts);
+// Hand cuts whose edges fall a hair from the middle of a frame, where rounding to the saved milliseconds moves a frame.
+function dragged(words, duration) {
+	const near = (t) => (Math.floor(t * 30) + 0.5) / 30 + (random() - 0.5) * 0.0008;
+	return many(Math.floor(between(1, 5)), () => {
+		const w = words[Math.floor(between(1, words.length - 1))];
+		const end = near((w.start + w.end) / 2);
+		return { start: Math.max(0, end - between(0.3, 1.5)), end: Math.min(duration, end) };
+	});
+}
 function planLines(c) {
 	const timeline = lib("src/lib/timeline");
-	return timeline.subtitleLines(c.words, timeline.keepSegments(c.duration, c.cuts), c.look, c.size, c.spacing, c.splits, [], planFit(c));
+	return timeline.subtitleLines(c.words, timeline.keepSegments(c.duration, browserCuts(c)), c.look, c.size, c.spacing, c.splits, [], planFit(c));
 }
 const cases = {
 	constants: null,
@@ -136,6 +147,12 @@ const cases = {
 		const { words, duration } = wordsFor(k % 2 === 0);
 		const look = ["clean", "big", "two"][Math.floor(k / 2) % 3];
 		const c = { words, duration, cuts: random() < 0.5 ? cutsFor(duration) : [], look, motion: pick(["none", "none", "pop", "bounce"]), size: pick([70, 100, 130, 220, 300]), spacing: pick([0, 0, 4]), splits: random() < 0.2 ? [ms(between(1, duration - 1))] : [], room: pick([250, 500, 920]) };
+		if (k % 2) {
+			c.hand = dragged(words, duration);
+			// As api/edit saves them and api/render hands them on.
+			const edit = lib("src/lib/edit");
+			c.serverCuts = edit.allCuts({ duration, words, cuts: c.cuts, manual: edit.readSpans(c.hand, duration) });
+		}
 		c.plan = lib("src/lib/timeline").linePlan(planLines(c));
 		return c;
 	}),
@@ -274,6 +291,9 @@ const web = {
 		if (!/left: 0,\s*right: 0,\s*whiteSpace: "nowrap",/.test(preview)) throw new Error("the preview's subtitles may wrap again");
 		const fit = planFit(c);
 		const lines = planLines(c);
+		// api/render looks at the plan before it counts anything: it must accept the preview's own.
+		const timeline = lib("src/lib/timeline");
+		if (timeline.planFits && !timeline.planFits(c.words, timeline.keepSegments(c.duration, c.serverCuts ?? c.cuts), c.plan)) throw new Error("the website would refuse the preview's own lines");
 		for (const l of lines) {
 			const rows = l.row2 === undefined ? [l.parts] : [l.parts.slice(0, l.row2), l.parts.slice(l.row2)];
 			const widest = Math.max(...rows.map((row) => fit.measure(row.map((p) => p.text).join("").trim()) + fit.wordGap * (row.length - 1)));

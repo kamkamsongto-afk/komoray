@@ -167,22 +167,27 @@ export async function subtitleFit(subtitle: SubtitleStyle): Promise<Fit> {
 			? own && ownThere ? { family: ownFamily(own), weight: 400, em: own.height } : { ...FONT_FACES.kanit, em: FONTS.kanit.height }
 			: { ...(FONT_FACES[subtitle.font as FontId] ?? FONT_FACES.kanit), em: fontMetrics(subtitle).height };
 	const russian = { family: fira.style.fontFamily, weight: 500, em: CYRILLIC_FONT.height };
-	// Each font file loads only when its letters are asked for. One that fails: measured in what the browser shows instead.
-	await Promise.all([face, russian].map((f) => document.fonts.load(`${f.weight} 100px ${f.family}`, f === russian ? "Жя" : "กิ้Aaéż").catch(() => [])));
+	// Each font file loads only when its letters are asked for. Every family of a list is waited for on its own: asked for
+	// together, a stand-in that isn't on the device (Arial on Android or Linux) failed the lot at once, and words were
+	// measured before the real font had come (review, 29 Nov). One that fails: measured in what the browser shows.
+	await Promise.allSettled([face, russian].flatMap((f) => f.family.split(",").map((family) => document.fonts.load(`${f.weight} 100px ${family.trim()}`, f === russian ? "Жя" : "กิ้Aaéż"))));
 	const pen = document.createElement("canvas").getContext("2d");
 	const seen = new Map<string, number>();
-	const letters = new Intl.Segmenter();
+	// Letters as spacing counts them. A browser without Intl.Segmenter (Firefox before 125): by character.
+	const letters = subtitle.letterSpacing && typeof Intl.Segmenter === "function" ? new Intl.Segmenter() : null;
 	const boxed = subtitle.look === "box";
 	return {
-		measure: (text) => {
-			let width = seen.get(text);
+		measure: (text, line = text) => {
+			// A line with Russian letters anywhere is drawn in the Russian font, both rows of it (font_tag in render.py).
+			const f = subtitle.font !== "own" && hasCyrillic(line) ? russian : face;
+			const key = f === russian ? `ru ${text}` : text;
+			let width = seen.get(key);
 			if (width === undefined) {
-				const f = subtitle.font !== "own" && hasCyrillic(text) ? russian : face;
 				if (pen) pen.font = `${f.weight} ${subtitle.size / f.em}px ${f.family}`;
 				// No canvas to measure with: half the size a letter, so lines still stay short.
 				const drawn = pen ? pen.measureText(text).width : text.length * subtitle.size * 0.5;
-				width = drawn + (subtitle.letterSpacing ? subtitle.letterSpacing * [...letters.segment(text)].length : 0);
-				seen.set(text, width);
+				width = drawn + (subtitle.letterSpacing ? subtitle.letterSpacing * (letters ? [...letters.segment(text)] : [...text]).length : 0);
+				seen.set(key, width);
 			}
 			return width;
 		},
@@ -1111,7 +1116,7 @@ mode === "move"
 								fontWeight: lineFace.weight,
 								fontSize: ((subtitle.size * (line?.shrink ?? 1)) / em) * motion.line,
 								lineHeight: em * (1 + rowGap / (subtitle.size * (line?.shrink ?? 1))),
-								letterSpacing: subtitle.letterSpacing,
+								letterSpacing: subtitle.letterSpacing * (line?.shrink ?? 1), // an over-wide word shrinks, spacing and all
 								color: subtitle.textColor,
 								opacity: line ? 1 : 0.5,
 								cursor: "ns-resize",

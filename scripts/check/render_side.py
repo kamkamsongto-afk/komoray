@@ -93,7 +93,8 @@ def plan(cases):
     out = []
     for c in cases:
         style = {**r.DEFAULT_STYLE, "look": c["look"], "motion": c["motion"], "size": c["size"], "letterSpacing": c["spacing"], "format": "9:16", "splits": c["splits"]}
-        ass = r.build_subtitles(c["words"], r.keep_segments(c["duration"], c["cuts"]), style, [], c["plan"])
+        # serverCuts: the cuts the website hands render.py, from the hand cuts as it saved them
+        ass = r.build_subtitles(c["words"], r.keep_segments(c["duration"], c.get("serverCuts", c["cuts"])), style, [], c["plan"])
         rows = [e.split(",", 9) for e in ass.splitlines() if e.startswith("Dialogue:")]
         rows = [f for f in rows if f[3] == "Default" and "\\p1" not in f[9]]
         may = [f[9][:90] for f in rows if not any("\\q2" in block for block in re.findall(r"\{[^}]*\}", f[9]))]

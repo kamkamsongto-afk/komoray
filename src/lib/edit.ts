@@ -34,12 +34,22 @@ export type HandEdits = { manual?: Span[]; keep?: Span[] };
 // Every cut for the final video: the silences and the deleted words (minus what was kept by hand),
 // plus the hand cuts.
 export function allCuts(edit: { duration: number; cuts: Span[]; words: Span[]; deleted?: number[] } & HandEdits): EditCut[] {
+	// The hand cuts as they are saved (to the millisecond, joined). The browser held a drag's raw seconds while the
+	// video got the saved ones: a cut edge near half a frame moved a word across it, the preview's subtitle lines no
+	// longer matched the video's words, and Make video stopped (review, 29 Nov).
+	const manualCuts = asSaved(edit.manual ?? [], edit.duration);
+	const kept = asSaved(edit.keep ?? [], edit.duration);
 	const auto = [
 		...edit.cuts.map((c) => ({ start: c.start, end: c.end, reason: "silence" as const })),
 		...wordCuts(edit.words, edit.deleted ?? [], edit.duration),
 	];
-	const manual = (edit.manual ?? []).map((c) => ({ start: c.start, end: c.end, reason: "manual" as const }));
-	return [...subtractSpans(auto, edit.keep ?? []), ...manual].sort((a, b) => a.start - b.start);
+	const manual = manualCuts.map((c) => ({ start: c.start, end: c.end, reason: "manual" as const }));
+	return [...subtractSpans(auto, kept), ...manual].sort((a, b) => a.start - b.start);
+}
+
+// Hand-cut spans as they are kept: whole milliseconds, never past the end, joined where they touch (readSpans).
+function asSaved(spans: Span[], duration: number) {
+	return mergeSpans(spans.map(({ start, end }) => ({ start: Math.round(start * 1000) / 1000, end: Math.round(Math.min(end, duration) * 1000) / 1000 })));
 }
 
 // Spans sorted and joined where they touch or overlap.
@@ -79,9 +89,9 @@ export function readSpans(value: unknown, duration: number): Span[] | null {
 		const { start, end } = v ?? {};
 		if (typeof start !== "number" || typeof end !== "number" || !Number.isFinite(start) || !Number.isFinite(end)) return null;
 		if (start < 0 || end > duration + 0.01 || end <= start) return null;
-		spans.push({ start: Math.round(start * 1000) / 1000, end: Math.round(Math.min(end, duration) * 1000) / 1000 });
+		spans.push({ start, end });
 	}
-	return mergeSpans(spans);
+	return asSaved(spans, duration);
 }
 
 // Words the user retyped in the script: words from..to (positions in the transcript) read as `text`.

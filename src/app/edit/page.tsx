@@ -828,7 +828,7 @@ export default function EditPage() {
 		try {
 			if (!(await savingRef.current)) throw new Error("Your edits could not be saved. Please try again.");
 			// The preview's subtitle lines, made again from what was just saved: the video draws these, none of its own.
-			const lines = analysis && linePlan(await previewLines(analysis));
+			const lines = analysis && subtitle.subtitles ? linePlan(await previewLines(analysis)) : undefined;
 			const res = await fetch("/api/render", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
