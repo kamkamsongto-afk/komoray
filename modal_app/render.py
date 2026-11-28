@@ -288,7 +288,7 @@ def logo_text_events(text: str, total: float, style: dict) -> list[str]:
             tags += f"\\3c&HFFFFFF&\\blur{glow}\\t(0,{d},\\3c&H000000&\\blur0)"
             if goes:
                 tags += f"\\t({show - d},{show},\\3c&HFFFFFF&\\blur{glow})"
-        lines.append(f"Dialogue: {LOGO_LAYER},{ass_time(a)},{ass_time(b)},Logo,,0,0,0,,{{{tags}{text}")
+        lines.append(f"Dialogue: {LOGO_LAYER},{ass_time(a)},{ass_time(b)},Logo,,0,0,0,,{{{NO_WRAP}{tags}{text}")
     return lines
 
 # The Free plan's watermark (WATERMARK in src/lib/watermark.ts, coach 18 Nov): the white word Komoray at 45% with a thin
@@ -361,6 +361,11 @@ def watermark_filters(parts: list[str], base: str, size: tuple[int, int], index:
         base = label
     return length
 
+
+# For a line placed by us, whose rows the preview never breaks (a banner's rows are `pre` and the channel name `nowrap`
+# in PlayerFrame): libass breaks no line by itself. Without it a row wider than the video less its side margins (920 of
+# 1080) was cut in two at a space, the halves on top of the rows next to it (coach, 28 Nov).
+NO_WRAP = "\\q2"
 
 # Banners (src/lib/banners.ts): sizes in px, fade in seconds, top of each place.
 BANNER = {"size": 72, "sub_size": 44, "padding": 28, "fade": 0.25}
@@ -617,7 +622,7 @@ def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, mid
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
             y = box_middle + (middle - box_middle) * scale + dy
             grow = size * scale * 100
-            events.append(f"Dialogue: {layer + 1},{when},Banner,,0,0,0,,{{\\an5{spin_f}{edge}\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + shift * scale + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{when},Banner,,0,0,0,,{{{NO_WRAP}\\an5{spin_f}{edge}\\shad0\\1c{ink}\\alpha{alpha_of(opacity)}{look}\\pos({centre + shift * scale + dx:.1f},{y:.1f})\\fscx{grow:.2f}\\fscy{grow:.2f}}}{row_text}")
     spin_s = f"\\org({centre:.1f},{box_middle:.1f})\\frz{-turn:g}" if turn else ""
     if last / FPS < end:
         # Settled: still until the end, then the fade out, as banner_motion does it.
@@ -626,7 +631,7 @@ def banner_frames(b, rows, looks, box, fill_colour, ink, centre, box_middle, mid
         if not b.get("noBox"):
             events.append(f"Dialogue: {layer},{rest},Banner,,0,0,0,,{{\\an5{spin_s}\\bord0\\shad0{fill_colour}\\pos({centre:.0f},{box_middle:.0f})\\fad(0,{fade})\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
-            events.append(f"Dialogue: {layer + 1},{rest},Banner,,0,0,0,,{{\\an5{spin_s}{edge}\\shad0\\1c{ink}{look}\\pos({centre + shift:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
+            events.append(f"Dialogue: {layer + 1},{rest},Banner,,0,0,0,,{{{NO_WRAP}\\an5{spin_s}{edge}\\shad0\\1c{ink}{look}\\pos({centre + shift:.0f},{middle:.0f})\\fad(0,{fade})\\fscx{size * 100:g}\\fscy{size * 100:g}}}{row_text}")
     return events
 
 
@@ -720,7 +725,7 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         if not b.get("noBox"):
             events.append(f"Dialogue: {layer - 2},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}\\bord0\\shad0{fill}{banner_motion(anim, centre, box_middle, seconds, 1, fades_of(b), roll)}\\p1}}{box}{{\\p0}}")
         for (row_text, _), middle, look, shift in zip(rows, middles, looks, shifts):
-            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{\\an5{spin}{edge}\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b), roll)}}}{row_text}")
+            events.append(f"Dialogue: {layer - 1},{ass_time(start)},{ass_time(end)},Banner,,0,0,0,,{{{NO_WRAP}\\an5{spin}{edge}\\shad0\\1c{ink}{look}{banner_motion(anim, centre + shift, middle, seconds, size, fades_of(b), roll)}}}{row_text}")
     return events
 
 

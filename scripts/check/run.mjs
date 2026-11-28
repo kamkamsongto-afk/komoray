@@ -125,6 +125,7 @@ const cases = {
 		times: many(30, () => ms(between(0, 80))),
 	})),
 	words: many(300, () => ms(between(-20, 600))),
+	wraps: [...["fade", "pop", "bounce", "pulse", "slideUp", "rollUp"].map((anim) => ({ anim })), ...["still", "fade", "flash", "zoom"].map((logo) => ({ logo }))],
 	layout_file: many(150, (k) => ({
 		size: pick(SIZES),
 		picture: [Math.round(between(300, 4000)), Math.round(between(300, 4000))],
@@ -246,6 +247,8 @@ const web = {
 		return { sum: seen, ffmpeg: seen };
 	},
 	words: (t) => [motion.scaleAt(motion.POP, t), motion.scaleAt(motion.BOUNCE, t)],
+	// PlayerFrame draws a banner row `pre` and the channel name `nowrap`: neither ever breaks by itself.
+	wraps: () => ({ drawn: true, mayWrap: [] }),
 	// As PlayerFrame shows a line: only inside its time, every word once, the last one that has started coloured.
 	bounce: (c) =>
 		c.frames.map((frame) => {
@@ -272,7 +275,7 @@ const web = {
 const cs = (t) => Math.round(t * 100) / 100;
 const plain = (lines, look) => lines.map((l) => ({ from: cs(l.from), to: cs(l.to), text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() })).filter((l) => l.to - l.from > 0.015);
 
-const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06, bounce: 0 };
+const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06, bounce: 0, wraps: 0 };
 let failed = 0;
 for (const name of Object.keys(cases)) {
 	const answer = python[name];
