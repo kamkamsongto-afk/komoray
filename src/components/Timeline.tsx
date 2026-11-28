@@ -30,6 +30,7 @@ type Props = {
 	playing: boolean;
 	onTogglePlay: () => void;
 	onSeek: (source: number) => void;
+	onLeaveItem?: () => void; // pressed away from every strip: the open tool box goes back to its main view
 	audioUrl: string | null; // the preview's sound, for the waveform; null until it is made
 	groups: TakeGroup[];
 	onPickTake: (group: TakeGroup, take: number) => void;
@@ -198,6 +199,7 @@ export function Timeline({
 	layouts,
 	onLayoutsChange,
 	onOpenLayout,
+	onLeaveItem,
 	onMakePart,
 	revealed,
 	splits,
@@ -822,6 +824,7 @@ export function Timeline({
 		if ((e.target as HTMLElement).closest("button")) return;
 		const el = scrollRef.current;
 		if (!el) return;
+		onLeaveItem?.(); // a strip takes its own press (startItemDrag), so this one is on no strip
 		// A press in the rows of banners, frames and layouts that misses a strip does nothing but let the strip go
 		// (coach, 17 Nov: just missing a strip picked a stretch of the video, and Make this part came up instead).
 		if (e.clientY - el.getBoundingClientRect().top >= height) {

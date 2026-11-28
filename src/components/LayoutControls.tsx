@@ -24,6 +24,7 @@ type Props = {
 	now: () => number; // where the preview is, seconds of the final video
 	total: number; // length of the final video, seconds
 	focus: string | null; // a layout to open here
+	fresh: number; // goes up when the box should show its main view again
 	onReveal?: (id: string, start: number) => void; // the blue line to its start
 	ruler?: Clock; // the timeline ruler's clock, for the times shown here
 	note?: string; // a file dropped on the video: being added to Import, or why it couldn't be
@@ -51,7 +52,7 @@ function KindIcon({ kind, meFirst = true, split = 0.5, size = 22 }: { kind: Layo
 // The editor's Layout box (coach, 14 Nov): for a stretch of the video, the screen is split, you in one part and a
 // picture or clip from Import in the other, top / bottom or side by side, sliding in or with a flash.
 // Drawn by PlayerFrame, made by layout_filters (render.py).
-export function LayoutControls({ layouts, onChange, now, total, focus, onReveal, note, libraryVersion = 0, onImportFile, ruler = FINAL_CLOCK, subtitles }: Props) {
+export function LayoutControls({ layouts, onChange, now, total, focus, fresh, onReveal, note, libraryVersion = 0, onImportFile, ruler = FINAL_CLOCK, subtitles }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	const [focused, setFocused] = useState(focus);
 	if (focus !== focused) {
@@ -60,6 +61,13 @@ export function LayoutControls({ layouts, onChange, now, total, focus, onReveal,
 	}
 	const [tab, setTab] = useState<"you" | "other">("you"); // under Layout: You, or the Other part (coach 22 Nov)
 	const [picking, setPicking] = useState<string | null>(null); // the layout whose pictures are open to change (Other part)
+	// Back to the main view (ScriptView's startFresh), set while drawing, as for focus.
+	const [seenFresh, setSeenFresh] = useState(fresh);
+	if (fresh !== seenFresh) {
+		setSeenFresh(fresh);
+		setOpen(null);
+		setPicking(null);
+	}
 	const [removing, setRemoving] = useState<{ name: string; remove: () => void } | null>(null);
 	const closeRemoving = useCallback(() => setRemoving(null), []);
 	// The pictures and clips for the other part. A new file in Import (libraryVersion went up): a list from after it.

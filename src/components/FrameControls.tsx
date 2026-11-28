@@ -24,6 +24,7 @@ type Props = {
 	now: () => number; // where the preview is, seconds of the final video
 	total: number; // length of the final video, seconds
 	focus: string | null; // a frame to open here
+	fresh: number; // goes up when the box should show its main view again
 	onReveal?: (id: string, start: number) => void; // the blue line to its start
 	ruler?: Clock; // the timeline ruler's clock, for the times shown here
 	format?: Format; // the video's shape, for Whole picture
@@ -52,7 +53,7 @@ function ShapeIcon({ shape, size = 22 }: { shape: FrameShape; size?: number }) {
 
 // The editor's Frame Me box (coach, 12 Nov): for a stretch of the video, you show inside a shape over a background,
 // like an alpha mask in OBS. Nothing is cut out, so it shows at once. Drawn by PlayerFrame, made by frame_filters.
-export function FrameControls({ frames, onChange, now, total, focus, onReveal, ruler = FINAL_CLOCK, format, subtitles }: Props) {
+export function FrameControls({ frames, onChange, now, total, focus, fresh, onReveal, ruler = FINAL_CLOCK, format, subtitles }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	const [focused, setFocused] = useState(focus);
 	if (focus !== focused) {
@@ -141,6 +142,14 @@ export function FrameControls({ frames, onChange, now, total, focus, onReveal, r
 	const [picking, setPicking] = useState<string | null>(null); // the frame whose pictures are open to change
 	const files = (library ?? []).filter((i) => i.media === "image" || /\.mp4$/.test(i.file));
 	const [adding, setAdding] = useState<string | null>(null); // a frame with no file yet, its choices open
+	// Back to the main view (ScriptView's startFresh), set while drawing, as for focus.
+	const [seenFresh, setSeenFresh] = useState(fresh);
+	if (fresh !== seenFresh) {
+		setSeenFresh(fresh);
+		setOpen(null);
+		setPicking(null);
+		setAdding(null);
+	}
 	// A file from the computer (coach 26 Nov, as Layout): into My files, then behind this frame. The upload takes a while,
 	// so it goes into the frames as they are by then; with the box closed meanwhile it only goes into My files.
 	const [uploading, setUploading] = useState<number | null>(null);
