@@ -17,7 +17,7 @@ import type { OwnFont } from "@/lib/font-info";
 import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { FONT_CHANGED, type FontChange } from "@/lib/use-my-fonts";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
-import { FPS, type Line, setSpot, ZOOM_ORIGIN } from "@/lib/timeline";
+import { type Fit, FPS, type Line, setSpot, ZOOM_ORIGIN } from "@/lib/timeline";
 import { WATERMARK, watermarkAt } from "@/lib/watermark";
 import { WatermarkSeed } from "@/components/WatermarkContext";
 
@@ -94,6 +94,26 @@ const ownFamily = (font: OwnFont) => `"${ownName(font)}", ${kanit.style.fontFami
 const ownLoads = new Map<string, Promise<boolean>>();
 const ownReady = new Set<string>();
 const ownGone = new Set<string>(); // My files ids
+// Loads an own font once; true when it can be drawn with.
+function loadOwnFont(font: OwnFont) {
+	const name = ownName(font);
+	let load = ownLoads.get(name);
+	if (!load) {
+		load = new FontFace(name, `url(${ownSource(font)})`).load().then(
+			(loaded) => {
+				document.fonts.add(loaded);
+				ownReady.add(name);
+				return true;
+			},
+			() => {
+				ownLoads.delete(name); // asked for again next time
+				return false;
+			},
+		);
+		ownLoads.set(name, load);
+	}
+	return load;
+}
 // Returns how to draw an own font now: its family, weight, and height in ems (see FONTS[].height).
 function useOwnFonts(fonts: (OwnFont | undefined)[]) {
 	const [, setSeen] = useState(0);
@@ -109,25 +129,7 @@ function useOwnFonts(fonts: (OwnFont | undefined)[]) {
 		};
 		window.addEventListener(FONT_CHANGED, changed);
 		if (typeof FontFace !== "undefined") {
-			for (const font of wanted) {
-				const name = ownName(font);
-				let load = ownLoads.get(name);
-				if (!load) {
-					load = new FontFace(name, `url(${ownSource(font)})`).load().then(
-						(loaded) => {
-							document.fonts.add(loaded);
-							ownReady.add(name);
-							return true;
-						},
-						() => {
-							ownLoads.delete(name); // asked for again next time
-							return false;
-						},
-					);
-					ownLoads.set(name, load);
-				}
-				void load.then((ok) => ok && redraw());
-			}
+			for (const font of wanted) void loadOwnFont(font).then((ok) => ok && redraw());
 		}
 		// Which of these My files still has. No answer: nothing changes (not sure is not deleted).
 		const kept = wanted.flatMap((f) => (f.file ? [f.file] : []));
@@ -153,6 +155,63 @@ function useOwnFonts(fonts: (OwnFont | undefined)[]) {
 }
 
 const SIDE_MARGIN = 80;
+
+// How wide subtitle words are in the final video (lib/timeline.ts Fit), measured with the very fonts the preview draws
+// them in, once those have loaded. The lines made with it are the lines the final video draws (linePlan).
+export async function subtitleFit(subtitle: SubtitleStyle): Promise<Fit> {
+	const own = subtitle.font === "own" ? subtitle.ownFont : undefined;
+	const ownThere = own ? (await loadOwnFont(own)) && !(own.file && ownGone.has(own.file)) : false;
+	// As PlayerFrame picks them: an own font that isn't there is Kanit at Kanit's size.
+	const face =
+		subtitle.font === "own"
+			? own && ownThere ? { family: ownFamily(own), weight: 400, em: own.height } : { ...FONT_FACES.kanit, em: FONTS.kanit.height }
+			: { ...(FONT_FACES[subtitle.font as FontId] ?? FONT_FACES.kanit), em: fontMetrics(subtitle).height };
+	const russian = { family: fira.style.fontFamily, weight: 500, em: CYRILLIC_FONT.height };
+	// Each font file loads only when its letters are asked for. One that fails: measured in what the browser shows instead.
+	await Promise.all([face, russian].map((f) => document.fonts.load(`${f.weight} 100px ${f.family}`, f === russian ? "Жя" : "กิ้Aaéż").catch(() => [])));
+	const pen = document.createElement("canvas").getContext("2d");
+	const seen = new Map<string, number>();
+	const letters = new Intl.Segmenter();
+	const boxed = subtitle.look === "box";
+	return {
+		measure: (text) => {
+			let width = seen.get(text);
+			if (width === undefined) {
+				const f = subtitle.font !== "own" && hasCyrillic(text) ? russian : face;
+				if (pen) pen.font = `${f.weight} ${subtitle.size / f.em}px ${f.family}`;
+				// No canvas to measure with: half the size a letter, so lines still stay short.
+				const drawn = pen ? pen.measureText(text).width : text.length * subtitle.size * 0.5;
+				width = drawn + (subtitle.letterSpacing ? subtitle.letterSpacing * [...letters.segment(text)].length : 0);
+				seen.set(text, width);
+			}
+			return width;
+		},
+		room: outputSize(subtitle).width - 2 * SIDE_MARGIN - (boxed ? 2 * BOX_PADDING : 0),
+		wordGap: subtitle.motion === "bounce" ? subtitle.size * BOUNCE_WORD_GAP : 0,
+	};
+}
+
+// subtitleFit for what is on screen: worked out again when the font, size, spacing, look, motion or shape changes, or a
+// font is deleted or comes back. Until the first one is ready, nothing (the letter limits alone).
+export function useSubtitleFit(subtitle: SubtitleStyle): Fit | undefined {
+	const [fit, setFit] = useState<Fit>();
+	const [fontNews, setFontNews] = useState(0);
+	useEffect(() => {
+		const news = () => setFontNews((n) => n + 1);
+		window.addEventListener(FONT_CHANGED, news);
+		return () => window.removeEventListener(FONT_CHANGED, news);
+	}, []);
+	const asked = [subtitle.font, subtitle.ownFont?.file, subtitle.ownFont?.version, subtitle.size, subtitle.letterSpacing, subtitle.look, subtitle.motion, subtitle.format].join(" ");
+	useEffect(() => {
+		let wanted = true;
+		void subtitleFit(subtitle).then((next) => wanted && setFit(next));
+		return () => {
+			wanted = false;
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- asked says what of the style matters here
+	}, [asked, fontNews]);
+	return fit;
+}
 const BOX_PADDING = 20; // the Box look: space around the letters (Outline of the box in render.py)
 // The channel name in a corner (the Logo style in render.py).
 const LOGO = { size: 52, outline: 4, side: 40, top: 40 }; // the same small gap from both edges of a corner (coach, 10 Nov). Same in render.py
@@ -642,7 +701,7 @@ mode === "move"
 								display: "inline-block",
 								position: "relative",
 								whiteSpace: "pre",
-								marginLeft: k > 0 && k !== line.row2 ? subtitle.size * BOUNCE_WORD_GAP : undefined,
+								marginLeft: k > 0 && k !== line.row2 ? subtitle.size * (line.shrink ?? 1) * BOUNCE_WORD_GAP : undefined,
 								transform: `scale(${wordScale})`,
 								zIndex: jumping ? 1 : undefined,
 								color: k === said ? subtitle.color : undefined,
@@ -1038,15 +1097,18 @@ mode === "move"
 							title="Drag to move the subtitles"
 							style={{
 								position: "absolute",
-								left: SIDE_MARGIN,
-								right: SIDE_MARGIN,
+								// The whole width, so a line popping a little past its room stays centred, as in the final video. Its rows
+								// never wrap: each holds only what fits (useSubtitleFit), as the final video draws them.
+								left: 0,
+								right: 0,
+								whiteSpace: "nowrap",
 								// The extra row gap goes half under the last row in a browser: the bottom row stays put, as in the final video.
 								bottom: H * (line?.position ?? subtitle.position) - rowGap / 2,
 								textAlign: "center",
 								fontFamily: lineFace.family,
 								fontWeight: lineFace.weight,
-								fontSize: (subtitle.size / em) * motion.line,
-								lineHeight: em * (1 + rowGap / subtitle.size),
+								fontSize: ((subtitle.size * (line?.shrink ?? 1)) / em) * motion.line,
+								lineHeight: em * (1 + rowGap / (subtitle.size * (line?.shrink ?? 1))),
 								letterSpacing: subtitle.letterSpacing,
 								color: subtitle.textColor,
 								opacity: line ? 1 : 0.5,

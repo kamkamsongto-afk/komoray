@@ -27,7 +27,8 @@ import { LANGUAGES, NOT_A_TRANSLATION, TRANSLATIONS } from "@/lib/languages";
 import { reportError } from "@/lib/report";
 import { DEFAULT_STYLE, fontMetrics, FORMATS, readStyle, type SubtitleStyle, withVideoZoom } from "@/lib/subtitle-style";
 import { fitLook, leftOutText, type LeftOut, type TemplateLook } from "@/lib/templates";
-import { FPS, keepSegments, subtitleLines, toSrt, totalFrames } from "@/lib/timeline";
+import { subtitleFit } from "@/components/PlayerFrame";
+import { FPS, keepSegments, linePlan, subtitleLines, toSrt, totalFrames } from "@/lib/timeline";
 import type { UploadOptions } from "@/lib/upload-options";
 import { watermarkSeed } from "@/lib/watermark";
 import type { ZoomPart } from "@/lib/zoom";
@@ -826,10 +827,12 @@ export default function EditPage() {
 		setRender({ status: "processing", ...(part && { part }) });
 		try {
 			if (!(await savingRef.current)) throw new Error("Your edits could not be saved. Please try again.");
+			// The preview's subtitle lines, made again from what was just saved: the video draws these, none of its own.
+			const lines = analysis && linePlan(await previewLines(analysis));
 			const res = await fetch("/api/render", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ key, ...(part && { part }), ...(again && { again }) }),
+				body: JSON.stringify({ key, ...(part && { part }), ...(again && { again }), ...(lines && { lines }) }),
 			});
 			const data = (await res.json()) as { error?: string; unchanged?: boolean };
 			if (data.unchanged) setUnchanged(true);
@@ -840,6 +843,14 @@ export default function EditPage() {
 			setRender({ status: "failed", error });
 			reportError("make video", error, { key });
 		}
+	}
+
+	// The subtitle lines as the preview shows them (ScriptView): measured in the real font, with the Splits and spots.
+	async function previewLines(of: NonNullable<typeof analysis>) {
+		// Thai typed in is cut into words, as in the video (lib/thai-cut.ts).
+		const cut = fixesNeedThaiCut(of.fixes) ? await loadThaiCut() : undefined;
+		const segments = keepSegments(of.duration, allCuts(of));
+		return subtitleLines(fixedWords(of.words, of.fixes ?? [], cut, of.deleted), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots, await subtitleFit(subtitle));
 	}
 
 	// Stop (coach 15 Nov: Make video pressed by mistake). Closing the page never stopped Modal.
@@ -895,10 +906,7 @@ export default function EditPage() {
 	// The subtitles of the final video as a file, same lines and timing as the preview.
 	async function downloadSrt() {
 		if (!analysis) return;
-		const segments = keepSegments(analysis.duration, allCuts(analysis));
-		// Thai typed in is cut into words, as in the video (lib/thai-cut.ts).
-		const cut = fixesNeedThaiCut(analysis.fixes) ? await loadThaiCut() : undefined;
-		saveSrt(toSrt(subtitleLines(fixedWords(analysis.words, analysis.fixes ?? [], cut, analysis.deleted), segments, subtitle.look, subtitle.size, subtitle.letterSpacing)), "");
+		saveSrt(toSrt(await previewLines(analysis)), "");
 	}
 
 	function saveSrt(srt: string, suffix: string) {

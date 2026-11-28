@@ -12,6 +12,7 @@ import type { useCutout } from "@/lib/use-cutout";
 import type { Faces } from "@/lib/framing";
 import { DEFAULT_STYLE, fontMetrics, outputSize, type SubtitleStyle, withVideoZoom } from "@/lib/subtitle-style";
 import { findRepeatedTakes, groupTakes, type TakeGroup } from "@/lib/takes";
+import { useSubtitleFit } from "@/components/PlayerFrame";
 import { FPS, keepSegments, placeStretch, stretchPlace, subtitleLines, toOutSeconds, toSourceSeconds, totalFrames } from "@/lib/timeline";
 import { reportError } from "@/lib/report";
 import { studioSupported } from "@/lib/player/engine";
@@ -432,9 +433,10 @@ export function ScriptView({
 	// Thai typed in becomes its words once newmm is here (loaded only for a video with Thai fixes, or Thai in the edit
 	// box: what a fix teaches needs it too, lib/thai-cut.ts).
 	const thaiCut = useThaiCut(fixesNeedThaiCut(editing ? [...fixes, { text: editing.before }] : fixes));
+	const fit = useSubtitleFit(subtitle); // lines hold what fits one row in the very font (the final video draws these)
 	const lines = useMemo(
-		() => subtitleLines(fixedWords(words, fixes, thaiCut, deleted), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots),
-		[words, fixes, thaiCut, deleted, segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots],
+		() => subtitleLines(fixedWords(words, fixes, thaiCut, deleted), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots, fit),
+		[words, fixes, thaiCut, deleted, segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots, fit],
 	);
 	// Where we are in the source video, so switching between Preview and Original keeps the spot.
 	const timeRef = useRef(0);

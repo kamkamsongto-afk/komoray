@@ -87,6 +87,24 @@ def subtitles(cases):
     return out
 
 
+def plan(cases):
+    """The preview's own lines (linePlan) drawn by build_subtitles: the lines it writes, and any it lets libass wrap."""
+    r.text_width = lambda *a, **k: 100.0  # only boxes and Bounce places need it (and uharfbuzz)
+    out = []
+    for c in cases:
+        style = {**r.DEFAULT_STYLE, "look": c["look"], "motion": c["motion"], "size": c["size"], "letterSpacing": c["spacing"], "format": "9:16", "splits": c["splits"]}
+        ass = r.build_subtitles(c["words"], r.keep_segments(c["duration"], c["cuts"]), style, [], c["plan"])
+        rows = [e.split(",", 9) for e in ass.splitlines() if e.startswith("Dialogue:")]
+        rows = [f for f in rows if f[3] == "Default" and "\\p1" not in f[9]]
+        may = [f[9][:90] for f in rows if not any("\\q2" in block for block in re.findall(r"\{[^}]*\}", f[9]))]
+        lines = None
+        if c["motion"] == "none":
+            h = lambda t: sum(float(x) * m for x, m in zip(t.split(":"), (3600, 60, 1)))
+            lines = [{"from": h(f[1]), "to": h(f[2]), "text": re.sub(r"\{[^}]*\}", "", f[9]).replace("\\N", " ").replace("\\h", " ")} for f in rows]
+        out.append({"lines": lines, "mayWrap": may})
+    return out
+
+
 def zoom(cases):
     """The zoom at every frame, picked per shot as ffmpeg_command does."""
     out = []
@@ -289,7 +307,7 @@ def two_rows(cases):
     return out
 
 
-SECTIONS = {f.__name__: f for f in (two_rows, bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
+SECTIONS = {f.__name__: f for f in (plan, two_rows, bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
 
 if __name__ == "__main__":
     asked = json.loads(sys.stdin.buffer.read().decode("utf-8"))

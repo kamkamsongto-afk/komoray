@@ -54,6 +54,11 @@ function wordsFor(thai) {
 	return { words, duration: ms(at + 1) };
 }
 
+const planFit = (c) => ({ measure: (text) => [...text].length * c.size * 0.5, room: c.room, wordGap: c.motion === "bounce" ? c.size * 0.14 : 0 });
+function planLines(c) {
+	const timeline = lib("src/lib/timeline");
+	return timeline.subtitleLines(c.words, timeline.keepSegments(c.duration, c.cuts), c.look, c.size, c.spacing, c.splits, [], planFit(c));
+}
 const cases = {
 	constants: null,
 	segments: many(200, () => {
@@ -126,6 +131,14 @@ const cases = {
 		times: many(30, () => ms(between(0, 80))),
 	})),
 	words: many(300, () => ms(between(-20, 600))),
+	// The preview's lines with a stand-in for its measuring: half the size a letter, in rows of several widths.
+	plan: many(200, (k) => {
+		const { words, duration } = wordsFor(k % 2 === 0);
+		const look = ["clean", "big", "two"][Math.floor(k / 2) % 3];
+		const c = { words, duration, cuts: random() < 0.5 ? cutsFor(duration) : [], look, motion: pick(["none", "none", "pop", "bounce"]), size: pick([70, 100, 130, 220, 300]), spacing: pick([0, 0, 4]), splits: random() < 0.2 ? [ms(between(1, duration - 1))] : [], room: pick([250, 500, 920]) };
+		c.plan = lib("src/lib/timeline").linePlan(planLines(c));
+		return c;
+	}),
 	two_rows: [-2, -20, -40].flatMap((spacing) => ["none", "pop"].map((motion) => ({ spacing, motion }))),
 	wraps: [...["fade", "pop", "bounce", "pulse", "slideUp", "rollUp"].map((anim) => ({ anim })), ...["still", "fade", "flash", "zoom"].map((logo) => ({ logo }))],
 	layout_file: many(150, (k) => ({
@@ -251,6 +264,19 @@ const web = {
 	words: (t) => [motion.scaleAt(motion.POP, t), motion.scaleAt(motion.BOUNCE, t)],
 	// PlayerFrame draws a banner row `pre` and the channel name `nowrap`: neither ever breaks by itself. Read from its
 	// source, so taking either out fails here too.
+	plan: (c) => {
+		const preview = readFileSync(join(repo, "src/components/PlayerFrame.tsx"), "utf8");
+		if (!/left: 0,\s*right: 0,\s*whiteSpace: "nowrap",/.test(preview)) throw new Error("the preview's subtitles may wrap again");
+		const fit = planFit(c);
+		const lines = planLines(c);
+		for (const l of lines) {
+			const rows = l.row2 === undefined ? [l.parts] : [l.parts.slice(0, l.row2), l.parts.slice(l.row2)];
+			const widest = Math.max(...rows.map((row) => fit.measure(row.map((p) => p.text).join("").trim()) + fit.wordGap * (row.length - 1)));
+			if (widest * (l.shrink ?? 1) > c.room + 1) throw new Error(`a line wider than its row (${Math.round(widest)} in ${c.room}): ${l.text}`);
+			if (l.shrink !== undefined && l.parts.length > 1) throw new Error(`more than one word made smaller: ${l.text}`);
+		}
+		return { lines: c.motion === "none" ? lines.map((l) => ({ from: l.from / FPS, to: l.to / FPS, text: l.parts.map((p) => p.text).join("") })) : null, mayWrap: [] };
+	},
 	two_rows: () => ({ drawn: true, leftToLibass: [] }),
 	wraps: (c) => {
 		const preview = readFileSync(join(repo, "src/components/PlayerFrame.tsx"), "utf8");
@@ -283,7 +309,7 @@ const web = {
 const cs = (t) => Math.round(t * 100) / 100;
 const plain = (lines, look) => lines.map((l) => ({ from: cs(l.from), to: cs(l.to), text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() })).filter((l) => l.to - l.from > 0.015);
 
-const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06, bounce: 0, wraps: 0, two_rows: 0 };
+const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06, bounce: 0, wraps: 0, two_rows: 0, plan: 0.0101 };
 let failed = 0;
 for (const name of Object.keys(cases)) {
 	const answer = python[name];
@@ -300,6 +326,7 @@ for (const name of Object.keys(cases)) {
 			let theirs = name === "constants" ? answer.ok : answer.ok[k];
 			if (name === "constants") theirs = { ...theirs, frameRatio: sorted(theirs.frameRatio) };
 			if (name === "subtitles") [ours, theirs] = [plain(ours, list[k].look), plain(theirs, list[k].look)];
+			if (name === "plan" && ours.lines) [ours, theirs] = [{ ...ours, lines: plain(ours.lines, list[k].look) }, { ...theirs, lines: plain(theirs.lines, list[k].look) }];
 			const found = differ(ours, theirs, TOLERANCE[name]);
 			if (found) problems.push(`case ${k}: ${found}`);
 			if (found && process.env.SHOW) console.log(JSON.stringify({ k, in: list[k], web: ours, video: theirs }));
