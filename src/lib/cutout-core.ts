@@ -158,6 +158,7 @@ export async function matteStretch(o: {
 	every: number;
 	check: () => void;
 	onFrame: () => void;
+	hold?: () => Promise<void> | undefined; // asked after every frame: a promise = wait for it (the preview is playing)
 	times: Times;
 	fail: (error: Error) => void;
 }) {
@@ -203,6 +204,7 @@ export async function matteStretch(o: {
 					}
 					onFrame();
 					await timed(times, "breathe", breathe);
+					await o.hold?.();
 				}
 			};
 
