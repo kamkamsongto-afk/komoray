@@ -3,7 +3,7 @@
 import { ChevronDown, ChevronUp, Columns2, Crop, Film, FolderInput, GripHorizontal, Layers, type LucideIcon, Palette, Pencil, Scissors, Search, Shapes, Sparkles, Tag, Trash2, Type, Undo2, X, ZoomIn } from "lucide-react";
 import { type CSSProperties, Fragment, memo, type PointerEvent as ReactPointerEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KIND_NOTE, learnFromFix } from "@/lib/word-rules";
-import { fixesNeedThaiCut, useThaiCut } from "@/lib/thai-cut";
+import { fixesNeedThaiCut, loadThaiCut, useThaiCut } from "@/lib/thai-cut";
 import { allCuts, findInside, type Fix, fixedWords, LEAD_BREAK, LINE_BREAK, MAX_FIX_LENGTH, mergeSpans, normText, setFix, subtractSpans, TRAIL, TRAIL_BREAK, withNeighbours, type WordFix } from "@/lib/edit";
 import { BANNER, BANNER_FILE, type Banner } from "@/lib/banners";
 import { cleanInsertName, type CutoutLayers, INSERT, type Insert } from "@/lib/behind";
@@ -403,8 +403,9 @@ export function ScriptView({
 		() => keepSegments(duration, allCuts({ duration, words, cuts, deleted, manual, keep })),
 		[duration, words, cuts, deleted, manual, keep],
 	);
-	// Thai typed in becomes its words once newmm is here (loaded only for a video with Thai fixes, lib/thai-cut.ts).
-	const thaiCut = useThaiCut(fixesNeedThaiCut(fixes));
+	// Thai typed in becomes its words once newmm is here (loaded only for a video with Thai fixes, or Thai in the edit
+	// box: what a fix teaches needs it too, lib/thai-cut.ts).
+	const thaiCut = useThaiCut(fixesNeedThaiCut(editing ? [...fixes, { text: editing.before }] : fixes));
 	const lines = useMemo(
 		() => subtitleLines(fixedWords(words, fixes, thaiCut, deleted), segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots),
 		[words, fixes, thaiCut, deleted, segments, subtitle.look, subtitle.size, subtitle.letterSpacing, subtitle.splits, subtitle.spots],
@@ -568,18 +569,27 @@ export function ScriptView({
 
 	// What saving words from..to as `text` teaches My words (lib/word-rules.ts): only the misspelled words, never
 	// spacing, words added or taken out, numbers or ๆ, which belong to this video (coach, 13 Nov).
-	const lessonOf = (from: number, to: number, text: string) => learnFromFix(words.slice(from, to + 1).map((w) => fixThai(w.text)), text);
+	// cut: the Thai dictionary, so a pair is never half of a word typed.
+	const lessonOf = (from: number, to: number, text: string, cut = thaiCut) => learnFromFix(words.slice(from, to + 1).map((w) => fixThai(w.text)), text, cut);
+	// Learning waits for that dictionary (Thai only): without it คอมพิวเตอร์ is learned as its second half (coach 28 Nov).
+	// If it can't be loaded, learn without it rather than not at all.
+	const withDictionary = (text: string, teach: (cut: typeof thaiCut) => void) =>
+		void (/[฀-๿]/.test(text) ? loadThaiCut().catch(() => undefined) : Promise.resolve(undefined)).then(teach);
 
 	// Remember a fix in the personal dictionary, keyed by what speech-to-text wrote. Back to the original: forget what
 	// the fix there (`before`) had taught.
 	function learn(from: number, to: number, text: string, before = "") {
 		const original = originalText(from, to);
-		if (!text.trim() || norm(text) === norm(original)) {
-			for (const p of before ? lessonOf(from, to, before).pairs : []) onLearn?.(p.heard, null);
-			onLearn?.(original, null);
-			return;
-		}
-		for (const p of lessonOf(from, to, text).pairs) onLearn?.(p.heard, p.fixed);
+		withDictionary(original + text + before, (cut) => {
+			if (!text.trim() || norm(text) === norm(original)) {
+				// Both ways of cutting: what was taught before 28 Nov was cut without the dictionary.
+				const taught = before ? [...lessonOf(from, to, before, cut).pairs, ...learnFromFix(words.slice(from, to + 1).map((w) => fixThai(w.text)), before).pairs] : [];
+				for (const heard of new Set(taught.map((p) => p.heard))) onLearn?.(heard, null);
+				onLearn?.(original, null);
+				return;
+			}
+			for (const p of lessonOf(from, to, text, cut).pairs) onLearn?.(p.heard, p.fixed);
+		});
 	}
 
 	// The words from..to as the script draws them now (fixes in).
@@ -624,8 +634,10 @@ export function ScriptView({
 		onFixesChange(next);
 		// Only what was replaced as found is learned: "ใช่" → "ไม่ใช่" next to "ไม่" took that word in, and must not
 		// teach the dictionary to put "ไม่" before every "ใช่" (Codex review 13 Nov).
-		const learned = new Map(plain.flatMap((m) => lessonOf(m.from, m.to, m.keep ? m.keep.join(replacement.trim()) : replacement).pairs).map((p) => [p.heard, p.fixed]));
-		for (const [heard, fixed] of learned) onLearn?.(heard, fixed);
+		withDictionary(query + replacement, (cut) => {
+			const learned = new Map(plain.flatMap((m) => lessonOf(m.from, m.to, m.keep ? m.keep.join(replacement.trim()) : replacement, cut).pairs).map((p) => [p.heard, p.fixed]));
+			for (const [heard, fixed] of learned) onLearn?.(heard, fixed);
+		});
 	}
 
 	// Personal dictionary, once per video: fix every word it knows that isn't fixed by hand already.

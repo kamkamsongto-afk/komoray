@@ -1,8 +1,8 @@
 import { hmac } from "./callback";
 import { cutThaiWords, isThaiWord } from "./newmm";
-import { getJson, putObject } from "./r2";
+import { getJson, putObject, updateJson } from "./r2";
 import { realThaiWords, thaiWords } from "./word-check";
-import { type WordUse, wordUse } from "./word-rules";
+import { shortScrap, type WordUse, wordUse } from "./word-rules";
 
 // Komoray's shared word list: speech-to-text mistakes that several creators fixed the same way. Only creators who
 // ticked "Help make Komoray more accurate" on My words give to it (Privacy: "Shared word fixes"). It is given to the
@@ -63,9 +63,11 @@ function distance(a: string, b: string) {
 // your own list, Word Hub the shared one, and not every save should land there"): ordinary words (shareable) that
 // are a clear misspelling, the heard side no real word (ผูหญิง → ผู้หญิง). A word right in other sentences (เนี่ย,
 // สวน → ส่วน) stays in the creator's My words. The team still adds any pair by hand on the Word Hub tab.
+// A one or two letter scrap (พ่ → พ่น) still comes in, though wordUse leaves it to the AI (28 Nov): without this the AI
+// would stop seeing creators' such pairs at all.
 export function hubLang(heard: string, fixed: string): Lang | null {
 	const lang = shareable(heard, fixed);
-	return lang && wordUse(heard, fixed, { ...thaiWords, shared: true }) === "always" ? lang : null;
+	return lang && (wordUse(heard, fixed, { ...thaiWords, shared: true }) === "always" || shortScrap(heard, fixed, thaiWords.realWords)) ? lang : null;
 }
 
 // Did this creator tick "Help make Komoray more accurate"? (their settings, api/prefs)
@@ -133,7 +135,9 @@ export type CuratedPair = { heard: string; fixed: string; at: string; uses?: num
 export type WordList = string; // "th", "latin", or a language code
 const MAX_CURATED = 20_000;
 const curatedKey = (list: WordList) => `shared-words/curated-${list}.json`;
-export const readCurated = async (list: WordList) => (await getJson<{ pairs: CuratedPair[] }>(curatedKey(list)).catch(() => null))?.pairs ?? [];
+// strict: throws when R2 can't be read, for work that must not take a hiccup for an empty list.
+export const readCuratedStrict = async (list: WordList) => (await getJson<{ pairs: CuratedPair[] }>(curatedKey(list)))?.pairs ?? [];
+export const readCurated = (list: WordList) => readCuratedStrict(list).catch((): CuratedPair[] => []);
 const tidy = (text: string) => text.trim().replace(/\s+/g, " ");
 export const isWordList = (list: unknown): list is WordList => typeof list === "string" && /^(th|latin|[a-z]{2})$/.test(list);
 // Where a pair goes: Thai to "th", others to their video's language when known, else "latin".
@@ -179,6 +183,21 @@ export async function changeCurated(list: WordList, add: { heard: string; fixed:
 	const pairs = [...fresh, ...saved.filter((p) => !gone.has(p.heard))].slice(0, MAX_CURATED);
 	await putObject(curatedKey(list), JSON.stringify({ pairs }), "application/json");
 	return pairs;
+}
+
+// A pair picked from Suggestions: added with how it is used, in one write (in two, "AI decides" could be live as
+// Always in between, or stay so if the second failed). Never over another pair under that heard side, spaces aside, nor
+// over what the team set: result is then that pair. null: too busy to get a turn.
+export function addPicked(list: WordList, heard: string, fixed: string, use: WordUse) {
+	const squashed = (text: string) => tidy(text).replace(/ํา/g, "ำ").replace(/ /g, "").toLowerCase();
+	return updateJson<{ pairs: CuratedPair[] }, CuratedPair | null>(curatedKey(list), (value) => {
+		const pairs = value?.pairs ?? [];
+		const there = pairs.filter((p) => squashed(p.heard) === squashed(heard));
+		const taken = there.find((p) => squashed(p.fixed) !== squashed(fixed) || (p.use && p.use !== use));
+		if (taken) return { result: taken };
+		const pair: CuratedPair = { heard: tidy(heard), fixed: tidy(fixed), at: new Date().toISOString(), uses: (there[0]?.uses ?? 0) + 1, use, reviewed: true };
+		return { next: { pairs: [pair, ...pairs.filter((p) => !there.includes(p))].slice(0, MAX_CURATED) }, result: null };
+	});
 }
 
 // The team's changes from the Words tab, by heard: what it is fixed to (or a new heard), how it is used (null: back
