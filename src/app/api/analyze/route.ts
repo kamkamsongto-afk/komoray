@@ -1,14 +1,12 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refundListen, settleDeadListen, startListening } from "@/lib/access";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
-import { signedCallbackUrl } from "@/lib/callback";
 import { isLanguage } from "@/lib/languages";
 import { CLEAN_SOUND, facesFor, mediaUrl, previewFiles, previewPercent, proxyStatus, proxyUrl, startProxy } from "@/lib/proxy";
 import type { Faces } from "@/lib/framing";
 import { copyObject, deleteObject, exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { mergeThaiEdit } from "@/lib/thai-words";
-import { AUDIO_FILE, continueAudioFirst, needsAudioFirst, startAudio } from "@/lib/audio-first";
-import { startTranscription } from "@/lib/transcribe";
+import { AUDIO_FILE, continueAudioFirst, startOnSound, tooBigForDeepgram } from "@/lib/audio-first";
 import { readOptions } from "@/lib/upload-options";
 
 // Finding silences lives in the video's folder:
@@ -39,29 +37,24 @@ export async function POST(request: Request) {
 	try {
 		// Listening again (Wrong language?) sends no choices: the ones made the first time stay.
 		const options = readOptions(asked) ?? readOptions((await getJson<{ options?: unknown }>(siblingKey(key, "analyze.json")))?.options);
-		// A video over Deepgram's 2 GB goes to it as its sound alone (lib/audio-first.ts).
-const big = await needsAudioFirst(key);
+		// Speech-to-text gets the video's sound, on the picture's clock (lib/audio-first.ts). big: over Deepgram's 2 GB.
+const big = await tooBigForDeepgram(key);
 // Listening again writes a new script over the work on this video: a copy is kept first (edit-before.json), so a
 // listen that fails, or a wrong press, does not lose it for good.
 const editKey = siblingKey(key, "edit.json");
 if (await exists(editKey)) await copyObject(editKey, siblingKey(key, "edit-before.json"));
-await Promise.all([deleteObject(editKey), deleteObject(siblingKey(key, "analyze-error.json")), deleteObject(siblingKey(key, "deepgram-started.json"))]);
+// First analyze.json stops saying anything about the last listen: with its files going one by one, a status ask or a
+// late sound-ready took the old one for timed out and started speech-to-text, in the old language (the review, 28 Nov).
+await putObject(siblingKey(key, "analyze.json"), JSON.stringify({ startedAt: new Date().toISOString(), ...(options && { options }) }), "application/json");
+// The sound and its error from an earlier listen go before analyze.json says a new one began, or a status ask between
+// the two would act on them.
+await Promise.all([editKey, ...["analyze-error.json", "deepgram-started.json", AUDIO_FILE, "audio-error.json"].map((name) => siblingKey(key, name))].map((file) => deleteObject(file)));
 		// usageKey: lets the callback give the minutes back if the job fails. language: what was listened for, so the
 		// admin's Accuracy tab can score each language (13 Nov; older videos are guessed from their letters).
-		await putObject(
-			siblingKey(key, "analyze.json"),
-			JSON.stringify({ startedAt: new Date().toISOString(), usageKey: listen.usageKey, language: language || "en", ...(big && { audioFirst: true }), ...(options && { options }) }),
-			"application/json",
-		);
-
-		if (big) {
-// Modal takes the sound out; the page's next asks start Deepgram on it (continueAudioFirst). A sound from an earlier try is used again.
-if (!(await exists(siblingKey(key, AUDIO_FILE)))) await startAudio(key, env);
-} else {
-const callbackUrl = await signedCallbackUrl(new URL("/api/analyze/callback", request.url).toString(), key, env.RENDER_TOKEN);
-// Deepgram downloads the video itself through a temporary read-only link.
-await startTranscription(await signedUrl(key, "GET", LINK_SECONDS), env.DEEPGRAM_API_KEY, language || "en", callbackUrl);
-}
+		const started = { startedAt: new Date().toISOString(), usageKey: listen.usageKey, language: language || "en", audioFirst: true, big, ...(options && { options }) };
+		await putObject(siblingKey(key, "analyze.json"), JSON.stringify(started), "application/json");
+		// Modal takes the sound out, then Deepgram is started on it (continueAudioFirst).
+		await startOnSound(key, request.url, env, started);
 		// Make the editor's preview copy meanwhile; it is usually ready before the script is.
 		const proxy = await proxyStatus(key);
 		if (proxy !== "done" && proxy !== "processing") {

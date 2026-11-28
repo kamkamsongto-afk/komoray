@@ -1536,6 +1536,7 @@ PART_GLIDE = 0.8  # seconds a zoom part's push in (or pull back) takes (PART_GLI
 PART_HOLD = 2
 PART_ZOOMS = ("in", "out", "smooth", "cuts")
 CUT_FADE = 0.004  # seconds of sound faded in and out at every cut
+SOUND_LATE_MOST = 5  # seconds: no file's sound starts later after its picture than this (cut_sound_parts)
 ZOOM_ORIGIN = (0.5, 0.4)  # zoomed around this point of the frame: a little above the middle, where faces are
 
 
@@ -2291,9 +2292,13 @@ def cut_sound_parts(pieces: list[tuple[int, int, int]]) -> list[str]:
     parts, labels = [], []
     for i, (_, trim, frames) in enumerate(pieces):
         a, b, length = trim / FPS, (trim + frames) / FPS, frames / FPS
+        # A phone's sound starts after its picture. A piece that begins before the sound does must get silence there, or its
+        # sound moved to the front and played early, and one ending before the sound began cut the rest of the sound off
+        # (tested 28 Nov). Only the opening pieces can reach back that far.
+        clock = f"{SOUND_ON_PICTURE_CLOCK}," if a < SOUND_LATE_MOST else ""
         # A few ms fade in and out at every cut, so the sound doesn't click (FADE_SAMPLES in the preview).
         parts.append(
-            f"[0:a]atrim=start={a:.6f}:end={b:.6f},asetpts=PTS-STARTPTS,apad=whole_dur={length:.6f},atrim=end={length:.6f},"
+            f"[0:a]{clock}atrim=start={a:.6f}:end={b:.6f},asetpts=PTS-STARTPTS,apad=whole_dur={length:.6f},atrim=end={length:.6f},"
             f"afade=t=in:d={CUT_FADE},afade=t=out:st={max(0.0, length - CUT_FADE):.6f}:d={CUT_FADE}[a{i}]"
         )
         labels.append(f"[a{i}]")
@@ -3189,9 +3194,15 @@ def make_thumb(video: Path, thumb: Path) -> None:
 AUDIO_RATE = 16000  # Hz: what speech-to-text needs; mono, lossless (FLAC), so nothing is lost for Deepgram
 
 
+AUDIO_SHORT_MOST = 1.5  # seconds the sound may end before the video without a second read (audio_whole)
+
+
 def audio_command(src: str, out: Path) -> list[str]:
     """ffmpeg: only the sound of a video (src: a file, or a link ffmpeg reads piece by piece), mono at AUDIO_RATE, as FLAC."""
-    return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", str(AUDIO_RATE), "-c:a", "flac", str(out)]
+    # On the picture's clock, the same sound track as the preview's proxy-audio.pcm: phone files start their sound after
+    # the picture, and speech-to-text given the video counted from the first sound, so every word and cut came early
+    # (366 ms on VID20261126143707, coach 28 Nov).
+    return ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src, "-map", "0:a:0", "-af", SOUND_ON_PICTURE_CLOCK, "-ac", "1", "-ar", str(AUDIO_RATE), "-c:a", "flac", str(out)]
 
 
 def audio_whole(src: str, out: Path) -> bool:
@@ -3201,30 +3212,52 @@ def audio_whole(src: str, out: Path) -> bool:
         return False
     try:
         whole = duration_of(src)  # type: ignore[arg-type]  # a link works as well as a path
-        return whole > 0 and duration_of(out) >= whole * 0.98 - 1
+        # Seconds, not a share of the length: 2% of 20 minutes let 25 s go missing, and what has no sound is cut from
+        # the final video (the review, 28 Nov). A truly shorter sound is read once more from the whole file.
+        return whole > 0 and duration_of(out) >= whole - AUDIO_SHORT_MOST
     except Exception:
         return False
 
 
+def tell(url: str | None) -> None:
+    """Tell the website a job's file (or its error) is there, so it goes on with nobody's page open. Tried three times;
+    the page's own asks do the same if all are lost. Our own User-Agent: Cloudflare turns Python's away (403, 18 Nov)."""
+    if not url:
+        return
+    for wait in (0, 5, 20):
+        time.sleep(wait)
+        try:
+            request = urllib.request.Request(url, data=b"", method="POST", headers={"User-Agent": "KomorayRender/1.0"})
+            urllib.request.urlopen(request, timeout=60).close()
+            return
+        except Exception as err:
+            print("could not tell the website:", err)
+
+
 @app.function(image=image, cpu=2, memory=4096, timeout=60 * 60)
-def audio(video_url: str, output_url: str, error_url: str | None = None) -> dict:
-    """The sound of a video that is too big for Deepgram (over 2 GB, coach 22 Nov), so Deepgram gets the sound alone.
-    Reads the video straight from its link, never all of it at once; a file ffmpeg can't read that way is downloaded and tried again."""
+def audio(video_url: str, output_url: str, error_url: str | None = None, ready_url: str | None = None) -> dict:
+    """The sound of a video for speech-to-text (every video from 28 Nov, so its word times are the picture's; before
+    that only one too big for Deepgram, over 2 GB, coach 22 Nov). Reads the video straight from its link, never all of
+    it at once; a file ffmpeg can't read that way is downloaded and tried again."""
     try:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "audio.flac"
             result = subprocess.run(audio_command(video_url, out), capture_output=True, text=True)
             if result.returncode != 0 or not audio_whole(video_url, out):
                 src = Path(tmp) / "source"
-                urllib.request.urlretrieve(video_url, src)
+                urllib.request.urlretrieve(video_url, src)  # raises if the file did not all arrive
                 result = subprocess.run(audio_command(str(src), out), capture_output=True, text=True)
-                if result.returncode != 0 or not audio_whole(str(src), out):
-                    raise RuntimeError(f"ffmpeg failed or the sound is shorter than the video: {result.stderr[-600:]}")
+                # Read from the whole file, a sound shorter than the picture is how the video is (it failed the job for
+                # good before), so it only has to be there.
+                if result.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+                    raise RuntimeError(f"ffmpeg failed: {result.stderr[-600:]}")
             put(output_url, out.read_bytes(), "audio/flac")
+            tell(ready_url)
             return {"ok": True, "bytes": out.stat().st_size}
     except Exception as err:
         if error_url:
             put(error_url, json.dumps({"error": str(err)}).encode(), "application/json")
+            tell(ready_url)
         raise
 
 
@@ -3339,7 +3372,7 @@ def start(body: dict) -> dict:
     if body.get("kind") == "proxy":
         call = proxy.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("audioUrl"), body.get("facesUrl"), body.get("thumbUrl"), body.get("cleanAudioUrl"), body.get("progressUrl"))
     elif body.get("kind") == "audio":
-        call = audio.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"))
+        call = audio.spawn(body["videoUrl"], body["outputUrl"], body.get("errorUrl"), body.get("readyUrl"))
     elif body.get("kind") == "faces":
         call = faces.spawn(body["videoUrl"], body["facesUrl"], body.get("thumbUrl"))
     else:
