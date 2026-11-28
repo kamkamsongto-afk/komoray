@@ -257,7 +257,27 @@ def bounce(cases):
     return out
 
 
-SECTIONS = {f.__name__: f for f in (bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back)}
+def wraps(cases):
+    """Banner rows and the channel name: lines libass could still break onto two by itself (the preview never does)."""
+    r.text_width = lambda *a, **k: 100.0  # only the box's width needs it (and uharfbuzz)
+    long = "a long row with spaces that is wider than the screen allows"
+    out = []
+    for c in cases:
+        if c.get("logo"):
+            kind = "Logo"
+            style = {**r.DEFAULT_STYLE, "format": "9:16", "logo": long, "logoEffect": c["logo"], "logoEvery": 5}
+            events = r.build_subtitles([], [(0.0, 20.0)], style, []).splitlines()
+        else:
+            kind = "Banner"
+            events = r.banner_events([{"text": long + "\nsecond row", "start": 0, "end": 3, "anim": c["anim"], "place": "top", "scale": 3}])
+        lines = [e for e in events if e.startswith("Dialogue:") and e.split(",", 9)[3] == kind and "\\p1" not in e]
+        # inside the line's own first {...}: anywhere else the tag would be drawn as letters, or not count
+        kept = [e.split(",", 9)[9] for e in lines]
+        out.append({"drawn": bool(lines), "mayWrap": [t[:90] for t in kept if not (t.startswith("{") and "\\q2" in t[: t.find("}")])]})
+    return out
+
+
+SECTIONS = {f.__name__: f for f in (bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
 
 if __name__ == "__main__":
     asked = json.loads(sys.stdin.buffer.read().decode("utf-8"))
