@@ -17,6 +17,7 @@ export type CutoutJob = {
 	width: number;
 	height: number;
 	side: number;
+	every: number;
 	bitrate: number;
 };
 // Sent to a worker after its job: work on, or wait (the preview is playing and another worker is carrying on).
@@ -69,7 +70,7 @@ scope.onmessage = async (e) => {
 				to: job.to,
 				model,
 				encoder,
-				every: 1,
+				every: job.every,
 				check: () => {
 					if (failure) throw failure;
 				},

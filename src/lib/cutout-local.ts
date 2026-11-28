@@ -134,6 +134,7 @@ export const workersFor = (frames: number) => {
 
 export type LocalOptions = {
 	workers?: number; // how many workers (default workersFor); 0 = none, on the page itself
+	every?: number; // the model on one frame in this many (default SETTINGS)
 	makeWorker?: () => Worker; // how a worker is made (the test page has its own)
 };
 
@@ -144,7 +145,9 @@ export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows:
 	const source = new RangeSource(videoUrl);
 	const track = await readVideoTrack(source);
 	const { frames } = track;
-	const settings = SETTINGS[tier];
+	// On trial (coach 28 Nov): ?every=1, 2 or 3 on the AI studio's address, to compare speed and edges on a real clip.
+	const asked = typeof location === "undefined" ? 0 : Number(new URLSearchParams(location.search).get("every"));
+	const settings = { ...SETTINGS[tier], ...(tier === "fast" && [1, 2, 3, 4].includes(asked) && { every: asked }), ...(options.every && { every: options.every }) };
 	const { w, h } = matteSize(track.width, track.height, settings.side);
 	const runs = runsOf(frames, windows);
 	const total = runs.reduce((sum, [a, b]) => sum + b - a, 0);
@@ -240,7 +243,7 @@ async function parallelMatte(o: {
 	for (let k = 0; k + 1 < cuts.length; k++) {
 		const [from, to] = [cuts[k], cuts[k + 1]];
 		const inside = runs.map(([a, b]): [number, number] => [Math.max(a, from), Math.min(b, to)]).filter(([a, b]) => b > a);
-		jobs.push({ url: o.url, codec: track.codec, description: track.description, frames: track.frames, runs: inside, from, to, width: track.width, height: track.height, side: o.settings.side, bitrate: o.settings.bitrate });
+		jobs.push({ url: o.url, codec: track.codec, description: track.description, frames: track.frames, runs: inside, from, to, width: track.width, height: track.height, side: o.settings.side, every: o.settings.every, bitrate: o.settings.bitrate });
 	}
 
 	const workers: Worker[] = [];
