@@ -26,6 +26,7 @@ import { duplicateOf, layerPlace, moveLayer } from "@/lib/layers";
 
 type Props = {
 	focus: string | null; // the layer just clicked on the timeline: open it here
+	fresh: number; // goes up when the box should show its main view again
 	layers: CutoutLayers;
 	onChange: (layers: CutoutLayers) => void;
 	cutout: ReturnType<typeof useCutout>;
@@ -61,7 +62,7 @@ const SPEEDS: [BehindSpeed, string][] = [
 // The editor's Cutout box: big text behind the speaker, and pictures or clips behind a smaller speaker.
 // The speaker is cut out on a GPU only for the parts these cover, once they are where they should be
 // (Cut out the speaker); moving one outside those parts asks for it again.
-export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, onReveal, onPickImported, onUploading, ruler = FINAL_CLOCK, subtitles }: Props) {
+export function CutoutControls({ layers, onChange, cutout, segments, now, total, videoUrl, thai, focus, fresh, onReveal, onPickImported, onUploading, ruler = FINAL_CLOCK, subtitles }: Props) {
 	const [open, setOpen] = useState<string | null>(focus);
 	// A new layer clicked on the timeline opens here (set while drawing, not in an effect).
 	const [focused, setFocused] = useState(focus);
@@ -151,6 +152,15 @@ export function CutoutControls({ layers, onChange, cutout, segments, now, total,
 	// and place stay; a clip starts from its first second again.
 	const [changingFile, setChangingFile] = useState<string | null>(null); // the picture or clip whose choices are open
 	const [swapping, setSwapping] = useState<number | null>(null); // percent sent of a file uploaded to take its place
+	// Back to the main view (ScriptView's startFresh), set while drawing, as for focus.
+	const [seenFresh, setSeenFresh] = useState(fresh);
+	if (fresh !== seenFresh) {
+		setSeenFresh(fresh);
+		setOpen(null);
+		setAdding(false);
+		setChangingFile(null);
+		setChanging(false);
+	}
 	function changeFile(list: Insert[], put: (inserts: Insert[]) => void, id: string, item: LibraryItem) {
 		const old = list.find((i) => i.id === id);
 		if (!old || old.file === item.file) return;

@@ -41,7 +41,7 @@ export function waitLabel(c: Pick<CutoutState, "local" | "status" | "tier"> & { 
 
 const POLL_MS = 10_000;
 const FIRST_ESTIMATE_MS = 3000; // the first frames say little about the speed
-const SHOW_EVERY_MS = 250;
+const SHOW_EVERY_MS = 1000; // each showing redraws the whole AI studio, which the preview feels (coach 28 Nov)
 const NO_BEST = { unlimited: false, limit: 0, used: 0 };
 
 // videoSeconds: the video's length, for how long finishing a Fast or Normal cutout takes (finishSeconds).

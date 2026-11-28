@@ -82,11 +82,12 @@ def put(url: str, data: bytes, content_type: str) -> None:
             raise RuntimeError(f"upload failed ({res.status})")
 
 
-def picture_size(src: Path) -> tuple[int, int]:
-    """Width and height after turning the picture upright and scaling the short side to MATTE_SIDE."""
+def picture_size(src: Path | str, first: Path | None = None) -> tuple[int, int]:
+    """Width and height after turning the picture upright and scaling the short side to MATTE_SIDE. src: a file, or a
+    link (then first says where the one picture goes): only the start of the video is read from it."""
     import cv2
 
-    first = src.with_name("first.png")
+    first = first or Path(src).with_name("first.png")
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-frames:v", "1", "-vf", scale_filter(MATTE_SIDE), str(first)], check=True)
     picture = cv2.imread(str(first))
     if picture is None:
@@ -159,19 +160,52 @@ def count_frames(src: Path) -> int:
     return total // 4
 
 
+def frame_size(video: Path) -> tuple[int, int]:
+    """Width and height of a video's frames as stored (the preview copy has no turn flag)."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(video)], capture_output=True, text=True, check=True).stdout
+    w, h = out.strip().split(",")[:2]
+    return int(w), int(h)
+
+
+# How the preview with the matte under it is encoded (as proxy.mp4 in render.py).
+PREVIEW_ENCODE = ["-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-tune", "fastdecode", "-bf", "0",
+                  "-g", str(PROXY_KEYFRAME_FRAMES), "-keyint_min", str(PROXY_KEYFRAME_FRAMES), "-sc_threshold", "0", "-movflags", "+faststart"]
+
+
 def write_preview(src: Path, matte: Path, preview: Path) -> None:
     """The preview copy: picture on top, matte below, each PROXY_SIDE on its short side."""
     side = f"scale='if(gt(iw,ih),-2,{PROXY_SIDE})':'if(gt(iw,ih),{PROXY_SIDE},-2)'"
     result = subprocess.run(
         ["ffmpeg", "-v", "error", "-y", "-i", str(src), "-i", str(matte),
          "-filter_complex", f"[0:v]{side},fps={FPS},format=yuv420p[p];[1:v]{side},fps={FPS},format=yuv420p[m];[p][m]vstack=shortest=1[v]",
-         "-map", "[v]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-tune", "fastdecode", "-bf", "0",
-         "-g", str(PROXY_KEYFRAME_FRAMES), "-keyint_min", str(PROXY_KEYFRAME_FRAMES), "-sc_threshold", "0", "-movflags", "+faststart", str(preview)],
+         "-map", "[v]", *PREVIEW_ENCODE, str(preview)],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed on the preview: {result.stderr[-800:]}")
+
+
+def write_both(local: Path, picture: Path, size: tuple[int, int], matte_size: tuple[int, int], matte: Path, preview: Path) -> None:
+    """finish_local's two files in one ffmpeg run: the browser's matte is read once and the two are encoded side by
+    side, a third faster than one after the other (28 Nov, 7 minute video, 2 cores: 38 s against 56 s; 4 cores were no
+    faster). The same settings as before, and matte.mp4 comes out the same picture for picture. size: the preview
+    copy's, which the matte under it is brought to exactly (rounded on its own it could come out 2 px off)."""
+    (pw, ph), (w, h) = size, matte_size
+    # extractplanes: the brightness exactly as the browser wrote it (a colour conversion would stretch it and leave
+    # the speaker slightly see-through).
+    graph = (f"[0:v]extractplanes=y,scale={w}:{h}:flags=bicubic,split[full][small];"
+             f"[1:v]scale={pw}:{ph},fps={FPS},format=yuv420p[p];[small]scale={pw}:{ph},fps={FPS},format=yuv420p[m];"
+             f"[p][m]vstack=shortest=1[v]")
+    result = subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "h264", "-framerate", str(FPS), "-i", str(local), "-i", str(picture), "-filter_complex", graph,
+         "-map", "[full]", "-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "10", "-pix_fmt", "gray", str(matte),
+         "-map", "[v]", *PREVIEW_ENCODE, str(preview)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed on the cutout files: {result.stderr[-800:]}")
 
 
 def matte_writer(path: Path, w: int, h: int):
@@ -327,29 +361,47 @@ def make_cutout(video_url: str, windows: list[list[float]], matte_url: str, prev
 
 
 @app.function(image=image, cpu=2, memory=4096, timeout=15 * 60)
-def finish_local(video_url: str, local_url: str, windows: list, tier: str, matte_url: str, preview_url: str, done_url: str, error_url: str) -> dict:
+def finish_local(video_url: str, local_url: str, windows: list, tier: str, matte_url: str, preview_url: str, done_url: str, error_url: str, picture_url: str | None = None) -> dict:
     """Fast and Balanced are cut out on the customer's own computer (lib/cutout-local.ts), which sends the matte
-    as a plain H.264 stream. This turns it into the same two files Best makes. No GPU."""
+    as a plain H.264 stream. This turns it into the same two files Best makes. No GPU.
+    picture_url: the preview copy (proxy.mp4), the very picture the matte was cut from. The preview with the matte
+    under it is made from it, and of the full video only the start is read, for its size: downloading and decoding a
+    1 GB original took most of this step (coach 28 Nov). Without it, the full video as before."""
     try:
         t_start = time.time()
         with tempfile.TemporaryDirectory() as tmp:
             wd = Path(tmp)
             src, local, matte, preview = wd / "source", wd / "local.h264", wd / "matte.mp4", wd / "proxy-cutout.mp4"
-            urllib.request.urlretrieve(video_url, src)
             urllib.request.urlretrieve(local_url, local)
-            w, h = picture_size(src)
-            # extractplanes: the brightness exactly as the browser wrote it (a colour conversion would stretch it
-            # and leave the speaker slightly see-through).
-            result = subprocess.run(
-                ["ffmpeg", "-v", "error", "-y", "-f", "h264", "-framerate", str(FPS), "-i", str(local),
-                 "-vf", f"extractplanes=y,scale={w}:{h}:flags=bicubic", "-r", str(FPS),
-                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "10", "-pix_fmt", "gray", str(matte)],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(f"ffmpeg failed on the matte: {result.stderr[-800:]}")
-            write_preview(src, matte, preview)
+            picture, size = src, None
+            if picture_url:
+                picture = wd / "picture.mp4"
+                urllib.request.urlretrieve(picture_url, picture)
+                size = frame_size(picture)
+                try:
+                    w, h = picture_size(video_url, wd / "first.png")
+                except Exception as err:  # a file ffmpeg can't read over its link: fetched whole, as before
+                    print("size over the link failed:", type(err).__name__)
+                    urllib.request.urlretrieve(video_url, src)
+                    w, h = picture_size(src)
+            else:
+                urllib.request.urlretrieve(video_url, src)
+                w, h = picture_size(src)
+            if size:
+                write_both(local, picture, size, (w, h), matte, preview)
+            else:
+                # extractplanes: the brightness exactly as the browser wrote it (a colour conversion would stretch it
+                # and leave the speaker slightly see-through).
+                result = subprocess.run(
+                    ["ffmpeg", "-v", "error", "-y", "-f", "h264", "-framerate", str(FPS), "-i", str(local),
+                     "-vf", f"extractplanes=y,scale={w}:{h}:flags=bicubic", "-r", str(FPS),
+                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "10", "-pix_fmt", "gray", str(matte)],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"ffmpeg failed on the matte: {result.stderr[-800:]}")
+                write_preview(src, matte, preview)
             put(matte_url, matte.read_bytes(), "video/mp4")
             put(preview_url, preview.read_bytes(), "video/mp4")
             stats = {"windows": [[float(a), float(b)] for a, b in windows], "tier": tier, "totalSeconds": round(time.time() - t_start, 1), "size": [w, h], "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -367,7 +419,8 @@ def start(body: dict) -> dict:
     if not hmac.compare_digest(str(body.get("token", "")), os.environ["RENDER_TOKEN"]):
         return {"error": "unauthorized"}
     if body.get("kind") == "finish":
-        call = finish_local.spawn(body["videoUrl"], body["localUrl"], body["windows"], body["tier"], body["matteUrl"], body["previewUrl"], body["doneUrl"], body["errorUrl"])
+        picture = {"picture_url": body["pictureUrl"]} if body.get("pictureUrl") else {}  # an older worker takes the rest
+        call = finish_local.spawn(body["videoUrl"], body["localUrl"], body["windows"], body["tier"], body["matteUrl"], body["previewUrl"], body["doneUrl"], body["errorUrl"], **picture)
     else:
         call = cutout.spawn(body["videoUrl"], body["windows"], body["matteUrl"], body["previewUrl"], body["doneUrl"], body["errorUrl"], body.get("previousUrl"), body.get("previousWindows"))
     return {"callId": call.object_id}

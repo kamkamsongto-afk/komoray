@@ -80,7 +80,9 @@ export function clock(seconds: number) {
 // Fast and Normal, after the last frame: uploading the matte and Modal's finish_local, which works through the whole
 // video (matte + preview copy), so it grows with the video's length. 12 Nov: a 4:54 video took 68 s from upload to done
 // (Modal 59.9 s); this says 71 s. The old flat 25 s left people at "Almost done" with no countdown (coach, 13 Nov).
-export const finishSeconds = (videoSeconds: number) => Math.round(12 + 0.2 * videoSeconds);
+// 28 Nov: made from the preview copy, both files in one run, a 6:55 video (1 GB original) took 56 s on the server
+// (92 s before) and a 5:37 one 35 s before the one-run change.
+export const finishSeconds = (videoSeconds: number) => Math.round(12 + 0.13 * videoSeconds);
 
 export function slowSeconds(wins: Window[]) {
 	const seconds = windowSeconds(wins);

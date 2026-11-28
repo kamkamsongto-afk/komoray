@@ -24,6 +24,7 @@ type Props = {
 	total: number; // length of the final video, seconds
 	brand: string; // the Brand Kit's colour: a banner's background until one is picked
 	focus: string | null; // the banner just clicked on the timeline: open it here
+	fresh: number; // goes up when the box should show its main view again
 	videoKey?: string; // the video, for uploading a banner of your own next to it
 	onUseFile?: (item: LibraryItem) => void; // a picture or clip uploaded before (Import's list): a banner again
 	onReveal?: (id: string, start: number) => void; // show it: the blue line to its start, its strip picked on the timeline
@@ -52,12 +53,19 @@ const BANNER_ANIM_BUTTONS: Record<BannerAnim, { name: string; note: string }> = 
 
 // The editor's Banners box: add a price tag, a call to action or "follow me" at the spot the
 // preview is at, then change its words, place and when it shows.
-export function BannerControls({ banners, onChange, now, total, brand, focus, videoKey, onUseFile, onReveal, subtitles }: Props) {
+export function BannerControls({ banners, onChange, now, total, brand, focus, fresh, videoKey, onUseFile, onReveal, subtitles }: Props) {
 	// One banner open at a time, so the panel stays short and the timeline below it stays in reach.
 	const [open, setOpen] = useState<string | null>(focus);
 	const [tab, setTab] = useState<BannerTab>(() => tabOf(banners.find((b) => b.id === focus)?.kind ?? banners[0]?.kind ?? "cta"));
 	// Which pop-up of pictures is open: a banner (Change), or "new" (Add a picture or clip).
 	const [picking, setPicking] = useState<string | null>(null);
+	// Back to the main view (ScriptView's startFresh), set while drawing, as for focus.
+	const [seenFresh, setSeenFresh] = useState(fresh);
+	if (fresh !== seenFresh) {
+		setSeenFresh(fresh);
+		setOpen(null);
+		setPicking(null);
+	}
 	// Another banner clicked on the timeline: open it, on its tab (set while drawing, not in an effect, as in CutoutControls).
 	const [seenFocus, setSeenFocus] = useState(focus);
 	if (focus !== seenFocus) {
