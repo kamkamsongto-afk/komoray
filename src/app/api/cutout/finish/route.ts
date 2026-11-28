@@ -1,7 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { accessFor } from "@/lib/access";
 import { LOCAL_MATTE, LOCAL_MATTE_MAX_BYTES, type Window } from "@/lib/cutout";
-import { getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
+import { exists, getJson, putObject, siblingKey, signedUrl, VIDEO_KEY } from "@/lib/r2";
 import { currentUser, ownsVideo } from "@/lib/supabase/server";
 import { CUTOUT_WRITES } from "@/lib/upload-name";
 
@@ -35,6 +35,9 @@ export async function POST(request: Request) {
 	await putObject(jobKey, JSON.stringify({ ...job, startedAt: new Date().toISOString() }), "application/json");
 	const env = getCloudflareContext().env as unknown as FinishEnv;
 	const errorKey = siblingKey(key, "cutout-error.json");
+	// The preview copy the matte was cut from: the server makes the stacked preview from it, not from the whole original.
+	const pictureKey = siblingKey(key, "proxy.mp4");
+	const picture = (await exists(pictureKey)) ? await signedUrl(pictureKey, "GET", LINK_SECONDS) : undefined;
 	const res = await fetch(env.CUTOUT_URL, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -44,6 +47,7 @@ export async function POST(request: Request) {
 			tier: job.local,
 			windows: job.windows,
 			videoUrl: await signedUrl(key, "GET", LINK_SECONDS),
+			pictureUrl: picture,
 			localUrl: await signedUrl(localKey, "GET", LINK_SECONDS),
 			matteUrl: await signedUrl(siblingKey(key, "matte.mp4"), "PUT", LINK_SECONDS, "video/mp4"),
 			previewUrl: await signedUrl(siblingKey(key, "proxy-cutout.mp4"), "PUT", LINK_SECONDS, "video/mp4"),
