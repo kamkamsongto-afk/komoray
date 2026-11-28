@@ -127,6 +127,16 @@ check("English: a count is not joined into one number (22 Nov)", () => same(text
 check("Thai numbers in words become digits (22 Nov)", () => same(texts(thaiNumbers.mergeThaiNumbers(said("ราคา", "สาม", "สิบ", "บาท"))), ["ราคา", "30", "บาท"]));
 check("Thai: ร้อย ละ (percent) is left as heard (22 Nov)", () => same(texts(thaiNumbers.mergeThaiNumbers(said("คิด", "เป็น", "ร้อย", "ละ"))), ["คิด", "เป็น", "ร้อย", "ละ"]));
 
+check("Thai: a letter on the wrong side of a long pause goes back to its word (28 Nov)", () => {
+	const pieces = [w("เว", 84.94, 85.09), w("ลาด", 85.09, 85.66), w("ัง", 88.9, 89.14), w("นั้น", 89.14, 89.3)];
+	const got = thaiWords.mergeThaiWords(thaiWords.mendAcrossPause(pieces)).map((x) => [x.text, x.start, x.end]);
+	return same(got, [["เวลา", 84.94, 85.66], ["ดังนั้น", 88.9, 89.3]]);
+});
+check("Thai: a short pause before a vowel mark still joins, nothing moved (13 Nov)", () => {
+	const pieces = [w("ส", 263, 263.35), w("่วน", 263.62, 263.9)];
+	return same([texts(thaiWords.mendAcrossPause(pieces)), texts(thaiWords.mergeThaiWords(thaiWords.mendAcrossPause(pieces)))], [["ส", "่วน"], ["ส่วน"]]);
+});
+
 check("Timeline: a strip stretched into its neighbour stops at it (17 Nov)", () => {
 	const memo = new Map();
 	rows.packRows([{ id: "a", start: 0, end: 2 }, { id: "b", start: 3, end: 5 }], "banners", 0, memo);

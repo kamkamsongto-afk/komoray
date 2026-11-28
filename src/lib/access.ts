@@ -224,11 +224,13 @@ export async function startListening(key: string, email?: string | null): Promis
 	if (!status.allowed || !email) return { error: NO_INVITE, status: 403 };
 
 	const [started, done, failed] = await Promise.all([
-		getJson<{ startedAt?: string }>(siblingKey(key, "analyze.json")),
+		getJson<ListenJob>(siblingKey(key, "analyze.json")),
 		exists(siblingKey(key, "edit.json")),
 		exists(siblingKey(key, "analyze-error.json")),
 	]);
-	const running = started?.startedAt && !done && !failed && Date.now() - new Date(started.startedAt).getTime() < JOB_TOO_OLD_MS;
+	// As long as settleDeadListen gives it: a big video asked again after 30 minutes had speech-to-text started, and paid
+	// for, a second time while the first was still at work.
+	const running = started?.startedAt && !done && !failed && Date.now() - new Date(started.startedAt).getTime() < tooOld(started);
 	if (running) return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
 	if (status.unlimited) return {};
 
@@ -273,12 +275,15 @@ export async function startListening(key: string, email?: string | null): Promis
 	}
 }
 
+// A big video's sound takes up to an hour to come out (Modal, lib/audio-first.ts), so it gets longer than a small one.
+// big missing with audioFirst: written before 28 Nov, when only big videos went through their sound.
+type ListenJob = { startedAt?: string; audioFirst?: boolean; big?: boolean };
+const tooOld = (job: ListenJob) => (job.audioFirst && job.big !== false ? BIG_JOB_TOO_OLD_MS : JOB_TOO_OLD_MS);
+
 // A job that never reported back has died: say so and give the minutes back. true = it had died.
 export async function settleDeadListen(key: string) {
-	const started = await getJson<{ startedAt?: string; usageKey?: string; audioFirst?: boolean }>(siblingKey(key, "analyze.json"));
-	// A big video first takes its sound out (up to an hour in Modal, lib/audio-first.ts), so it gets longer than a small one.
-	const limit = started?.audioFirst ? BIG_JOB_TOO_OLD_MS : JOB_TOO_OLD_MS;
-	if (!started?.startedAt || Date.now() - new Date(started.startedAt).getTime() < limit) return false;
+	const started = await getJson<ListenJob & { usageKey?: string }>(siblingKey(key, "analyze.json"));
+	if (!started?.startedAt || Date.now() - new Date(started.startedAt).getTime() < tooOld(started)) return false;
 	await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error: "This took too long and stopped. Your minutes are back. Please try again.", at: new Date().toISOString() }), "application/json");
 	if (started.usageKey) await refundListen(key, started.usageKey).catch(() => {});
 	return true;
