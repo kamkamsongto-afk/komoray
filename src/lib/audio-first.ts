@@ -2,7 +2,7 @@ import { refundListen } from "@/lib/access";
 import { DEEPGRAM_MAX_BYTES } from "@/lib/limits";
 import { signedCallbackUrl } from "@/lib/callback";
 import { startTranscription } from "@/lib/transcribe";
-import { exists, getJson, objectSize, putIfAbsent, putObject, siblingKey, signedUrl } from "@/lib/r2";
+import { deleteObject, exists, getJson, objectSize, putIfAbsent, putObject, siblingKey, signedUrl } from "@/lib/r2";
 
 // Speech-to-text hears the video's sound, taken out on the picture's clock (coach 28 Nov, VID20261126143707): phone files
 // start their sound after the picture (366 ms on that clip), and Deepgram given the video itself counted from the first
@@ -76,7 +76,12 @@ export async function startOnSound(key: string, requestUrl: string, env: Env, st
 // yet: starts Deepgram once the sound is ready, or records why it can't.
 export async function continueAudioFirst(key: string, requestUrl: string, env: Env) {
 	const started = await getJson<Started>(siblingKey(key, "analyze.json"));
-	if (!started?.audioFirst || (await exists(siblingKey(key, "deepgram-started.json")))) return;
+	if (!started?.audioFirst) return;
+	const [done, failed, going] = await Promise.all(["edit.json", "analyze-error.json", "deepgram-started.json"].map((name) => exists(siblingKey(key, name))));
+	// The script is there already (Deepgram got the video after a long wait): a sound that came after it goes.
+	if (done) return void (await deleteObject(siblingKey(key, AUDIO_FILE)).catch(() => {}));
+	// failed: its minutes are back, so nothing more is paid for it (the review, 28 Nov).
+	if (failed || going) return;
 	const fail = async (error: string) => {
 		await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error, at: new Date().toISOString() }), "application/json").catch(() => {});
 		if (started.usageKey) await refundListen(key, started.usageKey).catch(() => {});

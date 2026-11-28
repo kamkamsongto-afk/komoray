@@ -43,6 +43,9 @@ const big = await tooBigForDeepgram(key);
 // listen that fails, or a wrong press, does not lose it for good.
 const editKey = siblingKey(key, "edit.json");
 if (await exists(editKey)) await copyObject(editKey, siblingKey(key, "edit-before.json"));
+// First analyze.json stops saying anything about the last listen: with its files going one by one, a status ask or a
+// late sound-ready took the old one for timed out and started speech-to-text, in the old language (the review, 28 Nov).
+await putObject(siblingKey(key, "analyze.json"), JSON.stringify({ startedAt: new Date().toISOString(), ...(options && { options }) }), "application/json");
 // The sound and its error from an earlier listen go before analyze.json says a new one began, or a status ask between
 // the two would act on them.
 await Promise.all([editKey, ...["analyze-error.json", "deepgram-started.json", AUDIO_FILE, "audio-error.json"].map((name) => siblingKey(key, name))].map((file) => deleteObject(file)));

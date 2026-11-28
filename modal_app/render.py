@@ -3194,6 +3194,9 @@ def make_thumb(video: Path, thumb: Path) -> None:
 AUDIO_RATE = 16000  # Hz: what speech-to-text needs; mono, lossless (FLAC), so nothing is lost for Deepgram
 
 
+AUDIO_SHORT_MOST = 1.5  # seconds the sound may end before the video without a second read (audio_whole)
+
+
 def audio_command(src: str, out: Path) -> list[str]:
     """ffmpeg: only the sound of a video (src: a file, or a link ffmpeg reads piece by piece), mono at AUDIO_RATE, as FLAC."""
     # On the picture's clock, the same sound track as the preview's proxy-audio.pcm: phone files start their sound after
@@ -3209,7 +3212,9 @@ def audio_whole(src: str, out: Path) -> bool:
         return False
     try:
         whole = duration_of(src)  # type: ignore[arg-type]  # a link works as well as a path
-        return whole > 0 and duration_of(out) >= whole * 0.98 - 1
+        # Seconds, not a share of the length: 2% of 20 minutes let 25 s go missing, and what has no sound is cut from
+        # the final video (the review, 28 Nov). A truly shorter sound is read once more from the whole file.
+        return whole > 0 and duration_of(out) >= whole - AUDIO_SHORT_MOST
     except Exception:
         return False
 
