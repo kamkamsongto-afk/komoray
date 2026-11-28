@@ -295,6 +295,49 @@ def wraps(cases):
     return out
 
 
+def heights(cases):
+    """How far each kind of lettering is moved so it sits where the browser draws it, with stand-in font numbers
+    (the check's machine has no font files), and the Box look's drawn box."""
+    numbers = lambda path: (0.935, 0.265, 0.935, 0.265) if "Fira" in str(path) else (1.1, 0.395, 1.18, 0.4)
+    real_box = r.rounded_box
+    r.text_width = lambda *a, **k: 100.0
+
+    def drawn(c, on):
+        r.font_heights = numbers if on else (lambda path: None)
+        boxes = []
+        r.rounded_box = lambda w, h, radius: boxes.append(h) or real_box(w, h, radius)
+        style = {**r.DEFAULT_STYLE, "format": "9:16", "size": c["size"], "look": c.get("look", "clean"), "motion": c.get("motion", "none"), "position": 0.3, "logo": c.get("logo", ""), "logoAt": c.get("logoAt", "top-left")}
+        if c["kind"] == "banner":
+            events = r.banner_events([{"text": c["text"], "start": 0, "end": 3, "place": "middle", "scale": 2, "noBox": True}], style=style)
+        elif c["kind"] == "behind":
+            events = r.build_behind([{"text": c["text"], "start": 0, "end": 0.2, "size": c["size"], "y": 0.4, "fx": "fade", "fadeIn": False, "font": "kanit"}]).splitlines()
+        else:
+            words = [{"text": t, "start": 0.2 * k, "end": 0.2 * k + 0.18} for k, t in enumerate(c["text"].split())]
+            plan = [{"from": 0, "n": len(words), **({"row2": 1} if c.get("look") == "two" else {})}]
+            events = r.build_subtitles(words, [(0.0, 5.0)], style, [], plan).splitlines()
+        rows = [e.split(",", 9) for e in events if e.startswith("Dialogue:") and "\\p1" not in e]
+        if c["kind"] == "logo":
+            rows = [f for f in rows if f[3] == "Logo"]
+        else:
+            rows = [f for f in rows if f[3] != "Logo"]
+        f = rows[0]
+        place = re.search(r"\\(?:pos|move)\(([-0-9.]+),([-0-9.]+)", f[9])
+        return {"y": float(place[2]) if place else None, "margin": int(f[7]), "box": boxes[0] if boxes else None}
+
+    out = []
+    for c in cases:
+        with_it, without = drawn(c, True), drawn(c, False)
+        r.rounded_box = real_box
+        if c["kind"] == "logo":
+            moved = (with_it["margin"] or r.LOGO["top"]) - r.LOGO["top"]
+        elif with_it["y"] is None:
+            moved = with_it["margin"] - without["margin"]
+        else:
+            moved = with_it["y"] - without["y"]
+        out.append({"moved": moved, "box": with_it["box"] if c.get("look") == "box" else None})
+    return out
+
+
 def two_rows(cases):
     """Two lines with a Line spacing below 0: each row's own event, and whether libass is left to place it (it then
     pushes the rows apart, in the wrong order: the review of 28 Nov)."""
@@ -307,7 +350,7 @@ def two_rows(cases):
     return out
 
 
-SECTIONS = {f.__name__: f for f in (plan, two_rows, bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
+SECTIONS = {f.__name__: f for f in (heights, plan, two_rows, bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
 
 if __name__ == "__main__":
     asked = json.loads(sys.stdin.buffer.read().decode("utf-8"))
