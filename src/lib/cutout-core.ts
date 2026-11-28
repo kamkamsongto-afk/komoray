@@ -9,7 +9,9 @@ export type LocalTier = "fast" | "balanced";
 export const FPS = 30;
 // every: the model looks at one frame in this many; the mattes between are blended from the two around them.
 export const SETTINGS: Record<LocalTier, { side: number; every: number; bitrate: number }> = {
-	fast: { side: 288, every: 3, bitrate: 1_500_000 }, // side: matte's short side, px. every: 3, on trial (coach 28 Nov)
+	// side: the matte's short side, px. every: 3 (coach 28 Nov, for speed, edges compared on their clip: against the model
+	// on every frame, 0.09% of the speaker's area differed on average, 0.22% of frames by more than 2%)
+	fast: { side: 288, every: 3, bitrate: 1_500_000 },
 	balanced: { side: 540, every: 2, bitrate: 3_000_000 },
 };
 export const FAST_SIDE = 256; // Fast: what Google's model is made for

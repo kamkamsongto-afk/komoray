@@ -3,7 +3,7 @@
 // (white = person) as a plain H.264 stream, one frame for every frame of the video, black outside the
 // windows. /api/cutout/finish then turns that stream into the same files Best makes (modal_app/cutout.py),
 // so the player and Make video don't know the difference.
-//   Fast      Google's selfie model, on the processor, every frame (40 fps on a plain Intel laptop), in Web Workers
+//   Fast      Google's selfie model, on the processor, one frame in three, the ones between blended, in Web Workers
 //             (cutout-worker.ts), off the thread that draws the screen. On a computer with several cores the video is cut
 //             into stretches done at the same time; while the preview plays only one of them works (setWatching)
 //   Balanced  MODNet (Apache 2.0, code and weights) on the graphics card, every second frame, the ones
@@ -145,9 +145,7 @@ export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows:
 	const source = new RangeSource(videoUrl);
 	const track = await readVideoTrack(source);
 	const { frames } = track;
-	// On trial (coach 28 Nov): ?every=1, 2 or 3 on the AI studio's address, to compare speed and edges on a real clip.
-	const asked = typeof location === "undefined" ? 0 : Number(new URLSearchParams(location.search).get("every"));
-	const settings = { ...SETTINGS[tier], ...(tier === "fast" && [1, 2, 3, 4].includes(asked) && { every: asked }), ...(options.every && { every: options.every }) };
+	const settings = { ...SETTINGS[tier], ...(options.every && { every: options.every }) };
 	const { w, h } = matteSize(track.width, track.height, settings.side);
 	const runs = runsOf(frames, windows);
 	const total = runs.reduce((sum, [a, b]) => sum + b - a, 0);
