@@ -146,7 +146,8 @@ check("Cutout: a speaker off the screen is noticed, and a drag can't lose them (
 			const got = speakerDragged(x, lift, scale);
 			if (speakerOnScreen({ speakerScale: scale, ...got }) < SPEAKER_LOST) return `dragged to ${x}, ${lift} at ${scale}: lost at ${JSON.stringify(got)}`;
 		}
-	return null;
+	const far = speakerDragged(-0.2, 0, 0.5, { speakerX: -0.2, speakerLift: 0 });
+	return far.speakerX === -0.2 ? null : `a speaker the slider put at -0.2 jumped to ${far.speakerX} on the first drag`;
 });
 
 check("Timeline: a strip stretched into its neighbour stops at it (17 Nov)", () => {

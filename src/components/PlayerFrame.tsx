@@ -763,9 +763,12 @@ mode === "move"
 							speakerMoved.current = true;
 							if (d.corner) {
 								const scale = d.scale * (Math.hypot(e.clientX - d.ax, e.clientY - d.ay) / Math.max(1, d.from));
-								onInsert(insert.id, { speakerScale: Math.round(Math.min(INSERT.scale.max, Math.max(INSERT.scale.min, scale)) * 100) / 100 });
+								const speakerScale = Math.round(Math.min(INSERT.scale.max, Math.max(INSERT.scale.min, scale)) * 100) / 100;
+								const at = { speakerX: insert.speakerX, speakerLift: insert.speakerLift ?? 0 };
+								// Made small out near an edge, they would leave the screen: brought along.
+								onInsert(insert.id, { speakerScale, ...(speakerOnScreen({ speakerScale, ...at }) < SPEAKER_LOST && speakerDragged(at.speakerX, at.speakerLift, speakerScale)) });
 							} else {
-								onInsert(insert.id, speakerDragged(d.speakerX + (e.clientX - d.x) / box.clientWidth, d.lift - (e.clientY - d.y) / box.clientHeight, insert.speakerScale));
+								onInsert(insert.id, speakerDragged(d.speakerX + (e.clientX - d.x) / box.clientWidth, d.lift - (e.clientY - d.y) / box.clientHeight, insert.speakerScale, { speakerX: d.speakerX, speakerLift: d.lift }));
 							}
 						}}
 						onPointerUp={() => (speakerDrag.current = null)}
