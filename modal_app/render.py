@@ -17,6 +17,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -134,7 +135,8 @@ FONTS = {
 # asked for smaller to draw letters as big as Kanit's.
 CYRILLIC_FONT = "Fira Sans Medium"
 CYRILLIC_SCALE = 1.2 / 1.58
-BOX_PADDING = 20  # the Box look: space around the letters, px
+BOX_PADDING = 20  # the Box look: space left and right of the letters, px
+BOX_PAD_Y = 5  # and above and below the line (BOX_PAD_Y in subtitle-style.ts)
 # To measure text for rounded boxes: each font's file, and its full height in ems (FONTS in subtitle-style.ts).
 FONT_FOLDER = "/usr/share/fonts/truetype/google/"
 FONT_FILES = {
@@ -258,7 +260,7 @@ def logo_picture_filters(parts: list[str], base: str, index: int, size: int, opa
     parts.append(f"[lgso][lgt]overlay={x}:{y}:format=auto:enable='{moving}'{out}")
 
 
-def logo_text_events(text: str, total: float, style: dict) -> list[str]:
+def logo_text_events(text: str, total: float, style: dict, margin_v: int = 0) -> list[str]:
     """The channel name's Dialogue lines: one for the whole video when always on, else one per showing, each coming in
     and going with ASS tags, linear as logo_in: alpha (see-through), fscx/fscy and its outline from its corner (Zoom; the
     preview's CSS scale shrinks the outline too, libass doesn't with fscx), a white outline with a glow that settles to
@@ -288,7 +290,7 @@ def logo_text_events(text: str, total: float, style: dict) -> list[str]:
             tags += f"\\3c&HFFFFFF&\\blur{glow}\\t(0,{d},\\3c&H000000&\\blur0)"
             if goes:
                 tags += f"\\t({show - d},{show},\\3c&HFFFFFF&\\blur{glow})"
-        lines.append(f"Dialogue: {LOGO_LAYER},{ass_time(a)},{ass_time(b)},Logo,,0,0,0,,{{{NO_WRAP}{tags}{text}")
+        lines.append(f"Dialogue: {LOGO_LAYER},{ass_time(a)},{ass_time(b)},Logo,,0,0,{margin_v},,{{{NO_WRAP}{tags}{text}")  # 0: the style's margin
     return lines
 
 # The Free plan's watermark (WATERMARK in src/lib/watermark.ts, coach 18 Nov): the white word Komoray at 45% with a thin
@@ -485,19 +487,70 @@ def rename_font(path: str, family: str):
     Path(path).write_bytes(bytes(data))
 
 
+def font_face(style: dict, text: str = "", cyrillic: bool = False) -> tuple[str, float]:
+    """The font file a line is drawn with, and the height in ems the preview sizes it by (FONTS in subtitle-style.ts)."""
+    if style.get("font") == "own" and own_font_path(style, style.get("ownFont")):
+        return own_font_path(style, style.get("ownFont")), float((style.get("ownFont") or {}).get("height") or 1.58)
+    if style.get("font") != "own" and (cyrillic or re.search("[Ѐ-ԯ]", text)):
+        return FONT_FOLDER + "FiraSans-Medium.ttf", 1.58  # asked for smaller, drawn as big as Kanit's (CYRILLIC_SCALE)
+    name, height = FONT_FILES.get(style.get("font"), FONT_FILES["kanit"])
+    return FONT_FOLDER + name, height
+
+
+_heights: dict = {}
+
+
+def font_heights(path: str) -> tuple[float, float, float, float] | None:
+    """A font file's two heights, in ems: (ascent, descent) as browsers lay a line out (its typographic numbers where it
+    says to use them, else hhea) and (ascent, descent) as libass sizes it (the Windows numbers). None: not readable."""
+    import struct
+
+    if path not in _heights:
+        try:
+            data = Path(path).read_bytes()
+            count = struct.unpack_from(">H", data, 4)[0]
+            at = {data[12 + i * 16:16 + i * 16]: struct.unpack_from(">I", data, 20 + i * 16)[0] for i in range(count)}
+            upem = struct.unpack_from(">H", data, at[b"head"] + 18)[0]
+            ascent, descent = struct.unpack_from(">hh", data, at[b"hhea"] + 4)
+            os2 = at[b"OS/2"]
+            if struct.unpack_from(">H", data, os2 + 62)[0] & 128:  # USE_TYPO_METRICS
+                ascent, descent = struct.unpack_from(">hh", data, os2 + 68)
+            top, bottom = struct.unpack_from(">HH", data, os2 + 74)
+            _heights[path] = (ascent / upem, -descent / upem, top / upem, bottom / upem) if top + bottom else None
+        except (OSError, KeyError, struct.error) as err:
+            print("font heights not read:", path, type(err).__name__, file=sys.stderr)
+            _heights[path] = None
+    return _heights[path]
+
+
+def baseline_lift(face: tuple[str, float], size: float, full: float) -> float:
+    """px to move a line up so its letters sit where the preview draws them. The preview centres the font's own content
+    in a line `size` tall; libass makes the Windows height `full` and stands it on the line's bottom. Without this the
+    video's letters sat ~5 px lower in Kanit and ~24 px lower in the Russian font (coach, 28 Nov)."""
+    heights = font_heights(face[0])
+    if not heights:
+        return 0.0
+    ascent, descent, top, bottom = heights
+    em = size / face[1]
+    return (size - (ascent + descent) * em) / 2 + descent * em - full * bottom / (top + bottom)
+
+
+def middle_shift(face: tuple[str, float], size: float, full: float) -> float:
+    """The same for a line placed by its middle (\\an5: banners, text behind the speaker): px to add to its y."""
+    heights = font_heights(face[0])
+    if not heights:
+        return 0.0
+    ascent, descent, top, bottom = heights
+    return (ascent - descent) * (size / face[1]) / 2 - full * (top - bottom) / (2 * (top + bottom))
+
+
 def text_width(text: str, style: dict, size: float, spacing: int = 0, cyrillic: bool = False) -> float:
     """How wide libass draws this text, px, to draw a box around it: libass makes a font's full height the
     font size, and Thai needs real shaping to know its width. cyrillic: part of a line drawn in the Russian
     font (font_tag picks one font for a whole line)."""
     import uharfbuzz as hb
 
-    if style.get("font") == "own" and own_font_path(style, style.get("ownFont")):
-        path, height = own_font_path(style, style.get("ownFont")), float((style.get("ownFont") or {}).get("height") or 1.58)
-    elif style.get("font") != "own" and (cyrillic or re.search("[Ѐ-ԯ]", text)):
-        path, height = FONT_FOLDER + "FiraSans-Medium.ttf", 1.58  # asked for smaller, drawn as big as Kanit's (CYRILLIC_SCALE)
-    else:
-        name, height = FONT_FILES.get(style.get("font"), FONT_FILES["kanit"])
-        path = FONT_FOLDER + name
+    path, height = font_face(style, text, cyrillic)
     if path not in _shapers:
         face = hb.Face(hb.Blob.from_file_path(path))
         _shapers[path] = (hb.Font(face), face.upem)
@@ -711,9 +764,12 @@ def banner_events(banners: list[dict], height: int = HEIGHT, shape: str = "9:16"
         box = rounded_box(box_width, tall, radius)
         named = f"\\fn{name}" if name else ""
         looks = []
-        for row_text, row_size in rows:
+        for k, (row_text, row_size) in enumerate(rows):
             font = font_tag(row_text, row_own, row_size)
             looks.append(font or f"{named}\\fs{row_size}")
+            # Each row's letters moved to where the preview draws them in this font; the box stays (middle_shift).
+            drawn = row_size * size
+            middles[k] += middle_shift(font_face(row_style, row_text, bool(font)), drawn, drawn * (CYRILLIC_SCALE if font else 1))
         anim, seconds = b.get("anim") or "fade", end - start
         grows = anim in ("pop", "bounce", "pulse")
         layer += 2
@@ -825,6 +881,9 @@ def build_behind(texts: list[dict], shape: str = "9:16", style: dict | None = No
         own = b.get("ownFont")
         if b.get("font") == "own" and own_font_path(style or {}, own) and own_font_family(style or {}, own):
             font = own_font_family(style or {}, own)
+        # Its rows moved to where the preview draws them in this font (middle_shift).
+        shown = {**(style or {}), "font": b.get("font") if b.get("font") in FONTS or b.get("font") == "own" else "kanit", "ownFont": own}
+        shift = middle_shift(font_face(shown), int(b["size"]), int(b["size"]))
         stroke = int(b.get("stroke") or 0)
         look = f"\\fn{font}\\fs{int(b['size'])}\\1c{ass_colour(b.get('color', '#FFFFFF'))}\\3c{ass_colour(b.get('strokeColor', '#000000'))}\\bord{stroke}\\shad2\\4c&H000000&"
         for f in range(math.ceil(float(b["start"]) * FPS), math.ceil(float(b["end"]) * FPS)):
@@ -833,7 +892,7 @@ def build_behind(texts: list[dict], shape: str = "9:16", style: dict | None = No
                     continue
                 an = {"center": 5, "left": 4, "right": 6}[pose["align"]]
                 for r, row in enumerate(rows):
-                    y = pose["y"] + (r - (len(rows) - 1) / 2) * row_step * pose["sy"]
+                    y = pose["y"] + ((r - (len(rows) - 1) / 2) * row_step + shift) * pose["sy"]
                     # The soft shadow under the letters, as in the preview (roundOutline in PlayerFrame): 40% black.
                     tags = (
                         f"\\an{an}\\pos({pose['x']:.1f},{y:.1f})\\fscx{pose['sx'] * 100:.2f}\\fscy{pose['sy'] * 100:.2f}"
@@ -1750,6 +1809,26 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
     return lines
 
 
+STALE_LINES = "The subtitles changed while the video was being sent. Please refresh the page and press Make video again."
+
+
+def planned_lines(placed: list[dict], plan: list[dict]) -> tuple[list[list[dict]], list[dict]]:
+    """The preview's lines (linePlan in src/lib/timeline.ts) over the same words: each line `n` words from frame `from`.
+    The preview measured them in the real font, so each row fits; they are never made differently here. Words that
+    don't match the plan stop the video: other lines than the ones on screen are never drawn instead."""
+    lines, at = [], 0
+    for shape in plan:
+        n = int(shape.get("n") or 0)
+        line = placed[at:at + n]
+        if n < 1 or len(line) != n or abs(line[0]["start"] - float(shape.get("from", -9))) > 2:
+            raise ValueError(STALE_LINES)
+        lines.append(line)
+        at += n
+    if at != len(placed):
+        raise ValueError(STALE_LINES)
+    return lines, list(plan)
+
+
 def join_thai(words: list[dict]) -> list[str]:
     """Thai doesn't put spaces between words, only between phrases. A Thai line gets one where Thai,
     numbers and English meet ("5 นาที"), after a polite ending or ๆ, and where the speaker pauses.
@@ -1820,7 +1899,7 @@ def scale_tags(keys: list[tuple[int, int]], offset: float) -> str:
     return tags
 
 
-def word_places(plain: list[str], row2: int | None, style: dict, size: float, spacing: int, video_w: int, bottom: float, row_step: float, row_height: float, cyrillic: bool = False) -> list[tuple[float, float]]:
+def word_places(plain: list[str], row2: int | None, style: dict, size: float, spacing: int, video_w: int, bottom: float, row_step: float, row_height: float, cyrillic: bool = False, wrap: bool = True) -> list[tuple[float, float]]:
     """Where the middle of each word of a bouncing line goes, so the line looks the same as when libass lays
     it out by itself: centred, rows going up from `bottom`. A line too wide for the video continues on a
     new row, as it does in the browser."""
@@ -1830,7 +1909,7 @@ def word_places(plain: list[str], row2: int | None, style: dict, size: float, sp
     rows, row, used = [], [], 0.0
     for k in range(len(plain)):
         add = widths[k] + (spaces[k] if row else 0)
-        if row and (k == row2 or used + add > room):
+        if row and (k == row2 or (wrap and used + add > room)):  # the preview's lines (wrap False) already fit
             rows.append(row)
             row, used, add = [], 0.0, widths[k]
         row.append(k)
@@ -1896,7 +1975,7 @@ def ass_time(t: float) -> str:
     return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
 
 
-def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict, banners: list[dict] | None = None) -> str:
+def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict, banners: list[dict] | None = None, plan: list[dict] | None = None) -> str:
     thai = any(is_thai(w["text"]) for w in words)
     # "own": the user's uploaded font, put in the fonts folder next to the subtitles (render()).
     font = (own_font_family(style, style.get("ownFont")) or FONTS["kanit"]) if style["font"] == "own" else FONTS.get(style["font"], FONTS["kanit"])
@@ -1929,9 +2008,14 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     # A Split inside a cut part breaks where the video picks up again, or the pieces on either side would join.
     breaks = [f for f in (break_frame(float(s), segments) for s in (style.get("splits") or [])) if f is not None]
     spots = style.get("spots") or []
-    lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames, breaks)
-    if style.get("subtitles") is False:  # turned off: same as the preview (PlayerFrame shows no line)
+    shapes: list = []
+    if style.get("subtitles") is False:  # turned off: same as the preview (PlayerFrame shows no line), no plan to match
         lines = []
+    elif plan is None:
+        lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames, breaks)
+        shapes = [None] * len(lines)
+    else:
+        lines, shapes = planned_lines(placed, plan)
 
     brand = style.get("color", "#FFE600")
     highlight = ass_colour(brand)
@@ -1944,11 +2028,18 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         total = sum(frames for _, _, frames in segments) / FPS
         logo_font = font_tag(logo, own_font, LOGO["size"])
         # Comes and goes as the style says (logo_text_events); still and always on: one line, as before.
-        events.extend(logo_text_events(f"{logo_font}}}{logo}", total, style))
+        # Up or down to where the preview draws it (baseline_lift): from the top corner, or from the bottom one.
+        full = LOGO["size"] * (CYRILLIC_SCALE if logo_font else 1)
+        face = font_face(style, logo, bool(logo_font))
+        margin = 0
+        if font_heights(face[0]):
+            lift = baseline_lift(face, LOGO["size"], full)
+            margin = js_round(LOGO["top"] + (lift if str(style.get("logoAt", "")).startswith("bottom") else LOGO["size"] - full - lift))
+        events.extend(logo_text_events(f"{logo_font}}}{logo}", total, style, margin))
     logo_align = {"top-left": 7, "top-right": 9, "bottom-left": 1, "bottom-right": 3}.get(style.get("logoAt"), 7)
     # Round corners: libass's own box is always square, so the box is drawn under the letters instead.
     # Bounce too: each word is its own subtitle, but the line has one box.
-    draw_box = look == "box" and (float(style.get("boxRadius") or 0) > 0 or motion == "bounce")
+    draw_box = look == "box"  # libass's own box takes its size from the font; ours is the preview's (BOX_PAD_Y)
     box_fill = f"\\1c{ass_colour(style.get('boxColor', '#000000'))}\\1a{alpha_of(float(style.get('boxOpacity', 0.75)))}"
     text_layer = 1 if draw_box else 0
     all_motion = motion
@@ -1964,15 +2055,33 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
         if i + 1 < len(lines) and lines[i + 1][0]["start"] - end < gap_frames:
             end = lines[i + 1][0]["start"]
         plain = [ass_text(p) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
-        parts = [spaced_marks(p, spacing) for p in plain]
+        shape = shapes[i]
+        # One word wider than a whole row is drawn smaller (`shrink`), letter spacing and all, as the preview draws it;
+        # every other line is `size`.
+        small = min(1.0, max(0.1, float((shape or {}).get("shrink") or 1)))
+        line_size = round(size * small, 2) if small < 1 else size
+        line_spacing = round(spacing * small, 2) if small < 1 else spacing
+        parts = [spaced_marks(p, line_spacing) for p in plain]
         row2 = second_row(plain) if look == "two" else None
-        line_font = font_tag("".join(parts), own_font, size)
+        if shape is not None and look == "two":
+            row2 = shape.get("row2") if 0 < int(shape.get("row2") or 0) < len(plain) else None
+        line_font = font_tag("".join(parts), own_font, line_size)
         cyrillic_line = bool(line_font)
-        letters_height = size * CYRILLIC_SCALE if cyrillic_line else size  # libass makes a font's full height its size
+        letters_height = line_size * CYRILLIC_SCALE if cyrillic_line else line_size  # libass makes a font's full height its size
+        if small < 1 and not cyrillic_line:
+            line_font = f"\\fs{line_size:g}"
+        if small < 1 and spacing:
+            line_font += f"\\fsp{line_spacing:g}"
+        if shape is not None:  # a line of the preview's: libass never breaks it (NO_WRAP)
+            line_font = NO_WRAP + line_font
+        # The letters moved up to where the preview draws them; the box stays where the line is.
+        lift = baseline_lift(font_face(style, "".join(parts), cyrillic_line), line_size, letters_height)
+        text_margin = line_margin + js_round(lift)
+        second = parts[row2].lstrip() if row2 is not None else ""  # the second row without the space put above it
         if row2 is not None:
             # ASS has no line spacing: an empty row as tall as the gap goes between the two rows.
             gap = int(style.get("lineSpacing") or 0)
-            back = size * CYRILLIC_SCALE if line_font else size
+            back = line_size * CYRILLIC_SCALE if cyrillic_line else line_size
             spacer = f"\\N{{\\fs{gap}}}\\h\\N{{\\fs{back:g}}}" if gap > 0 else "\\N"
             parts[row2] = spacer + parts[row2].lstrip()
         if draw_box:
@@ -1981,35 +2090,39 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             gap = int(style.get("lineSpacing") or 0)
             bottom = video_h - line_margin
             for r, row in enumerate(rows):
-                row_bottom = bottom - (size + gap) * (len(rows) - 1 - r)
+                row_bottom = bottom - (line_size + gap) * (len(rows) - 1 - r)
                 # Two rows meet with no space, so a see-through box doesn't get darker where they overlap.
-                above = BOX_PADDING if r == 0 else gap
-                below = BOX_PADDING if r == len(rows) - 1 else 0
-                row_height = size + above + below
-                middle = row_bottom - size + (below - above + size) / 2
-                box_width = text_width(row, style, size, spacing, cyrillic_line) + 2 * BOX_PADDING
+                above = BOX_PAD_Y if r == 0 else gap
+                below = BOX_PAD_Y if r == len(rows) - 1 else 0
+                row_height = line_size + above + below
+                middle = row_bottom - line_size + (below - above + line_size) / 2
+                box_width = text_width(row, style, line_size, line_spacing, cyrillic_line) + 2 * BOX_PADDING
                 if motion == "bounce":  # the room kept between its words (word_places)
                     row_words = len(plain) if row2 is None else row2 if r == 0 else len(plain) - row2
-                    box_width += (row_words - 1) * size * BOUNCE_WORD_GAP
+                    box_width += (row_words - 1) * line_size * BOUNCE_WORD_GAP
                 box = rounded_box(box_width, row_height, float(style.get("boxRadius") or 0))
                 head = f"{{\\an5\\pos({video_w / 2:.0f},{middle:.0f})\\bord0\\shad0{box_fill}"
                 events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{head}\\p1}}{pop_tags(motion, 0)}{box}{{\\p0}}")
         if motion == "bounce":
-            row_step = size + int(style.get("lineSpacing") or 0)
-            places = word_places(plain, row2, style, size, spacing, video_w, video_h - line_margin, row_step, letters_height, cyrillic_line)
-            words = [spaced_marks(p.strip(), spacing) for p in plain]
+            row_step = line_size + int(style.get("lineSpacing") or 0)
+            places = word_places(plain, row2, style, line_size, line_spacing, video_w, video_h - line_margin - lift, row_step, letters_height, cyrillic_line, wrap=shape is None)
+            words = [spaced_marks(p.strip(), line_spacing) for p in plain]
             events += bounce_events(line, start, end, words, places, line_font, text_layer, highlight if look == "highlight" else None)
             continue
         line_font = f"{{{line_font}}}" if line_font else ""
-        if row2 is not None and int(style.get("lineSpacing") or 0) < 0:
+        # Also Russian two rows: libass stacks rows as tall as its smaller font, the preview a whole line apart.
+        if row2 is not None and (int(style.get("lineSpacing") or 0) < 0 or cyrillic_line):
             # Rows closer than usual: ASS can't pull rows together, so each row is its own event, row_step apart like Bounce.
-            step = size + int(style.get("lineSpacing") or 0)
-            rows = [("".join(parts[:row2]), step), (parts[row2].removeprefix("\\N") + "".join(parts[row2 + 1:]), 0)]
-            for row, lift in rows:
-                events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin + lift},,{line_font}{pop_tags(motion, 0)}{row}")
+            step = line_size + int(style.get("lineSpacing") or 0)
+            rows = [("".join(parts[:row2]), step), (second + "".join(parts[row2 + 1:]), 0)]
+            for row, up in rows:
+                # Placed with \pos (its bottom middle, where a margin would put it): left to a margin, libass moves two
+                # overlapping events apart and put the second row above the first (review, 28 Nov).
+                place = f"{{\\an2\\pos({video_w / 2:.0f},{video_h - line_margin - lift - up:.1f})}}"
+                events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{place}{line_font}{pop_tags(motion, 0)}{row}")
             continue
         if look != "highlight":
-            events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
+            events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{text_margin},,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
             continue
         # Highlight: one event per word, that word in the brand colour until the next one starts.
         # As the preview picks it: the last word that has started is the lit one, inside the line's own time. A cut through
@@ -2027,7 +2140,7 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
                 on = f"\\1c{highlight}" if coloured else ""
                 off = f"\\1c{ass_colour(style.get('textColor', '#FFFFFF'))}" if coloured else ""
                 text += f"{{{on}}}{p}{{{off}}}" if on else p
-            events.append(f"Dialogue: {text_layer},{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, since)}{text}")
+            events.append(f"Dialogue: {text_layer},{ass_time(a / FPS)},{ass_time(b / FPS)},Default,,0,0,{text_margin},,{line_font}{pop_tags(motion, since)}{text}")
 
     # Box: the outline becomes a dark box behind each line (BorderStyle 3) with no shadow.
     boxed = look == "box"
@@ -2948,7 +3061,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 rename_font(str(path), unique_font_name(str(file)))  # one family per file (own_font_family)
                 style.setdefault("_ownFontPaths", {})[file] = str(path)
                 fonts_dir = "fonts"
-            subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners")), encoding="utf-8")
+            subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners"), edit.get("lines")), encoding="utf-8")
 
             # Cutout layers (behind.ts): sent by the app with links to the matte and each picture or clip.
             cutout = None

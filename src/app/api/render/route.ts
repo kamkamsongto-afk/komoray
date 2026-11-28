@@ -14,7 +14,7 @@ import type { Banner } from "@/lib/banners";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
 import type { Window } from "@/lib/cutout";
-import { FPS, keepSegments, totalFrames } from "@/lib/timeline";
+import { FPS, keepSegments, planFits, readLinePlan, totalFrames } from "@/lib/timeline";
 import { jobFiles, PART_JOB, PART_RENDER, readRenderPart, type RenderPart, WHOLE_JOB } from "@/lib/render-part";
 import { readStyle } from "@/lib/subtitle-style";
 import { takeRender } from "@/lib/render-limit";
@@ -30,7 +30,7 @@ import { watermarkOn } from "@/lib/watermark-on";
 const LINK_SECONDS = 3600;
 // Part of every video's fingerprint (below). Change it whenever render.py makes the same edits look different
 // (a fix or a new look): else a press that changed nothing hands back the video made before the fix.
-const RENDER_REV = "2026-11-28b"; // k (28 Nov): a long banner row or channel name with spaces is never broken in two by itself; j (28 Nov): the opening pieces' sound stays with the picture when a phone's sound starts after it; i (26 Nov): "บาท" stays on the line of a long number that takes longer to say than a line may last; h (25 Nov): a Highlight line never starts before itself (it showed over the line before) and Bounce words stay inside their line; g (25 Nov): a background zoomed smaller than its space shows its colour round it, not its own edge smeared; f (24 Nov): banners (20 lines shrunk to fit, stroke, rotate, padding), background movement, Layout zoom/line-break fallback; e (22-23 Nov): subtitle lines never end on a leaning word or split a number from its unit, and "บาท" never starts one (coach 22-23 Nov); Layout zoom (meZoom) is new, old layouts unchanged. a: English lines never end on a word that leads on ("I", "the"), break at , . or a pause. b: two spaces typed = a new line; retyped English words keep their times. c: an English line ended by a pause gives a leading word ("I") to the next. d: a word half cut by hand still shows in the subtitles
+const RENDER_REV = "2026-11-28d"; // m (28 Nov): letters sit where the preview draws them (each font's own heights), the Box look's box is the preview's size, Russian two rows a line apart; l (28 Nov): the preview makes the subtitle lines, each fitting one row; close rows of Two lines keep their order; k (28 Nov): a long banner row or channel name with spaces is never broken in two by itself; j (28 Nov): the opening pieces' sound stays with the picture when a phone's sound starts after it; i (26 Nov): "บาท" stays on the line of a long number that takes longer to say than a line may last; h (25 Nov): a Highlight line never starts before itself (it showed over the line before) and Bounce words stay inside their line; g (25 Nov): a background zoomed smaller than its space shows its colour round it, not its own edge smeared; f (24 Nov): banners (20 lines shrunk to fit, stroke, rotate, padding), background movement, Layout zoom/line-break fallback; e (22-23 Nov): subtitle lines never end on a leaning word or split a number from its unit, and "บาท" never starts one (coach 22-23 Nov); Layout zoom (meZoom) is new, old layouts unchanged. a: English lines never end on a word that leads on ("I", "the"), break at , . or a pause. b: two spaces typed = a new line; retyped English words keep their times. c: an English line ended by a pause gives a leading word ("I") to the next. d: a word half cut by hand still shows in the subtitles
 
 async function fingerprintOf(parts: unknown) {
 	const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(parts)));
@@ -49,7 +49,10 @@ export async function POST(request: Request) {
 	// part: only this stretch of the final video, seconds (Make this part, coach 14 Nov). Its job has files of its own
 	// (lib/render-part.ts), so the whole video made before stays, and the admin pages only see whole videos.
 	// again: Make it again anyway, after a press that changed nothing.
-	const { key: rawKey, part: rawPart, again } = (await request.json()) as { key?: string; part?: unknown; again?: boolean };
+	const { key: rawKey, part: rawPart, again, lines: rawLines } = (await request.json()) as { key?: string; part?: unknown; again?: boolean; lines?: unknown };
+	// The preview's subtitle lines: the video draws these and breaks none itself. None sent (a page open since before):
+	// render.py makes its own, as it did.
+	const lines = readLinePlan(rawLines);
 	const key = await readKey(rawKey ?? null);
 	if (!key) return Response.json({ error: "Unknown video" }, { status: 404 });
 	const email = (await currentUser()).user?.email;
@@ -72,6 +75,11 @@ export async function POST(request: Request) {
 		siblingKey(key, "edit.json"),
 	);
 	if (!edit) return Response.json({ error: "Find silences first" }, { status: 400 });
+	// A plan over other words than the saved ones (a page that is behind): said here, before anything is counted or
+	// started. With subtitles off there are no lines to match.
+	if (lines && readStyle(edit.style).subtitles && !planFits(fixedWords(edit.words, edit.fixes, cutThaiWords, edit.deleted), keepSegments(edit.duration, allCuts(edit)), lines)) {
+		return Response.json({ error: "The subtitles changed while the video was being sent. Please refresh the page and press Make video again." }, { status: 409 });
+	}
 	const part = rawPart === undefined ? null : readRenderPart(rawPart, totalFrames(keepSegments(edit.duration, allCuts(edit))) / FPS);
 	if (rawPart !== undefined && !part) return Response.json({ error: `Pick at least ${PART_RENDER.minSeconds} seconds of the video to make.` }, { status: 400 });
 
@@ -160,6 +168,7 @@ export async function POST(request: Request) {
 		RENDER_REV,
 		edit,
 		part,
+		...(lines && { lines }),
 		cutout: layers ? await getJson(siblingKey(key, "cutout.json")) : null,
 		font: ownFont ? await currentUser().then(({ user }) => (user ? getJson(fontKeys(user.id).info) : null)) : null,
 		// Only when it is on (agent review, 18 Nov): always adding the key changed every saved video's fingerprint, so each
@@ -231,7 +240,7 @@ export async function POST(request: Request) {
 			// Modal just removes every cut, so hand it the deleted words and the timeline's hand cuts as cuts too,
 			// and the words already fixed: it only uses them for subtitles.
 			// faces: frame wide videos around the speaker, as the preview does (lib/framing.ts).
-			edit: { ...edit, cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes, cutThaiWords, edit.deleted), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles, ...(part && { part }) },
+			edit: { ...edit, ...(lines && { lines }), cuts: allCuts(edit), words: fixedWords(edit.words, edit.fixes, cutThaiWords, edit.deleted), faces: await getJson<Faces>(siblingKey(key, "faces.json")), cutout, bannerFiles, frameFiles, ...(part && { part }) },
 			// How the subtitles look, from the editor (lib/subtitle-style.ts).
 			style,
 			// Modal only ever gets these one-file, time-limited links, never our R2 keys.

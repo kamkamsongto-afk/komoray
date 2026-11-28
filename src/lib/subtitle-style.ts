@@ -197,6 +197,8 @@ export const FONTS: Record<FontId, { name: string; thai: boolean; height: number
 // font picked by chance (too big, words nearly touching). Its letters are drawn as big as Kanit's, so
 // it counts as Kanit's height here; render.py shrinks it to match (CYRILLIC_SCALE).
 export const CYRILLIC_FONT = { name: "Fira Sans", height: FONTS.kanit.height };
+// px above and below a line in the Box look, in the preview and the final video alike (BOX_PAD_Y in render.py).
+export const BOX_PAD_Y = 5;
 export const hasCyrillic = (text: string) => /[Ѐ-ԯ]/.test(text);
 
 const clamp = (n: number, { min, max }: { min: number; max: number }) => Math.min(max, Math.max(min, n));
