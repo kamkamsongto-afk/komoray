@@ -805,6 +805,7 @@ export function Timeline({
 	// stretch can be dragged to fine-tune it. A click on the zoom strip turns zoom off (or back on) for that piece.
 	type Press = { kind: "scrub" | "pick" | "start" | "end" | "cut"; x: number; at: number; moved: boolean; cut?: [number, number]; side?: "start" | "end"; strip?: boolean; chip?: boolean; shift?: boolean };
 	const press = useRef<Press | null>(null);
+	const touchTap = useRef<{ x: number; y: number } | null>(null); // a finger down off every strip, not yet moved
 	const xAt = (clientX: number) => {
 		const el = scrollRef.current;
 		return el ? clientX - el.getBoundingClientRect().left + el.scrollLeft : 0;
@@ -824,7 +825,12 @@ export function Timeline({
 		if ((e.target as HTMLElement).closest("button")) return;
 		const el = scrollRef.current;
 		if (!el) return;
-		onLeaveItem?.(); // a strip takes its own press (startItemDrag), so this one is on no strip
+		// A strip takes its own press (startItemDrag), so this one is on no strip. Not the scrollbar; a finger counts when it
+		// lifts without having moved (a swipe scrolls the timeline).
+		const box = el.getBoundingClientRect();
+		const onBar = e.clientY - box.top >= el.clientHeight || e.clientX - box.left >= el.clientWidth;
+		touchTap.current = e.pointerType === "touch" && !onBar ? { x: e.clientX, y: e.clientY } : null;
+		if (e.pointerType !== "touch" && !onBar) onLeaveItem?.();
 		// A press in the rows of banners, frames and layouts that misses a strip does nothing but let the strip go
 		// (coach, 17 Nov: just missing a strip picked a stretch of the video, and Make this part came up instead).
 		if (e.clientY - el.getBoundingClientRect().top >= height) {
@@ -869,7 +875,10 @@ export function Timeline({
 			setSelection({ start: Math.min(other, t), end: Math.max(other, t) });
 		}
 	};
-	const onPointerUp = () => {
+	const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
+		const tap = touchTap.current;
+		touchTap.current = null;
+		if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < DRAG_PX) onLeaveItem?.();
 		const p = press.current;
 		press.current = null;
 		follow.current = true;

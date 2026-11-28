@@ -311,10 +311,16 @@ export function ScriptView({
 	const [current, setCurrent] = useState(-1);
 	const [playing, setPlaying] = useState(false);
 	const [selected, setSelected] = useState<number[]>([]);
-	// While the preview plays, Cut me out holds back so the picture and the sound stay smooth.
+	// While the preview plays, Cut me out holds back so the picture and the sound stay smooth. Not in a hidden tab: nobody
+	// watches there, and the player can't even reach its end to stop (review 28 Nov).
 	useEffect(() => {
-		setWatching(playing);
-		return () => setWatching(false);
+		const tell = () => setWatching(playing && !document.hidden);
+		tell();
+		document.addEventListener("visibilitychange", tell);
+		return () => {
+			document.removeEventListener("visibilitychange", tell);
+			setWatching(false);
+		};
 	}, [playing]);
 	// What the script marks with ✂️: the silences still cut, and the parts cut by hand.
 	const shownCuts = useMemo(() => mergeSpans([...subtractSpans(cuts, keep), ...manual]), [cuts, keep, manual]);
@@ -339,6 +345,9 @@ export function ScriptView({
 	// people changing it while they meant to make a new one). fresh counts those; an open box sees it change.
 	const [fresh, setFresh] = useState(0);
 	const startFresh = useCallback(() => {
+		// A time typed in the box is applied when its field loses focus: first that, or resetting the box threw it away
+		// (review 28 Nov).
+		(document.activeElement as HTMLElement | null)?.blur();
 		setFresh((n) => n + 1);
 		setFocusBanner(null);
 		setFocusCutout(null);

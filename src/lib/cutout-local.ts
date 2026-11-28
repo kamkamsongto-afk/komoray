@@ -144,6 +144,8 @@ export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows:
 	const t0 = performance.now();
 	const source = new RangeSource(videoUrl);
 	const track = await readVideoTrack(source);
+	// Stop pressed during that read: the listeners further on are added too late to hear it (review 28 Nov).
+	if (signal.aborted) throw new DOMException("Stopped", "AbortError");
 	const { frames } = track;
 	const settings = { ...SETTINGS[tier], ...(options.every && { every: options.every }) };
 	const { w, h } = matteSize(track.width, track.height, settings.side);

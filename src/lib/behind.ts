@@ -206,12 +206,15 @@ export const SPEAKER_LOST = 0.1;
 // A drag on the video keeps this much of the box's width and of its height on the screen. (The sliders go as far as
 // before.)
 const KEPT_ON_SCREEN = 0.35;
-export function speakerDragged(speakerX: number, speakerLift: number, scale: number) {
-	const within = (n: number, low: number, high: number) => Math.round(Math.min(high, Math.max(low, n)) * 1000) / 1000;
+// from: where this drag started. A speaker the sliders put further out than a drag may go is not pulled in by the first
+// move; they just can't be dragged further out.
+export function speakerDragged(speakerX: number, speakerLift: number, scale: number, from?: { speakerX: number; speakerLift: number }) {
+	const within = (n: number, low: number, high: number, start?: number) =>
+		Math.round(Math.min(Math.max(high, start ?? high), Math.max(Math.min(low, start ?? low), n)) * 1000) / 1000;
 	const edge = scale * (0.5 - KEPT_ON_SCREEN);
 	return {
-		speakerX: within(speakerX, Math.max(INSERT.stand.min, -edge), Math.min(INSERT.stand.max, 1 + edge)),
-		speakerLift: within(speakerLift, Math.max(INSERT.lift.min, -scale * (1 - KEPT_ON_SCREEN)), Math.min(INSERT.lift.max, 1 - scale * KEPT_ON_SCREEN)),
+		speakerX: within(speakerX, Math.max(INSERT.stand.min, -edge), Math.min(INSERT.stand.max, 1 + edge), from?.speakerX),
+		speakerLift: within(speakerLift, Math.max(INSERT.lift.min, -scale * (1 - KEPT_ON_SCREEN)), Math.min(INSERT.lift.max, 1 - scale * KEPT_ON_SCREEN), from?.speakerLift),
 	};
 }
 

@@ -419,7 +419,8 @@ def start(body: dict) -> dict:
     if not hmac.compare_digest(str(body.get("token", "")), os.environ["RENDER_TOKEN"]):
         return {"error": "unauthorized"}
     if body.get("kind") == "finish":
-        call = finish_local.spawn(body["videoUrl"], body["localUrl"], body["windows"], body["tier"], body["matteUrl"], body["previewUrl"], body["doneUrl"], body["errorUrl"], body.get("pictureUrl"))
+        picture = {"picture_url": body["pictureUrl"]} if body.get("pictureUrl") else {}  # an older worker takes the rest
+        call = finish_local.spawn(body["videoUrl"], body["localUrl"], body["windows"], body["tier"], body["matteUrl"], body["previewUrl"], body["doneUrl"], body["errorUrl"], **picture)
     else:
         call = cutout.spawn(body["videoUrl"], body["windows"], body["matteUrl"], body["previewUrl"], body["doneUrl"], body["errorUrl"], body.get("previousUrl"), body.get("previousWindows"))
     return {"callId": call.object_id}

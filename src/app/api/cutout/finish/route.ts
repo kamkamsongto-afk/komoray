@@ -37,7 +37,8 @@ export async function POST(request: Request) {
 	const errorKey = siblingKey(key, "cutout-error.json");
 	// The preview copy the matte was cut from: the server makes the stacked preview from it, not from the whole original.
 	const pictureKey = siblingKey(key, "proxy.mp4");
-	const picture = (await exists(pictureKey)) ? await signedUrl(pictureKey, "GET", LINK_SECONDS) : undefined;
+	// A look that fails: the whole original is used, as without a preview copy (a thrown error here left the job "processing").
+	const picture = (await exists(pictureKey).catch(() => false)) ? await signedUrl(pictureKey, "GET", LINK_SECONDS) : undefined;
 	const res = await fetch(env.CUTOUT_URL, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
