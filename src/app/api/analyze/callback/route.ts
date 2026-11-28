@@ -68,6 +68,7 @@ export async function POST(request: Request) {
 	} catch (err) {
 		const error = err instanceof Error ? err.message : "Analysis failed";
 		await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error, at: new Date().toISOString() }), "application/json");
+		await deleteObject(siblingKey(key, AUDIO_FILE)).catch(() => {});
 		// A failed job takes no minutes.
 		const started = await getJson<{ usageKey?: string }>(siblingKey(key, "analyze.json")).catch(() => null);
 		if (started?.usageKey) await refundListen(key, started.usageKey).catch(() => {});

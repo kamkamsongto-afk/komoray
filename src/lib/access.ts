@@ -230,7 +230,7 @@ export async function startListening(key: string, email?: string | null): Promis
 	]);
 	// As long as settleDeadListen gives it: a big video asked again after 30 minutes had speech-to-text started, and paid
 	// for, a second time while the first was still at work.
-	const running = started?.startedAt && !done && !failed && Date.now() - new Date(started.startedAt).getTime() < tooOld(started);
+	const running = started?.startedAt && !done && !failed && Date.now() - (await stageBegan(key, started)) < tooOld(started);
 	if (running) return { error: "This video is already being listened to. Please wait for it to finish.", status: 409 };
 	if (status.unlimited) return {};
 
@@ -279,11 +279,18 @@ export async function startListening(key: string, email?: string | null): Promis
 // big missing with audioFirst: written before 28 Nov, when only big videos went through their sound.
 type ListenJob = { startedAt?: string; audioFirst?: boolean; big?: boolean };
 const tooOld = (job: ListenJob) => (job.audioFirst && job.big !== false ? BIG_JOB_TOO_OLD_MS : JOB_TOO_OLD_MS);
+// When the stage it is in began. A listen through the sound starts speech-to-text later, maybe much later (nobody on the
+// page and Modal's call lost): counted from the first press, the ask that started it also gave the minutes back, and the
+// script came anyway (the review, 28 Nov).
+async function stageBegan(key: string, job: ListenJob) {
+	const mark = job.audioFirst ? await getJson<{ at?: string }>(siblingKey(key, "deepgram-started.json")).catch(() => null) : null;
+	return new Date(mark?.at ?? job.startedAt ?? 0).getTime();
+}
 
 // A job that never reported back has died: say so and give the minutes back. true = it had died.
 export async function settleDeadListen(key: string) {
 	const started = await getJson<ListenJob & { usageKey?: string }>(siblingKey(key, "analyze.json"));
-	if (!started?.startedAt || Date.now() - new Date(started.startedAt).getTime() < tooOld(started)) return false;
+	if (!started?.startedAt || Date.now() - (await stageBegan(key, started)) < tooOld(started)) return false;
 	await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error: "This took too long and stopped. Your minutes are back. Please try again.", at: new Date().toISOString() }), "application/json");
 	if (started.usageKey) await refundListen(key, started.usageKey).catch(() => {});
 	return true;
