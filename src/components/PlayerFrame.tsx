@@ -4,7 +4,7 @@ import { Pause, Play, RotateCw } from "lucide-react";
 import { Anton, Bebas_Neue, Chakra_Petch, Fira_Sans, Kanit, Mitr, Poppins, Prompt, Sarabun, Itim, Sriracha, Pattaya, Chonburi, Charm, Mali, Bai_Jamjuree, K2D, Krub, Kodchasan, Trirong, Maitree, Bangers, Pacifico, Lobster, Abril_Fatface, Alfa_Slab_One, Righteous, Archivo_Black, Titan_One } from "next/font/google";
 import { type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useContext, useEffect, useRef, useState } from "react";
 import { BANNER_ANIMS, BANNER_FILE, BANNER_SCALE, BANNER_TOP, type Banner, bannerFileSrc, bannerFit, bannerInk, bannerMotion, bannerPad, bannerRoll, bannerRows, bannerStrokeShadow, bannerTall } from "@/lib/banners";
-import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, speakerTransform } from "@/lib/behind";
+import { backdropShown, behindMotion, type CutoutLayers, INSERT, type Insert, insertShown, picMoved, picturePlace, pictureWindow, runText, SPEAKER_LOST, speakerDragged, speakerOnScreen, speakerTransform } from "@/lib/behind";
 import { bgStyle } from "@/lib/bg-motion";
 import { clipGain, soundOf } from "@/lib/clip-sound";
 import { type FrameMe, FRAME, frameAt, frameBackMoved, frameBackPlace, frameBackWindow, frameShown, framePicture, frameRect, shapeMask, shapePolygon } from "@/lib/frame-me";
@@ -741,8 +741,9 @@ mode === "move"
 				<div className="pointer-events-none absolute inset-0" style={{ zIndex: 1, ...personStyle }}>
 					{person}
 				</div>
-				{/* While paused: drag the speaker to move them, a top corner to resize them. Writes the same numbers as the sliders. */}
-				{insert && !insert.hidden && !insert.seeThrough && !playing && onInsert && (
+				{/* While paused: drag the speaker to move them, a top corner to resize them. Writes the same numbers as the sliders.
+				    Only once they are cut out (person): before that an empty box could be dragged off the screen unseen. */}
+				{insert && !insert.hidden && !insert.seeThrough && person && !playing && onInsert && (
 					<div
 						title="Drag to move yourself. Drag a corner to resize."
 						onClick={(e) => speakerMoved.current && e.stopPropagation()}
@@ -764,9 +765,7 @@ mode === "move"
 								const scale = d.scale * (Math.hypot(e.clientX - d.ax, e.clientY - d.ay) / Math.max(1, d.from));
 								onInsert(insert.id, { speakerScale: Math.round(Math.min(INSERT.scale.max, Math.max(INSERT.scale.min, scale)) * 100) / 100 });
 							} else {
-								const speakerX = d.speakerX + (e.clientX - d.x) / box.clientWidth;
-								const speakerLift = d.lift - (e.clientY - d.y) / box.clientHeight;
-								onInsert(insert.id, { speakerX: Math.round(Math.min(INSERT.stand.max, Math.max(INSERT.stand.min, speakerX)) * 1000) / 1000, speakerLift: Math.round(Math.min(INSERT.lift.max, Math.max(INSERT.lift.min, speakerLift)) * 1000) / 1000 });
+								onInsert(insert.id, speakerDragged(d.speakerX + (e.clientX - d.x) / box.clientWidth, d.lift - (e.clientY - d.y) / box.clientHeight, insert.speakerScale));
 							}
 						}}
 						onPointerUp={() => (speakerDrag.current = null)}
@@ -776,6 +775,21 @@ mode === "move"
 						{["top-0 left-0", "top-0 right-0"].map((at) => (
 							<span key={at} data-corner="" className={`absolute ${at} h-4 w-4 cursor-nwse-resize rounded-sm bg-blue-400`} style={{ transform: `scale(${1 / insert.speakerScale})` }} />
 						))}
+					</div>
+				)}
+				{insert && !insert.hidden && !insert.seeThrough && person && onInsert && speakerOnScreen(insert) < SPEAKER_LOST && (
+					<div className="pointer-events-none absolute inset-x-0 top-1/4 flex justify-center px-2" style={{ zIndex: 3 }}>
+						<button
+							type="button"
+							onPointerDown={(e) => e.stopPropagation()}
+							onClick={(e) => {
+								e.stopPropagation(); // not also play
+								onInsert(insert.id, { speakerX: 0.25, speakerLift: 0 });
+							}}
+							className="pointer-events-auto rounded-full bg-blue-600 px-3 py-1.5 text-center text-xs font-medium text-white shadow-lg hover:bg-blue-700"
+						>
+							You&apos;re off the screen here · Put me back
+						</button>
 					</div>
 				)}
 			</>

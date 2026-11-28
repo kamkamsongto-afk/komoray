@@ -193,6 +193,28 @@ export const insertName = (i: Insert) => i.name || (i.kind === "video" ? "Clip" 
 export const cleanInsertName = (name: unknown) => String(name ?? "").replace(/[\n\r\t]/g, " ").trim().slice(0, BEHIND.maxName);
 export const speakerTransform = (i: Insert, boxWidth: number) => `translate(${(i.speakerX - 0.5) * boxWidth}px, ${-(i.speakerLift ?? 0) * 100}%) scale(${i.speakerScale})`;
 
+// How much of the speaker's box is on the screen, 0..1, as speakerTransform places it: scale of the screen wide and
+// tall, its middle at speakerX, its bottom edge raised by speakerLift.
+export function speakerOnScreen(i: Pick<Insert, "speakerX" | "speakerLift" | "speakerScale">) {
+	const s = i.speakerScale;
+	const shown = (from: number) => Math.max(0, Math.min(1, from + s) - Math.max(0, from));
+	return (shown(i.speakerX - s / 2) * shown(1 - (i.speakerLift ?? 0) - s)) / (s * s);
+}
+// Less than this on the screen: the preview says so and offers to bring them back. A speaker dragged right off could
+// not be seen, nor grabbed again, and looked like a broken cutout (coach 28 Nov).
+export const SPEAKER_LOST = 0.1;
+// A drag on the video keeps this much of the box's width and of its height on the screen. (The sliders go as far as
+// before.)
+const KEPT_ON_SCREEN = 0.35;
+export function speakerDragged(speakerX: number, speakerLift: number, scale: number) {
+	const within = (n: number, low: number, high: number) => Math.round(Math.min(high, Math.max(low, n)) * 1000) / 1000;
+	const edge = scale * (0.5 - KEPT_ON_SCREEN);
+	return {
+		speakerX: within(speakerX, Math.max(INSERT.stand.min, -edge), Math.min(INSERT.stand.max, 1 + edge)),
+		speakerLift: within(speakerLift, Math.max(INSERT.lift.min, -scale * (1 - KEPT_ON_SCREEN)), Math.min(INSERT.lift.max, 1 - scale * KEPT_ON_SCREEN)),
+	};
+}
+
 // The parts of the source video the speaker must be cut out for: every layer's time on the final video,
 // back on the source, a little wider so a cut-in-between never shows the edge.
 export function cutoutWindows(layers: CutoutLayers, segments: Segment[]): Window[] {
