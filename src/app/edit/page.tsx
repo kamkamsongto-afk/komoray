@@ -13,7 +13,7 @@ import { VideoReady } from "@/components/VideoReady";
 import { WatermarkSeed } from "@/components/WatermarkContext";
 import type { StudioMedia } from "@/components/StudioPlayer";
 import type { Banner } from "@/lib/banners";
-import { type CutoutLayers, NO_LAYERS } from "@/lib/behind";
+import { type CutoutLayers, keptWindows, NO_LAYERS } from "@/lib/behind";
 import type { FrameMe } from "@/lib/frame-me";
 import type { VideoLayout } from "@/lib/layout";
 import type { RenderPart } from "@/lib/render-part";
@@ -48,6 +48,7 @@ type Analysis = {
 	takesApplied?: boolean; // repeated takes were already looked for on this video once
 	options?: UploadOptions; // what was asked for when uploading (none on videos from before)
 	badTakesApplied?: boolean; // the AI's bad takes were cut once, as asked when uploading
+	cutoutApplied?: boolean; // Cut person was started once, as asked when uploading
 	style?: unknown;
 	banners?: Banner[];
 	cutout?: CutoutLayers; // text behind the speaker, pictures and clips behind them (lib/behind.ts)
@@ -324,6 +325,7 @@ export default function EditPage() {
 			spellingApplied?: boolean;
 			takesApplied?: boolean;
 			badTakesApplied?: boolean;
+			cutoutApplied?: boolean;
 			style?: SubtitleStyle;
 			banners?: Banner[];
 			manual?: Cut[];
@@ -377,6 +379,25 @@ export default function EditPage() {
 		analysisRef.current = analysis;
 	});
 	const cutout = useCutout(key, analysis?.duration ?? 0);
+	// Cut person, ticked when uploading (coach, 27 Nov): started once, Fast, on this computer, as soon as it can be: the
+	// preview copy is there, Cutout is on for them and this computer can run it (one that can't leaves it for one that
+	// can). Marked as it starts, so Stop or a reload is the last word.
+	const autoCut = useRef("");
+	const startCut = cutout.start;
+	const cutNow = Boolean(analysis?.options?.cutout && !analysis.cutoutApplied && cutout.on && cutout.support.fast && cutout.status === "none" && !cutout.local);
+	const cutVideo = analysis?.studio?.videoUrl;
+	useEffect(() => {
+		if (!key || !cutNow || !cutVideo || autoCut.current === key) return;
+		const timer = setTimeout(() => {
+			const a = analysisRef.current;
+			if (!a) return;
+			autoCut.current = key;
+			setAnalysis((now) => (now ? { ...now, cutoutApplied: true } : now));
+			save({ cutoutApplied: true });
+			startCut(keptWindows(keepSegments(a.duration, allCuts(a))), "fast", cutVideo);
+		}, 0);
+		return () => clearTimeout(timer);
+	}, [key, cutNow, cutVideo, save, startCut]);
 	const cutoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const bannersTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const framesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
