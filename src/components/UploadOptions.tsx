@@ -1,6 +1,6 @@
 "use client";
 
-import { AudioLines, Captions, Check, Film, Lock, Plus, Scissors, Sparkles, Sun, Users, Wand2, ZoomIn } from "lucide-react";
+import { AudioLines, Captions, Check, Film, Lock, Plus, Scissors, Sparkles, Users, ZoomIn } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import type { UploadOptions as Options, UploadToggle } from "@/lib/upload-options";
@@ -11,12 +11,8 @@ const READY: { id: UploadToggle; name: string; hint: string; icon: typeof Scisso
 	{ id: "zoom", name: "Auto zoom", hint: "Moves in slowly, so the video feels alive", icon: ZoomIn },
 	{ id: "subtitles", name: "Subtitles", hint: "Your words on the video as you speak", icon: Captions },
 	{ id: "audio", name: "Audio optimization", hint: "A clearer voice and less background noise, on both speakers", icon: AudioLines },
-];
-// Shown so people know they are coming, but they can't be ticked: they don't exist yet.
-const SOON = [
-	{ name: "Light", hint: "Better light and colour", icon: Sun },
-	{ name: "Make-up", hint: "Smoother skin", icon: Wand2 },
-	{ name: "Cut person", hint: "Take you out of the background", icon: Users },
+	// Six choices, no "coming soon" ones (coach, 27 Nov). Locked without Cutout on the plan (not Free).
+	{ id: "cutout", name: "Cut person", hint: "Take you out of the background", icon: Users },
 ];
 
 // Opens when a video is dropped: what Komoray should do with it, and the language it is spoken in (we can't
@@ -34,6 +30,7 @@ export function UploadOptions({
 	onStart,
 	onClose,
 	kits = [],
+	canCut = false,
 }: {
 	fileName: string;
 	options: Options;
@@ -46,6 +43,7 @@ export function UploadOptions({
 	onStart: () => void;
 	onClose: () => void;
 	kits?: { id: string; name: string }[]; // the creator's Brand Kits (api/brand): a choice only when there are two or more
+	canCut?: boolean; // Cutout is on for this person (their plan, or turned on by us)
 }) {
 	const dialog = useRef<HTMLDivElement>(null);
 	const close = useRef(onClose);
@@ -77,7 +75,8 @@ export function UploadOptions({
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
 
-	const picked = READY.filter(({ id }) => options[id]).length;
+	const locked = (id: UploadToggle) => id === "cutout" && !canCut;
+	const picked = READY.filter(({ id }) => options[id] && !locked(id)).length;
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center sm:p-6" role="presentation">
@@ -127,7 +126,20 @@ export function UploadOptions({
 
 				<fieldset className="grid gap-3 sm:grid-cols-2">
 					<legend className="mb-2 text-sm font-medium">Do this for me</legend>
-					{READY.map(({ id, name, hint, icon: Icon }) => (
+					{READY.map(({ id, name, hint, icon: Icon }) => locked(id) ? (
+						<div key={id} className="flex min-h-20 items-center gap-3 rounded-xl border-2 border-dashed border-foreground/10 p-3 text-foreground/40" aria-disabled="true">
+							<input type="checkbox" disabled aria-label={`${name}, for paid plans`} className="sr-only" />
+							<Icon className="h-5 w-5 shrink-0" aria-hidden />
+							<span className="flex min-w-0 flex-1 flex-col">
+								<span className="font-semibold">{name}</span>
+								<span className="text-xs">{hint}</span>
+							</span>
+							<span className="flex shrink-0 items-center gap-1 rounded-full border border-foreground/15 px-2 py-0.5 text-xs">
+								<Lock className="h-3 w-3" aria-hidden />
+								Paid plans
+							</span>
+						</div>
+					) : (
 						<label
 							key={id}
 							className={`flex min-h-20 cursor-pointer items-center gap-3 rounded-xl border-2 p-3 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-400 ${
@@ -148,20 +160,6 @@ export function UploadOptions({
 								<Plus className="mx-1 h-5 w-5 shrink-0 text-foreground/50" aria-hidden />
 							)}
 						</label>
-					))}
-					{SOON.map(({ name, hint, icon: Icon }) => (
-						<div key={name} className="flex min-h-20 items-center gap-3 rounded-xl border-2 border-dashed border-foreground/10 p-3 text-foreground/40" aria-disabled="true">
-							<input type="checkbox" disabled aria-label={`${name}, coming soon`} className="sr-only" />
-							<Icon className="h-5 w-5 shrink-0" aria-hidden />
-							<span className="flex min-w-0 flex-1 flex-col">
-								<span className="font-semibold">{name}</span>
-								<span className="text-xs">{hint}</span>
-							</span>
-							<span className="flex shrink-0 items-center gap-1 rounded-full border border-foreground/15 px-2 py-0.5 text-xs">
-								<Lock className="h-3 w-3" aria-hidden />
-								Soon
-							</span>
-						</div>
 					))}
 				</fieldset>
 
