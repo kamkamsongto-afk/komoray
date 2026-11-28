@@ -21,7 +21,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **ตอบโยชิเป็นภาษาไทยเสมอ** ชื่อปุ่มบนเว็บเขียนเป็นภาษาอังกฤษตามที่เห็นบนจอ
 - **เรียกสินค้าว่า "AI studio"** ห้ามเรียกว่า editor ในข้อความที่ผู้ใช้เห็น (เหตุผลอยู่ใน `PROGRESS.md`)
 - **push ขึ้น `main` = ขึ้นเว็บจริงทันที** (Workers Builds)
-- **เทสต์อัตโนมัติมีแค่ `npm run check`** (เทียบวิธีคิดของตัวอย่างกับคลิปจริง) ไม่ได้ดูภาพบนจอและไม่ครอบทุกฟีเจอร์ ข้อ 5 จึงยังบังคับใช้ทุกครั้ง
+- **เทสต์อัตโนมัติมีแค่ `npm run check`** (กฎกันบั๊กเก่าบางข้อ และเทียบวิธีคิดของตัวอย่างกับคลิปจริง) ไม่ได้ดูภาพบนจอและไม่ครอบทุกฟีเจอร์ ข้อ 5 จึงยังบังคับใช้ทุกครั้ง
 
 ## 2. แก้โค้ดได้ทีละตัว
 
@@ -106,7 +106,7 @@ comment บางจุดในฝั่งเว็บอ้างชื่อ
 npx tsc --noEmit    # ต้องไม่มี error
 npm run lint        # ต้องไม่มี error และไม่เพิ่ม warning (4 พ.ย. 2026: 0 error, 28 warning)
 npm run build       # ต้องผ่าน
-npm run check       # ต้องจบด้วย "The preview and the final video agree."
+npm run check       # ต้องจบแบบไม่ error (exit code 0) ไม่มีบรรทัด FAIL เลย
 python -m py_compile modal_app/render.py    # เมื่อแก้ไฟล์นี้
 ```
 
