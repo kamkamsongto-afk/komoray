@@ -3,8 +3,9 @@
 // (white = person) as a plain H.264 stream, one frame for every frame of the video, black outside the
 // windows. /api/cutout/finish then turns that stream into the same files Best makes (modal_app/cutout.py),
 // so the player and Make video don't know the difference.
-//   Fast      Google's selfie model, on the processor, every frame (40 fps on a plain Intel laptop). On a computer with
-//             several cores the video is cut into stretches that workers do at the same time (cutout-worker.ts)
+//   Fast      Google's selfie model, on the processor, every frame (40 fps on a plain Intel laptop), in Web Workers
+//             (cutout-worker.ts), off the thread that draws the screen. On a computer with several cores the video is cut
+//             into stretches done at the same time; while the preview plays only one of them works (setWatching)
 //   Balanced  MODNet (Apache 2.0, code and weights) on the graphics card, every second frame, the ones
 //             between blended (2.8 fps on the same laptop: every frame would take twice as long)
 // Tested 9 Nov on a real clip against BiRefNet: both agree with it on 98% of the person, Balanced has the cleaner edge.
@@ -24,11 +25,41 @@ import {
 	VISION_ROOT,
 	type Vision,
 } from "./cutout-core";
-import type { CutoutJob, CutoutMessage } from "./cutout-worker";
+import type { CutoutJob, CutoutMessage, CutoutPace } from "./cutout-worker";
 import { RangeSource } from "./player/bytes";
 import { readVideoTrack } from "./player/mp4";
 
 export type { LocalTier };
+
+// Is the creator watching the preview? Cutting takes the processor the picture and the sound need: they stuttered while
+// it ran (coach 28 Nov). While watched, one worker carries on and the rest wait; cutting on the page itself (the last
+// resort) stops until the playing does. Set by the AI studio (ScriptView).
+let watching = false;
+const watchers = new Set<() => void>();
+export function setWatching(now: boolean) {
+	if (now === watching) return;
+	watching = now;
+	watchers.forEach((tell) => tell());
+}
+function onWatching(tell: () => void) {
+	watchers.add(tell);
+	return () => void watchers.delete(tell);
+}
+// For cutting on the page itself: wait until the playing stops (or the cut is stopped).
+function heldWhileWatched(signal: AbortSignal) {
+	if (!watching || signal.aborted) return undefined;
+	return new Promise<void>((resolve) => {
+		const done = () => {
+			if (watching && !signal.aborted) return;
+			off();
+			signal.removeEventListener("abort", done);
+			resolve();
+		};
+		const off = onWatching(done);
+		signal.addEventListener("abort", done);
+	});
+}
+class Stalled extends Error {}
 
 // ort.all, not the smaller ort.webgpu: with that one MODNet gave a ragged matte (agreement with BiRefNet 79% instead of 97%).
 const ORT_ROOT = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/";
@@ -91,7 +122,7 @@ async function balancedModel(width: number, height: number, w: number, h: number
 
 export type MatteTimes = { setup: number; modelLoad: number; read: number; decodeWait: number; model: number; encode: number; breathe: number; frames: number; modelFrames: number; total: number; size: string; workers: number };
 
-// Workers: half of the cores, at most 3 (the computer stays usable, memory stays small), and none for a short video.
+// Workers: half of the cores, at most 3 (the computer stays usable, memory stays small), and one for a short video.
 const MIN_PARALLEL_FRAMES = 120;
 const STALL_MS = 180_000; // no word from any worker for this long: give up on them (start-up downloads the model, slow connections take minutes)
 const MAX_WORKERS = 3; // measured 23 Nov on a 12-core computer: 3 workers 1.65x, more gave little (each frame got slower when more ran at once)
@@ -102,7 +133,7 @@ export const workersFor = (frames: number) => {
 };
 
 export type LocalOptions = {
-	workers?: number; // how many workers (default workersFor); 1 = no workers
+	workers?: number; // how many workers (default workersFor); 0 = none, on the page itself
 	makeWorker?: () => Worker; // how a worker is made (the test page has its own)
 };
 
@@ -120,16 +151,18 @@ export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows:
 	const size = `${track.width}x${track.height} -> ${w}x${h}`;
 	const ms = (n: number) => Math.round(n);
 
-	const wanted = tier === "fast" ? (options.workers ?? workersFor(total)) : 1;
-	if (wanted >= 2) {
+	const wanted = tier === "fast" && typeof Worker !== "undefined" ? (options.workers ?? workersFor(total)) : 0;
+	// Several workers, then one on its own, and only then on the page: there it takes the screen's thread.
+	for (const n of wanted > 1 ? [wanted, 1] : wanted === 1 ? [1] : []) {
 		try {
-			const result = await parallelMatte({ n: wanted, track, runs, total, settings, url: videoUrl, onProgress, signal, makeWorker: options.makeWorker ?? defaultWorker });
-			onTimes?.({ setup: ms(result.setup - t0), modelLoad: 0, read: ms(result.times.read), decodeWait: ms(result.times.decodeWait), model: ms(result.times.model), encode: ms(result.times.encode), breathe: ms(result.times.breathe), frames: total, modelFrames: result.times.modelFrames, total: ms(performance.now() - t0), size, workers: wanted });
+			const result = await parallelMatte({ n, track, runs, total, settings, url: videoUrl, onProgress, signal, makeWorker: options.makeWorker ?? defaultWorker });
+			onTimes?.({ setup: ms(result.setup - t0), modelLoad: 0, read: ms(result.times.read), decodeWait: ms(result.times.decodeWait), model: ms(result.times.model), encode: ms(result.times.encode), breathe: ms(result.times.breathe), frames: total, modelFrames: result.times.modelFrames, total: ms(performance.now() - t0), size, workers: n });
 			return result.blob;
 		} catch (error) {
 			if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
-			console.warn("Cutting in workers did not work, cutting alone:", error);
+			console.warn(`Cutting in ${n} worker(s) did not work:`, error);
 			onProgress(0);
+			if (error instanceof Stalled) break; // gone quiet: another worker would be another three minutes of waiting
 		}
 	}
 
@@ -162,11 +195,12 @@ export async function makeLocalMatte(tier: LocalTier, videoUrl: string, windows:
 				if (failure) throw failure;
 			},
 			onFrame: () => onProgress(++done / total),
+			hold: () => heldWhileWatched(signal),
 			times,
 			fail,
 		});
 		const blob = await encoder.finish();
-		onTimes?.({ setup: ms(t1 - t0), modelLoad: ms(t2 - t1), read: ms(times.read), decodeWait: ms(times.decodeWait), model: ms(times.model), encode: ms(times.encode), breathe: ms(times.breathe), frames: done, modelFrames: times.modelFrames, total: ms(performance.now() - t0), size, workers: 1 });
+		onTimes?.({ setup: ms(t1 - t0), modelLoad: ms(t2 - t1), read: ms(times.read), decodeWait: ms(times.decodeWait), model: ms(times.model), encode: ms(times.encode), breathe: ms(times.breathe), frames: done, modelFrames: times.modelFrames, total: ms(performance.now() - t0), size, workers: 0 });
 		return blob;
 	} finally {
 		encoder.close();
@@ -210,6 +244,18 @@ async function parallelMatte(o: {
 	}
 
 	const workers: Worker[] = [];
+	const finished: boolean[] = [];
+	// While watched, only the first stretch still to be done works; when it is done the next one takes over.
+	const pace = () => {
+		let carrying = false;
+		workers.forEach((worker, k) => {
+			if (finished[k]) return;
+			const go = !watching || !carrying;
+			carrying = true;
+			worker.postMessage({ pace: go ? "go" : "wait" } satisfies CutoutPace);
+		});
+	};
+	let stopPacing = () => {};
 	const stop = () => workers.forEach((worker) => worker.terminate());
 	const onAbort = () => {
 		stop();
@@ -226,13 +272,13 @@ async function parallelMatte(o: {
 	stall.catch(() => {}); // nobody is waiting on it once the pieces are in
 	const wake = () => {
 		clearTimeout(alarm);
-		alarm = setTimeout(() => stalled(new Error("The workers stopped answering.")), STALL_MS);
+		alarm = setTimeout(() => stalled(new Stalled("The workers stopped answering.")), STALL_MS);
 	};
 	wake();
 	try {
-		const pieces = await Promise.race([stall, Promise.all(
+		const all = Promise.all(
 			jobs.map(
-				(job) =>
+				(job, k) =>
 					new Promise<{ blob: Blob; times: Times }>((resolve, reject) => {
 						const worker = o.makeWorker();
 						workers.push(worker);
@@ -242,15 +288,21 @@ async function parallelMatte(o: {
 							if (m.type === "progress") {
 								done += m.frames;
 								o.onProgress(Math.min(1, done / total));
-							} else if (m.type === "done") resolve({ blob: m.blob, times: m.times });
-							else reject(new Error(m.message));
+							} else if (m.type === "done") {
+								finished[k] = true;
+								pace();
+								resolve({ blob: m.blob, times: m.times });
+							} else reject(new Error(m.message));
 						};
 						worker.onerror = (e) => reject(new Error(e.message || "A worker could not start."));
 						worker.onmessageerror = () => reject(new Error("A worker sent something unreadable."));
 						worker.postMessage(job);
 					}),
 			),
-		)]);
+		);
+		stopPacing = onWatching(pace); // every worker is made by now
+		pace();
+		const pieces = await Promise.race([stall, all]);
 		if (o.signal.aborted) throw new DOMException("Stopped", "AbortError");
 		const times = newTimes();
 		for (const p of pieces) (Object.keys(times) as (keyof Times)[]).forEach((key) => (times[key] += p.times[key]));
@@ -260,6 +312,7 @@ async function parallelMatte(o: {
 		throw error;
 	} finally {
 		clearTimeout(alarm);
+		stopPacing();
 		stop();
 		o.signal.removeEventListener("abort", onAbort);
 	}

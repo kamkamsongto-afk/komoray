@@ -19,9 +19,11 @@ export type CutoutJob = {
 	side: number;
 	bitrate: number;
 };
+// Sent to a worker after its job: work on, or wait (the preview is playing and another worker is carrying on).
+export type CutoutPace = { pace: "go" | "wait" };
 export type CutoutMessage = { type: "progress"; frames: number } | { type: "done"; blob: Blob; times: Times } | { type: "error"; message: string };
 
-type Scope = { importScripts: (url: string) => void; postMessage: (m: CutoutMessage) => void; onmessage: ((e: MessageEvent<CutoutJob>) => void) | null; exports?: unknown };
+type Scope = { importScripts: (url: string) => void; postMessage: (m: CutoutMessage) => void; onmessage: ((e: MessageEvent<CutoutJob | CutoutPace>) => void) | null; exports?: unknown };
 const scope = self as unknown as Scope;
 
 // jsDelivr sends .cjs as a type importScripts refuses, so it is fetched and handed over as JavaScript.
@@ -32,7 +34,19 @@ async function loadVision(): Promise<Vision> {
 	return scope.exports as Vision;
 }
 
+let waiting = false;
+let goOn: (() => void) | null = null;
+const hold = () => (waiting ? new Promise<void>((resolve) => (goOn = resolve)) : undefined);
+
 scope.onmessage = async (e) => {
+	if ("pace" in e.data) {
+		waiting = e.data.pace === "wait";
+		if (!waiting) {
+			goOn?.();
+			goOn = null;
+		}
+		return;
+	}
 	const job = e.data;
 	let failure: Error | null = null;
 	const fail = (error: Error) => {
@@ -62,6 +76,7 @@ scope.onmessage = async (e) => {
 				onFrame: () => {
 					if (++done % 8 === 0) scope.postMessage({ type: "progress", frames: 8 });
 				},
+				hold,
 				times,
 				fail,
 			});

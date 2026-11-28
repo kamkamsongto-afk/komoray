@@ -29,6 +29,7 @@ import type { RenderPart } from "@/lib/render-part";
 import { newClipSound } from "@/lib/clip-sound";
 import { ImportControls } from "./ImportControls";
 import { clock } from "@/lib/cutout";
+import { setWatching } from "@/lib/cutout-local";
 import { waitLabel } from "@/lib/use-cutout";
 import { AudioControls } from "./AudioControls";
 import { type Clock, FINAL_CLOCK, rangeText, RowFit } from "./TimeField";
@@ -310,6 +311,11 @@ export function ScriptView({
 	const [current, setCurrent] = useState(-1);
 	const [playing, setPlaying] = useState(false);
 	const [selected, setSelected] = useState<number[]>([]);
+	// While the preview plays, Cut me out holds back so the picture and the sound stay smooth.
+	useEffect(() => {
+		setWatching(playing);
+		return () => setWatching(false);
+	}, [playing]);
 	// What the script marks with ✂️: the silences still cut, and the parts cut by hand.
 	const shownCuts = useMemo(() => mergeSpans([...subtractSpans(cuts, keep), ...manual]), [cuts, keep, manual]);
 	const items = useMemo(() => layout(words, shownCuts, fixes), [words, shownCuts, fixes]);
