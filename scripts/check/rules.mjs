@@ -137,6 +137,18 @@ check("Thai: a short pause before a vowel mark still joins, nothing moved (13 No
 	return same([texts(thaiWords.mendAcrossPause(pieces)), texts(thaiWords.mergeThaiWords(thaiWords.mendAcrossPause(pieces)))], [["ส", "่วน"], ["ส่วน"]]);
 });
 
+check("Cutout: a speaker off the screen is noticed, and a drag can't lose them (28 Nov)", () => {
+	const { speakerOnScreen, speakerDragged, SPEAKER_LOST } = behind;
+	if (speakerOnScreen({ speakerScale: 0.65, speakerX: -0.5, speakerLift: -0.164 }) >= SPEAKER_LOST) return "the coach's lost speaker counts as seen";
+	if (speakerOnScreen({ speakerScale: 0.5, speakerX: 0.25, speakerLift: 0 }) < 0.99) return "a new picture's speaker counts as off the screen";
+	for (const scale of [0.25, 0.5, 1, 1.5])
+		for (const [x, lift] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) {
+			const got = speakerDragged(x, lift, scale);
+			if (speakerOnScreen({ speakerScale: scale, ...got }) < SPEAKER_LOST) return `dragged to ${x}, ${lift} at ${scale}: lost at ${JSON.stringify(got)}`;
+		}
+	return null;
+});
+
 check("Timeline: a strip stretched into its neighbour stops at it (17 Nov)", () => {
 	const memo = new Map();
 	rows.packRows([{ id: "a", start: 0, end: 2 }, { id: "b", start: 3, end: 5 }], "banners", 0, memo);
