@@ -61,7 +61,31 @@ export type Segment = { from: number; trim: number; frames: number };
 // piece = the stretch of the original video this line is in, once the video has been Split: dragging the line
 // moves that stretch's subtitles only. position = where that stretch's subtitles were moved to, if they were.
 // afterPause: the first line, or one said after a pause (POP_PAUSE): only these pop in (motion.ts).
-export type Line = { from: number; to: number; text: string; parts: { text: string; from: number }[]; row2?: number; piece?: [number, number]; position?: number; afterPause?: boolean };
+// shrink: one word (or number) wider than a whole row, drawn this much smaller; every other line is the set size.
+export type Line = { from: number; to: number; text: string; parts: { text: string; from: number }[]; row2?: number; piece?: [number, number]; position?: number; afterPause?: boolean; shrink?: number };
+
+// How much room a subtitle row has and how wide words are in it, in px of the final video, measured by the preview with
+// the very font (useSubtitleFit in PlayerFrame). With it a line holds only what fits on its row at the set size, and
+// breaks where the language reads well (coach 28 Nov: browser and libass wrapped a long line at different places).
+// wordGap: room kept between words (Bounce).
+export type Fit = { measure: (text: string) => number; room: number; wordGap: number };
+
+// What the final video is told about each line, so it draws the preview's lines and never breaks one itself
+// (planned_lines in render.py): its first frame, how many words, where its second row starts, how much smaller.
+export type LinePlan = { from: number; n: number; row2?: number; shrink?: number };
+export const linePlan = (lines: Line[]): LinePlan[] =>
+	lines.map((l) => ({ from: l.from, n: l.parts.length, ...(l.row2 !== undefined && { row2: l.row2 }), ...(l.shrink !== undefined && { shrink: l.shrink }) }));
+// A plan as sent to Make video, or nothing if it isn't one.
+export function readLinePlan(raw: unknown): LinePlan[] | undefined {
+	if (!Array.isArray(raw) || raw.length > 50000) return undefined;
+	const lines = raw.map((l: Partial<LinePlan> | null) => {
+		if (!l || !Number.isFinite(l.from) || !Number.isInteger(l.n) || l.n! < 1) return null;
+		const row2 = Number.isInteger(l.row2) && l.row2! > 0 && l.row2! < l.n! ? l.row2 : undefined;
+		const shrink = typeof l.shrink === "number" && l.shrink > 0 && l.shrink < 1 ? Math.max(0.1, l.shrink) : undefined;
+		return { from: l.from!, n: l.n!, ...(row2 !== undefined && { row2 }), ...(shrink !== undefined && { shrink }) };
+	});
+	return lines.every((l) => l !== null) ? (lines as LinePlan[]) : undefined;
+}
 
 // The stretch between the Splits around second t of the original video.
 export function pieceAt(splits: number[], t: number, end: number): [number, number] {
@@ -238,7 +262,7 @@ function joinThai(words: { text: string; start: number; end: number; space?: boo
 }
 
 // Short subtitle lines on the output timeline, grouped the same way as the final video.
-export function subtitleLines(words: Word[], segments: Segment[], look = "clean", size = 100, spacing = 0, splits: number[] = [], spots: SubtitleSpot[] = []): Line[] {
+export function subtitleLines(words: Word[], segments: Segment[], look = "clean", size = 100, spacing = 0, splits: number[] = [], spots: SubtitleSpot[] = [], fit?: Fit): Line[] {
 	const thai = words.some((w) => isThai(w.text));
 	const lastSegment = segments[segments.length - 1];
 	const videoEnd = lastSegment ? (lastSegment.trim + lastSegment.frames) / FPS : 0;
@@ -265,8 +289,23 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	// Deepgram gives 990 as "9" "9" "0" (and 2,990 as "2," "9" "9" "0"): a line never breaks inside a number (coach 22 Nov:
 	// "99" on one line, "0" on the next). Same as inside_number in group_lines (render.py).
 	const insideNumber = (last: Placed, first: Placed) => /\d[,.]?$/.test(last.text) && /^\d/.test(first.text);
+	// A line's words as shown, and where its second row starts (Two lines).
+	const shown = (run: Placed[]) => {
+		const texts = thai ? joinThai(run) : run.map((w, k) => (k ? " " : "") + w.text);
+		const row2 = look === "two" ? secondRow(texts) : undefined;
+		if (row2 !== undefined) texts[row2] = texts[row2].trimStart();
+		return { texts, row2 };
+	};
+	// How wide its widest row is (0 when nothing can be measured yet).
+	const widest = (run: Placed[]) => {
+		if (!fit) return 0;
+		const { texts, row2 } = shown(run);
+		const rows = row2 === undefined ? [texts] : [texts.slice(0, row2), texts.slice(row2)];
+		return Math.max(...rows.map((row) => fit.measure(row.join("").trim()) + fit.wordGap * (row.length - 1)));
+	};
+	const narrow = (run: Placed[]) => !fit || widest(run) <= fit.room;
 	const fits = (run: Placed[]) =>
-		run.length <= perLine && run[run.length - 1].end - run[0].start <= maxFrames && (!thai || lettersOf(run) <= maxLetters);
+		run.length <= perLine && run[run.length - 1].end - run[0].start <= maxFrames && (!thai || lettersOf(run) <= maxLetters) && narrow(run);
 	// A full Thai line: break where it reads best (see THAI_NO_START), carrying the rest to the next
 	// line, as long as that still fits. k = how many words stay on this line.
 	const bestBreak = (run: Placed[], next: Placed) => {
@@ -309,7 +348,7 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 
 	// A long number takes longer to say than a line may last ("38990" runs 2 s), so "บาท" after it began the next line
 	// (coach 26 Nov). Alone with its number it stays, as long as the line is wide enough. Same in group_lines (render.py).
-	const unitStays = (run: Placed[], w: Placed) => run.length === 1 && /\d[,.]?$/.test(run[0].text) && THAI_NO_START.has(w.text) && lettersOf([...run, w]) <= maxLetters;
+	const unitStays = (run: Placed[], w: Placed) => run.length === 1 && /\d[,.]?$/.test(run[0].text) && THAI_NO_START.has(w.text) && lettersOf([...run, w]) <= maxLetters && narrow([...run, w]);
 
 	const groups: Placed[][] = [];
 	let current: Placed[] = [];
@@ -332,19 +371,36 @@ export function subtitleLines(words: Word[], segments: Segment[], look = "clean"
 	}
 	if (current.length) groups.push(current);
 
-	return groups.map((line, i) => {
+	// The rules above keep some words together even when the line they make is too wide: it is cut here after all, at
+	// the longest start that fits and, where one does, never inside a number nor before a word that can't start a line.
+	const narrowed = (line: Placed[]) => {
+		const out: Placed[][] = [];
+		let rest = line;
+		while (rest.length > 1 && !narrow(rest)) {
+			const ends = Array.from({ length: rest.length - 1 }, (_, i) => rest.length - 1 - i).filter((k) => narrow(rest.slice(0, k)));
+			const good = ends.find((k) => !insideNumber(rest[k - 1], rest[k]) && !rest[k].glue && !(thai && (THAI_NO_START.has(rest[k].text) || THAI_ENDINGS.has(rest[k].text))));
+			const k = good ?? ends[0] ?? 1;
+			out.push(rest.slice(0, k));
+			rest = rest.slice(k);
+		}
+		return [...out, rest];
+	};
+	const done = fit ? groups.flatMap(narrowed) : groups;
+
+	return done.map((line, i) => {
 		let to = line[line.length - 1].end;
 		// Hold each line until the next one starts (if close), so subtitles don't flicker.
-		const next = groups[i + 1];
+		const next = done[i + 1];
 		if (next && next[0].start - to < gapFrames) to = next[0].start;
-		const texts = thai ? joinThai(line) : line.map((w, k) => (k ? " " : "") + w.text);
-		const row2 = look === "two" ? secondRow(texts) : undefined;
-		if (row2 !== undefined) texts[row2] = texts[row2].trimStart();
+		const { texts, row2 } = shown(line);
+		// Only a single word too wide for a row is left by now: it is drawn as much smaller as it needs.
+		const wide = widest(line);
+		const shrink = fit && wide > fit.room ? Math.floor((fit.room / wide) * 1000) / 1000 : undefined;
 		const source = lineSource(line[0].start, segments);
 		const position = source === null ? undefined : spots.find((s) => source >= s.start && source < s.end)?.position;
 		const piece = source !== null && splits.length ? pieceAt(splits, source, videoEnd) : undefined;
-		const before = groups[i - 1];
+		const before = done[i - 1];
 		const afterPause = !before || line[0].start - before[before.length - 1].end >= POP_PAUSE * FPS;
-		return { from: line[0].start, to, text: texts.join(""), parts: texts.map((text, k) => ({ text, from: line[k].start })), row2, piece, position, afterPause };
+		return { from: line[0].start, to, text: texts.join(""), parts: texts.map((text, k) => ({ text, from: line[k].start })), row2, piece, position, afterPause, ...(shrink !== undefined && { shrink }) };
 	});
 }

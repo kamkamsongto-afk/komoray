@@ -87,6 +87,24 @@ def subtitles(cases):
     return out
 
 
+def plan(cases):
+    """The preview's own lines (linePlan) drawn by build_subtitles: the lines it writes, and any it lets libass wrap."""
+    r.text_width = lambda *a, **k: 100.0  # only boxes and Bounce places need it (and uharfbuzz)
+    out = []
+    for c in cases:
+        style = {**r.DEFAULT_STYLE, "look": c["look"], "motion": c["motion"], "size": c["size"], "letterSpacing": c["spacing"], "format": "9:16", "splits": c["splits"]}
+        ass = r.build_subtitles(c["words"], r.keep_segments(c["duration"], c["cuts"]), style, [], c["plan"])
+        rows = [e.split(",", 9) for e in ass.splitlines() if e.startswith("Dialogue:")]
+        rows = [f for f in rows if f[3] == "Default" and "\\p1" not in f[9]]
+        may = [f[9][:90] for f in rows if not any("\\q2" in block for block in re.findall(r"\{[^}]*\}", f[9]))]
+        lines = None
+        if c["motion"] == "none":
+            h = lambda t: sum(float(x) * m for x, m in zip(t.split(":"), (3600, 60, 1)))
+            lines = [{"from": h(f[1]), "to": h(f[2]), "text": re.sub(r"\{[^}]*\}", "", f[9]).replace("\\N", " ").replace("\\h", " ")} for f in rows]
+        out.append({"lines": lines, "mayWrap": may})
+    return out
+
+
 def zoom(cases):
     """The zoom at every frame, picked per shot as ffmpeg_command does."""
     out = []
@@ -277,7 +295,19 @@ def wraps(cases):
     return out
 
 
-SECTIONS = {f.__name__: f for f in (bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
+def two_rows(cases):
+    """Two lines with a Line spacing below 0: each row's own event, and whether libass is left to place it (it then
+    pushes the rows apart, in the wrong order: the review of 28 Nov)."""
+    out = []
+    words = [{"text": f"word{k:02d}", "start": 0.2 * k, "end": 0.2 * k + 0.18} for k in range(6)]
+    for c in cases:
+        style = {**r.DEFAULT_STYLE, "format": "9:16", "look": "two", "motion": c["motion"], "lineSpacing": c["spacing"], "size": 100}
+        rows = [e.split(",", 9) for e in r.build_subtitles(words, [(0.0, 5.0)], style, []).splitlines() if e.startswith("Dialogue:")]
+        out.append({"drawn": bool(rows), "leftToLibass": [row[9][:90] for row in rows if not (row[9].startswith("{") and "\\pos(" in row[9][: row[9].find("}")])]})
+    return out
+
+
+SECTIONS = {f.__name__: f for f in (plan, two_rows, bounce, constants, segments, subtitles, zoom, background, layouts, frames, banners, behind, framing, logo, words, layout_file, frame_back, wraps)}
 
 if __name__ == "__main__":
     asked = json.loads(sys.stdin.buffer.read().decode("utf-8"))

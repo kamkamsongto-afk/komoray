@@ -1750,6 +1750,26 @@ def group_lines(placed: list[dict], thai: bool, per_line: int, max_frames: float
     return lines
 
 
+STALE_LINES = "The subtitles changed while the video was being sent. Please refresh the page and press Make video again."
+
+
+def planned_lines(placed: list[dict], plan: list[dict]) -> tuple[list[list[dict]], list[dict]]:
+    """The preview's lines (linePlan in src/lib/timeline.ts) over the same words: each line `n` words from frame `from`.
+    The preview measured them in the real font, so each row fits; they are never made differently here. Words that
+    don't match the plan stop the video: other lines than the ones on screen are never drawn instead."""
+    lines, at = [], 0
+    for shape in plan:
+        n = int(shape.get("n") or 0)
+        line = placed[at:at + n]
+        if n < 1 or len(line) != n or abs(line[0]["start"] - float(shape.get("from", -9))) > 2:
+            raise ValueError(STALE_LINES)
+        lines.append(line)
+        at += n
+    if at != len(placed):
+        raise ValueError(STALE_LINES)
+    return lines, list(plan)
+
+
 def join_thai(words: list[dict]) -> list[str]:
     """Thai doesn't put spaces between words, only between phrases. A Thai line gets one where Thai,
     numbers and English meet ("5 นาที"), after a polite ending or ๆ, and where the speaker pauses.
@@ -1820,7 +1840,7 @@ def scale_tags(keys: list[tuple[int, int]], offset: float) -> str:
     return tags
 
 
-def word_places(plain: list[str], row2: int | None, style: dict, size: float, spacing: int, video_w: int, bottom: float, row_step: float, row_height: float, cyrillic: bool = False) -> list[tuple[float, float]]:
+def word_places(plain: list[str], row2: int | None, style: dict, size: float, spacing: int, video_w: int, bottom: float, row_step: float, row_height: float, cyrillic: bool = False, wrap: bool = True) -> list[tuple[float, float]]:
     """Where the middle of each word of a bouncing line goes, so the line looks the same as when libass lays
     it out by itself: centred, rows going up from `bottom`. A line too wide for the video continues on a
     new row, as it does in the browser."""
@@ -1830,7 +1850,7 @@ def word_places(plain: list[str], row2: int | None, style: dict, size: float, sp
     rows, row, used = [], [], 0.0
     for k in range(len(plain)):
         add = widths[k] + (spaces[k] if row else 0)
-        if row and (k == row2 or used + add > room):
+        if row and (k == row2 or (wrap and used + add > room)):  # the preview's lines (wrap False) already fit
             rows.append(row)
             row, used, add = [], 0.0, widths[k]
         row.append(k)
@@ -1896,7 +1916,7 @@ def ass_time(t: float) -> str:
     return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
 
 
-def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict, banners: list[dict] | None = None) -> str:
+def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: dict, banners: list[dict] | None = None, plan: list[dict] | None = None) -> str:
     thai = any(is_thai(w["text"]) for w in words)
     # "own": the user's uploaded font, put in the fonts folder next to the subtitles (render()).
     font = (own_font_family(style, style.get("ownFont")) or FONTS["kanit"]) if style["font"] == "own" else FONTS.get(style["font"], FONTS["kanit"])
@@ -1929,7 +1949,11 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
     # A Split inside a cut part breaks where the video picks up again, or the pieces on either side would join.
     breaks = [f for f in (break_frame(float(s), segments) for s in (style.get("splits") or [])) if f is not None]
     spots = style.get("spots") or []
-    lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames, breaks)
+    if plan is None:
+        lines = group_lines(placed, thai, per_line, max_seconds * FPS, max_letters, gap_frames, breaks)
+        shapes: list = [None] * len(lines)
+    else:
+        lines, shapes = planned_lines(placed, plan)
     if style.get("subtitles") is False:  # turned off: same as the preview (PlayerFrame shows no line)
         lines = []
 
@@ -1965,14 +1989,24 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             end = lines[i + 1][0]["start"]
         plain = [ass_text(p) for p in (join_thai(line) if thai else [(" " if k else "") + w["text"] for k, w in enumerate(line)])]
         parts = [spaced_marks(p, spacing) for p in plain]
+        shape = shapes[i]
+        # One word wider than a whole row is drawn smaller (`shrink`), as the preview draws it; every other line is `size`.
+        small = min(1.0, max(0.1, float((shape or {}).get("shrink") or 1)))
+        line_size = round(size * small, 2) if small < 1 else size
         row2 = second_row(plain) if look == "two" else None
-        line_font = font_tag("".join(parts), own_font, size)
+        if shape is not None and look == "two":
+            row2 = shape.get("row2") if 0 < int(shape.get("row2") or 0) < len(plain) else None
+        line_font = font_tag("".join(parts), own_font, line_size)
         cyrillic_line = bool(line_font)
-        letters_height = size * CYRILLIC_SCALE if cyrillic_line else size  # libass makes a font's full height its size
+        letters_height = line_size * CYRILLIC_SCALE if cyrillic_line else line_size  # libass makes a font's full height its size
+        if small < 1 and not cyrillic_line:
+            line_font = f"\\fs{line_size:g}"
+        if shape is not None:  # a line of the preview's: libass never breaks it (NO_WRAP)
+            line_font = NO_WRAP + line_font
         if row2 is not None:
             # ASS has no line spacing: an empty row as tall as the gap goes between the two rows.
             gap = int(style.get("lineSpacing") or 0)
-            back = size * CYRILLIC_SCALE if line_font else size
+            back = line_size * CYRILLIC_SCALE if cyrillic_line else line_size
             spacer = f"\\N{{\\fs{gap}}}\\h\\N{{\\fs{back:g}}}" if gap > 0 else "\\N"
             parts[row2] = spacer + parts[row2].lstrip()
         if draw_box:
@@ -1981,32 +2015,35 @@ def build_subtitles(words: list[dict], keeps: list[tuple[float, float]], style: 
             gap = int(style.get("lineSpacing") or 0)
             bottom = video_h - line_margin
             for r, row in enumerate(rows):
-                row_bottom = bottom - (size + gap) * (len(rows) - 1 - r)
+                row_bottom = bottom - (line_size + gap) * (len(rows) - 1 - r)
                 # Two rows meet with no space, so a see-through box doesn't get darker where they overlap.
                 above = BOX_PADDING if r == 0 else gap
                 below = BOX_PADDING if r == len(rows) - 1 else 0
-                row_height = size + above + below
-                middle = row_bottom - size + (below - above + size) / 2
-                box_width = text_width(row, style, size, spacing, cyrillic_line) + 2 * BOX_PADDING
+                row_height = line_size + above + below
+                middle = row_bottom - line_size + (below - above + line_size) / 2
+                box_width = text_width(row, style, line_size, spacing, cyrillic_line) + 2 * BOX_PADDING
                 if motion == "bounce":  # the room kept between its words (word_places)
                     row_words = len(plain) if row2 is None else row2 if r == 0 else len(plain) - row2
-                    box_width += (row_words - 1) * size * BOUNCE_WORD_GAP
+                    box_width += (row_words - 1) * line_size * BOUNCE_WORD_GAP
                 box = rounded_box(box_width, row_height, float(style.get("boxRadius") or 0))
                 head = f"{{\\an5\\pos({video_w / 2:.0f},{middle:.0f})\\bord0\\shad0{box_fill}"
                 events.append(f"Dialogue: 0,{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{head}\\p1}}{pop_tags(motion, 0)}{box}{{\\p0}}")
         if motion == "bounce":
-            row_step = size + int(style.get("lineSpacing") or 0)
-            places = word_places(plain, row2, style, size, spacing, video_w, video_h - line_margin, row_step, letters_height, cyrillic_line)
+            row_step = line_size + int(style.get("lineSpacing") or 0)
+            places = word_places(plain, row2, style, line_size, spacing, video_w, video_h - line_margin, row_step, letters_height, cyrillic_line, wrap=shape is None)
             words = [spaced_marks(p.strip(), spacing) for p in plain]
             events += bounce_events(line, start, end, words, places, line_font, text_layer, highlight if look == "highlight" else None)
             continue
         line_font = f"{{{line_font}}}" if line_font else ""
         if row2 is not None and int(style.get("lineSpacing") or 0) < 0:
             # Rows closer than usual: ASS can't pull rows together, so each row is its own event, row_step apart like Bounce.
-            step = size + int(style.get("lineSpacing") or 0)
+            step = line_size + int(style.get("lineSpacing") or 0)
             rows = [("".join(parts[:row2]), step), (parts[row2].removeprefix("\\N") + "".join(parts[row2 + 1:]), 0)]
             for row, lift in rows:
-                events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin + lift},,{line_font}{pop_tags(motion, 0)}{row}")
+                # Placed with \pos (its bottom middle, where a margin would put it): left to a margin, libass moves two
+                # overlapping events apart and put the second row above the first (review, 28 Nov).
+                place = f"{{\\an2\\pos({video_w / 2:.0f},{video_h - line_margin - lift})}}"
+                events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,0,,{place}{line_font}{pop_tags(motion, 0)}{row}")
             continue
         if look != "highlight":
             events.append(f"Dialogue: {text_layer},{ass_time(start / FPS)},{ass_time(end / FPS)},Default,,0,0,{line_margin},,{line_font}{pop_tags(motion, 0)}{''.join(parts)}")
@@ -2948,7 +2985,7 @@ def render(video_url: str, edit: dict, output_url: str, error_url: str | None = 
                 rename_font(str(path), unique_font_name(str(file)))  # one family per file (own_font_family)
                 style.setdefault("_ownFontPaths", {})[file] = str(path)
                 fonts_dir = "fonts"
-            subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners")), encoding="utf-8")
+            subs.write_text(build_subtitles(edit.get("words", []), keeps, style, edit.get("banners"), edit.get("lines")), encoding="utf-8")
 
             # Cutout layers (behind.ts): sent by the app with links to the matte and each picture or clip.
             cutout = None
