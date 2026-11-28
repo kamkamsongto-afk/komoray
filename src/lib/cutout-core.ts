@@ -7,8 +7,9 @@ import type { Frame } from "./player/mp4";
 
 export type LocalTier = "fast" | "balanced";
 export const FPS = 30;
+// every: the model looks at one frame in this many; the mattes between are blended from the two around them.
 export const SETTINGS: Record<LocalTier, { side: number; every: number; bitrate: number }> = {
-	fast: { side: 288, every: 1, bitrate: 1_500_000 }, // matte's short side, px
+	fast: { side: 288, every: 3, bitrate: 1_500_000 }, // side: matte's short side, px. every: 3, on trial (coach 28 Nov)
 	balanced: { side: 540, every: 2, bitrate: 3_000_000 },
 };
 export const FAST_SIDE = 256; // Fast: what Google's model is made for
@@ -158,6 +159,7 @@ export async function matteStretch(o: {
 	every: number;
 	check: () => void;
 	onFrame: () => void;
+	hold?: () => Promise<void> | undefined; // asked after every frame: a promise = wait for it (the preview is playing)
 	times: Times;
 	fail: (error: Error) => void;
 }) {
@@ -174,7 +176,7 @@ export async function matteStretch(o: {
 			while (start > 0 && !frames[start].key) start--;
 			let next = start; // which frame the decoder gives next (no B-frames: in order)
 			let previous: Uint8Array | null = null;
-			let between = -1; // Balanced: a frame waiting for the next model result, to blend
+			let skipped = 0; // frames waiting for the next model result, to be blended
 
 			const take = async () => {
 				while (decoded.length) {
@@ -187,22 +189,25 @@ export async function matteStretch(o: {
 					check();
 					if ((at - first) % o.every !== 0) {
 						frame.close();
-						between = at;
+						skipped++;
 					} else {
 						const matte: Uint8Array = await timed(times, "model", () => model.run(frame));
 						times.modelFrames++;
 						frame.close();
-						if (between >= 0 && previous) {
+						// Each skipped frame a step of the way from the matte before to this one.
+						for (let k = 1; previous && k <= skipped; k++) {
+							const share = k / (skipped + 1);
 							const middle = new Uint8Array(matte.length);
-							for (let i = 0; i < matte.length; i++) middle[i] = (matte[i] + previous[i]) / 2;
+							for (let i = 0; i < matte.length; i++) middle[i] = previous[i] + (matte[i] - previous[i]) * share + 0.5;
 							await timed(times, "encode", () => encoder.add(middle));
-							between = -1;
 						}
+						skipped = 0;
 						await timed(times, "encode", () => encoder.add(matte));
 						previous = matte;
 					}
 					onFrame();
 					await timed(times, "breathe", breathe);
+					await o.hold?.();
 				}
 			};
 
@@ -221,7 +226,7 @@ export async function matteStretch(o: {
 			}
 			await timed(times, "decodeWait", () => decoder.flush());
 			await take();
-			if (between >= 0) await timed(times, "encode", () => encoder.add(previous)); // the run ended on a frame with nothing after it
+			for (; skipped > 0; skipped--) await timed(times, "encode", () => encoder.add(previous)); // the run ended on frames with nothing after them
 			written = past;
 		}
 		for (; written < o.to; written++) await timed(times, "encode", () => encoder.add(null));
