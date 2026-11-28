@@ -167,5 +167,19 @@ if (bugs.includes("`wordEdges`")) {
 	});
 }
 
+if (bugs.includes("`agrees` ใน")) {
+	check("Word suggestions: a rule that would double a word or change a right one is counted as left (28 Nov)", () => {
+		const { suggestWords } = lib("src/lib/word-suggestions");
+		const { cutThaiWords, isThaiWord } = lib("src/lib/newmm");
+		const say = (...texts) => texts.map((text) => ({ text }));
+		const options = { cut: cutThaiWords, oneWord: isThaiWord, allowed: () => true, known: () => false, done: () => false, safe: () => false };
+		const left = (clip, heard) => suggestWords([clip], options).flatMap((s) => s.variants).find((v) => v.heard === heard)?.left;
+		const doubled = left({ words: say("เพราะ", "ฉ", "เรา", "เพราะ", "ฉ", "นั้น"), fixes: [{ from: 0, to: 1, text: "เพราะฉะนั้น" }, { from: 3, to: 5, text: "เพราะฉะนั้น" }], ai: [] }, "เพราะ ฉ");
+		const right = left({ words: say("ยาย", "กิน", "ยาย", "มา"), fixes: [{ from: 0, to: 0, text: "ยา" }], ai: [] }, "ยาย");
+		const added = suggestWords([{ words: say("ผม", "ไป"), fixes: [{ from: 0, to: 1, text: "ผมจะไม่ได้ไป" }], ai: [] }], options).length;
+		return same([doubled, right, added], [1, 1, 0]);
+	});
+}
+
 console.log(failed ? `\n${failed} rule check(s) failed.` : "\nAll rule checks pass.");
 process.exit(failed ? 1 : 0);

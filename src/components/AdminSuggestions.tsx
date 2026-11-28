@@ -3,7 +3,8 @@
 import { useState } from "react";
 import type { Suggestion } from "@/lib/word-suggestions";
 
-type Loaded = { suggestions: Suggestion[]; total: number; videos: number };
+type Loaded = { suggestions: Suggestion[]; total: number; videos: number; unread: number; older: number };
+type Way = Suggestion["variants"][number]["with"];
 const WAYS = { none: "As you fixed it", before: "+ word before", after: "+ word after" } as const;
 const STEP = 30;
 
@@ -15,7 +16,10 @@ export function AdminSuggestions({ added }: { added: () => void }) {
 	const [busy, setBusy] = useState("");
 	const [note, setNote] = useState("");
 	const [shown, setShown] = useState(STEP);
-	const [chosen, setChosen] = useState<Record<string, number>>({});
+	// Which way was picked, by its name: after Refresh a suggestion may have fewer ways than before.
+	const [chosen, setChosen] = useState<Record<string, Way>>({});
+	const [failed, setFailed] = useState<{ id: string; why: string } | null>(null);
+	const wayOf = (s: Suggestion) => s.variants.find((v) => v.with === chosen[s.id]) ?? s.variants[s.pick];
 
 	async function load() {
 		setLoading(true);
@@ -28,9 +32,10 @@ export function AdminSuggestions({ added }: { added: () => void }) {
 	}
 
 	async function decide(s: Suggestion, action: "always" | "ai" | "skip") {
-		const way = s.variants[chosen[s.id] ?? s.pick];
+		const way = wayOf(s);
 		setBusy(s.id);
 		setNote("");
+		setFailed(null);
 		const res = await fetch("/api/admin/words/suggestions", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
@@ -38,7 +43,7 @@ export function AdminSuggestions({ added }: { added: () => void }) {
 		}).catch(() => null);
 		const body = (await res?.json().catch(() => null)) as { error?: string } | null;
 		setBusy("");
-		if (!res?.ok) return setNote(body?.error ?? "That didn't work. Please try again.");
+		if (!res?.ok) return setFailed({ id: s.id, why: body?.error ?? "That didn't work. Please try again." });
 		setData((old) => old && { ...old, total: old.total - 1, suggestions: old.suggestions.filter((x) => x.id !== s.id) });
 		if (action !== "skip") {
 			setNote(`Added ${way.heard} → ${way.fixed} as ${action === "always" ? "Always" : "AI decides"}.`);
@@ -61,12 +66,13 @@ export function AdminSuggestions({ added }: { added: () => void }) {
 						{loading ? "Reading your videos…" : "Refresh"}
 					</button>
 					{data && <span>From {data.videos} {data.videos === 1 ? "video" : "videos"} with fixes.</span>}
+					{data && data.older > 0 && <span>{data.older} older ones left out.</span>}
+					{data && data.unread > 0 && <span className="text-amber-600">{data.unread} could not be read: press Refresh.</span>}
 				</div>
 				{note && <p className="text-xs text-foreground/70">{note}</p>}
 				{data && !data.suggestions.length && <p className="text-sm text-foreground/60">Nothing new to suggest. Fix words in the AI studio, then press Refresh.</p>}
 				{data?.suggestions.slice(0, shown).map((s) => {
-					const at = chosen[s.id] ?? s.pick;
-					const way = s.variants[at];
+					const way = wayOf(s);
 					return (
 						<div key={s.id} className="flex flex-col gap-1.5 rounded-lg border border-foreground/15 p-2.5 text-sm">
 							<p className="font-medium">
@@ -75,8 +81,8 @@ export function AdminSuggestions({ added }: { added: () => void }) {
 							</p>
 							{s.variants.length > 1 && (
 								<div className="flex flex-wrap gap-1 self-start rounded-lg bg-foreground/5 p-0.5 text-xs">
-									{s.variants.map((v, k) => (
-										<button key={v.with} onClick={() => setChosen((old) => ({ ...old, [s.id]: k }))} aria-pressed={k === at} className={`rounded-md px-2 py-0.5 ${k === at ? "bg-background shadow" : "text-foreground/60 hover:text-foreground"}`}>
+									{s.variants.map((v) => (
+										<button key={v.with} onClick={() => setChosen((old) => ({ ...old, [s.id]: v.with }))} aria-pressed={v.with === way.with} className={`rounded-md px-2 py-0.5 ${v.with === way.with ? "bg-background shadow" : "text-foreground/60 hover:text-foreground"}`}>
 											{WAYS[v.with]}
 										</button>
 									))}
@@ -84,7 +90,7 @@ export function AdminSuggestions({ added }: { added: () => void }) {
 							)}
 							<p className="text-xs text-foreground/60">
 								You fixed this {s.times}× · heard {way.seen}× in your videos
-								{way.left > 0 && <span className="text-amber-600"> · {way.left} of those you didn&apos;t change this way: Always would change them</span>}
+								{way.left > 0 && <span className="text-amber-600"> · {way.left} of those would not come out as your script reads: check before Always</span>}
 							</p>
 							<div className="flex flex-wrap gap-2 text-sm">
 								<button onClick={() => void decide(s, "always")} disabled={Boolean(busy)} title="Fixed in every new video, wherever these words show up" className={button}>
@@ -97,6 +103,7 @@ export function AdminSuggestions({ added }: { added: () => void }) {
 									Skip
 								</button>
 							</div>
+							{failed?.id === s.id && <p className="text-xs text-amber-600">{failed.why}</p>}
 						</div>
 					);
 				})}
