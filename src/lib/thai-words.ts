@@ -113,6 +113,30 @@ export function joinGroup<W extends Word>(words: W[], group: number[]): W {
 	return { ...first, text: fixThai(group.map((k) => words[k].text).join("")), end: words[group[group.length - 1]].end };
 }
 
+// Speech-to-text can hand the first letter of a word to the piece before a long pause: "ลาด" ... 3 s ... "ัง" for
+// ลา ... ดัง. Joined by the mark rule above (a piece can't begin with one), the two made one word with the pause inside it:
+// the pause was not cut, and cutting it by hand deleted the whole word (coach 28 Nov, VID20261126143707 at 1:25). After
+// more than MARK_PAUSE the last consonant (with the vowels and marks on it) moves over to the piece that needs it. A
+// shorter pause is a word said slowly or stretched ("ส" ... "่วน", 13 Nov) and is left to be joined.
+const MARK_PAUSE = 1;
+const LAST_CONSONANT = /[เ-ไ]?[ก-ฮ][ัิ-ฺ็-๎]*$/;
+export function mendAcrossPause<W extends Word>(words: W[]): W[] {
+	const out: W[] = [];
+	for (const word of words) {
+		const before = out[out.length - 1];
+		const moved = before && THAI_MARK_FIRST.test(word.text) && word.start - before.end > MARK_PAUSE ? before.text.match(LAST_CONSONANT)?.[0] : undefined;
+		if (!moved) {
+			out.push(word);
+			continue;
+		}
+		const rest = before.text.slice(0, -moved.length);
+		if (rest) out[out.length - 1] = { ...before, text: rest };
+		else out.pop();
+		out.push({ ...word, text: moved + word.text });
+	}
+	return out;
+}
+
 // heard: the pieces as speech-to-text timed them, which decide what belongs together. timed: the same pieces with the
 // times to keep (a stretched tail cut off, lib/silences.ts trimStretchedWords). Judged on the shortened times, a piece
 // said without any pause looked paused from the next one: the word stayed in two and the false pause was cut as silence

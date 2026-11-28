@@ -1,7 +1,8 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refundListen } from "@/lib/access";
+import { AUDIO_FILE } from "@/lib/audio-first";
 import { verifyCallback } from "@/lib/callback";
-import { getJson, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
+import { deleteObject, getJson, putObject, siblingKey, VIDEO_KEY } from "@/lib/r2";
 import {
 	findSilences,
 	MIN_SILENCE,
@@ -12,7 +13,7 @@ import {
 } from "@/lib/silences";
 import { isLanguage } from "@/lib/languages";
 import { mergeThaiNumbers } from "@/lib/thai-numbers";
-import { mergeThaiWords } from "@/lib/thai-words";
+import { mendAcrossPause, mergeThaiWords } from "@/lib/thai-words";
 import { readTranscript } from "@/lib/transcribe";
 import { readOptions } from "@/lib/upload-options";
 
@@ -33,7 +34,9 @@ export async function POST(request: Request) {
 		// words, so a word is never cut through (a piece "่วน" after a pause is still part of "ส่วน", lib/thai-words.ts).
 		// Numbers said in words ("สามสิบ") become digits (lib/thai-numbers.ts), after the pieces are whole words.
 		// Which pieces are one word is judged on the times as heard; the shortened times are what is kept (lib/thai-words.ts).
-		const words = mergeThaiNumbers(mergeThaiWords(transcript.words, trimStretchedWords(transcript.words)));
+		// First a letter that came on the wrong side of a long pause goes back to its word (mendAcrossPause).
+		const heard = mendAcrossPause(transcript.words);
+		const words = mergeThaiNumbers(mergeThaiWords(heard, trimStretchedWords(heard)));
 		// What the creator asked for when uploading (none on videos from before): the editor uses it once.
 		const asked = await getJson<{ options?: unknown; language?: unknown }>(siblingKey(key, "analyze.json")).catch(() => null);
 		const options = readOptions(asked?.options);
@@ -60,6 +63,8 @@ export async function POST(request: Request) {
 			...(language && { language }),
 		};
 		await putObject(siblingKey(key, "edit.json"), JSON.stringify(edit, null, 2), "application/json");
+		// The sound speech-to-text was given has done its work (it would count against their storage).
+		await deleteObject(siblingKey(key, AUDIO_FILE)).catch(() => {});
 	} catch (err) {
 		const error = err instanceof Error ? err.message : "Analysis failed";
 		await putObject(siblingKey(key, "analyze-error.json"), JSON.stringify({ error, at: new Date().toISOString() }), "application/json");
