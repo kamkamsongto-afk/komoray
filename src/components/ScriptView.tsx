@@ -328,6 +328,17 @@ export function ScriptView({
 	const [focusCutout, setFocusCutout] = useState<string | null>(null);
 	const [focusFrame, setFocusFrame] = useState<string | null>(null);
 	const [focusLayout, setFocusLayout] = useState<string | null>(null);
+	// A tool box starts on its main view, ready to add, unless a strip was just clicked to open it: after a tool's button
+	// is pressed, and after the timeline is pressed anywhere else (coach 28 Nov: a box that remembered the last item had
+	// people changing it while they meant to make a new one). fresh counts those; an open box sees it change.
+	const [fresh, setFresh] = useState(0);
+	const startFresh = useCallback(() => {
+		setFresh((n) => n + 1);
+		setFocusBanner(null);
+		setFocusCutout(null);
+		setFocusFrame(null);
+		setFocusLayout(null);
+	}, []);
 	// From the timeline: the panels live under the preview.
 	const openPanel = (next: Panel) => {
 		setMode("preview");
@@ -1330,6 +1341,11 @@ if (!panel) return;
 									onClick={() => {
 										if (p.id === "cutout") markCutoutSeen();
 										if (p.id === "import") setImportNews(false);
+										startFresh();
+										if (p.id === "zoom") {
+											setZoomTab("part");
+											setZoomDraft(null);
+										}
 										setPanel(panel === p.id ? null : p.id);
 									}}
 									className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-3 ${
@@ -1576,6 +1592,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							videoUrl={studio?.videoUrl ?? null}
 							thai={thaiClip}
 							focus={focusCutout}
+							fresh={fresh}
 							onReveal={reveal}
 							ruler={ruler}
 							onPickImported={putInPicClip}
@@ -1593,6 +1610,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							now={() => toOutSeconds(timeRef.current, segments)}
 							total={totalFrames(segments) / FPS}
 							focus={focusFrame}
+							fresh={fresh}
 							onReveal={reveal}
 							ruler={ruler}
 							format={subtitle.format}
@@ -1605,6 +1623,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							now={() => toOutSeconds(timeRef.current, segments)}
 							total={totalFrames(segments) / FPS}
 							focus={focusLayout}
+							fresh={fresh}
 							onReveal={reveal}
 							ruler={ruler}
 							note={layoutNote}
@@ -1630,6 +1649,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 							total={totalFrames(segments) / FPS}
 							brand={subtitle.color}
 							focus={focusBanner}
+							fresh={fresh}
 							onUseFile={putAsBanner}
 							onReveal={reveal}
 						/>
@@ -1904,6 +1924,7 @@ className="flex items-center justify-between px-3 pt-2 text-sm font-medium selec
 					playing={playing}
 					onTogglePlay={togglePlay}
 					onSeek={jump}
+					onLeaveItem={startFresh}
 					audioUrl={studio?.audioUrl ?? null}
 					groups={groups}
 					onPickTake={pickTake}
