@@ -14,7 +14,7 @@ import { logoPictureName, logoPictureUrl } from "@/lib/logo";
 import { myFileUrl } from "@/lib/my-files";
 import { LOGO_MOTION, logoLook } from "@/lib/logo-motion";
 import type { OwnFont } from "@/lib/font-info";
-import { CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
+import { BOX_PAD_Y, CYRILLIC_FONT, FONTS, type FontId, fontMetrics, hasCyrillic, LIMITS, outputSize, type SubtitleStyle } from "@/lib/subtitle-style";
 import { FONT_CHANGED, type FontChange } from "@/lib/use-my-fonts";
 import { BOUNCE_WORD_GAP, motionScale } from "@/lib/motion";
 import { type Fit, FPS, type Line, setSpot, ZOOM_ORIGIN } from "@/lib/timeline";
@@ -664,8 +664,10 @@ mode === "move"
 	const rowGap = line?.row2 !== undefined ? subtitle.lineSpacing : 0; // only a line split in two rows has a gap
 	const boxed = subtitle.look === "box";
 	// Box: letters on a box. Every other look: letters with an outline.
+	// The box is one row (lines hold what fits one): a block as tall as the line plus BOX_PAD_Y each side, whatever the
+	// font, as draw_box in render.py draws it. An inline box took its height from the font and came out another size.
 	const letters: CSSProperties = boxed
-		? { background: `${subtitle.boxColor}${solid(subtitle.boxOpacity)}`, borderRadius: subtitle.boxRadius, padding: `${BOX_PADDING / 2}px ${BOX_PADDING}px`, boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }
+		? { display: "block", width: "max-content", margin: "0 auto", background: `${subtitle.boxColor}${solid(subtitle.boxOpacity)}`, borderRadius: subtitle.boxRadius, padding: `${BOX_PAD_Y}px ${BOX_PADDING}px` }
 		: { textShadow: roundOutline(subtitle.outline, subtitle.outlineColor) };
 	// Highlight: the word being said is in the brand colour until the next one starts.
 	const frame = outTime * FPS;
@@ -1103,7 +1105,7 @@ mode === "move"
 								right: 0,
 								whiteSpace: "nowrap",
 								// The extra row gap goes half under the last row in a browser: the bottom row stays put, as in the final video.
-								bottom: H * (line?.position ?? subtitle.position) - rowGap / 2,
+								bottom: H * (line?.position ?? subtitle.position) - (boxed ? BOX_PAD_Y : rowGap / 2),
 								textAlign: "center",
 								fontFamily: lineFace.family,
 								fontWeight: lineFace.weight,

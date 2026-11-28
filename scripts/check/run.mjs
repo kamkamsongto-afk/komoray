@@ -139,6 +139,11 @@ const cases = {
 		c.plan = lib("src/lib/timeline").linePlan(planLines(c));
 		return c;
 	}),
+	heights: [
+		...[100, 150, 220].flatMap((size) => ["hello there", "Мы тут"].flatMap((text) => [{ kind: "line", text, size }, { kind: "line", text, size, look: "box" }, { kind: "line", text, size, look: "two" }, { kind: "line", text, size, motion: "bounce" }])),
+		...["hello there", "Мы тут"].flatMap((text) => [{ kind: "banner", text, size: 100 }, ...["top-left", "bottom-right"].map((logoAt) => ({ kind: "logo", text: "a", size: 100, logo: text, logoAt }))]),
+		{ kind: "behind", text: "hello", size: 200 },
+	],
 	two_rows: [-2, -20, -40].flatMap((spacing) => ["none", "pop"].map((motion) => ({ spacing, motion }))),
 	wraps: [...["fade", "pop", "bounce", "pulse", "slideUp", "rollUp"].map((anim) => ({ anim })), ...["still", "fade", "flash", "zoom"].map((logo) => ({ logo }))],
 	layout_file: many(150, (k) => ({
@@ -277,6 +282,27 @@ const web = {
 		}
 		return { lines: c.motion === "none" ? lines.map((l) => ({ from: l.from / FPS, to: l.to / FPS, text: l.parts.map((p) => p.text).join("") })) : null, mayWrap: [] };
 	},
+	// Where the browser puts letters: the font's content (its "typographic" height) centred in a line of the size; the
+	// video's engine uses the font's full (Windows) height. The final video moves its letters by the difference.
+	heights: (c) => {
+		const style = lib("src/lib/subtitle-style");
+		const em = style.FONTS.kanit.height;
+		const russian = /[Ѐ-ԯ]/.test(c.kind === "logo" ? c.logo : c.text);
+		const [a, d, wa, wd] = russian ? [0.935, 0.265, 0.935, 0.265] : [1.1, 0.395, 1.18, 0.4];
+		const preview = readFileSync(join(repo, "src/components/PlayerFrame.tsx"), "utf8");
+		if (!preview.includes("padding: `${BOX_PAD_Y}px ${BOX_PADDING}px`") || !preview.includes("(boxed ? BOX_PAD_Y : rowGap / 2)")) throw new Error("the preview's box is not placed by BOX_PAD_Y");
+		const S = c.kind === "logo" ? 52 : c.kind === "banner" ? 72 * 2 : c.size;
+		const p = S / em;
+		const full = russian && c.kind !== "behind" ? S * (style.CYRILLIC_FONT.height === em ? 1.2 / 1.58 : 1) : S;
+		const lift = (S - (a + d) * p) / 2 + d * p - (full * wd) / (wa + wd);
+		let moved;
+		if (c.kind === "banner" || c.kind === "behind") moved = ((a - d) * p) / 2 - (full * (wa - wd)) / (2 * (wa + wd));
+		else if (c.kind === "logo") moved = c.logoAt.startsWith("bottom") ? lift : S - full - lift;
+		else if (c.look === "two" && russian) moved = -lift; // each row placed by its bottom: up the screen is less
+		else if (c.motion === "bounce") moved = -lift;
+		else moved = lift;
+		return { moved, box: c.look === "box" ? S + 2 * style.BOX_PAD_Y : null };
+	},
 	two_rows: () => ({ drawn: true, leftToLibass: [] }),
 	wraps: (c) => {
 		const preview = readFileSync(join(repo, "src/components/PlayerFrame.tsx"), "utf8");
@@ -309,7 +335,7 @@ const web = {
 const cs = (t) => Math.round(t * 100) / 100;
 const plain = (lines, look) => lines.map((l) => ({ from: cs(l.from), to: cs(l.to), text: (look === "two" ? l.text.replace(/\s+/g, "") : l.text.replace(/\s+/g, " ").trim()).toLowerCase() })).filter((l) => l.to - l.from > 0.015);
 
-const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06, bounce: 0, wraps: 0, two_rows: 0, plan: 0.0101 };
+const TOLERANCE = { constants: 1e-9, segments: 0, subtitles: 0.0101, zoom: 4e-4, background: 2e-3, layouts: 2e-3, frames: 1e-6, banners: 1e-6, behind: 1e-3, framing: 1e-6, logo: 2e-3, words: 1e-9, layout_file: 4.5, frame_back: 0.06, bounce: 0, wraps: 0, two_rows: 0, plan: 0.0101, heights: 1.01 };
 let failed = 0;
 for (const name of Object.keys(cases)) {
 	const answer = python[name];
